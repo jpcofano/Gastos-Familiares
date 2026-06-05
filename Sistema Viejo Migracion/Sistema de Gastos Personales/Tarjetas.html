@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <?!= include('_styles'); ?>
+  <style>
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    select { cursor: pointer; }
+    .card { margin-bottom: 16px; }
+    .page-head h1 { margin-bottom: 6px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .step-card { padding: 12px 16px; }
+    .card-title { font-size: 15px; font-weight: 800; color:var(--text); margin-bottom:4px; }
+    .card-sub { color: var(--muted); font-size: 13px; margin-bottom:12px; }
+    /* tabla de revisión — NO TOCAR */
+    .tbl-wrap { overflow-x: auto; margin-bottom: 14px; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th { background: #111827; color: #fff; padding: 8px 8px; text-align: left; white-space: nowrap; position: sticky; top: 0; }
+    td { padding: 5px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tr.incluir      { background: #fff; }
+    tr.no-dash      { background: #fffbeb; }
+    tr.excluir      { background: #fef2f2; opacity: .75; }
+    tr.ignorar      { background: #f3f4f6; opacity: .6; }
+    td input, td select { padding: 4px 6px; font-size: 12px; border-radius: 5px; min-width: 80px; }
+    .badge { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+    .badge-consumo   { background: #dbeafe; color: #1e40af; }
+    .badge-cuota     { background: #ede9fe; color: #4c1d95; }
+    .badge-impuesto  { background: #fee2e2; color: #991b1b; }
+    .badge-reintegro { background: #d1fae5; color: #065f46; }
+    .badge-pago      { background: #f3f4f6; color: #6b7280; }
+    .badge-otro      { background: #fef9c3; color: #713f12; }
+    .monto-ars { color: #111827; font-weight: 600; }
+    .monto-usd { color: #065f46; font-weight: 600; }
+    .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .stat { background: #f3f4f6; border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+    .stat b { display: block; font-size: 18px; }
+    /* Step indicator */
+    #stepBar { display:flex; align-items:flex-start; gap:0; padding:14px 16px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); margin-bottom:14px; }
+    .step-item { display:flex; flex-direction:column; align-items:center; gap:4px; }
+    .step-connector { flex:1; height:2px; background:var(--line); margin-top:10px; }
+    .step-n { width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:11px; }
+    .step-n.done    { background:#065f46; color:#fff; }
+    .step-n.active  { background:#111827; color:#fff; }
+    .step-n.pending { background:#e5e7eb; color:#6b7280; }
+    .step-label { font-size:11px; color:var(--muted); text-align:center; }
+    .step-label.active { color:var(--text); font-weight:700; }
+    .action-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    .action-grid .btn { width:100%; }
+    #btnSubir { width:100%; }
+    /* Banner share */
+    .banner-share { display:none; margin:0 0 12px; padding:10px 14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:var(--radius-md); font-size:13px; align-items:center; gap:8px; flex-wrap:wrap; }
+    /* Drop zone archivo */
+    #dzPdf { display:flex; flex-direction:column; align-items:center; gap:6px; padding:18px 12px; text-align:center; cursor:pointer; }
+    #dzPdf .dz-icon { font-size:24px; }
+    #dzPdfLabel { font-size:13px; font-weight:500; word-break:break-all; }
+    /* Panel de resumen duplicado */
+    .panel-dup { display:none; border:2px solid var(--warn-line); border-radius:var(--radius-md); background:var(--warn-bg); padding:18px 20px; margin-bottom:14px; }
+    .panel-dup-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+    .panel-dup-icon { font-size:24px; line-height:1; }
+    .panel-dup-title { font-size:17px; font-weight:800; color:var(--warn-text); }
+    .panel-dup-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:13px; margin-bottom:14px; }
+    .panel-dup-grid dt { color:var(--warn-text); font-weight:600; }
+    .panel-dup-grid dd { margin:0; color:#1c1917; }
+    .panel-dup-actions { display:flex; gap:10px; flex-wrap:wrap; }
+    .panel-dup-actions .btn { width:auto; }
+    /* Done screen (paso 3) */
+    .done-header { text-align:center; padding:8px 0 12px; }
+    .done-icon { font-size:40px; margin-bottom:6px; }
+    .done-title { font-size:18px; font-weight:800; color:var(--text); }
+    .done-stats { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin:12px 0 4px; }
+    .done-stat { background:#f9fafb; border:1px solid var(--line); border-radius:var(--radius-md); padding:12px 16px; min-width:90px; text-align:center; }
+    .done-stat-ok { background:#f0fdf4; border-color:#bbf7d0; }
+    .done-stat-val { font-size:22px; font-weight:800; color:var(--text); }
+    .done-stat-ok .done-stat-val { color:#065f46; }
+    .done-stat-label { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.3px; margin-top:3px; }
+    @media (max-width:700px) { .action-grid { grid-template-columns:1fr; } }
+    @media (max-width:600px) { .row2, .row3 { grid-template-columns:1fr; } }
+    @media (max-width:480px) { .page-tip { font-size:12px; } .panel-dup-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-head">
+    <div class="page-kicker">💳 Importación guiada</div>
+    <h1>Importar tarjeta</h1>
+    <p class="page-sub">Subí el PDF del resumen, revisá los movimientos sugeridos y confirmá la importación.</p>
+    <div class="page-tip"><strong>Ideal para:</strong> resúmenes Visa, Master, Amex y consumos con cuotas o reintegros. Si abrís desde compartir, el PDF llega listo a esta pantalla.</div>
+  </div>
+  <nav class="qnav">
+    <a class="qnav-btn" data-qhref="dashboard" href="<?!= webAppBaseUrl ?>?view=dashboard"><span class="qi">📈</span> Vista general</a>
+    <a class="qnav-btn" data-qhref="resumen" href="<?!= webAppBaseUrl ?>?view=resumen"><span class="qi">📊</span> Panorama</a>
+    <a class="qnav-btn" data-qhref="manual&tipo=gasto" href="<?!= webAppBaseUrl ?>?view=manual&tipo=gasto"><span class="qi">💸</span> Movimientos</a>
+    <a class="qnav-btn active" data-qhref="tarjetas" href="<?!= webAppBaseUrl ?>?view=tarjetas"><span class="qi">💳</span> Importar tarjeta</a>
+    <a class="qnav-btn" data-qhref="comprobantes" href="<?!= webAppBaseUrl ?>?view=comprobantes"><span class="qi">🧾</span> Comprobante</a>
+  </nav>
+  <div id="bannerShareTarjetas" class="banner-share">
+    <span id="bannerShareTarjetasText">📲 Modo recepción desde compartir</span>
+    <button class="btn btn-outline" style="width:auto; padding:4px 10px; font-size:12px; margin-left:auto;" onclick="salirModoShareTarjetas_()">Volver al modo manual</button>
+  </div>
+  <div id="msgShareTarjetas" class="msg" style="margin-bottom:10px;"></div>
+  <!-- Indicador de pasos -->
+  <div id="stepBar">
+    <div class="step-item">
+      <div class="step-n active" id="sn1">1</div>
+      <span class="step-label active" id="sl1">Subir PDF</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="step-item">
+      <div class="step-n pending" id="sn2">2</div>
+      <span class="step-label" id="sl2">Revisar</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="step-item">
+      <div class="step-n pending" id="sn3">3</div>
+      <span class="step-label" id="sl3">Confirmar</span>
+    </div>
+  </div>
+
+  <div id="msgGlobal" class="msg"></div>
+
+  <!-- ── Panel de duplicado ─────────────────────────────────────── -->
+  <div id="panelDuplicado" class="panel-dup">
+    <div class="panel-dup-header">
+      <span class="panel-dup-icon">⚠️</span>
+      <span class="panel-dup-title">Este resumen ya fue importado</span>
+    </div>
+    <dl class="panel-dup-grid" id="dupGrid"></dl>
+    <div class="panel-dup-actions">
+      <button class="btn btn-outline" onclick="cancelarDuplicado()">Cancelar</button>
+      <button class="btn btn-dark"    onclick="forzarImportacion()" style="background:#92400e; border-color:#92400e;">Importar de todas formas</button>
+    </div>
+  </div>
+
+  <!-- ── PASO 1: Subir PDF ─────────────────────────────────────── -->
+  <div id="paso1" class="card step-card">
+    <div class="card-title">Paso 1 · PDF del resumen</div>
+    <div class="card-sub">Subí el PDF y el sistema detecta la tarjeta automáticamente. También podés elegirla vos.</div>
+    <div class="row2">
+      <div>
+        <label>Tarjeta <span style="color:var(--muted);font-size:11px;">(opcional)</span></label>
+        <select id="selTarjeta">
+          <option value="">Cargando catálogo...</option>
+        </select>
+      </div>
+      <div>
+        <label>Archivo PDF</label>
+        <label for="pdfFile" class="drop-zone" id="dzPdf">
+          <span class="dz-icon">📄</span>
+          <span id="dzPdfLabel">Tocá para seleccionar el PDF</span>
+          <input type="file" id="pdfFile" accept=".pdf" style="position:absolute;left:-9999px;width:1px;height:1px;" />
+        </label>
+      </div>
+    </div>
+    <button class="btn btn-dark" id="btnSubir" onclick="subirPDF()" disabled>Procesar resumen</button>
+    <div id="msgSubir" class="msg" style="margin-top:10px;"></div>
+  </div>
+
+  <!-- ── PASO 2: Revisar movimientos ──────────────────────────── -->
+  <div id="paso2" style="display:none;">
+
+    <div class="card" style="padding:10px 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <strong id="resumenTitulo">—</strong>
+          <span style="color:var(--muted); font-size:12px;" id="resumenSub"></span>
+        </div>
+        <button class="btn btn-outline" style="width:auto;" onclick="volverPaso1()">← Otro resumen</button>
+      </div>
+    </div>
+
+    <div class="card step-card" style="padding-bottom:12px;">
+      <div class="card-title">Paso 2 · Revisar movimientos</div>
+      <div class="card-sub">Ajustá descripción, persona, categoría y acción antes de confirmar la importación.</div>
+      <div class="stats" id="statsBar"></div>
+
+      <div style="margin-bottom:10px; font-size:12px; color:var(--muted);">
+      Editá descripción, persona, categoría, subcategoría, etiqueta y acción por fila.
+      Las filas en <span style="color:#991b1b; font-weight:700;">rojo</span> no se importan.
+      Las en <span style="color:#92400e; font-weight:700;">amarillo</span> se importan pero no aparecen en el Dash.
+    </div>
+
+    <div class="tbl-wrap">
+      <table id="tblMovimientos">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Tipo</th>
+            <th>Fecha</th>
+            <th>Descripción</th>
+            <th>Monto</th>
+            <th>Persona</th>
+            <th>Categoría</th>
+            <th>Subcateg.</th>
+            <th>Etiqueta</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody id="tbodyMovimientos"></tbody>
+      </table>
+    </div>
+
+    <div class="action-grid">
+      <button class="btn btn-green" id="btnConfirmar" onclick="confirmarResumen()">✅ Confirmar movimientos</button>
+      <button class="btn btn-outline" onclick="seleccionarTodo('')">Incluir todo</button>
+      <button class="btn btn-outline" onclick="seleccionarTodo('ExcluirTotalmente')">Excluir todo</button>
+    </div>
+
+    <div id="msgConfirmar" class="msg" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <!-- ── PASO 3: Resultado final ─────────────────────────────── -->
+  <div id="paso3" style="display:none;" class="card step-card">
+    <div id="msgFinal" style="display:none;"></div><!-- shim -->
+    <div class="done-header">
+      <div class="done-icon">✅</div>
+      <div class="done-title">Importación completada</div>
+    </div>
+    <div class="done-stats">
+      <div class="done-stat done-stat-ok">
+        <div class="done-stat-val" id="doneConfirmados">—</div>
+        <div class="done-stat-label">Confirmados</div>
+      </div>
+      <div class="done-stat">
+        <div class="done-stat-val" id="doneExcluidos">—</div>
+        <div class="done-stat-label">Excluidos</div>
+      </div>
+      <div class="done-stat">
+        <div class="done-stat-val" id="doneIgnorados">—</div>
+        <div class="done-stat-label">Ignorados</div>
+      </div>
+      <div class="done-stat done-stat-ok" id="doneAprendidosRow" style="display:none;">
+        <div class="done-stat-val" id="doneAprendidos">—</div>
+        <div class="done-stat-label">Aprendidos</div>
+      </div>
+    </div>
+    <div id="doneErrores" class="msg err" style="display:none; margin:10px 0 0;"></div>
+    <button class="btn btn-dark" onclick="volverPaso1()" style="margin-top:14px; width:100%;">Subir otro resumen</button>
+  </div>
+
+</div><!-- /wrap -->
+
+<!-- datalists para autocompletar -->
+<datalist id="dlSubcategorias"></datalist>
+<datalist id="dlEtiq"></datalist>
+
+<?!= include('_scripts'); ?>
+<script>
+// ── Estado global ────────────────────────────────────────────────────────────
+// Tarjetas usa setStep/fmtMonto/esc/poblarDatalist propios (anulan los de _scripts.html)
+var STATE = {
+  resumenID: null,
+  filas: [],
+  catalogo: [],
+  personas: ['Juan','María','Federico','Sofía'],
+  categorias: [],
+  subcategorias: [],
+  subcategoriasPorCategoria: {},
+  etiquetas: [],
+  sharedPdf: null,
+  shareMode: false,
+  pendingBase64: null,
+  pendingTarjetaCodigo: null
+};
+var SHARE_CTX = <?!= JSON.stringify(shareContext) ?>;
+// ── Bootstrap ────────────────────────────────────────────────────────────────
+(function init() {
+  // Catálogo de tarjetas
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res || !res.ok) return;
+      STATE.catalogo = res.catalogo || [];
+      var sel = document.getElementById('selTarjeta');
+      sel.innerHTML = '<option value="">Detectar automáticamente</option>';
+      STATE.catalogo.forEach(function(t) {
+        var opt = document.createElement('option');
+        opt.value = t.codigo;
+        opt.textContent = t.banco + ' · ' + t.tarjeta + ' (' + t.codigo + ')';
+        sel.appendChild(opt);
+      });
+      actualizarBtnSubir();
+    })
+    .withFailureHandler(function(e) {
+      showMsg('msgSubir', 'warn', 'No se pudo cargar el catálogo: ' + e.message);
+    })
+    .getTarjetasCatalogo();
+
+  // Bootstrap para diccionario
+  try {
+    var b = <?!= JSON.stringify(
+      (typeof bootstrap !== 'undefined' && bootstrap) ? bootstrap : {}
+    ) ?>;
+    if (b && b.diccionario) {
+      STATE.categorias                = b.diccionario.categorias                || [];
+      STATE.subcategorias             = b.diccionario.subcategorias             || [];
+      STATE.subcategoriasPorCategoria = b.diccionario.subcategoriasPorCategoria || {};
+      STATE.etiquetas                 = b.diccionario.etiquetas                 || [];
+      poblarDatalist('dlSubcategorias', STATE.subcategorias);
+      poblarDatalist('dlEtiq',          STATE.etiquetas);
+    }
+  } catch(e) {}
+
+  document.getElementById('selTarjeta').addEventListener('change', actualizarBtnSubir);
+  document.getElementById('pdfFile').addEventListener('change', actualizarBtnSubir);
+  initShareTarjetasIfNeeded_();
+})();
+
+function poblarDatalist(id, arr) {
+  var dl = document.getElementById(id);
+  if (!dl) return;
+  dl.innerHTML = '';
+  arr.forEach(function(v) {
+    var opt = document.createElement('option');
+    opt.value = v;
+    dl.appendChild(opt);
+  });
+}
+
+function actualizarBtnSubir() {
+  var archivoManual = document.getElementById('pdfFile').files.length > 0;
+  var archivoCompartido = !!(STATE.sharedPdf && STATE.sharedPdf.base64);
+  document.getElementById('btnSubir').disabled = !(archivoManual || archivoCompartido);
+  var dzLabel = document.getElementById('dzPdfLabel');
+  if (dzLabel) {
+    var f = document.getElementById('pdfFile').files[0];
+    dzLabel.textContent = archivoCompartido
+      ? (STATE.sharedPdf.fileName || 'Archivo compartido')
+      : (f ? f.name : 'Tocá para seleccionar el PDF');
+  }
+}
+
+// ── PASO 1: Subir PDF ────────────────────────────────────────────────────────
+function subirPDF() {
+  var tarjetaCodigo = document.getElementById('selTarjeta').value || null;
+
+  var fileInput = document.getElementById('pdfFile');
+  var file = fileInput.files[0];
+
+  setStep(1, 'active');
+  showMsg('msgSubir', 'wait', '⏳ Leyendo PDF y enviando a Claude API… esto puede demorar 30-90 segundos.');
+  document.getElementById('btnSubir').disabled = true;
+
+  function procesarBase64(base64, forcear) {
+    STATE.pendingBase64       = base64;
+    STATE.pendingTarjetaCodigo = tarjetaCodigo;
+    var payload = { pdfBase64: base64, tarjetaCodigo: tarjetaCodigo };
+    if (forcear) payload.force = true;
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        document.getElementById('btnSubir').disabled = false;
+        if (!res || !res.ok) {
+          showMsg('msgSubir', 'err', '❌ Error: ' + (res && res.error ? res.error : 'desconocido'));
+          return;
+        }
+        if (res.status === 'duplicado') {
+          hideMsg('msgSubir');
+          mostrarPanelDuplicado(res.resumen);
+          return;
+        }
+        hideMsg('msgSubir');
+        STATE.sharedPdf = null;
+        STATE.resumenID = res.resumenID || null;
+        cargarPendientes(res);
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('btnSubir').disabled = false;
+        showMsg('msgSubir', 'err', '❌ Error de red: ' + err.message);
+      })
+      .importarPDF(payload);
+  }
+
+  if (STATE.sharedPdf && STATE.sharedPdf.base64) {
+    procesarBase64(STATE.sharedPdf.base64);
+    return;
+  }
+
+  if (!file) {
+    document.getElementById('btnSubir').disabled = false;
+    showMsg('msgSubir', 'err', '❌ Seleccioná un PDF.');
+    return;
+  }
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var base64 = e.target.result.split(',')[1];
+    procesarBase64(base64);
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Manejo de duplicado ───────────────────────────────────────────────────────
+function mostrarPanelDuplicado(r) {
+  var fmt = function(n, usd) {
+    if (!n && n !== 0) return '—';
+    return (usd ? 'USD ' : '$ ') + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  };
+  var items = [
+    ['Tarjeta',      r.tarjeta + ' · ' + r.banco],
+    ['Período',      r.mesResumen || '—'],
+    ['Cierre',       r.fechaCierre || '—'],
+    ['Vencimiento',  r.fechaVencimiento || '—'],
+    ['Total ARS',    fmt(r.totalARS, false)],
+    ['Total USD',    r.totalUSD ? fmt(r.totalUSD, true) : '—'],
+    ['Estado',       r.estado || '—'],
+    ['Importado por',r.importadoPor || '—']
+  ];
+  var html = items.map(function(p) {
+    return '<dt>' + esc(p[0]) + '</dt><dd>' + esc(p[1]) + '</dd>';
+  }).join('');
+  document.getElementById('dupGrid').innerHTML = html;
+  document.getElementById('panelDuplicado').style.display = 'block';
+  document.getElementById('paso1').style.display = 'none';
+}
+
+function cancelarDuplicado() {
+  document.getElementById('panelDuplicado').style.display = 'none';
+  document.getElementById('paso1').style.display = '';
+  STATE.pendingBase64 = null;
+  STATE.pendingTarjetaCodigo = null;
+  document.getElementById('pdfFile').value = '';
+  hideMsg('msgSubir');
+  actualizarBtnSubir();
+}
+
+function forzarImportacion() {
+  if (!STATE.pendingBase64) return;
+  document.getElementById('panelDuplicado').style.display = 'none';
+  document.getElementById('paso1').style.display = '';
+  setStep(1, 'active');
+  showMsg('msgSubir', 'wait', '⏳ Importando de todas formas… esto puede demorar 30-90 segundos.');
+  document.getElementById('btnSubir').disabled = true;
+
+  var base64       = STATE.pendingBase64;
+  var tarjetaCodigo = STATE.pendingTarjetaCodigo;
+
+  var payload = { pdfBase64: base64, tarjetaCodigo: tarjetaCodigo, force: true };
+  google.script.run
+    .withSuccessHandler(function(res) {
+      document.getElementById('btnSubir').disabled = false;
+      if (!res || !res.ok) {
+        showMsg('msgSubir', 'err', '❌ Error: ' + (res && res.error ? res.error : 'desconocido'));
+        return;
+      }
+      hideMsg('msgSubir');
+      STATE.sharedPdf = null;
+      STATE.resumenID = res.resumenID || null;
+      cargarPendientes(res);
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('btnSubir').disabled = false;
+      showMsg('msgSubir', 'err', '❌ Error de red: ' + err.message);
+    })
+    .importarPDF(payload);
+}
+
+// ── PASO 2: Revisar movimientos ──────────────────────────────────────────────
+function cargarPendientes(importRes) {
+  // Tarjeta: usar la detectada/confirmada por el backend
+  var tarjetaCodigo = importRes.tarjetaCodigo || document.getElementById('selTarjeta').value || '';
+  var tarjetaInfo = STATE.catalogo.filter(function(t){ return t.codigo === tarjetaCodigo; })[0] || {};
+
+  // Mostrar banco/tarjeta desde el catálogo (más fiable) o desde lo que extrajo Claude
+  var bancoLabel   = tarjetaInfo.banco   || importRes.resumen.banco   || '';
+  var tarjetaLabel = tarjetaInfo.tarjeta || importRes.resumen.tarjeta || '';
+  var detectado    = !document.getElementById('selTarjeta').value ? ' (auto-detectado)' : '';
+
+  document.getElementById('resumenTitulo').textContent =
+    bancoLabel + ' · ' + tarjetaLabel + detectado + ' — ' + STATE.resumenID;
+  document.getElementById('resumenSub').textContent =
+    '  ' + (importRes.insertados || 0) + ' insertados, ' +
+    (importRes.duplicados || 0) + ' duplicados, ' +
+    (importRes.autoMatched || 0) + ' auto-mapeados';
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res || !res.ok) {
+        showMsg('msgGlobal', 'err', '❌ No se pudieron cargar los movimientos: ' + (res && res.error || ''));
+        return;
+      }
+      STATE.filas = res.filas || [];
+      renderTabla();
+      setStep(2, 'active');
+      document.getElementById('paso1').style.display = 'none';
+      document.getElementById('paso2').style.display = '';
+      window.scrollTo(0,0);
+    })
+    .withFailureHandler(function(err) {
+      showMsg('msgGlobal', 'err', '❌ Error al cargar pendientes: ' + err.message);
+    })
+    .getPendientes({ resumenID: STATE.resumenID });
+}
+
+function renderTabla() {
+  var tbody = document.getElementById('tbodyMovimientos');
+  tbody.innerHTML = '';
+
+  var totalARS = 0, totalUSD = 0, nIncluir = 0, nExcluir = 0, nIgnorar = 0;
+
+  STATE.filas.forEach(function(f, i) {
+    var accion = f.accionUsuario || '';
+
+    // Acumular stats
+    if (accion === 'ExcluirTotalmente') nExcluir++;
+    else if (accion === 'Ignorar') nIgnorar++;
+    else {
+      nIncluir++;
+      var esCredito = (f.tipoLinea === 'reintegro_percepcion' ||
+                       f.tipoLinea === 'bonificacion' ||
+                       f.tipoLinea === 'reverso');
+      var signo = esCredito ? -1 : 1;
+      if (f.moneda === 'USD') totalUSD += signo * f.monto;
+      else totalARS += signo * f.monto;
+    }
+
+    var trClass = accion === 'ExcluirTotalmente' ? 'excluir'
+                : accion === 'Ignorar'           ? 'ignorar'
+                : accion === 'IncluirNoDash'     ? 'no-dash'
+                : 'incluir';
+
+    var tr = document.createElement('tr');
+    tr.id = 'fila-' + i;
+    tr.className = trClass;
+    tr.innerHTML = [
+      '<td style="color:var(--muted);">' + (f.seq || i+1) + '</td>',
+      '<td>' + badgeTipo(f.tipoLinea) + '</td>',
+      '<td style="white-space:nowrap;">' + (f.fechaConsumo || '') + '</td>',
+      '<td><input type="text" value="' + esc(f.descLimpia || f.descripcionRaw) + '" ' +
+        'onchange="updateFila(' + i + ',\'descLimpia\',this.value)" style="min-width:160px;" ' +
+        'title="Raw: ' + esc(f.descripcionRaw) + '"></td>',
+      '<td class="monto-' + (f.moneda==='USD'?'usd':'ars') + '" style="white-space:nowrap; text-align:right;">' +
+        fmtMonto(f.monto, f.moneda) + (f.cuotaTotal>1?' <small>'+f.cuotaActual+'/'+f.cuotaTotal+'</small>':'') + '</td>',
+      '<td>' + selectPersona(i, f.personaFinal || f.personaDetectada) + '</td>',
+      '<td>' + selectCategoria(i, f.categoria) + '</td>',
+      '<td><input type="text" list="dlSubcategorias" value="' + esc(f.subcategoria) + '" ' +
+        'onfocus="onSubcategoriaFocus_(' + i + ')" ' +
+        'onchange="updateFila(' + i + ',\'subcategoria\',this.value)" style="min-width:80px;"></td>',
+      '<td><input type="text" list="dlEtiq" value="' + esc(f.etiqueta) + '" ' +
+        'onchange="updateFila(' + i + ',\'etiqueta\',this.value)" style="min-width:80px;"></td>',
+      '<td>' + selectAccion(i, accion) + '</td>'
+    ].join('');
+
+    tbody.appendChild(tr);
+  });
+
+  // Stats
+  var stats = document.getElementById('statsBar');
+  stats.innerHTML = [
+    stat('Incluir', nIncluir, '#065f46'),
+    stat('Excluir', nExcluir, '#991b1b'),
+    stat('Ignorar', nIgnorar, '#6b7280'),
+    stat('Total ARS', fmtMonto(totalARS, 'ARS'), '#111827'),
+    totalUSD > 0 ? stat('Total USD', fmtMonto(totalUSD, 'USD'), '#065f46') : ''
+  ].join('');
+}
+
+function onCategoriaChange_(cat) {
+  var mapa = STATE.subcategoriasPorCategoria || {};
+  var subs = (cat && mapa[cat] && mapa[cat].length) ? mapa[cat] : STATE.subcategorias;
+  poblarDatalist('dlSubcategorias', subs);
+}
+
+function onSubcategoriaFocus_(i) {
+  var cat = (STATE.filas[i] && STATE.filas[i].categoria) || '';
+  onCategoriaChange_(cat);
+}
+
+function selectCategoria(i, val) {
+  var cats = STATE.categorias.slice();
+  if (val && cats.indexOf(val) === -1) cats.push(val);
+  var opts = '<option value="">Seleccioná categoría</option>' +
+    cats.map(function(c) {
+      return '<option value="' + esc(c) + '"' + (c === val ? ' selected' : '') + '>' + esc(c) + '</option>';
+    }).join('');
+  return '<select onchange="updateFila(' + i + ',\'categoria\',this.value)" style="min-width:120px;">' + opts + '</select>';
+}
+
+function updateFila(i, campo, valor) {
+  STATE.filas[i][campo] = valor;
+  if (campo === 'categoria') {
+    onCategoriaChange_(valor);
+  }
+  if (campo === 'accionUsuario') {
+    var tr = document.getElementById('fila-' + i);
+    tr.className = valor === 'ExcluirTotalmente' ? 'excluir'
+                 : valor === 'Ignorar'           ? 'ignorar'
+                 : valor === 'IncluirNoDash'     ? 'no-dash'
+                 : 'incluir';
+    actualizarStats();
+  }
+}
+
+function actualizarStats() {
+  var totalARS = 0, totalUSD = 0, nIncluir = 0, nExcluir = 0, nIgnorar = 0;
+  STATE.filas.forEach(function(f) {
+    var accion = f.accionUsuario || '';
+    if (accion === 'ExcluirTotalmente') nExcluir++;
+    else if (accion === 'Ignorar') nIgnorar++;
+    else {
+      nIncluir++;
+      var esCredito = (f.tipoLinea === 'reintegro_percepcion' ||
+                       f.tipoLinea === 'bonificacion' ||
+                       f.tipoLinea === 'reverso');
+      var signo = esCredito ? -1 : 1;
+      if (f.moneda === 'USD') totalUSD += signo * f.monto;
+      else totalARS += signo * f.monto;
+    }
+  });
+  var stats = document.getElementById('statsBar');
+  stats.innerHTML = [
+    stat('Incluir', nIncluir, '#065f46'),
+    stat('Excluir', nExcluir, '#991b1b'),
+    stat('Ignorar', nIgnorar, '#6b7280'),
+    stat('Total ARS', fmtMonto(totalARS, 'ARS'), '#111827'),
+    totalUSD > 0 ? stat('Total USD', fmtMonto(totalUSD, 'USD'), '#065f46') : ''
+  ].join('');
+}
+
+function seleccionarTodo(accion) {
+  STATE.filas.forEach(function(f, i) {
+    f.accionUsuario = accion;
+    var sel = document.querySelector('#fila-' + i + ' select.sel-accion');
+    if (sel) sel.value = accion;
+    updateFila(i, 'accionUsuario', accion);
+  });
+}
+
+// ── PASO 3: Confirmar ────────────────────────────────────────────────────────
+function confirmarResumen() {
+  if (!STATE.resumenID) return;
+  showMsg('msgConfirmar', 'wait', '⏳ Confirmando e importando a Historico…');
+  document.getElementById('btnConfirmar').disabled = true;
+
+  // Armar los cambios: todas las filas con sus valores editados
+  var cambios = STATE.filas.map(function(f) {
+    return {
+      rawID:        f.rawID,
+      accionUsuario: f.accionUsuario || '',
+      personaFinal:  f.personaFinal  || '',
+      descLimpia:    f.descLimpia    || '',
+      categoria:     f.categoria     || '',
+      subcategoria:  f.subcategoria  || '',
+      etiqueta:      f.etiqueta      || ''
+    };
+  });
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      document.getElementById('btnConfirmar').disabled = false;
+      if (!res || !res.ok) {
+        showMsg('msgConfirmar', 'err', '❌ Error: ' + (res && res.error || 'desconocido'));
+        return;
+      }
+      hideMsg('msgConfirmar');
+      document.getElementById('paso2').style.display = 'none';
+      document.getElementById('doneConfirmados').textContent = res.confirmados;
+      document.getElementById('doneExcluidos').textContent   = res.excluidos;
+      document.getElementById('doneIgnorados').textContent   = res.ignorados;
+      if (res.aprendidos > 0) {
+        document.getElementById('doneAprendidos').textContent     = res.aprendidos;
+        document.getElementById('doneAprendidosRow').style.display = '';
+      }
+      if (res.errores > 0) {
+        var errEl = document.getElementById('doneErrores');
+        errEl.textContent    = 'Errores: ' + res.errores;
+        errEl.style.display  = '';
+      }
+      document.getElementById('paso3').style.display = '';
+      setStep(3, 'done');
+      window.scrollTo(0,0);
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('btnConfirmar').disabled = false;
+      showMsg('msgConfirmar', 'err', '❌ Error de red: ' + err.message);
+    })
+    .confirmarResumenWeb({ resumenID: STATE.resumenID, cambios: cambios });
+}
+
+// ── Navegar ──────────────────────────────────────────────────────────────────
+function volverPaso1() {
+  STATE.resumenID = null;
+  STATE.filas = [];
+  STATE.pendingBase64 = null;
+  STATE.pendingTarjetaCodigo = null;
+  document.getElementById('paso2').style.display = 'none';
+  document.getElementById('paso3').style.display = 'none';
+  document.getElementById('panelDuplicado').style.display = 'none';
+  document.getElementById('paso1').style.display = '';
+  document.getElementById('pdfFile').value = '';
+  hideMsg('msgSubir');
+  hideMsg('msgGlobal');
+  actualizarBtnSubir();
+  setStep(1, 'active');
+  window.scrollTo(0,0);
+}
+
+// ── Helpers UI ───────────────────────────────────────────────────────────────
+function setStep(active, _unused) {
+  for (var i = 1; i <= 3; i++) {
+    var sn = document.getElementById('sn' + i);
+    var sl = document.getElementById('sl' + i);
+    if (i < active) {
+      sn.className = 'step-n done'; sn.textContent = '✓';
+      sl.className = 'step-label';
+    } else if (i === active) {
+      sn.className = 'step-n active'; sn.textContent = i;
+      sl.className = 'step-label active';
+    } else {
+      sn.className = 'step-n pending'; sn.textContent = i;
+      sl.className = 'step-label';
+    }
+  }
+  if (active === 3) {
+    document.getElementById('sn3').className = 'step-n done';
+    document.getElementById('sn3').textContent = '✓';
+  }
+}
+
+function showMsg(id, tipo, txt) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'msg ' + tipo;
+  el.innerHTML = txt;
+  el.style.display = 'block';
+}
+function hideMsg(id) {
+  var el = document.getElementById(id);
+  if (el) { el.className = 'msg'; el.style.display = 'none'; }
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+
+function fmtMonto(n, moneda) {
+  var abs = Math.abs(n || 0);
+  var str = abs.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return (moneda === 'USD' ? 'USD ' : '$ ') + str;
+}
+
+function stat(label, val, color) {
+  return '<div class="stat"><b style="color:' + color + ';">' + val + '</b>' + label + '</div>';
+}
+
+function badgeTipo(tipo) {
+  var cls = tipo === 'consumo'              ? 'badge-consumo'
+          : tipo === 'cuota'               ? 'badge-cuota'
+          : tipo === 'impuesto'            ? 'badge-impuesto'
+          : tipo === 'reintegro_percepcion'? 'badge-reintegro'
+          : tipo === 'pago_anterior'       ? 'badge-pago'
+          : 'badge-otro';
+  return '<span class="badge ' + cls + '">' + (tipo || '—') + '</span>';
+}
+
+function selectPersona(i, val) {
+  var opts = '<option value=""></option>' +
+    STATE.personas.map(function(p) {
+      return '<option value="' + p + '"' + (p === val ? ' selected' : '') + '>' + p + '</option>';
+    }).join('');
+  return '<select onchange="updateFila(' + i + ',\'personaFinal\',this.value)" style="min-width:70px;">' + opts + '</select>';
+}
+
+function selectAccion(i, val) {
+  var opciones = [
+    ['',               'Incluir'],
+    ['IncluirNoDash',  'No Dash'],
+    ['ExcluirTotalmente','Excluir'],
+    ['Ignorar',        'Ignorar']
+  ];
+  var opts = opciones.map(function(o) {
+    return '<option value="' + o[0] + '"' + (o[0] === val ? ' selected' : '') + '>' + o[1] + '</option>';
+  }).join('');
+  return '<select class="sel-accion" onchange="updateFila(' + i + ',\'accionUsuario\',this.value)">' + opts + '</select>';
+}
+function initShareTarjetasIfNeeded_() {
+  try {
+    if (SHARE_CTX && SHARE_CTX.hasShareToken) {
+      initShareTarjetasToken_(SHARE_CTX.shareToken);
+      return;
+    }
+  } catch (err) {
+    showMsg('msgShareTarjetas', 'err', '❌ No pude recuperar el PDF compartido: ' + err.message);
+  }
+}
+
+function initShareTarjetasToken_(shareToken) {
+  if (!shareToken) {
+    showMsg('msgShareTarjetas', 'err', '❌ Token inválido para el resumen compartido.');
+    return;
+  }
+
+  var banner = document.getElementById('bannerShareTarjetas');
+  var bannerText = document.getElementById('bannerShareTarjetasText');
+  if (banner) banner.style.display = 'flex';
+
+  document.getElementById('pdfFile').disabled = true;
+  showMsg('msgShareTarjetas', 'wait', '⏳ Recuperando el resumen compartido…');
+
+  google.script.run
+    .withSuccessHandler(function(payload) {
+      if (!payload || !payload.ok) {
+        showMsg('msgShareTarjetas', 'err', '❌ ' + (payload && payload.error || 'No pude recuperar el resumen compartido.'));
+        return;
+      }
+
+      if (!payload.base64) {
+        showMsg('msgShareTarjetas', 'err', '❌ El token existe, pero el PDF temporal está vacío.');
+        return;
+      }
+
+      STATE.sharedPdf = {
+        route: 'tarjetas',
+        token: shareToken,
+        base64: payload.base64,
+        fileName: payload.fileName || 'archivo.pdf',
+        mimeType: payload.mimeType || 'application/pdf'
+      };
+      STATE.shareMode = true;
+
+      if (bannerText) {
+        bannerText.textContent = '📲 Resumen recibido desde compartir: ' + (STATE.sharedPdf.fileName || 'archivo.pdf');
+      }
+
+      showMsg('msgShareTarjetas', 'ok', 'PDF compartido listo. Ahora elegí la tarjeta y tocá “Subir y parsear con IA”.');
+      actualizarBtnSubir();
+    })
+    .withFailureHandler(function(err) {
+      showMsg('msgShareTarjetas', 'err', '❌ Error recuperando el resumen compartido: ' + err.message);
+    })
+    .api_getSharePayload(shareToken, 'tarjetas');
+}
+
+function salirModoShareTarjetas_() {
+  STATE.sharedPdf = null;
+  STATE.shareMode = false;
+  if (SHARE_CTX) SHARE_CTX.hasShareToken = false;
+
+  var banner = document.getElementById('bannerShareTarjetas');
+  if (banner) banner.style.display = 'none';
+
+  document.getElementById('pdfFile').disabled = false;
+  hideMsg('msgShareTarjetas');
+  actualizarBtnSubir();
+}
+
+initQnav('<?!= webAppBaseUrl ?>');
+</script>
+</body>
+</html>

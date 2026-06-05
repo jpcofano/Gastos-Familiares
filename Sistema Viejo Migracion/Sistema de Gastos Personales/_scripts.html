@@ -1,0 +1,78 @@
+<script>
+function showMsg(id, tipo, txt) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'msg ' + tipo;
+  el.innerHTML = txt;
+  el.style.display = 'block';
+}
+function hideMsg(id) {
+  var el = document.getElementById(id);
+  if (el) { el.className = 'msg'; el.style.display = 'none'; }
+}
+function poblarDatalist(id, arr) {
+  var dl = document.getElementById(id);
+  if (!dl) return;
+  dl.innerHTML = '';
+  arr.forEach(function(v) {
+    var opt = document.createElement('option');
+    opt.value = v;
+    dl.appendChild(opt);
+  });
+}
+function poblarSelect(id, arr, placeholder) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var html = '<option value="">' + esc(placeholder || '— Seleccioná —') + '</option>';
+  arr.forEach(function(v) { html += '<option value="' + esc(v) + '">' + esc(v) + '</option>'; });
+  el.innerHTML = html;
+}
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+}
+function fmtMonto(n) {
+  return Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+/* initQnav: resuelve hrefs de [data-qhref].
+   base: URL base de la WebApp (preferir pasar desde el template para evitar
+   problemas con el sandbox de Apps Script que sirve desde googleusercontent.com). */
+function initQnav(base) {
+  base = base || window.location.href.split('?')[0];
+  var els = document.querySelectorAll('[data-qhref]');
+  for (var i = 0; i < els.length; i++) {
+    els[i].href = base + '?view=' + els[i].getAttribute('data-qhref');
+  }
+}
+/* setStep genérico: itera sn1..snN hasta que el elemento no exista.
+   Usa clases .sn/.sl (Comprobantes, Manual).
+   Tarjetas tiene su propio setStep que usa .step-n/.step-label. */
+function setStep(active) {
+  for (var i = 1; i <= 10; i++) {
+    var sn = document.getElementById('sn' + i);
+    if (!sn) break;
+    var sl = document.getElementById('sl' + i);
+    if (i < active) {
+      sn.className = 'sn done'; sn.textContent = '✓';
+      if (sl) sl.className = 'sl';
+    } else if (i === active) {
+      sn.className = 'sn active'; sn.textContent = String(i);
+      if (sl) sl.className = 'sl active';
+    } else {
+      sn.className = 'sn pend'; sn.textContent = String(i);
+      if (sl) sl.className = 'sl';
+    }
+  }
+}
+/* gf_detectTouch: aplica 'is-desktop' al body si no hay touch.
+   Llamar ANTES del primer render con un script inline en el body.
+   El WebView de Samsung reporta media queries incorrectamente;
+   'ontouchstart' y navigator.maxTouchPoints son confiables. */
+function gf_detectTouch() {
+  var isTouch = ('ontouchstart' in window) ||
+                (navigator.maxTouchPoints > 0) ||
+                (navigator.msMaxTouchPoints > 0);
+  if (!isTouch) document.body.classList.add('is-desktop');
+}
+</script>

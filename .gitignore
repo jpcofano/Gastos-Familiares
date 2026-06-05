@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+secrets/*.json
+secrets/serviceAccountKey*.json
+**/serviceAccountKey*.json
+*.log
+.firebase/
+.DS_Store
+Thumbs.db
+emulator-data/

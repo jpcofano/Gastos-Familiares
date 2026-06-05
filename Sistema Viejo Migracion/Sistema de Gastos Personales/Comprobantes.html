@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Comprobante · Gastos Familia</title>
+  <?!= include('_styles'); ?>
+  <style>
+    /* ── Mobile-first redesign — sobreescribe _styles.html ─────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;   /* Previene shrink-to-fit del WebView */
+      max-width: 100%;
+    }
+    body {
+      background: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Pantalla completa ──────────────────────────────────────────────────── */
+    .screen {
+      min-height: 100dvh;
+      min-height: 100vh; /* fallback */
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Hero oscuro ────────────────────────────────────────────────────────── */
+    .hero {
+      flex: 0 0 auto;
+      padding: max(env(safe-area-inset-top, 16px), 20px) 24px 32px;
+      color: #fff;
+      min-height: 230px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      text-align: center;
+    }
+    .hero-icon {
+      width: 80px; height: 80px;
+      background: rgba(255,255,255,.1);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 38px;
+      margin-bottom: 14px;
+      flex-shrink: 0;
+    }
+    .hero-eyebrow {
+      font-size: 11px; font-weight: 700;
+      color: #4b5563; letter-spacing: .5px;
+      text-transform: uppercase; margin-bottom: 10px;
+    }
+    .hero-amount {
+      font-size: 40px; font-weight: 900;
+      letter-spacing: -1px; line-height: 1;
+      margin-bottom: 6px;
+    }
+    .hero-desc { font-size: 16px; color: #9ca3af; margin-bottom: 16px; }
+    .hero-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .hero-tag {
+      display: inline-flex; align-items: center;
+      border-radius: 8px; padding: 5px 12px;
+      font-size: 13px; font-weight: 600;
+    }
+
+    /* ── Drawer blanco ──────────────────────────────────────────────────────── */
+    .drawer {
+      background: #fff;
+      border-radius: 24px 24px 0 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .drawer-handle {
+      width: 36px; height: 4px;
+      background: #e5e7eb; border-radius: 2px;
+      margin: 12px auto 0; flex-shrink: 0;
+    }
+    .drawer-scroll {
+      flex: 1; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 16px 24px 0;
+    }
+    /* Centra verticalmente el contenido del paso 1 cuando no hay scroll */
+    #paso1 .drawer-scroll {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .drawer-scroll::-webkit-scrollbar { display: none; }
+
+    /* ── Drop zone (paso 1) ─────────────────────────────────────────────────── */
+    .drop-zone {
+      border: 2px dashed #e5e7eb;
+      border-radius: 20px;
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      margin-bottom: 16px;
+    }
+    .drop-zone:active { border-color: #111827; background: #f9fafb; }
+
+    /* ── CTA bar fija al fondo ──────────────────────────────────────────────── */
+    .cta-bar {
+      flex-shrink: 0;
+      background: #fff;
+      padding: 12px 24px;
+      padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+      border-top: 1px solid rgba(0,0,0,.06);
+    }
+    .cta-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; height: 52px;
+      border: none; border-radius: 14px;
+      font-size: 17px; font-weight: 700;
+      cursor: pointer; font-family: inherit;
+      transition: transform .12s, opacity .12s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .cta-btn + .cta-btn { margin-top: 8px; }
+    .cta-btn:active { transform: scale(.97); }
+    .cta-btn:disabled { opacity: .45; cursor: default; transform: none; }
+    .cta-primary   { background: #111827; color: #fff; }
+    .cta-secondary { background: #f3f4f6; color: #374151; font-size: 15px; }
+    .cta-green     { background: #065f46; color: #fff; }
+
+    /* ── Secciones del formulario ───────────────────────────────────────────── */
+    .form-section-label {
+      font-size: 11px; font-weight: 700;
+      color: #9ca3af; text-transform: uppercase;
+      letter-spacing: .5px; margin: 20px 0 4px;
+    }
+    .form-section-label:first-child { margin-top: 16px; }
+
+    /* ── Field row ──────────────────────────────────────────────────────────── */
+    .field-row {
+      display: flex; align-items: center;
+      min-height: 56px;
+      border-bottom: 1px solid #f3f4f6;
+      gap: 12px;
+    }
+    .field-row:last-of-type { border-bottom: none; }
+    .field-label {
+      font-size: 15px; color: #9ca3af;
+      width: 110px; flex-shrink: 0;
+    }
+    .field-label.req::after { content: ' *'; color: #dc2626; }
+    .field-value {
+      flex: 1; display: flex;
+      align-items: center; justify-content: flex-end;
+    }
+
+    /* CRÍTICO: 16px previene zoom automático en iOS */
+    .field-input, .field-select {
+      font-size: 16px !important;
+      font-weight: 600; color: #111827;
+      border: none; outline: none;
+      background: transparent;
+      text-align: right;
+      width: 100%;
+      font-family: inherit;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .field-input::placeholder { color: #d1d5db; font-weight: 400; }
+    .field-textarea {
+      font-size: 16px !important;
+      width: 100%;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 12px;
+      font-family: inherit;
+      color: #111827;
+      resize: none; height: 80px;
+      outline: none; margin-bottom: 8px;
+    }
+
+    /* ── Toggle pagado ──────────────────────────────────────────────────────── */
+    .toggle-wrap {
+      display: flex; align-items: center;
+      justify-content: flex-end; cursor: pointer;
+    }
+    #fPagadoToggle {
+      width: 50px; height: 28px; border-radius: 14px;
+      position: relative; transition: background .2s;
+      flex-shrink: 0; cursor: pointer;
+      border: none; padding: 0; background: #e5e7eb;
+    }
+    #fPagadoToggle.on { background: #111827; }
+    #fPagadoToggle::after {
+      content: '';
+      position: absolute; top: 3px; left: 3px;
+      width: 22px; height: 22px;
+      border-radius: 50%; background: #fff;
+      transition: left .2s;
+      box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    }
+    #fPagadoToggle.on::after { left: 22px; }
+
+    /* ── Hint match (pre-clasificado) ───────────────────────────────────────── */
+    .hint-match {
+      font-size: 12px; color: #065f46;
+      font-weight: 600; margin-top: 4px;
+    }
+
+    /* ── Banner share ───────────────────────────────────────────────────────── */
+    #bannerShare {
+      background: rgba(59,130,246,.12);
+      border: 1px solid rgba(59,130,246,.25);
+      border-radius: 14px;
+      padding: 12px 16px;
+      display: none; /* initShareMode_() lo activa */
+      align-items: center; gap: 12px;
+      margin-bottom: 16px;
+    }
+    #bannerShare span { font-size: 13px; font-weight: 700; color: #60a5fa; }
+
+    /* ── Warning duplicado ──────────────────────────────────────────────────── */
+    #warnDup {
+      display: none;
+      background: #fffbeb; border: 1px solid #fde68a;
+      border-radius: 14px; padding: 14px 16px;
+      margin-bottom: 16px;
+    }
+    #warnDup .dup-title { font-size: 14px; font-weight: 700; color: #92400e; margin-bottom: 4px; }
+    #warnDup .dup-body  { font-size: 13px; color: #92400e; line-height: 1.5; margin-bottom: 10px; }
+    #warnDup .dup-btns  { display: flex; gap: 8px; }
+    #warnDup .dup-btns button {
+      flex: 1; border-radius: 8px; padding: 9px;
+      font-size: 13px; font-weight: 700;
+      cursor: pointer; font-family: inherit;
+    }
+    .dup-cancel   { border: 1px solid #fde68a; background: #fff; color: #92400e; }
+    .dup-continue { border: none; background: #92400e; color: #fff; }
+
+    /* ── Loading screen ─────────────────────────────────────────────────────── */
+    #pasoLoading {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      padding: 60px 32px 40px;
+      text-align: center;
+    }
+    .load-orb-wrap {
+      position: relative; width: 100px; height: 100px;
+      margin-bottom: 32px;
+    }
+    .load-orb-ring {
+      position: absolute; inset: 0; border-radius: 50%;
+      border: 3px solid rgba(139,92,246,.3);
+      animation: pulse-ring 1.6s ease-out infinite;
+    }
+    .load-orb {
+      width: 100px; height: 100px; border-radius: 50%;
+      background: rgba(139,92,246,.1);
+      border: 2px solid rgba(139,92,246,.3);
+      display: flex; align-items: center;
+      justify-content: center; font-size: 44px;
+    }
+    .load-steps { width: 100%; max-width: 300px; margin-top: 8px; }
+    .load-step {
+      display: flex; align-items: center; gap: 12px;
+      padding: 11px 0;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      transition: opacity .4s;
+    }
+    .load-step:last-child { border-bottom: none; }
+    .load-dot {
+      width: 22px; height: 22px; border-radius: 50%;
+      flex-shrink: 0; display: flex;
+      align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700;
+      transition: background .4s, color .4s;
+    }
+    .load-dot.done   { background: #10b981; color: #fff; }
+    .load-dot.active { background: #8b5cf6; color: #fff; }
+    .load-dot.pend   { background: rgba(255,255,255,.08); color: transparent; }
+
+    /* ── Done screen ────────────────────────────────────────────────────────── */
+    #paso3 {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      padding: 60px 28px 40px;
+      padding-bottom: max(env(safe-area-inset-bottom, 0px), 40px);
+      text-align: center;
+    }
+    .receipt-card {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 20px;
+      padding: 22px 24px;
+      width: 100%; text-align: left;
+      margin-bottom: 28px;
+    }
+    .receipt-card .rc-amount {
+      font-size: 32px; font-weight: 900;
+      color: #fff; letter-spacing: -1px; margin-bottom: 4px;
+    }
+    .receipt-card .rc-meta { font-size: 14px; color: #6b7280; margin-bottom: 12px; }
+    .receipt-card .rc-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .receipt-card .rc-desc { font-size: 13px; color: #4b5563; margin-top: 10px; }
+    .rc-tag {
+      display: inline-flex; align-items: center;
+      border-radius: 8px; padding: 4px 10px;
+      font-size: 13px; font-weight: 600;
+    }
+
+    /* ── Ocultar step indicator original (requerido por setStep() de _scripts) */
+    #stepIndicator { display: none !important; }
+
+    /* ── msgGlobal / msgShare se muestran en el hero ────────────────────────── */
+    #msgGlobal, #msgShare {
+      margin: 0 24px 12px; border-radius: 12px;
+    }
+    #msgGlobal.msg.ok, #msgGlobal.msg.err,
+    #msgGlobal.msg.warn, #msgGlobal.msg.wait,
+    #msgShare.msg.ok, #msgShare.msg.err,
+    #msgShare.msg.warn, #msgShare.msg.wait {
+      display: block;
+    }
+
+    /* ── App container ───────────────────────────────────────────────────────
+       Mobile: ocupa todo el ancho del viewport (que ahora es real gracias a
+       addMetaTag('viewport', ...) en 11_WebApp.gs lado backend).
+       Desktop: clase 'is-desktop' aplicada vía JS lo centra a 480px.         */
+    #app {
+      width: 100%;
+      max-width: 100%;
+      min-height: 100dvh;
+      min-height: 100vh;    /* fallback */
+      background: #111827;
+    }
+
+    /* Desktop real (sin touch): app centrado a 480px con decoración */
+    body.is-desktop { background: #0d1117; }
+    body.is-desktop #app {
+      max-width: 480px;
+      margin: 0 auto;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.05), 0 40px 100px rgba(0,0,0,.6);
+    }
+
+    @keyframes pulse-ring {
+      0%   { transform: scale(1); opacity: .6; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+<script>
+  // Detección temprana de desktop real vs touch. Ejecuta ANTES del render
+  // para evitar flash de layout. El WebView de Samsung dentro de
+  // script.google.com miente en media queries width/hover/pointer, pero
+  // 'ontouchstart' y navigator.maxTouchPoints son confiables.
+  (function() {
+    var isTouch = ('ontouchstart' in window) ||
+                  (navigator.maxTouchPoints > 0) ||
+                  (navigator.msMaxTouchPoints > 0);
+    if (!isTouch) document.body.classList.add('is-desktop');
+  })();
+</script>
+<div id="app">
+
+  <!-- Step indicator oculto — requerido por setStep() de _scripts.html -->
+  <div id="stepIndicator">
+    <div class="sn" id="sn1">1</div><span id="sl1">PDF</span>
+    <div class="sn" id="sn2">2</div><span id="sl2">Revisar</span>
+    <div class="sn" id="sn3">3</div><span id="sl3">Listo</span>
+  </div>
+
+  <!-- Mensajes globales (errores de red, etc.) -->
+  <div id="msgGlobal" class="msg"></div>
+  <div id="msgShare"  class="msg"></div>
+
+  <!-- ══ PASO 1 — Subir PDF ═══════════════════════════════════════════════════ -->
+  <div id="paso1" class="screen">
+    <div class="hero">
+      <div class="hero-icon">🧾</div>
+      <div style="font-size:28px;font-weight:800;color:#fff;line-height:1.2;margin-bottom:8px">Subir comprobante</div>
+      <div style="font-size:15px;color:#6b7280;line-height:1.6">Expensas, facturas, comprobantes de pago y ABL</div>
+    </div>
+
+    <!-- Banner modo share (oculto por defecto) -->
+    <div id="bannerShare">
+      <span style="font-size:22px;flex-shrink:0">📲</span>
+      <span>Modo recepción activo</span>
+      <button onclick="salirModoShare_()" style="margin-left:auto;background:none;border:none;font-size:18px;color:#6b7280;cursor:pointer;padding:4px;line-height:1">✕</button>
+    </div>
+
+    <div class="drawer">
+      <div class="drawer-handle"></div>
+      <div class="drawer-scroll" style="padding-top:16px">
+
+        <!-- Drop zone — label asociado al input, el browser abre el picker sin JS -->
+        <label class="drop-zone" for="pdfFile">
+          <div style="font-size:52px;margin-bottom:14px">📄</div>
+          <div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:6px">Tocá para seleccionar</div>
+          <div style="font-size:14px;color:#9ca3af">PDF o imagen · Máx. 10 MB</div>
+          <div id="pdfFileName" style="font-size:13px;color:#065f46;font-weight:600;margin-top:10px;display:none"></div>
+        </label>
+
+        <!-- Input file real — visually hidden pero NO display:none (iOS requiere esto) -->
+        <input type="file" id="pdfFile"
+               accept=".pdf,image/jpeg,image/png,image/heic,image/webp,.heic,.jpg,.jpeg,.png,.webp"
+               onchange="onFileSelected()"
+               style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden">
+
+        <!-- Mensaje de error del paso 1 -->
+        <div id="msgParsear" class="msg" style="margin-bottom:12px"></div>
+
+        <div style="height:20px"></div>
+      </div>
+
+      <div class="cta-bar">
+        <button class="cta-btn cta-primary" id="btnParsear"
+                onclick="parsearPDF()" disabled>
+          <span>🤖</span> Leer con IA
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ LOADING — mientras la IA procesa ═════════════════════════════════════ -->
+  <div id="pasoLoading">
+    <div class="load-orb-wrap">
+      <div class="load-orb-ring"></div>
+      <div class="load-orb">🤖</div>
+    </div>
+    <div style="font-size:22px;font-weight:800;color:#fff;margin-bottom:6px">Leyendo con IA…</div>
+    <div style="font-size:14px;color:#6b7280;margin-bottom:32px;line-height:1.6;max-width:260px">
+      Esto puede tardar entre 30 y 90 segundos con PDFs grandes.
+    </div>
+    <div class="load-steps" id="loadSteps"></div>
+  </div>
+
+  <!-- ══ PASO 2 — Revisar datos ════════════════════════════════════════════════ -->
+  <div id="paso2" class="screen" style="display:none">
+
+    <!-- Hero con monto extraído -->
+    <div class="hero">
+      <div class="hero-eyebrow" id="heroEyebrow">COMPROBANTE DETECTADO</div>
+      <div class="hero-amount" id="heroAmount">—</div>
+      <div class="hero-desc" id="heroDesc"></div>
+      <div class="hero-tags">
+        <span id="tagPreclasif" class="hero-tag"
+              style="background:rgba(16,185,129,.15);color:#6ee7b7;display:none">
+          ✨ Pre-clasificado
+        </span>
+        <span id="tagFecha" class="hero-tag"
+              style="background:rgba(255,255,255,.08);color:#9ca3af"></span>
+        <span id="tagBanco" class="hero-tag"
+              style="background:rgba(255,255,255,.08);color:#9ca3af"></span>
+      </div>
+    </div>
+
+    <div class="drawer">
+      <div class="drawer-handle"></div>
+      <div class="drawer-scroll">
+
+        <!-- Warning duplicado -->
+        <div id="warnDup">
+          <div class="dup-title">⚠️ Posible duplicado</div>
+          <div class="dup-body" id="warnDupBody">Encontramos un movimiento similar ya guardado.</div>
+          <div class="dup-btns">
+            <button class="dup-cancel"   onclick="cancelarPorDup_()">Sí, cancelar</button>
+            <button class="dup-continue" onclick="guardarForzado_()">No, guardar igual</button>
+          </div>
+        </div>
+
+        <!-- ¿Quién? -->
+        <div class="form-section-label">¿Quién?</div>
+        <div class="field-row">
+          <div class="field-label">Persona</div>
+          <div class="field-value">
+            <select class="field-select" id="fPersona"
+                    onchange="actualizarHeroTags()">
+              <option value="">— Sin asignar —</option>
+              <option>Juan</option>
+              <option>María</option>
+              <option>Federico</option>
+              <option>Sofía</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ¿Qué es? -->
+        <div class="form-section-label">¿Qué es?</div>
+        <div class="field-row">
+          <div class="field-label req">Descripción</div>
+          <div class="field-value">
+            <input class="field-input" id="fDescripcion" type="text"
+                   placeholder="Ej: Expensas Cofano"
+                   oninput="onDescChange()">
+          </div>
+        </div>
+        <div id="hintLookup" class="hint-match" style="display:none;padding:0 0 8px">
+          ✨ pre-clasificado por uso anterior
+        </div>
+        <div class="field-row">
+          <div class="field-label">Categoría</div>
+          <div class="field-value">
+            <select class="field-select" id="fCategoria"
+                    onchange="onCategoriaChange_()">
+              <option value="">— Seleccioná —</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Subcategoría</div>
+          <div class="field-value">
+            <input class="field-input" id="fSubcategoria" list="dlSub"
+                   placeholder="Ej: Expensas">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Etiqueta</div>
+          <div class="field-value">
+            <input class="field-input" id="fEtiqueta" list="dlEtiq"
+                   placeholder="Ej: rutina-casa">
+          </div>
+        </div>
+
+        <!-- ¿Cuándo y cuánto? -->
+        <div class="form-section-label">¿Cuándo y cuánto?</div>
+        <div class="field-row">
+          <div class="field-label req">Fecha</div>
+          <div class="field-value">
+            <input class="field-input field-select" id="fFecha" type="date"
+                   onchange="actualizarHeroTags()">
+          </div>
+        </div>
+        <div id="hintFecha" style="font-size:12px;color:#6b7280;padding:0 0 8px;display:none"></div>
+        <div class="field-row">
+          <div class="field-label">Moneda</div>
+          <div class="field-value">
+            <select class="field-select" id="fMoneda" onchange="actualizarHeroAmount()">
+              <option value="ARS">$ ARS</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label req">Monto</div>
+          <div class="field-value" style="gap:4px">
+            <span id="monedaPrefix"
+                  style="font-size:16px;color:#9ca3af;flex-shrink:0">$</span>
+            <input class="field-input" id="fMonto" type="number"
+                   min="0" step="0.01" placeholder="0"
+                   oninput="actualizarHeroAmount()" style="text-align:right">
+          </div>
+        </div>
+        <div id="hintGastos" style="font-size:12px;color:#6b7280;padding:2px 0 4px;display:none"></div>
+
+        <!-- ¿Cómo se paga? -->
+        <div class="form-section-label">¿Cómo se paga?</div>
+        <div class="field-row">
+          <div class="field-label req">Banco</div>
+          <div class="field-value">
+            <select class="field-select" id="fBanco"
+                    onchange="actualizarHeroTags()">
+              <option value="">— Seleccioná —</option>
+              <option>BBVA</option>
+              <option>Galicia</option>
+              <option>Personal Pay</option>
+              <option selected>Efectivo</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-label">Pagado</div>
+          <div class="field-value">
+            <button id="fPagadoToggle" type="button"
+                    onclick="togglePagado_()" aria-label="Pagado"></button>
+          </div>
+        </div>
+        <!-- Input hidden para que el JS original pueda leer fPagado.checked -->
+        <input type="checkbox" id="fPagado" style="display:none">
+
+        <!-- Notas -->
+        <div class="form-section-label">Notas (opcional)</div>
+        <textarea class="field-textarea" id="fNotas"
+                  placeholder="Nro de factura, período, etc."></textarea>
+
+        <div style="height:16px"></div>
+      </div><!-- /drawer-scroll -->
+
+      <div class="cta-bar">
+        <button class="cta-btn cta-green" id="btnGuardar" onclick="guardar()">
+          Guardar en el historial
+        </button>
+        <button class="cta-btn cta-secondary" onclick="volverPaso1()">
+          ← Otro PDF
+        </button>
+        <div id="msgGuardar" class="msg" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div><!-- /paso2 -->
+
+  <!-- ══ PASO 3 — Listo ════════════════════════════════════════════════════════ -->
+  <div id="paso3">
+    <div style="font-size:64px;margin-bottom:16px">✅</div>
+    <div style="font-size:24px;font-weight:800;color:#fff;margin-bottom:8px">¡Guardado!</div>
+    <div style="font-size:15px;color:#6b7280;margin-bottom:28px;line-height:1.6;max-width:260px">
+      El comprobante fue guardado correctamente en Historico.
+    </div>
+
+    <div class="receipt-card">
+      <div class="rc-amount" id="rcAmount">—</div>
+      <div class="rc-meta"   id="rcMeta"></div>
+      <div class="rc-tags"   id="rcTags"></div>
+      <div class="rc-desc"   id="rcDesc"></div>
+    </div>
+
+    <button class="cta-btn cta-secondary" style="width:100%"
+            onclick="volverPaso1()">
+      Registrar otro
+    </button>
+
+    <!-- msgFinal oculto — el JS de guardar() lo escribe, pero no lo mostramos visualmente -->
+    <div id="msgFinal" class="msg" style="display:none"></div>
+  </div>
+
+</div><!-- /app -->
+
+<datalist id="dlSub"></datalist>
+<datalist id="dlEtiq"></datalist>
+
+<?!= include('_scripts'); ?>
+<script>
+// ── Contextos inyectados server-side ──────────────────────────────────────────
+var STATE = {
+  categorias: [],
+  subcategorias: [],
+  etiquetas: [],
+  subcategoriasPorCategoria: {},
+  ultimoGuardado: null,
+  numeroComprobanteParseado: null
+};
+// Descripción que vino del parser (clave de match para el dict)
+var descripcionOriginalDelParser = '';
+var SHARE_CTX = <?!= JSON.stringify(shareContext) ?>;
+
+// ── Mensajes del loading (animación paso a paso) ───────────────────────────────
+var LOAD_MSGS = [
+  'Analizando el PDF…',
+  'Detectando tipo de documento…',
+  'Extrayendo monto y fecha…',
+  'Clasificando con IA…',
+  'Finalizando…'
+];
+var _loadInterval = null;
+var _loadIdx = 0;
+
+// ── INIT ───────────────────────────────────────────────────────────────────────
+(function init() {
+  try {
+    var b = <?!= JSON.stringify(bootstrap) ?>;
+    if (b && b.diccionario) {
+      STATE.categorias                = b.diccionario.categorias                || [];
+      STATE.subcategorias             = b.diccionario.subcategorias             || [];
+      STATE.etiquetas                 = b.diccionario.etiquetas                 || [];
+      STATE.subcategoriasPorCategoria = b.diccionario.subcategoriasPorCategoria || {};
+      poblarSelectCategorias_(STATE.categorias);
+      poblarDatalist('dlSub',  STATE.subcategorias);
+      poblarDatalist('dlEtiq', STATE.etiquetas);
+    }
+  } catch(e) {}
+
+  if (SHARE_CTX && SHARE_CTX.hasShareToken) {
+    initShareMode_();
+  }
+})();
+
+// ── File selection ─────────────────────────────────────────────────────────────
+function onFileSelected() {
+  var input = document.getElementById('pdfFile');
+  var btn   = document.getElementById('btnParsear');
+  var nameEl = document.getElementById('pdfFileName');
+  var hasFile = input.files && input.files.length > 0;
+  btn.disabled = !hasFile;
+  if (hasFile) {
+    nameEl.textContent = '📎 ' + input.files[0].name;
+    nameEl.style.display = '';
+  } else {
+    nameEl.style.display = 'none';
+  }
+}
+
+// Alias para compatibilidad con el evento onchange original
+function actualizarBtn() { onFileSelected(); }
+
+// ── Loading helpers ────────────────────────────────────────────────────────────
+function mostrarLoading_() {
+  document.getElementById('paso1').style.display = 'none';
+  document.getElementById('pasoLoading').style.display = 'flex';
+  _loadIdx = 0;
+  renderLoadSteps_();
+  _loadInterval = setInterval(function() {
+    if (_loadIdx < LOAD_MSGS.length - 1) {
+      _loadIdx++;
+      renderLoadSteps_();
+    }
+  }, 900);
+}
+
+function ocultarLoading_() {
+  clearInterval(_loadInterval);
+  document.getElementById('pasoLoading').style.display = 'none';
+}
+
+function renderLoadSteps_() {
+  var html = '';
+  LOAD_MSGS.forEach(function(msg, i) {
+    var cls = i < _loadIdx ? 'done' : i === _loadIdx ? 'active' : 'pend';
+    var icon = i < _loadIdx ? '✓' : i === _loadIdx ? '◉' : '';
+    var opacity = i <= _loadIdx ? '1' : '.3';
+    html += '<div class="load-step" style="opacity:' + opacity + '">' +
+      '<div class="load-dot ' + cls + '">' + icon + '</div>' +
+      '<div style="font-size:14px;color:' + (i <= _loadIdx ? '#e5e7eb' : '#4b5563') + ';text-align:left">' + esc(msg) + '</div>' +
+      '</div>';
+  });
+  document.getElementById('loadSteps').innerHTML = html;
+}
+
+// ── PASO 1: parsear ────────────────────────────────────────────────────────────
+function parsearPDF() {
+  var fileInput = document.getElementById('pdfFile');
+  if (!fileInput.files || !fileInput.files.length) return;
+
+  var file     = fileInput.files[0];
+  var mimeType = file.type || 'application/pdf';
+
+  hideMsg('msgParsear');
+  mostrarLoading_();
+  document.getElementById('btnParsear').disabled = true;
+
+  var reader = new FileReader();
+
+  reader.onerror = function() {
+    ocultarLoading_();
+    document.getElementById('paso1').style.display = '';
+    document.getElementById('btnParsear').disabled = false;
+    showMsg('msgParsear', 'err', '❌ No se pudo leer el archivo. Intentá de nuevo.');
+  };
+
+  reader.onload = function(e) {
+    var dataUrl = e.target.result;
+    if (!dataUrl || dataUrl.indexOf(',') === -1) {
+      ocultarLoading_();
+      document.getElementById('paso1').style.display = '';
+      document.getElementById('btnParsear').disabled = false;
+      showMsg('msgParsear', 'err', '❌ El archivo no pudo leerse correctamente.');
+      return;
+    }
+    var base64 = dataUrl.split(',')[1];
+    if (!base64 || base64.length < 100) {
+      ocultarLoading_();
+      document.getElementById('paso1').style.display = '';
+      document.getElementById('btnParsear').disabled = false;
+      showMsg('msgParsear', 'err', '❌ Archivo vacío o inválido.');
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(function(res) {
+        ocultarLoading_();
+        document.getElementById('btnParsear').disabled = false;
+        if (!res || !res.ok) {
+          document.getElementById('paso1').style.display = '';
+          showMsg('msgParsear', 'err', '❌ ' + (res && res.error || 'Error desconocido'));
+          return;
+        }
+        hideMsg('msgParsear');
+        rellenarFormulario(res.data);
+        mostrarPaso2(res.data.descripcion || '');
+      })
+      .withFailureHandler(function(err) {
+        ocultarLoading_();
+        document.getElementById('paso1').style.display = '';
+        document.getElementById('btnParsear').disabled = false;
+        showMsg('msgParsear', 'err', '❌ Error de red: ' + (err && err.message || 'desconocido'));
+      })
+      .parsearComprobante({ pdfBase64: base64, mimeType: mimeType });
+  };
+
+  reader.readAsDataURL(file);
+}
+
+// Solo muestra el hint de monto esperado — nunca sobreescribe campos del form.
+// Se llama siempre (HIT y MISS del dict) después de que cat/subcat/persona
+// ya fueron fijados por rellenarFormulario o por el match del diccionario.
+function aplicarEsperadosBudget_() {
+  var cat    = document.getElementById('fCategoria').value.trim();
+  var subcat = document.getElementById('fSubcategoria').value.trim();
+  var persona = document.getElementById('fPersona').value.trim();
+  var el     = document.getElementById('hintGastos');
+  if (el) el.style.display = 'none';
+  if (!cat && !subcat) return;
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res || !el || !res.montoEsperado) return;
+      el.innerHTML = '💡 Monto esperado: ' + (res.moneda === 'USD' ? 'USD ' : '$ ') + fmtMonto(res.montoEsperado);
+      el.style.display = '';
+    })
+    .withFailureHandler(function() {})
+    .api_gastosEsperadosLookup(cat, subcat, persona);
+}
+
+// ── Mostrar paso 2 + dict lookup ───────────────────────────────────────────────
+function mostrarPaso2(descripcion) {
+  setStep(2);
+  document.getElementById('paso1').style.display    = 'none';
+  document.getElementById('pasoLoading').style.display = 'none';
+  document.getElementById('paso2').style.display    = '';
+  window.scrollTo(0, 0);
+  actualizarHeroTags();
+  actualizarHeroAmount();
+
+  if (!descripcion) return;
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      // api_dictLookup devuelve directamente el match (objeto) o null. NO devuelve {ok, match}.
+      if (!res) {
+        // MISS: rellenarFormulario ya aplicó data.esperado. Solo mostrar hint de monto.
+        aplicarEsperadosBudget_();
+        return;
+      }
+      var m = res;
+
+      // Moneda disambiguation: si el dict dice ARS pero el PDF es USD (o viceversa),
+      // tratar como MISS para que prevalezcan los valores ya aplicados de data.esperado.
+      var etiqLow    = (m.etiqueta || '').toLowerCase();
+      var monedaForm = (document.getElementById('fMoneda').value || '').toLowerCase();
+      var monedaConflict = (etiqLow.indexOf('ars') !== -1 && monedaForm === 'usd') ||
+                           (etiqLow.indexOf('usd') !== -1 && monedaForm === 'ars');
+      if (monedaConflict) {
+        aplicarEsperadosBudget_();
+        return;
+      }
+
+      // HIT: el diccionario es fuente primaria para clasificación.
+      if (m.categoria) {
+        document.getElementById('fCategoria').value = m.categoria;
+        onCategoriaChange_();
+      }
+      if (m.subcategoria) document.getElementById('fSubcategoria').value = m.subcategoria;
+      if (m.etiqueta)     document.getElementById('fEtiqueta').value     = m.etiqueta;
+      if (m.personaDefault && m.personaDefault.trim()) {
+        document.getElementById('fPersona').value = m.personaDefault.trim();
+      }
+      if (m.descripcionNormalizada && m.descripcionNormalizada.trim()) {
+        document.getElementById('fDescripcion').value = m.descripcionNormalizada.trim();
+        onDescChange();
+      }
+      document.getElementById('hintLookup').style.display  = '';
+      document.getElementById('tagPreclasif').style.display = '';
+      aplicarEsperadosBudget_();
+    })
+    .withFailureHandler(function() { /* silencioso — lo que clasificó la IA queda */ })
+    .api_dictLookup(descripcion);
+}
+
+// ── Rellenar formulario con datos del parser ───────────────────────────────────
+function rellenarFormulario(data) {
+  // Eyebrow (tipo de documento)
+  var labels = {
+    comprobante_pago: 'COMPROBANTE DE PAGO',
+    factura:          'FACTURA',
+    expensas:         'EXPENSAS',
+    abl:              'ABL / INMOBILIARIO',
+    otro:             'COMPROBANTE'
+  };
+  document.getElementById('heroEyebrow').textContent =
+    (labels[data.tipoDocumento] || 'COMPROBANTE') + ' DETECTADO';
+
+  document.getElementById('hintLookup').style.display = 'none';
+  document.getElementById('tagPreclasif').style.display = 'none';
+  document.getElementById('warnDup').style.display = 'none';
+
+  STATE.numeroComprobanteParseado = data.numeroComprobante || null;
+
+  // Duplicate check server-side: el parser encontró el mismo numeroComprobante en Historico
+  if (data.duplicado) {
+    var dup = data.duplicado;
+    document.getElementById('warnDupBody').innerHTML =
+      'El número <strong>' + esc(data.numeroComprobante) + '</strong> ya fue registrado: ' +
+      '<strong>' + esc(dup.descripcion) + '</strong>' +
+      ' — $' + Number(dup.monto || 0).toLocaleString('es-AR', {minimumFractionDigits:0}) +
+      ' el ' + esc(dup.fecha);
+    document.getElementById('warnDup').style.display = '';
+  }
+
+  descripcionOriginalDelParser = data.descripcion || '';
+  set('fDescripcion', data.descripcion || '');
+  set('fMonto',       data.monto || '');
+  set('fMoneda',      data.moneda || 'ARS');
+  set('fCategoria',   data.categoriaSugerida || '');
+  // Re-filtrar subcategorías si la categoría vino del parser IA
+  if (data.categoriaSugerida) onCategoriaChange_();
+  set('fSubcategoria',data.subcategoriaSugerida || '');
+  set('fPersona',     data.persona || '');
+  set('fNotas',       data.notas || '');
+
+  // Pisar con datos canónicos de GastosEsperados (ya resueltos server-side con personaHint)
+  if (data.esperado) {
+    if (data.esperado.banco)        set('fBanco',        data.esperado.banco);
+    if (data.esperado.persona)      set('fPersona',      data.esperado.persona);
+    if (data.esperado.etiqueta)     set('fEtiqueta',     data.esperado.etiqueta);
+    if (data.esperado.moneda)       set('fMoneda',       data.esperado.moneda);
+    if (data.esperado.categoria)  { set('fCategoria',    data.esperado.categoria); onCategoriaChange_(); }
+    if (data.esperado.subcategoria) set('fSubcategoria', data.esperado.subcategoria);
+  }
+
+  document.getElementById('fPagado').checked = !!data.pagado;
+  document.getElementById('fPagadoToggle').className = data.pagado ? 'on' : '';
+
+  if (data.fecha) {
+    document.getElementById('fFecha').value = data.fecha;
+    var hint = data.pagado ? 'Fecha de pago' : 'Fecha de vencimiento';
+    if (data.fechaEmision && data.fechaEmision !== data.fecha) {
+      hint += ' · Emisión: ' + data.fechaEmision;
+    }
+    var hintEl = document.getElementById('hintFecha');
+    hintEl.textContent = hint;
+    hintEl.style.display = '';
+  } else {
+    document.getElementById('fFecha').value = '';
+    var hintEl2 = document.getElementById('hintFecha');
+    hintEl2.textContent = '⚠ No encontrada — ingresala manualmente';
+    hintEl2.style.display = '';
+    document.getElementById('fFecha').style.borderColor = '#dc2626';
+  }
+
+  // Hero desc
+  document.getElementById('heroDesc').textContent = data.descripcion || '';
+  actualizarHeroAmount();
+}
+
+// ── Hero: actualizar amount en tiempo real ─────────────────────────────────────
+function actualizarHeroAmount() {
+  var monto  = parseFloat(document.getElementById('fMonto').value) || 0;
+  var moneda = document.getElementById('fMoneda').value;
+  var pfx    = moneda === 'USD' ? 'USD ' : '$ ';
+  document.getElementById('heroAmount').textContent =
+    pfx + monto.toLocaleString('es-AR', { minimumFractionDigits:0, maximumFractionDigits:0 });
+  document.getElementById('monedaPrefix').textContent = moneda === 'USD' ? 'USD' : '$';
+}
+
+// ── Hero: actualizar tags (fecha, banco) ───────────────────────────────────────
+function actualizarHeroTags() {
+  var fecha = document.getElementById('fFecha').value;
+  var banco = document.getElementById('fBanco').value;
+  document.getElementById('tagFecha').textContent = fecha || '';
+  document.getElementById('tagBanco').textContent = banco || '';
+}
+
+// ── Desc change: actualizar hero desc en tiempo real ──────────────────────────
+function onDescChange() {
+  document.getElementById('heroDesc').textContent =
+    document.getElementById('fDescripcion').value || '';
+}
+
+// ── Toggle pagado ──────────────────────────────────────────────────────────────
+function togglePagado_() {
+  var checkbox = document.getElementById('fPagado');
+  var toggle   = document.getElementById('fPagadoToggle');
+  checkbox.checked = !checkbox.checked;
+  toggle.className = checkbox.checked ? 'on' : '';
+}
+
+// ── PASO 2: guardar ────────────────────────────────────────────────────────────
+function guardar() {
+  var descripcion = document.getElementById('fDescripcion').value.trim();
+  var fecha       = document.getElementById('fFecha').value.trim();
+  var monto       = parseFloat(document.getElementById('fMonto').value);
+  var banco       = document.getElementById('fBanco').value.trim();
+
+  if (!descripcion) { alert('Ingresá una descripción.'); return; }
+  if (!fecha)        { alert('La fecha es obligatoria.'); return; }
+  if (!monto || monto <= 0) { alert('Ingresá un monto válido.'); return; }
+  if (!banco)        { alert('Seleccioná el banco.'); return; }
+
+  // ── Detección de duplicado (client-side) ─────────────────────────────────────
+  // Compara monto + cat + fecha contra el último guardado en la misma sesión
+  // para detectar doble-tap accidental.
+  var cat = document.getElementById('fCategoria').value.trim();
+  var dupKey = monto + '|' + cat + '|' + fecha;
+  if (STATE.ultimoGuardado === dupKey) {
+    var warnEl  = document.getElementById('warnDup');
+    var bodyEl  = document.getElementById('warnDupBody');
+    bodyEl.textContent = 'Ya guardaste un movimiento similar: $' +
+      monto.toLocaleString('es-AR') + ' · ' + (cat || 'sin cat') + ' · ' + fecha + '. ¿Es otro?';
+    warnEl.style.display = '';
+    warnEl.scrollIntoView ? null : window.scrollTo(0, 0);
+    // Scroll suave hasta el warning dentro del drawer
+    var scroll = document.querySelector('.drawer-scroll');
+    if (scroll) scroll.scrollTop = 0;
+    return;
+  }
+
+  ejecutarGuardar_();
+}
+
+function cancelarPorDup_() {
+  document.getElementById('warnDup').style.display = 'none';
+  volverPaso1();
+}
+
+function guardarForzado_() {
+  document.getElementById('warnDup').style.display = 'none';
+  STATE.ultimoGuardado = null; // Reset para no re-triggerear en el mismo form
+  ejecutarGuardar_();
+}
+
+function ejecutarGuardar_() {
+  var descripcion = document.getElementById('fDescripcion').value.trim();
+  var fecha       = document.getElementById('fFecha').value.trim();
+  var monto       = parseFloat(document.getElementById('fMonto').value);
+
+  showMsg('msgGuardar', 'wait', '⏳ Guardando…');
+  document.getElementById('btnGuardar').disabled = true;
+
+  var params = {
+    descripcion:  descripcion,
+    fecha:        fecha,
+    monto:        monto,
+    moneda:       document.getElementById('fMoneda').value,
+    banco:        document.getElementById('fBanco').value.trim(),
+    persona:      document.getElementById('fPersona').value,
+    categoria:    document.getElementById('fCategoria').value.trim(),
+    subcategoria: document.getElementById('fSubcategoria').value.trim(),
+    etiqueta:     document.getElementById('fEtiqueta').value,
+    pagado:       document.getElementById('fPagado').checked,
+    notas:        document.getElementById('fNotas').value.trim(),
+    numeroComprobante: STATE.numeroComprobanteParseado || ''
+  };
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      document.getElementById('btnGuardar').disabled = false;
+      if (!res || !res.ok) {
+        showMsg('msgGuardar', 'err', '❌ ' + (res && res.error || 'Error desconocido'));
+        return;
+      }
+      hideMsg('msgGuardar');
+
+      // Guardar dupKey para próximo intento
+      STATE.ultimoGuardado = params.monto + '|' + params.categoria + '|' + params.fecha;
+
+      // Render receipt
+      var pfx = params.moneda === 'USD' ? 'USD ' : '$ ';
+      document.getElementById('rcAmount').textContent =
+        pfx + params.monto.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0});
+      document.getElementById('rcMeta').textContent =
+        params.fecha + (params.banco ? ' · ' + params.banco : '') +
+        (params.persona ? ' · ' + params.persona : '');
+      var tags = '';
+      if (params.categoria)  tags += '<span class="rc-tag" style="background:rgba(255,255,255,.1);color:#e5e7eb">' + esc(params.categoria) + '</span>';
+      if (params.subcategoria) tags += '<span class="rc-tag" style="background:rgba(255,255,255,.1);color:#e5e7eb">' + esc(params.subcategoria) + '</span>';
+      if (params.etiqueta)   tags += '<span class="rc-tag" style="background:rgba(139,92,246,.2);color:#c4b5fd">' + esc(params.etiqueta) + '</span>';
+      tags += params.pagado
+        ? '<span class="rc-tag" style="background:rgba(16,185,129,.2);color:#6ee7b7">✓ Pagado</span>'
+        : '<span class="rc-tag" style="background:rgba(255,255,255,.06);color:#6b7280">Pendiente de pago</span>';
+      document.getElementById('rcTags').innerHTML = tags;
+      document.getElementById('rcDesc').textContent = params.descripcion || '';
+
+      // Transición a paso 3
+      document.getElementById('paso2').style.display = 'none';
+      var paso3 = document.getElementById('paso3');
+      paso3.style.display = 'flex';
+      setStep(3);
+      window.scrollTo(0, 0);
+
+      // 3.h — aprender en background (patrón = original del parser, alias = lo que el usuario ve al guardar)
+      if (params.descripcion && (params.categoria || params.subcategoria)) {
+        google.script.run
+          .withSuccessHandler(function() {})
+          .withFailureHandler(function() {})
+          .api_dictAprender(
+            descripcionOriginalDelParser || params.descripcion,
+            params.categoria,
+            params.subcategoria,
+            params.etiqueta,
+            'Comprobante',
+            params.descripcion,
+            params.persona
+          );
+      }
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('btnGuardar').disabled = false;
+      showMsg('msgGuardar', 'err', '❌ Error de red: ' + err.message);
+    })
+    .guardarComprobante(params);
+}
+
+// ── Share: modo shareToken (Drive + api_getSharePayload) ──────────────────────
+function initShareMode_() {
+  document.getElementById('bannerShare').style.display = 'flex';
+  document.getElementById('pdfFile').disabled = true;
+  document.getElementById('btnParsear').disabled = true;
+  iniciarModoShareToken_(SHARE_CTX.shareToken);
+}
+
+
+function iniciarModoShareToken_(shareToken) {
+  if (!shareToken) {
+    mostrarErrorShare_('Token inválido o vacío. No se puede continuar.');
+    return;
+  }
+
+  // Mostrar la pantalla de loading mientras recuperamos el archivo desde Drive
+  mostrarLoading_();
+
+  // Paso A — recuperar el archivo desde Drive usando el shareToken
+  google.script.run
+    .withSuccessHandler(function(payload) {
+      if (!payload || !payload.ok) {
+        ocultarLoading_();
+        mostrarErrorShare_((payload && payload.error) ||
+          'No pude recuperar el archivo compartido. El token puede haber expirado.');
+        return;
+      }
+      if (!payload.base64) {
+        ocultarLoading_();
+        mostrarErrorShare_('El token existe, pero el archivo temporal está vacío.');
+        return;
+      }
+
+      // Mostrar nombre del archivo recibido (UX — aparece si el usuario vuelve al paso 1)
+      if (payload.fileName) {
+        var nameEl = document.getElementById('pdfFileName');
+        if (nameEl) {
+          nameEl.textContent = '📎 ' + payload.fileName;
+          nameEl.style.display = '';
+        }
+      }
+
+      // Paso B — parsear el archivo (pipeline normal, igual que el modo manual)
+      google.script.run
+        .withSuccessHandler(function(res) {
+          ocultarLoading_();
+          if (!res || !res.ok) {
+            mostrarErrorShare_((res && res.error) || 'No pude parsear el archivo compartido.');
+            return;
+          }
+          hideMsg('msgShare');
+          rellenarFormulario(res.data);
+          mostrarPaso2(res.data.descripcion || '');
+        })
+        .withFailureHandler(function(err) {
+          ocultarLoading_();
+          mostrarErrorShare_('Error de red al analizar el archivo: ' +
+            (err && err.message || 'desconocido'));
+        })
+        .parsearComprobante({
+          pdfBase64: payload.base64,
+          mimeType:  payload.mimeType || 'application/pdf'
+        });
+    })
+    .withFailureHandler(function(err) {
+      ocultarLoading_();
+      mostrarErrorShare_('Error recuperando el archivo compartido: ' +
+        (err && err.message || 'desconocido'));
+    })
+    .api_getSharePayload(shareToken, 'comprobantes');
+}
+
+
+function mostrarErrorShare_(msg) {
+  // Asegurar que la pantalla de loading se oculte y volver a paso 1
+  ocultarLoading_();
+  document.getElementById('paso1').style.display = '';
+  document.getElementById('pdfFile').disabled = false;
+  showMsg('msgShare', 'err', msg);
+}
+
+function salirModoShare_() {
+  SHARE_CTX.hasShareToken = false;
+  document.getElementById('bannerShare').style.display = 'none';
+  document.getElementById('pdfFile').disabled = false;
+  hideMsg('msgShare');
+  volverPaso1();
+}
+
+// ── Volver a paso 1 ────────────────────────────────────────────────────────────
+function volverPaso1() {
+  document.getElementById('paso2').style.display    = 'none';
+  document.getElementById('paso3').style.display    = 'none';
+  document.getElementById('pasoLoading').style.display = 'none';
+  document.getElementById('paso1').style.display    = '';
+  document.getElementById('pdfFile').value          = '';
+  document.getElementById('btnParsear').disabled    = true;
+  document.getElementById('pdfFileName').style.display = 'none';
+  document.getElementById('warnDup').style.display   = 'none';
+  document.getElementById('hintGastos').style.display = 'none';
+  STATE.numeroComprobanteParseado = null;
+  hideMsg('msgParsear'); hideMsg('msgGlobal'); hideMsg('msgGuardar');
+  // Restaurar dlSub al listado completo (por si quedó filtrado del último uso)
+  if (STATE.subcategorias && STATE.subcategorias.length) {
+    poblarDatalist('dlSub', STATE.subcategorias);
+  }
+  actualizarBtn();
+  setStep(1);
+  window.scrollTo(0, 0);
+}
+
+// ── Util ───────────────────────────────────────────────────────────────────────
+function set(id, val) {
+  var el = document.getElementById(id);
+  if (el) el.value = (val !== null && val !== undefined) ? String(val) : '';
+}
+
+// Puebla el <select> de categoría preservando el placeholder y el valor actual
+function poblarSelectCategorias_(cats) {
+  var sel = document.getElementById('fCategoria');
+  if (!sel) return;
+  var prev = sel.value;
+  var html = '<option value="">— Seleccioná —</option>';
+  (cats || []).forEach(function(c) {
+    html += '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+  });
+  sel.innerHTML = html;
+  // Si el valor previo existe en la nueva lista, mantenerlo
+  if (prev && (cats || []).indexOf(prev) !== -1) sel.value = prev;
+}
+
+// Al cambiar categoría: filtrar datalist de subcategorías al subconjunto relevante
+function onCategoriaChange_() {
+  var cat  = document.getElementById('fCategoria').value;
+  var mapa = STATE.subcategoriasPorCategoria || {};
+  var subs = (cat && mapa[cat] && mapa[cat].length) ? mapa[cat] : STATE.subcategorias;
+  poblarDatalist('dlSub', subs);
+  actualizarHeroTags();
+}
+
+initQnav('<?!= webAppBaseUrl ?>');
+</script>
+</body>
+</html>

@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <?!= include('_styles'); ?>
+  <style>
+    html, body { height:100%; margin:0; padding:0; }
+    body { background:#111827; padding:0; }
+
+    #app { min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; }
+    .screen { display:flex; flex-direction:column; flex:1; max-width:560px; margin:0 auto; width:100%; }
+
+    /* HERO — centrado */
+    .hero { padding:28px 16px 22px; color:#fff; flex-shrink:0; text-align:center; }
+    .hero-eyebrow { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; opacity:.65; margin-bottom:10px; }
+    .hero-amount { font-size:40px; font-weight:800; letter-spacing:-.5px; line-height:1; margin-bottom:6px; font-variant-numeric:tabular-nums; }
+    .hero-desc { font-size:13px; opacity:.6; margin-bottom:14px; }
+    .hero-tags { display:flex; flex-wrap:wrap; gap:6px; min-height:24px; justify-content:center; }
+    .hero-tag { padding:4px 10px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.2px; }
+
+    /* drawer */
+    .drawer { background:#fff; border-radius:20px 20px 0 0; flex:1; display:flex; flex-direction:column; overflow:hidden; }
+    .drawer-handle { width:36px; height:4px; background:#e5e7eb; border-radius:999px; margin:12px auto 4px; flex-shrink:0; }
+    .drawer-scroll { flex:1; overflow-y:auto; padding:12px 16px; padding-bottom:max(40px,env(safe-area-inset-bottom,0px)); -webkit-overflow-scrolling:touch; }
+
+    .section-title { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; }
+
+    /* qnav active override */
+    .qnav-btn.active { border-color:#111827; background:#111827; color:#fff; }
+
+    /* kpi 2-col + neto */
+    .kpi-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+    .kpi2-card { background:var(--color-background-secondary); border:1px solid #e5e7eb; border-radius:12px; padding:12px 10px; }
+    .kpi2-label { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; margin-bottom:5px; }
+    .kpi2-val { font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; word-break:break-all; }
+    .kpi2-sub { font-size:11px; color:var(--muted); margin-top:3px; font-variant-numeric:tabular-nums; }
+    .kpi2-neto { background:var(--color-background-secondary); border:1px solid #e5e7eb; border-radius:12px; padding:14px; text-align:center; margin-bottom:14px; }
+    .kpi2-neto-label { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px; }
+    .kpi2-neto-val { font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; }
+    .kpi2-neto-sub { font-size:13px; color:var(--muted); margin-top:3px; font-variant-numeric:tabular-nums; }
+    .pos { color:#065f46; }
+    .neg { color:#991b1b; }
+
+    /* días mobile */
+    .dia-seccion-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    .dia-seccion-label { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+    .dia-seccion-count { font-size:12px; color:var(--color-text-tertiary); }
+    .dia-list { display:flex; flex-direction:column; gap:2px; }
+    .dia-row { display:flex; align-items:flex-start; padding:12px; border-radius:var(--radius-md); gap:10px; }
+    .dia-row:nth-child(even) { background:var(--color-background-secondary); }
+    .dia-meta { flex-shrink:0; width:44px; height:44px; display:flex; flex-direction:column; justify-content:center; }
+    .dia-meta-fecha { font-size:13px; font-weight:700; line-height:1.2; }
+    .dia-meta-dia { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.3px; }
+    .dia-chips { display:flex; gap:4px; flex-wrap:wrap; flex:1; padding-top:2px; }
+    .dia-chip { padding:3px 8px; border-radius:8px; font-size:11px; font-weight:500; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .dia-right { flex-shrink:0; text-align:right; }
+    .dia-total-ars { font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .dia-total-usd { font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+    /* total-mes mobile */
+    .dia-row.total-row { border-top:2px solid var(--line); background:var(--color-background-secondary); margin-top:4px; }
+
+    /* efectivo list */
+    .ef-list { display:flex; flex-direction:column; gap:2px; }
+    .ef-row { display:flex; align-items:center; padding:12px; border-radius:var(--radius-md); gap:10px; }
+    .ef-row:nth-child(even) { background:var(--color-background-secondary); }
+    .ef-dia { flex-shrink:0; width:44px; height:44px; display:flex; flex-direction:column; justify-content:center; }
+    .ef-dia-num { font-size:16px; font-weight:700; line-height:1; }
+    .ef-dia-mes { font-size:10px; font-weight:600; color:var(--color-text-tertiary); text-transform:uppercase; letter-spacing:.3px; margin-top:2px; }
+    .ef-desc { flex:1; min-width:0; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ef-monto { flex-shrink:0; font-size:13px; font-weight:500; font-variant-numeric:tabular-nums; }
+    .ef-total-row { display:flex; justify-content:space-between; padding:8px 0 0; border-top:2px solid var(--line); margin-top:4px; font-weight:700; font-size:13px; font-variant-numeric:tabular-nums; }
+
+    /* ===== Distribución de ingresos — chips v3 ===== */
+    .dist-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .dist-chip { display:flex; flex-direction:column; padding:12px 14px; border-radius:12px; min-width:0; }
+    .dist-chip .dist-name { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; opacity:.85; margin-bottom:6px; }
+    .dist-chip .dist-ars { font-size:16px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.1; }
+    .dist-chip .dist-usd { font-size:11px; font-weight:600; opacity:.7; margin-top:3px; font-variant-numeric:tabular-nums; }
+    .dist-juan  { background:#E8EEF7; color:#23477F; }
+    .dist-maria { background:#F0EAF5; color:#5B3A82; }
+
+    /* ===== Síntesis del día ===== */
+    .sintesis-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    .sintesis-titulo { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+    .sintesis-mov-badge { font-size:11px; font-weight:700; color:var(--muted); background:var(--color-background-secondary); padding:3px 8px; border-radius:999px; }
+    .sintesis-total { font-size:32px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.1; margin-bottom:4px; }
+    .sintesis-usd { font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; margin-bottom:14px; }
+    .sintesis-bancos { display:flex; gap:8px; flex-wrap:wrap; }
+    .sbk-chip { display:flex; flex-direction:column; padding:8px 12px; border-radius:10px; min-width:80px; }
+    .sbk-nombre { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; margin-bottom:4px; }
+    .sbk-monto { font-size:14px; font-weight:800; font-variant-numeric:tabular-nums; }
+    .hoy-vacia { font-size:13px; color:var(--muted); font-style:italic; }
+    /* lista individual de movimientos debajo del resumen */
+    .hoy-lista { list-style:none; margin:14px 0 0; padding:0; border-top:1px solid #f3f4f6; }
+    .hoy-item { display:flex; align-items:center; padding:9px 0; border-bottom:1px solid #f3f4f6; gap:8px; }
+    .hoy-item:last-child { border-bottom:0; }
+    .hoy-item-banco { flex-shrink:0; padding:2px 7px; border-radius:5px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.2px; }
+    .hoy-item-desc { flex:1; min-width:0; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .hoy-item-monto { flex-shrink:0; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
+
+    /* ===== CTA pendientes (btn-v3) ===== */
+    .cta-mount { margin-bottom:14px; }
+    .btn-v3 { width:100%; display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:12px; border:0; cursor:pointer; text-align:left; font-family:inherit; transition:filter .15s; }
+    .btn-v3:hover { filter:brightness(1.06); }
+    .btn-v3.warn { background:#92400e; color:#fff; }
+    .btn-v3.ok { background:#fff; color:var(--text); border:1px solid #a7f3d0; padding:10px 14px; }
+    .btn-v3-ico { width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,.14); display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+    .btn-v3.ok .btn-v3-ico { width:24px; height:24px; background:#ecfdf5; color:#065f46; font-size:14px; border-radius:8px; }
+    .btn-v3-body { flex:1; min-width:0; }
+    .btn-v3-title { font-size:14px; font-weight:800; line-height:1.15; }
+    .btn-v3.ok .btn-v3-title { font-size:13px; font-weight:700; }
+    .btn-v3-sub { font-size:11px; opacity:.8; margin-top:2px; }
+    .btn-v3-badge { background:rgba(255,255,255,.2); border-radius:999px; padding:3px 10px; font-size:11px; font-weight:800; font-variant-numeric:tabular-nums; }
+    .btn-v3.ok .btn-v3-badge { background:#ecfdf5; color:#065f46; }
+    .btn-v3-arrow { font-size:18px; opacity:.7; flex-shrink:0; }
+    .btn-v3.ok .btn-v3-arrow { display:none; }
+
+    /* Modo filtrado */
+    .filter-bar { display:none; align-items:center; gap:10px; padding:10px 12px; background:#fffbeb; border:1px solid #fde68a; border-radius:10px; margin-bottom:14px; font-size:12px; color:#92400e; font-weight:700; }
+    .filter-bar.active { display:flex; }
+    .filter-bar button { margin-left:auto; background:#fff; border:1px solid #fde68a; color:#92400e; padding:5px 10px; border-radius:6px; font-size:11px; font-weight:700; cursor:pointer; font-family:inherit; }
+    body.filtered .hide-on-filter { display:none !important; }
+
+    /* pendientes */
+    .pend-bloque { margin-bottom:10px; }
+    .pend-bloque-titulo { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; cursor:pointer; user-select:none; display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid var(--line); margin-bottom:6px; }
+    .pend-bloque-titulo .pend-chevron { font-size:10px; transition:transform .2s; }
+    .pend-bloque-titulo.collapsed .pend-chevron { transform:rotate(-90deg); }
+    .pend-lista { list-style:none; margin:0; padding:0; }
+    .pend-item { display:flex; justify-content:space-between; align-items:flex-start; padding:7px 0; border-bottom:1px solid #f3f4f6; gap:8px; }
+    .pend-item:last-child { border-bottom:0; }
+    .pend-icono { font-size:14px; flex-shrink:0; margin-top:1px; }
+    .pend-desc { flex:1; min-width:0; }
+    .pend-desc-main { font-size:13px; font-weight:600; }
+    .pend-desc-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+    .pend-montos { text-align:right; flex-shrink:0; }
+    .pend-monto-real { font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .pend-monto-esp { font-size:11px; color:var(--muted); margin-top:2px; font-variant-numeric:tabular-nums; }
+    .pend-vacio { font-size:13px; color:var(--muted); font-style:italic; padding:6px 0; }
+
+    /* desktop overrides */
+    body.is-desktop .hero { padding:36px 24px 26px; }
+    body.is-desktop .hero-amount { font-size:52px; }
+    body.is-desktop .drawer { border-radius:16px 16px 0 0; }
+    body.is-desktop .drawer-scroll { padding:20px 24px 32px; }
+    #hintTC { text-align:right; font-size:11px; color:var(--color-text-tertiary); margin-top:8px; }
+  </style>
+</head>
+<body>
+<script>
+var isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) || (navigator.msMaxTouchPoints > 0);
+if (!isTouch) document.body.classList.add('is-desktop');
+</script>
+<div id="app">
+  <div class="screen">
+
+    <!-- HERO -->
+    <div class="hero">
+      <div class="hero-eyebrow" id="subTitulo">Cargando…</div>
+      <div class="hero-amount" id="kpiGas">—</div>
+      <div class="hero-desc" id="heroDescDias">salidas del mes</div>
+      <div class="hero-tags" id="heroTags"></div>
+    </div>
+
+    <!-- DRAWER -->
+    <div class="drawer">
+      <div class="drawer-handle"></div>
+      <div class="drawer-scroll">
+
+        <nav class="qnav hide-on-filter">
+          <a class="qnav-btn" data-qhref="dashboard" href="#"><span class="qi">📈</span> Dashboard</a>
+          <a class="qnav-btn active" data-qhref="resumen" href="#"><span class="qi">📊</span> Panorama</a>
+          <a class="qnav-btn" data-qhref="manual&tipo=gasto" href="#"><span class="qi">💸</span> Cargar</a>
+          <a class="qnav-btn" data-qhref="tarjetas" href="#"><span class="qi">💳</span> Tarjeta</a>
+          <a class="qnav-btn" data-qhref="comprobantes" href="#"><span class="qi">🧾</span> Comprobante</a>
+        </nav>
+
+        <div id="msgCarga" class="msg wait" style="display:none">⏳ Cargando datos…</div>
+        <div id="msgError" class="msg err"></div>
+
+        <!-- Filter bar -->
+        <div id="filterBar" class="filter-bar">
+          <span>Filtrado: pendientes del mes</span>
+          <button id="exitFilter" type="button">Volver al panorama</button>
+        </div>
+
+        <div id="contenido" style="display:none">
+
+          <!-- KPIs ingresos / gastos -->
+          <div class="kpi-grid-2 hide-on-filter">
+            <div class="kpi2-card">
+              <div class="kpi2-label">Ingresos</div>
+              <div class="kpi2-val" id="kpiIng">—</div>
+              <div class="kpi2-sub" id="kpiIngUsd"></div>
+            </div>
+            <div class="kpi2-card">
+              <div class="kpi2-label">Gastos</div>
+              <div class="kpi2-val" id="kpiGas2">—</div>
+              <div class="kpi2-sub" id="kpiGasUsd"></div>
+            </div>
+          </div>
+          <div class="kpi2-neto hide-on-filter">
+            <div class="kpi2-neto-label">Balance del mes</div>
+            <div class="kpi2-neto-val" id="kpiNet">—</div>
+            <div class="kpi2-neto-sub" id="kpiNetUsd"></div>
+          </div>
+
+          <!-- CTA Revisar pendientes -->
+          <div id="ctaMount" class="cta-mount" style="display:none"></div>
+
+          <!-- pendientes del mes -->
+          <div class="card" id="cardPendientes" style="display:none">
+            <div class="section-title">Por revisar este mes</div>
+            <div class="pend-bloque" id="pendGastosBloque">
+              <div class="pend-bloque-titulo collapsed" onclick="togglePend('pendGastos',this)">
+                <span>Compromisos del mes</span><span class="pend-chevron">▾</span>
+              </div>
+              <ul class="pend-lista" id="pendGastos" style="display:none"></ul>
+            </div>
+            <div class="pend-bloque" id="pendIngresosBloque">
+              <div class="pend-bloque-titulo collapsed" onclick="togglePend('pendIngresos',this)">
+                <span>Ingresos previstos</span><span class="pend-chevron">▾</span>
+              </div>
+              <ul class="pend-lista" id="pendIngresos" style="display:none"></ul>
+            </div>
+          </div>
+
+          <!-- Síntesis del día -->
+          <div class="card hide-on-filter" id="cardHoy">
+            <div class="sintesis-header">
+              <div class="sintesis-titulo" id="sintesisFecha"></div>
+              <div class="sintesis-mov-badge" id="sintesisMov"></div>
+            </div>
+            <div class="sintesis-total" id="sintesisTotal"></div>
+            <div class="sintesis-usd" id="sintesisUsd"></div>
+            <div class="sintesis-bancos" id="sintesisBancos"></div>
+            <div class="hoy-vacia" id="sintesisVacia" style="display:none"></div>
+            <ul class="hoy-lista" id="hoyLista" style="display:none"></ul>
+          </div>
+
+          <!-- distribución de ingresos — chips v3 -->
+          <div class="card hide-on-filter">
+            <div class="section-title">Distribución de ingresos</div>
+            <div class="dist-grid">
+              <div class="dist-chip dist-juan">
+                <div class="dist-name">Juan</div>
+                <div class="dist-ars" id="distJuanArs">$ 0</div>
+                <div class="dist-usd" id="distJuanUsd">USD 0 eq</div>
+              </div>
+              <div class="dist-chip dist-maria">
+                <div class="dist-name">María</div>
+                <div class="dist-ars" id="distMariaArs">$ 0</div>
+                <div class="dist-usd" id="distMariaUsd">USD 0 eq</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- movimientos por día -->
+          <div class="card hide-on-filter">
+            <div class="dia-seccion-header">
+              <span class="dia-seccion-label">Movimientos por día</span>
+              <span class="dia-seccion-count" id="diaCount"></span>
+            </div>
+            <div id="tbodyDia" class="dia-list"></div>
+            <div id="hintTC"></div>
+          </div>
+
+          <!-- efectivo detalle -->
+          <div class="card hide-on-filter" id="cardEfectivo" style="display:none">
+            <div class="dia-seccion-header">
+              <span class="dia-seccion-label">Efectivo · Detalle</span>
+              <span class="dia-seccion-count" id="efCount"></span>
+            </div>
+            <div id="tbodyEf" class="ef-list"></div>
+          </div>
+
+          <div class="hint hide-on-filter" style="text-align:center" id="hintActualizado"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<?!= include('_scripts'); ?>
+<script>
+var BANCOS_DEF = [
+  {key:'bbvaArs',  nombre:'BBVA',    bg:'#E6F1FB', fg:'#0C447C'},
+  {key:'galArs',   nombre:'Galicia', bg:'#FAEEDA', fg:'#854F0B'},
+  {key:'ppArs',    nombre:'PP',      bg:'#EAF3DE', fg:'#3B6D11'},
+  {key:'efecArs',  nombre:'Efec.',   bg:'#F1EFE8', fg:'#5F5E5A'}
+];
+
+document.getElementById('msgCarga').style.display = 'block';
+
+function cargarResumen_(attempt) {
+  attempt = attempt || 1;
+  google.script.run
+    .withSuccessHandler(function(res) {
+      document.getElementById('msgCarga').style.display = 'none';
+      if (!res || !res.ok) { showErr(res && res.error || 'Error desconocido'); return; }
+      if (res.vacia) { showErr('ResumenMes todavía no fue generado para este mes. Usá "Actualizar ResumenMes" desde el menú del Sheet.'); return; }
+      render(res);
+      google.script.run
+        .withSuccessHandler(function(p) { if (p && p.ok) renderPendientes(p); })
+        .withFailureHandler(function() {})
+        .getPendientesData();
+    })
+    .withFailureHandler(function(err) {
+      var isAuth = err.message && err.message.indexOf('no autorizado') !== -1;
+      if (isAuth && attempt < 3) { setTimeout(function() { cargarResumen_(attempt + 1); }, 1500); return; }
+      document.getElementById('msgCarga').style.display = 'none';
+      showErr('Error de red: ' + err.message);
+    })
+    .getResumenData();
+}
+cargarResumen_();
+
+function showErr(msg) {
+  var el = document.getElementById('msgError');
+  el.className = 'msg err';
+  el.innerHTML = '❌ ' + esc(msg);
+}
+
+function render(d) {
+  document.getElementById('subTitulo').textContent = d.titulo || d.mes || '';
+
+  setKpi('kpiGas',  d.cards.gasArs, 'kpiGasUsd', d.cards.gasUsd, false);
+  setKpi('kpiIng',  d.cards.ingArs, 'kpiIngUsd', d.cards.ingUsd, false);
+  setKpi('kpiNet',  d.cards.netArs, 'kpiNetUsd', d.cards.netUsd, true);
+
+  var el2 = document.getElementById('kpiGas2');
+  if (el2) el2.textContent = d.cards.gasArs || '—';
+
+  var dias = (d.filasdia || []).length;
+  document.getElementById('heroDescDias').textContent =
+    'salidas del mes' + (dias ? ' · ' + dias + (dias === 1 ? ' día' : ' días') : '');
+
+  renderHeroTags(d.cards);
+
+  if (d.tcRef) document.getElementById('hintTC').textContent = 'TC ref: $' + d.tcRef + ' (MEP Bolsa)';
+
+  renderHoy(d.pagosHoy || [], d.tcRef);
+
+  renderDistribucion(d.personas);
+
+  renderDias(d.filasdia || [], d.totalMes);
+
+  if (d.efectivoFilas && d.efectivoFilas.length) {
+    renderEfectivo(d.efectivoFilas, d.efectivoTotal, d.mes);
+    document.getElementById('cardEfectivo').style.display = '';
+  }
+
+  if (d.actualizadoEn) document.getElementById('hintActualizado').textContent = 'Datos al ' + d.actualizadoEn;
+
+  document.getElementById('contenido').style.display = '';
+}
+
+function renderDistribucion(personas) {
+  personas = personas || [];
+  var juan  = personas.filter(function(p) { return p.persona === 'Juan';  })[0];
+  var maria = personas.filter(function(p) { return p.persona === 'María'; })[0];
+  document.getElementById('distJuanArs').textContent  = (juan  && juan.arsEq)  ? juan.arsEq        : '$ 0';
+  document.getElementById('distJuanUsd').textContent  = (juan  && juan.usdEq)  ? juan.usdEq + ' eq' : 'USD 0 eq';
+  document.getElementById('distMariaArs').textContent = (maria && maria.arsEq) ? maria.arsEq       : '$ 0';
+  document.getElementById('distMariaUsd').textContent = (maria && maria.usdEq) ? maria.usdEq + ' eq': 'USD 0 eq';
+}
+
+function renderHeroTags(cards) {
+  var cont = document.getElementById('heroTags');
+  cont.innerHTML = '';
+  var ingStr = String((cards && cards.ingArs) ? cards.ingArs : '$0');
+  var ispan  = document.createElement('span');
+  ispan.className        = 'hero-tag';
+  ispan.style.background = '#EAF3DE';
+  ispan.style.color      = '#3B6D11';
+  ispan.textContent      = 'Ingresos ' + ingStr;
+  cont.appendChild(ispan);
+  var netStr = String((cards && cards.netArs) ? cards.netArs : '0');
+  var isNeg  = netStr.indexOf('-') >= 0;
+  var bspan  = document.createElement('span');
+  bspan.className        = 'hero-tag';
+  bspan.style.background = isNeg ? '#FCE4E4' : '#EAF3DE';
+  bspan.style.color      = isNeg ? '#9B1C1C' : '#3B6D11';
+  bspan.textContent      = 'Balance ' + netStr;
+  cont.appendChild(bspan);
+}
+
+
+function renderDiaRow(row, extraClass) {
+  var bancosPresentes = BANCOS_DEF.filter(function(b) { return !!row[b.key]; });
+  var chips = '';
+  if (bancosPresentes.length === 1) {
+    var b = bancosPresentes[0];
+    chips = '<span class="dia-chip" style="background:' + b.bg + ';color:' + b.fg + '">' + esc(b.nombre) + '</span>';
+  } else {
+    bancosPresentes.forEach(function(b) {
+      chips += '<span class="dia-chip" style="background:' + b.bg + ';color:' + b.fg + '">' +
+        esc(b.nombre) + ' ' + esc(row[b.key]) + '</span>';
+    });
+  }
+  var div = document.createElement('div');
+  div.className = 'dia-row' + (extraClass ? ' ' + extraClass : '');
+  div.innerHTML =
+    '<div class="dia-meta">' +
+      '<div class="dia-meta-fecha">' + esc(row.fecha || 'TOTAL') + '</div>' +
+      '<div class="dia-meta-dia">' + esc(row.dia || '') + '</div>' +
+    '</div>' +
+    '<div class="dia-chips">' + chips + '</div>' +
+    '<div class="dia-right">' +
+      '<div class="dia-total-ars">' + esc(row.totalArs) + '</div>' +
+      (row.usdEq ? '<div class="dia-total-usd">' + esc(row.usdEq) + '</div>' : '') +
+    '</div>';
+  return div;
+}
+
+function renderDias(filas, totalMes) {
+  var cont = document.getElementById('tbodyDia');
+  var countEl = document.getElementById('diaCount');
+  if (!filas.length) {
+    cont.innerHTML = '<div style="font-size:13px;color:var(--muted);font-style:italic;padding:8px 0">Sin movimientos este mes.</div>';
+    return;
+  }
+  if (countEl) countEl.textContent = filas.length + (filas.length === 1 ? ' día con movimiento' : ' días con movimiento');
+  filas.forEach(function(row) { cont.appendChild(renderDiaRow(row, '')); });
+  if (totalMes) cont.appendChild(renderDiaRow(totalMes, 'total-row'));
+}
+
+function renderEfectivo(filas, total, mes) {
+  var cont = document.getElementById('tbodyEf');
+  var countEl = document.getElementById('efCount');
+  if (countEl) countEl.textContent = filas.length + (filas.length === 1 ? ' movimiento' : ' movimientos');
+  var MESES_ABR = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+  var mesAbr = '';
+  if (mes && mes.length >= 6) {
+    var mIdx = parseInt(mes.slice(4, 6), 10) - 1;
+    if (mIdx >= 0 && mIdx < 12) mesAbr = MESES_ABR[mIdx];
+  }
+  filas.forEach(function(f) {
+    var row = document.createElement('div');
+    row.className = 'ef-row';
+    row.innerHTML =
+      '<div class="ef-dia">' +
+        '<div class="ef-dia-num">' + esc(f.dia) + '</div>' +
+        (mesAbr ? '<div class="ef-dia-mes">' + mesAbr + '</div>' : '') +
+      '</div>' +
+      '<div class="ef-desc">'  + esc(f.desc)  + '</div>' +
+      '<div class="ef-monto">' + esc(f.monto) + '</div>';
+    cont.appendChild(row);
+  });
+  if (total) {
+    var totRow = document.createElement('div');
+    totRow.className = 'ef-total-row';
+    totRow.innerHTML = '<span>TOTAL</span><span>' + esc(total) + '</span>';
+    cont.appendChild(totRow);
+  }
+}
+
+function bankStyleFor(banco) {
+  var b = String(banco || '').toLowerCase();
+  if (b.indexOf('bbva') >= 0)                              return {bg:'#E6F1FB', fg:'#0C447C'};
+  if (b.indexOf('galicia') >= 0)                           return {bg:'#FAEEDA', fg:'#854F0B'};
+  if (b.indexOf('personal') >= 0 || b.indexOf('pp') >= 0) return {bg:'#EAF3DE', fg:'#3B6D11'};
+  if (b.indexOf('efec') >= 0)                              return {bg:'#F1EFE8', fg:'#5F5E5A'};
+  return {bg:'#F3F4F6', fg:'#4B5563'};
+}
+
+function renderHoy(pagos, tcRef) {
+  var DIAS_ES = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+  var hoy = new Date();
+  document.getElementById('sintesisFecha').textContent =
+    'HOY · ' + DIAS_ES[hoy.getDay()] + ' ' + hoy.getDate();
+
+  var movEl    = document.getElementById('sintesisMov');
+  var totEl    = document.getElementById('sintesisTotal');
+  var usdEl    = document.getElementById('sintesisUsd');
+  var bancosEl = document.getElementById('sintesisBancos');
+  var vaciaEl  = document.getElementById('sintesisVacia');
+
+  bancosEl.innerHTML = '';
+
+  if (!pagos.length) {
+    movEl.textContent   = '';
+    totEl.textContent   = '';
+    usdEl.textContent   = '';
+    vaciaEl.textContent = 'Sin movimientos para hoy.';
+    vaciaEl.style.display = '';
+    return;
+  }
+  vaciaEl.style.display = 'none';
+
+  var totalArs = 0;
+  var byBanco  = {};
+  var ORDEN    = ['BBVA', 'Galicia', 'Personal Pay', 'Efectivo'];
+
+  pagos.forEach(function(p) {
+    var monto = Number(p.monto) || 0;
+    var banco = p.banco || 'Efectivo';
+    var arsEq = (p.moneda === 'USD' && tcRef) ? monto * tcRef : monto;
+    totalArs += arsEq;
+    byBanco[banco] = (byBanco[banco] || 0) + arsEq;
+  });
+
+  var usdEq = tcRef && totalArs ? totalArs / tcRef : 0;
+
+  movEl.textContent = pagos.length + ' MOV.';
+  totEl.textContent = '$ ' + fmtNum(totalArs);
+  usdEl.textContent = usdEq > 0 ? 'USD ' + fmtNum(usdEq) + ' eq' : '';
+
+  // chips en orden canónico primero, luego el resto
+  var bancosOrdenados = ORDEN.filter(function(n) { return byBanco[n] !== undefined; });
+  Object.keys(byBanco).forEach(function(n) {
+    if (ORDEN.indexOf(n) < 0) bancosOrdenados.push(n);
+  });
+  bancosOrdenados.forEach(function(banco) {
+    var st   = bankStyleFor(banco);
+    var chip = document.createElement('div');
+    chip.className = 'sbk-chip';
+    chip.style.background = st.bg;
+    chip.style.color      = st.fg;
+    chip.innerHTML =
+      '<div class="sbk-nombre">' + esc(banco) + '</div>' +
+      '<div class="sbk-monto">$ ' + esc(fmtNum(byBanco[banco])) + '</div>';
+    bancosEl.appendChild(chip);
+  });
+
+  // Lista individual de movimientos
+  var lista = document.getElementById('hoyLista');
+  lista.innerHTML = '';
+  lista.style.display = '';
+  pagos.forEach(function(p) {
+    var li = document.createElement('li');
+    li.className = 'hoy-item';
+    var esUsd = p.moneda === 'USD';
+    var montoFmt = esUsd ? 'USD ' + fmtNum(p.monto) : '$ ' + fmtNum(p.monto);
+    var st = bankStyleFor(p.banco);
+    var bankSpan = p.banco
+      ? '<span class="hoy-item-banco" style="background:' + st.bg + ';color:' + st.fg + '">' + esc(p.banco) + '</span>'
+      : '';
+    li.innerHTML =
+      bankSpan +
+      '<div class="hoy-item-desc">' + esc(p.desc) + '</div>' +
+      '<div class="hoy-item-monto">' + esc(montoFmt) + '</div>';
+    lista.appendChild(li);
+  });
+}
+
+function renderPendientes(p) {
+  var hayGastos   = p.gastos   && p.gastos.length;
+  var hayIngresos = p.ingresos && p.ingresos.length;
+  if (!hayGastos && !hayIngresos) { renderCta(0, 0); return; }
+  renderPendLista('pendGastos',   p.gastos   || []);
+  renderPendLista('pendIngresos', p.ingresos || []);
+  if (!hayGastos)   document.getElementById('pendGastosBloque').style.display   = 'none';
+  if (!hayIngresos) document.getElementById('pendIngresosBloque').style.display = 'none';
+  document.getElementById('cardPendientes').style.display = '';
+  // contar faltas
+  var totalItems = (p.gastos || []).length + (p.ingresos || []).length;
+  var faltan = (p.gastos || []).filter(function(i){ return i.estado === 'falta'; }).length
+             + (p.ingresos || []).filter(function(i){ return i.estado === 'falta'; }).length;
+  renderCta(faltan, totalItems);
+}
+
+function renderCta(faltan, total) {
+  var mount = document.getElementById('ctaMount');
+  if (!total) { mount.style.display = 'none'; return; }
+  mount.style.display = '';
+  if (faltan === 0) {
+    mount.innerHTML =
+      '<button class="btn-v3 ok" type="button" onclick="enterFilterMode()">' +
+        '<div class="btn-v3-ico">✓</div>' +
+        '<div class="btn-v3-body"><div class="btn-v3-title">Mes al día</div></div>' +
+        '<div class="btn-v3-badge">' + total + '/' + total + '</div>' +
+      '</button>';
+  } else {
+    mount.innerHTML =
+      '<button class="btn-v3 warn" type="button" onclick="enterFilterMode()">' +
+        '<div class="btn-v3-ico">⚠️</div>' +
+        '<div class="btn-v3-body">' +
+          '<div class="btn-v3-title">Revisar pendientes del mes</div>' +
+          '<div class="btn-v3-sub">Faltan ítems por cargar</div>' +
+        '</div>' +
+        '<div class="btn-v3-badge">' + faltan + '</div>' +
+        '<div class="btn-v3-arrow">›</div>' +
+      '</button>';
+  }
+}
+
+var _filterBloqueOcultados = [];
+
+function enterFilterMode() {
+  document.body.classList.add('filtered');
+  document.getElementById('filterBar').classList.add('active');
+  _filterBloqueOcultados = [];
+
+  // Ocultar items OK, dejar solo los falta
+  var items = document.querySelectorAll('.pend-item');
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].getAttribute('data-estado') !== 'falta') items[i].style.display = 'none';
+  }
+
+  // Por cada bloque: expandir si tiene falta, ocultar si no (solo los que ya estaban visibles)
+  ['pendGastos', 'pendIngresos'].forEach(function(id) {
+    var ul     = document.getElementById(id);
+    var bloque = document.getElementById(id + 'Bloque');
+    if (!ul || !bloque || bloque.style.display === 'none') return;
+    var hasFalta = ul.querySelector('[data-estado="falta"]');
+    if (hasFalta) {
+      ul.style.display = '';
+      bloque.querySelector('.pend-bloque-titulo').classList.remove('collapsed');
+    } else {
+      bloque.style.display = 'none';
+      _filterBloqueOcultados.push(id + 'Bloque');
+    }
+  });
+
+  var sc = document.querySelector('.drawer-scroll');
+  if (sc) sc.scrollTop = 0;
+}
+
+function exitFilterMode() {
+  document.body.classList.remove('filtered');
+  document.getElementById('filterBar').classList.remove('active');
+
+  // Restaurar visibilidad de todos los items
+  var items = document.querySelectorAll('.pend-item');
+  for (var i = 0; i < items.length; i++) items[i].style.display = '';
+
+  // Restaurar solo los bloques que el filtro ocultó (no los que renderPendientes ya había ocultado)
+  _filterBloqueOcultados.forEach(function(bloqueId) {
+    document.getElementById(bloqueId).style.display = '';
+  });
+  _filterBloqueOcultados = [];
+
+  // Re-colapsar listas
+  ['pendGastos', 'pendIngresos'].forEach(function(id) {
+    var ul     = document.getElementById(id);
+    var bloque = document.getElementById(id + 'Bloque');
+    if (!ul || !bloque || bloque.style.display === 'none') return;
+    ul.style.display = 'none';
+    bloque.querySelector('.pend-bloque-titulo').classList.add('collapsed');
+  });
+}
+document.getElementById('exitFilter').addEventListener('click', exitFilterMode);
+
+function renderPendLista(idLista, items) {
+  var ul = document.getElementById(idLista);
+  if (!items.length) {
+    var li = document.createElement('li');
+    li.className = 'pend-vacio';
+    li.textContent = 'Sin ítems configurados.';
+    ul.appendChild(li);
+    return;
+  }
+  items.forEach(function(item) {
+    var li = document.createElement('li');
+    li.className = 'pend-item';
+    li.setAttribute('data-estado', item.estado);
+    var icono = item.estado === 'cargado' ? '✅' : '⚠️';
+    var subLineas = [];
+    if (item.movimientos && item.movimientos.length) {
+      item.movimientos.forEach(function(m) {
+        subLineas.push(m.fecha + ' · ' + esc('$ ' + fmtNum(m.monto)) + (m.persona ? ' · ' + esc(m.persona) : ''));
+      });
+    }
+    var montoRealHtml = item.montoReal != null
+      ? '<div class="pend-monto-real">$ ' + fmtNum(item.montoReal) + '</div>'
+      : (item.estado === 'falta' ? '<div class="pend-monto-real" style="color:var(--muted)">—</div>' : '');
+    var montoEspHtml = item.montoEsperado != null
+      ? '<div class="pend-monto-esp">esp. $ ' + fmtNum(item.montoEsperado) + '</div>'
+      : '';
+    li.innerHTML =
+      '<div class="pend-icono">' + icono + '</div>' +
+      '<div class="pend-desc">' +
+        '<div class="pend-desc-main">' + esc(item.categoria) + ' / ' + esc(item.subcategoria) + '</div>' +
+        (subLineas.length ? '<div class="pend-desc-sub">' + subLineas.join('<br>') + '</div>' : '') +
+      '</div>' +
+      '<div class="pend-montos">' + montoRealHtml + montoEspHtml + '</div>';
+    ul.appendChild(li);
+  });
+}
+
+function togglePend(idLista, titulo) {
+  var ul = document.getElementById(idLista);
+  var oculto = ul.style.display === 'none';
+  ul.style.display = oculto ? '' : 'none';
+  if (oculto) { titulo.classList.remove('collapsed'); } else { titulo.classList.add('collapsed'); }
+}
+
+function setKpi(idVal, valArs, idVal2, valUsd, isNet) {
+  var el = document.getElementById(idVal);
+  if (!el) return;
+  el.textContent = valArs || '—';
+  if (isNet && valArs) {
+    var isNeg = valArs.charAt(0) === '-';
+    el.classList.remove('pos', 'neg');
+    el.classList.add(isNeg ? 'neg' : 'pos');
+  }
+  if (!idVal2) return;
+  var el2 = document.getElementById(idVal2);
+  if (el2 && valUsd) {
+    el2.textContent = valUsd + ' USD eq';
+    if (isNet) {
+      var isNeg2 = valUsd.charAt(0) === '-';
+      el2.classList.remove('pos', 'neg');
+      el2.classList.add(isNeg2 ? 'neg' : 'pos');
+    }
+  }
+}
+
+function fmtNum(n) {
+  return Number(n).toLocaleString('es-AR', { minimumFractionDigits:0, maximumFractionDigits:0 });
+}
+
+initQnav('<?!= webAppBaseUrl ?>');
+</script>
+</body>
+</html>

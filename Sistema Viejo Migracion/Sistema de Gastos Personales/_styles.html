@@ -1,0 +1,256 @@
+<style>
+  :root {
+    /* ── Colores base ───────────────────────────────────────────────────────── */
+    --bg:#fff; --card:#f9fafb; --text:#111827; --muted:#6b7280;
+    --line:#e5e7eb; --dark:#111827; --accent:#065f46;
+    /* ── Mensajes ───────────────────────────────────────────────────────────── */
+    --ok-bg:#ecfdf5;   --ok-line:#a7f3d0;   --ok-text:#065f46;
+    --err-bg:#fef2f2;  --err-line:#fecaca;  --err-text:#991b1b;
+    --warn-bg:#fffbeb; --warn-line:#fde68a; --warn-text:#92400e;
+    --wait-bg:#eff6ff; --wait-line:#bfdbfe; --wait-text:#1e40af;
+    /* ── Tipografía ─────────────────────────────────────────────────────────── */
+    --font-base: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Arial, sans-serif;
+    /* ── Radio de bordes ────────────────────────────────────────────────────── */
+    --radius-sm:8px; --radius-md:12px; --radius-lg:20px;
+  }
+
+  /* ── Reset base ─────────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing:border-box; }
+  html { overflow-x:hidden; max-width:100%; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--text); font-family:var(--font-base); font-size:14px; -webkit-font-smoothing:antialiased; }
+  h1 { margin:0 0 4px; font-size:20px; }
+  .sub { font-size:12px; color:var(--muted); margin-bottom:16px; }
+
+  /* ── Card (layout clásico) ──────────────────────────────────────────────── */
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px; margin-bottom:14px; }
+
+  /* ── Tipografía de cards ────────────────────────────────────────────────── */
+  .card-title { font-size:15px; font-weight:800; color:var(--text); }
+  .card-sub   { font-size:13px; color:var(--muted); }
+
+  /* ── Controles de formulario (layout clásico) ───────────────────────────── */
+  label { display:block; font-size:11px; font-weight:700; color:#374151; margin-bottom:5px; text-transform:uppercase; letter-spacing:.4px; }
+  input, select, textarea { border:1px solid var(--line); border-radius:var(--radius-sm); padding:9px 10px; font-size:14px; background:#fff; color:var(--text); width:100%; font-family:var(--font-base); }
+  textarea { min-height:70px; resize:vertical; }
+  .req { color:#dc2626; }
+  .mb { margin-bottom:12px; }
+  .hint { font-size:12px; color:var(--muted); margin-top:4px; }
+  .hint.match { color:var(--accent); font-weight:600; }
+
+  /* ── Botones (layout clásico) ───────────────────────────────────────────── */
+  button.btn { border:0; border-radius:var(--radius-sm); padding:10px 18px; font-size:14px; font-weight:700; cursor:pointer; font-family:var(--font-base); }
+  button.btn-dark    { background:var(--dark); color:#fff; }
+  button.btn-green   { background:var(--accent); color:#fff; }
+  button.btn-outline { background:#fff; color:var(--dark); border:1px solid var(--line); }
+  button.btn[disabled] { opacity:.55; cursor:default; }
+
+  /* ── Mensajes ───────────────────────────────────────────────────────────── */
+  .msg { display:none; border-radius:10px; padding:12px 14px; font-size:13px; line-height:1.5; margin-bottom:14px; }
+  .msg.ok   { display:block; background:var(--ok-bg);   border:1px solid var(--ok-line);   color:var(--ok-text); }
+  .msg.err  { display:block; background:var(--err-bg);  border:1px solid var(--err-line);  color:var(--err-text); word-break:break-all; }
+  .msg.warn { display:block; background:var(--warn-bg); border:1px solid var(--warn-line); color:var(--warn-text); }
+  .msg.wait { display:block; background:var(--wait-bg); border:1px solid var(--wait-line); color:var(--wait-text); }
+
+  /* ── Indicador de pasos — .sn/.sl (Comprobantes, Manual) ───────────────── */
+  .step { display:flex; gap:6px; align-items:center; margin-bottom:16px; font-size:12px; }
+  .sn { width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:11px; }
+  .sn.done   { background:var(--accent); color:#fff; }
+  .sn.active { background:var(--dark); color:#fff; }
+  .sn.pend   { background:#e5e7eb; color:#6b7280; }
+  .sl { color:var(--muted); }
+  .sl.active { color:var(--text); font-weight:700; }
+  .sep { color:var(--line); }
+
+  /* ── Page header — patrón compartido (Resumen, Tarjetas) ───────────────── */
+  .page-head { margin-bottom:14px; }
+  .page-kicker { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#f3f4f6; color:#374151; font-size:12px; font-weight:700; margin-bottom:10px; }
+  .page-sub { color:var(--muted); margin-bottom:0; }
+  .page-tip { margin:14px 0 0; padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius-md); background:#fafafa; color:#374151; font-size:13px; line-height:1.45; }
+  .page-tip strong { color:var(--text); }
+
+  /* ── Quick nav — barra de accesos rápidos compartida ───────────────────── */
+  .qnav {
+    display:flex; gap:6px; flex-wrap:wrap;
+    margin-bottom:16px; padding-bottom:14px;
+    border-bottom:1px solid #f3f4f6;
+  }
+  .qnav-btn {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:5px 12px; border-radius:var(--radius-sm);
+    border:1px solid var(--line); background:#fff;
+    font-size:12px; font-weight:600; color:#374151;
+    text-decoration:none; cursor:pointer;
+    transition:border-color .15s, box-shadow .15s;
+    white-space:nowrap;
+  }
+  .qnav-btn:hover { border-color:var(--dark); box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .qnav-btn .qi { font-size:14px; line-height:1; }
+  .qnav-btn.active { border-color:var(--dark); background:var(--dark); color:#fff; box-shadow:0 6px 18px rgba(17,24,39,.12); }
+  .qnav-btn.active .qi { opacity:1; }
+
+  /* ══ Mobile-first: hero + drawer + CTA bar ══════════════════════════════
+     Usados por Comprobantes.html y Manual.html.
+     Los HTMLs que usen este patrón deben sobreescribir en su <style> local:
+       body { background:#111827; margin:0; padding:0; }              */
+
+  /* ── App container y detección desktop ─────────────────────────────────── */
+  #app {
+    width:100%; max-width:100%;
+    min-height:100dvh;
+    min-height:100vh;
+    background:#111827;
+  }
+  body.is-desktop { background:#0d1117; }
+  body.is-desktop #app {
+    max-width:480px; margin:0 auto;
+    box-shadow:0 0 0 1px rgba(255,255,255,.05), 0 40px 100px rgba(0,0,0,.6);
+  }
+
+  /* ── Pantalla completa ──────────────────────────────────────────────────── */
+  .screen {
+    min-height:100dvh;
+    min-height:100vh;
+    display:flex; flex-direction:column;
+  }
+
+  /* ── Hero oscuro ────────────────────────────────────────────────────────── */
+  .hero {
+    flex:0 0 auto;
+    padding:max(env(safe-area-inset-top, 16px), 20px) 24px 32px;
+    color:#fff;
+    min-height:230px;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-end;
+    text-align:center;
+  }
+  .hero-icon {
+    width:80px; height:80px;
+    background:rgba(255,255,255,.1); border-radius:20px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:38px; margin-bottom:14px; flex-shrink:0;
+  }
+  .hero-eyebrow {
+    font-size:11px; font-weight:700;
+    color:#4b5563; letter-spacing:.5px;
+    text-transform:uppercase; margin-bottom:10px;
+  }
+  .hero-amount {
+    font-size:40px; font-weight:900;
+    letter-spacing:-1px; line-height:1; margin-bottom:6px;
+  }
+  .hero-desc { font-size:16px; color:#9ca3af; margin-bottom:16px; }
+  .hero-tags { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+  .hero-tag {
+    display:inline-flex; align-items:center;
+    border-radius:var(--radius-sm); padding:5px 12px;
+    font-size:13px; font-weight:600;
+  }
+
+  /* ── Drawer blanco ──────────────────────────────────────────────────────── */
+  .drawer {
+    background:#fff; border-radius:24px 24px 0 0;
+    flex:1; display:flex; flex-direction:column; overflow:hidden;
+  }
+  .drawer-handle {
+    width:36px; height:4px;
+    background:var(--line); border-radius:2px;
+    margin:12px auto 0; flex-shrink:0;
+  }
+  .drawer-scroll {
+    flex:1; overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    padding:16px 24px 0;
+  }
+  .drawer-scroll::-webkit-scrollbar { display:none; }
+
+  /* ── Drop zone ──────────────────────────────────────────────────────────── */
+  .drop-zone {
+    border:2px dashed var(--line);
+    border-radius:var(--radius-lg);
+    padding:48px 24px; text-align:center; cursor:pointer;
+    transition:border-color .15s, background .15s;
+    margin-bottom:16px;
+  }
+  .drop-zone:active { border-color:var(--dark); background:#f9fafb; }
+
+  /* ── CTA bar fija al fondo ──────────────────────────────────────────────── */
+  .cta-bar {
+    flex-shrink:0; background:#fff;
+    padding:12px 24px;
+    padding-bottom:max(env(safe-area-inset-bottom, 0px), 12px);
+    border-top:1px solid rgba(0,0,0,.06);
+  }
+  .cta-btn {
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    width:100%; height:52px;
+    border:none; border-radius:14px;
+    font-size:17px; font-weight:700;
+    cursor:pointer; font-family:var(--font-base);
+    transition:transform .12s, opacity .12s;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .cta-btn + .cta-btn { margin-top:8px; }
+  .cta-btn:active { transform:scale(.97); }
+  .cta-btn:disabled { opacity:.45; cursor:default; transform:none; }
+  .cta-primary   { background:var(--dark); color:#fff; }
+  .cta-secondary { background:#f3f4f6; color:#374151; font-size:15px; }
+  .cta-green     { background:var(--accent); color:#fff; }
+
+  /* ── Secciones del formulario (drawer) ─────────────────────────────────── */
+  .form-section-label {
+    font-size:11px; font-weight:700;
+    color:#9ca3af; text-transform:uppercase;
+    letter-spacing:.5px; margin:20px 0 4px;
+  }
+  .form-section-label:first-child { margin-top:16px; }
+
+  /* ── Field row ──────────────────────────────────────────────────────────── */
+  .field-row {
+    display:flex; align-items:center;
+    min-height:56px;
+    border-bottom:1px solid #f3f4f6;
+    gap:12px;
+  }
+  .field-row:last-of-type { border-bottom:none; }
+  .field-label {
+    font-size:15px; color:#9ca3af;
+    width:110px; flex-shrink:0;
+  }
+  .field-label.req::after { content:' *'; color:#dc2626; }
+  .field-value {
+    flex:1; display:flex;
+    align-items:center; justify-content:flex-end;
+  }
+  /* CRÍTICO: 16px previene zoom automático en iOS */
+  .field-input, .field-select {
+    font-size:16px !important;
+    font-weight:600; color:#111827;
+    border:none; outline:none;
+    background:transparent;
+    text-align:right; width:100%;
+    font-family:var(--font-base);
+    -webkit-appearance:none; appearance:none;
+  }
+  .field-input::placeholder { color:#d1d5db; font-weight:400; }
+  .field-textarea {
+    font-size:16px !important;
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:var(--radius-md);
+    padding:12px; font-family:var(--font-base);
+    color:#111827; resize:none; height:80px;
+    outline:none; margin-bottom:8px;
+  }
+
+  /* ── Toggle wrap (wrapper del botón de pagado) ──────────────────────────── */
+  .toggle-wrap {
+    display:flex; align-items:center;
+    justify-content:flex-end; cursor:pointer;
+  }
+
+  /* ── Hint pre-clasificado ───────────────────────────────────────────────── */
+  .hint-match {
+    font-size:12px; color:var(--accent);
+    font-weight:600; margin-top:4px;
+  }
+</style>

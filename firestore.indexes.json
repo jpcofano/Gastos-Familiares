@@ -1,0 +1,45 @@
+{
+  "indexes": [
+    { "collectionGroup": "movements", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "mes",    "order": "ASCENDING" },
+      { "fieldPath": "tipo",   "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "movements", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "persona", "order": "ASCENDING" },
+      { "fieldPath": "mes",     "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "movements", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "persona", "order": "ASCENDING" },
+      { "fieldPath": "mes",     "order": "ASCENDING" },
+      { "fieldPath": "tipo",    "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "movements", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "cardStatementId", "order": "ASCENDING" },
+      { "fieldPath": "fecha",           "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "movements", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "mes",              "order": "ASCENDING" },
+      { "fieldPath": "incluirResumenMes","order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "movements", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "mes",         "order": "ASCENDING" },
+      { "fieldPath": "excluirDash", "order": "ASCENDING" },
+      { "fieldPath": "tipo",        "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "movements", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "mes",          "order": "ASCENDING" },
+      { "fieldPath": "tipo",         "order": "ASCENDING" },
+      { "fieldPath": "categoria",    "order": "ASCENDING" },
+      { "fieldPath": "subcategoria", "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "dictionary", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "activo",   "order": "ASCENDING" },
+      { "fieldPath": "usoCount", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "expectedItems", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "activo", "order": "ASCENDING" },
+      { "fieldPath": "tipo",   "order": "ASCENDING" }
+    ]}
+  ],
+  "fieldOverrides": []
+}

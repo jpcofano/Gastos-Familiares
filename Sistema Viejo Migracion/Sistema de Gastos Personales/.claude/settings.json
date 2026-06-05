@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(file *.png)",
+      "Bash(python3 -c ':*)",
+      "Bash(python -c ':*)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

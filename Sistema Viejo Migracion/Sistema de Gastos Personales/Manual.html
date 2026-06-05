@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <?!= include('_styles'); ?>
+  <style>
+    body { background:#111827; margin:0; padding:0; }
+
+    /* ── Tipo toggle en el hero ──────────────────────────────────────────────── */
+    .hero-tipo-toggle {
+      display:flex;
+      border:1.5px solid rgba(255,255,255,.2);
+      border-radius:12px; overflow:hidden;
+      margin-bottom:20px;
+      width:220px;
+    }
+    .tipo-btn {
+      flex:1; border:0; padding:10px 18px;
+      font-size:14px; font-weight:700;
+      cursor:pointer; font-family:var(--font-base);
+      background:transparent; color:rgba(255,255,255,.45);
+      transition:background .15s, color .15s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .tipo-btn.active-gasto   { background:rgba(255,255,255,.92); color:#111827; }
+    .tipo-btn.active-ingreso { background:var(--accent); color:#fff; }
+
+    /* ── Pagado pill ─────────────────────────────────────────────────────────── */
+    #fPagadoToggle {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 14px; border-radius:999px;
+      font-size:13px; font-weight:700;
+      border:none; cursor:pointer;
+      font-family:var(--font-base);
+      transition:background .15s, color .15s;
+      background:#ecfdf5; color:#065f46;
+      -webkit-tap-highlight-color:transparent;
+    }
+    #fPagadoToggle.no-pagado { background:#f3f4f6; color:#6b7280; }
+
+    /* ── Step indicator oculto (requerido por setStep()) ─────────────────────── */
+    #stepIndicator { display:none; }
+  </style>
+</head>
+<body>
+<script>
+(function(){
+  var isTouch = ('ontouchstart' in window) ||
+                (navigator.maxTouchPoints > 0) ||
+                (navigator.msMaxTouchPoints > 0);
+  if (!isTouch) document.body.classList.add('is-desktop');
+})();
+</script>
+
+<div id="stepIndicator">
+  <div class="sn" id="sn1"></div><span id="sl1"></span>
+  <div class="sn" id="sn2"></div><span id="sl2"></span>
+</div>
+
+<div id="app">
+
+  <!-- ══ PASO 1 — Formulario ══════════════════════════════════════════════════ -->
+  <div class="screen" id="paso1">
+    <div class="hero">
+      <div class="hero-tipo-toggle">
+        <button type="button" class="tipo-btn" id="btnGasto"   onclick="setTipo('Gasto')">💸 Salida</button>
+        <button type="button" class="tipo-btn" id="btnIngreso" onclick="setTipo('Ingreso')">💵 Ingreso</button>
+      </div>
+      <div class="hero-amount" id="heroMonto">$ 0,00</div>
+      <div class="hero-desc"   id="heroBanco">— seleccioná banco —</div>
+    </div>
+
+    <div class="drawer">
+      <div class="drawer-handle"></div>
+      <div class="drawer-scroll">
+
+        <div id="msgGlobal" class="msg" style="display:none; margin-bottom:8px;"></div>
+
+        <nav class="qnav">
+          <a class="qnav-btn" data-qhref="dashboard"    href="<?!= webAppBaseUrl ?>?view=dashboard"><span class="qi">📈</span> Vista general</a>
+          <a class="qnav-btn" data-qhref="resumen"      href="<?!= webAppBaseUrl ?>?view=resumen"><span class="qi">📊</span> Panorama</a>
+          <a class="qnav-btn active" data-qhref="manual" href="<?!= webAppBaseUrl ?>?view=manual"><span class="qi">💸</span> Movimientos</a>
+          <a class="qnav-btn" data-qhref="tarjetas"     href="<?!= webAppBaseUrl ?>?view=tarjetas"><span class="qi">💳</span> Tarjeta</a>
+          <a class="qnav-btn" data-qhref="comprobantes" href="<?!= webAppBaseUrl ?>?view=comprobantes"><span class="qi">🧾</span> Comprobante</a>
+        </nav>
+
+        <!-- Identificación -->
+        <div class="form-section-label">Identificación</div>
+
+        <div class="field-row">
+          <div class="field-label req">Persona</div>
+          <div class="field-value">
+            <select class="field-select" id="fPersona">
+              <option value="Juan">Juan</option>
+              <option value="María">María</option>
+              <option value="Federico">Federico</option>
+              <option value="Sofía">Sofía</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field-label req">Fecha</div>
+          <div class="field-value">
+            <input class="field-input" type="date" id="fFecha" onchange="onFechaChange()" />
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field-label req">Banco</div>
+          <div class="field-value">
+            <select class="field-select" id="fBanco" onchange="actualizarHero_()">
+              <option value="">— Seleccioná —</option>
+              <option value="BBVA">BBVA</option>
+              <option value="Galicia">Galicia</option>
+              <option value="Personal Pay">Personal Pay</option>
+              <option value="Efectivo">Efectivo</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field-label">Moneda</div>
+          <div class="field-value">
+            <select class="field-select" id="fMoneda" onchange="actualizarHero_()">
+              <option value="ARS">ARS $</option>
+              <option value="USD">USD u$s</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Detalle -->
+        <div class="form-section-label">Detalle</div>
+
+        <div class="field-row">
+          <div class="field-label req">Descripción</div>
+          <div class="field-value">
+            <input class="field-input" type="text" id="fDetalle"
+                   placeholder="Ej: Carrefour, AySA…"
+                   oninput="onDetalleInput()" />
+          </div>
+        </div>
+        <div class="hint-match" id="hintLookup" style="display:none; padding-bottom:4px;">✨ pre-clasificado por uso anterior</div>
+
+        <!-- Clasificación -->
+        <div class="form-section-label">Clasificación</div>
+
+        <div class="field-row">
+          <div class="field-label">Categoría</div>
+          <div class="field-value">
+            <select class="field-select" id="fCategoria" onchange="onCategoriaChange_()">
+              <option value="">Seleccioná</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field-label">Subcategoría</div>
+          <div class="field-value">
+            <input class="field-input" type="text" id="fSubcategoria"
+                   list="dlSub" placeholder="Ej: Colegio Sofía" />
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field-label">Etiqueta</div>
+          <div class="field-value">
+            <input class="field-input" type="text" id="fEtiqueta"
+                   list="dlEtiq" placeholder="Ej: rutina-casa" />
+          </div>
+        </div>
+
+        <!-- Monto y estado -->
+        <div class="form-section-label">Monto</div>
+
+        <div class="field-row">
+          <div class="field-label req">Monto</div>
+          <div class="field-value">
+            <input class="field-input" type="number" id="fMonto"
+                   min="0.01" step="0.01" placeholder="0.00"
+                   oninput="actualizarHero_()" />
+          </div>
+        </div>
+        <div id="hintGastos" style="font-size:12px;color:#6b7280;padding:2px 0 4px;display:none"></div>
+
+        <div class="field-row">
+          <div class="field-label">Pagado</div>
+          <div class="field-value">
+            <button type="button" id="fPagadoToggle" onclick="togglePagado_()">
+              <span id="fPagadoIcon">✓</span> <span id="fPagadoLabel">Sí, pagado</span>
+            </button>
+            <input type="checkbox" id="fPagado" style="display:none;" checked />
+          </div>
+        </div>
+
+        <!-- Notas -->
+        <div class="form-section-label">Notas</div>
+        <textarea class="field-textarea" id="fNotas" placeholder="Notas opcionales…"></textarea>
+
+      </div><!-- /drawer-scroll -->
+
+      <div class="cta-bar">
+        <div id="msgGuardar" class="msg" style="margin-bottom:8px;"></div>
+        <button type="button" class="cta-btn cta-green" id="btnGuardar" onclick="guardar()">💾 Guardar movimiento</button>
+      </div>
+    </div><!-- /drawer -->
+  </div><!-- /paso1 -->
+
+  <!-- ══ PASO 2 — Confirmación ════════════════════════════════════════════════ -->
+  <div class="screen" id="paso2" style="display:none;">
+    <div class="hero">
+      <div class="hero-icon" id="paso2Icon">💸</div>
+      <div class="hero-amount" id="paso2Monto"></div>
+      <div class="hero-desc"   id="paso2Desc">Movimiento guardado</div>
+    </div>
+    <div class="drawer">
+      <div class="drawer-handle"></div>
+      <div class="drawer-scroll">
+        <div id="msgFinal" class="msg" style="margin:16px 0 8px;"></div>
+      </div>
+      <div class="cta-bar">
+        <button type="button" class="cta-btn cta-secondary" onclick="resetForm()">Cargar otro movimiento</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<datalist id="dlSub"></datalist>
+<datalist id="dlEtiq"></datalist>
+
+<?!= include('_scripts'); ?>
+<script>
+var TIPO_PRESET = <?!= JSON.stringify((urlParams && urlParams.tipo) ? urlParams.tipo.toLowerCase() : '') ?>;
+
+var STATE = {
+  tipo: 'Gasto',
+  persona: '',
+  categorias: [],
+  subcategorias: [],
+  etiquetas: [],
+  subcategoriasPorCategoria: {}
+};
+
+var lookupTimer = null;
+var descripcionOriginalDelParser = '';
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+(function init() {
+  try {
+    var b = <?!= JSON.stringify(bootstrap) ?>;
+    if (b && b.diccionario) {
+      STATE.categorias                = b.diccionario.categorias               || [];
+      STATE.subcategorias             = b.diccionario.subcategorias            || [];
+      STATE.etiquetas                 = b.diccionario.etiquetas                || [];
+      STATE.subcategoriasPorCategoria = b.diccionario.subcategoriasPorCategoria || {};
+      poblarSelect('fCategoria', STATE.categorias, 'Seleccioná categoría');
+      poblarDatalist('dlSub',  STATE.subcategorias);
+      poblarDatalist('dlEtiq', STATE.etiquetas);
+    }
+  } catch(e) {}
+
+  var hoy = new Date();
+  document.getElementById('fFecha').value = fmtDateInput(hoy);
+  document.getElementById('fPagado').checked = true;
+  sincronizarTogglePagado_(true);
+
+  google.script.run
+    .withSuccessHandler(function(u) {
+      if (u && u.persona) {
+        STATE.persona = u.persona;
+        document.getElementById('fPersona').value = u.persona;
+      }
+    })
+    .withFailureHandler(function() {})
+    .getCurrentUser();
+
+  if (TIPO_PRESET === 'ingreso') {
+    setTipo('Ingreso');
+  } else {
+    setTipo('Gasto');
+  }
+})();
+
+// ── TIPO TOGGLE ───────────────────────────────────────────────────────────────
+function setTipo(tipo) {
+  STATE.tipo = tipo;
+  var btnG = document.getElementById('btnGasto');
+  var btnI = document.getElementById('btnIngreso');
+  if (tipo === 'Ingreso') {
+    btnG.className = 'tipo-btn';
+    btnI.className = 'tipo-btn active-ingreso';
+  } else {
+    btnG.className = 'tipo-btn active-gasto';
+    btnI.className = 'tipo-btn';
+  }
+}
+
+// ── PAGADO TOGGLE ─────────────────────────────────────────────────────────────
+function togglePagado_() {
+  var cb = document.getElementById('fPagado');
+  cb.checked = !cb.checked;
+  sincronizarTogglePagado_(cb.checked);
+}
+
+function sincronizarTogglePagado_(checked) {
+  var btn   = document.getElementById('fPagadoToggle');
+  var icon  = document.getElementById('fPagadoIcon');
+  var label = document.getElementById('fPagadoLabel');
+  if (checked) {
+    btn.className = '';
+    icon.textContent  = '✓';
+    label.textContent = 'Sí, pagado';
+  } else {
+    btn.className = 'no-pagado';
+    icon.textContent  = '○';
+    label.textContent = 'Pendiente';
+  }
+}
+
+// ── HERO LIVE UPDATE ──────────────────────────────────────────────────────────
+function actualizarHero_() {
+  var monto  = parseFloat(document.getElementById('fMonto').value) || 0;
+  var moneda = document.getElementById('fMoneda').value;
+  var banco  = document.getElementById('fBanco').value;
+  var sym    = moneda === 'USD' ? 'USD ' : '$ ';
+  document.getElementById('heroMonto').textContent = sym + fmtMonto(monto);
+  document.getElementById('heroBanco').textContent = banco || '— seleccioná banco —';
+}
+
+// ── FECHA → PAGADO AUTO ───────────────────────────────────────────────────────
+function onFechaChange() {
+  var val = document.getElementById('fFecha').value;
+  if (!val) return;
+  var hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  var partes = val.split('-');
+  var fecha  = new Date(Number(partes[0]), Number(partes[1]) - 1, Number(partes[2]));
+  var esPasada = fecha <= hoy;
+  document.getElementById('fPagado').checked = esPasada;
+  sincronizarTogglePagado_(esPasada);
+}
+
+// ── Aplicar GastosEsperados al form (autoritativo sobre defaults) ──────────────
+function aplicarGastosEsperados_() {
+  var cat    = document.getElementById('fCategoria').value.trim();
+  var subcat = document.getElementById('fSubcategoria').value.trim();
+  var el     = document.getElementById('hintGastos');
+  if (el) el.style.display = 'none';
+  if (!cat && !subcat) return;
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      if (!res) return;
+      var pisados = [];
+
+      if (res.banco) {
+        document.getElementById('fBanco').value = res.banco;
+        actualizarHero_();
+        pisados.push('Banco');
+      }
+      if (res.etiqueta) {
+        document.getElementById('fEtiqueta').value = res.etiqueta;
+        pisados.push('Etiqueta');
+      }
+      if (res.persona) {
+        document.getElementById('fPersona').value = res.persona;
+        pisados.push('Persona');
+      }
+      if (res.moneda) {
+        document.getElementById('fMoneda').value = res.moneda;
+        actualizarHero_();
+        pisados.push('Moneda');
+      }
+      // Canonicaliza casing; el match ya confirmó coincidencia
+      if (res.categoria) {
+        document.getElementById('fCategoria').value = res.categoria;
+        onCategoriaChange_();
+      }
+      if (res.subcategoria) document.getElementById('fSubcategoria').value = res.subcategoria;
+
+      if (!el) return;
+      var lines = [];
+      if (pisados.length) {
+        lines.push('📋 ' + pisados.join(', ') + ' completados desde Gastos Esperados');
+      }
+      if (res.montoEsperado) {
+        lines.push('💡 Monto esperado: ' + (res.moneda === 'USD' ? 'USD ' : '$ ') + fmtMonto(res.montoEsperado));
+      }
+      if (lines.length) {
+        el.innerHTML = lines.join('<br>');
+        el.style.display = '';
+      }
+    })
+    .withFailureHandler(function() {})
+    .api_gastosEsperadosLookup(cat, subcat, document.getElementById('fPersona').value || '');
+}
+
+// ── DETALLE → DICT LOOKUP (debounce 300ms) ────────────────────────────────────
+function onDetalleInput() {
+  clearTimeout(lookupTimer);
+  document.getElementById('hintLookup').style.display = 'none';
+  lookupTimer = setTimeout(function() {
+    var desc = document.getElementById('fDetalle').value.trim();
+    if (desc.length < 3) return;
+    descripcionOriginalDelParser = desc;
+    google.script.run
+      .withSuccessHandler(function(res) {
+        // api_dictLookup devuelve el match directamente o null (NO {ok, match})
+        if (!res) { aplicarGastosEsperados_(); return; }
+        var m = res;
+        if (m.categoria)    { document.getElementById('fCategoria').value    = m.categoria; onCategoriaChange_(); }
+        if (m.subcategoria) document.getElementById('fSubcategoria').value = m.subcategoria;
+        if (m.etiqueta)     document.getElementById('fEtiqueta').value     = m.etiqueta;
+        if (m.descripcionNormalizada && m.descripcionNormalizada.trim()) {
+          document.getElementById('fDetalle').value = m.descripcionNormalizada.trim();
+        }
+        document.getElementById('hintLookup').style.display = '';
+        aplicarGastosEsperados_();
+      })
+      .withFailureHandler(function() {})
+      .api_dictLookup(desc);
+  }, 300);
+}
+
+// ── GUARDAR ───────────────────────────────────────────────────────────────────
+function guardar() {
+  var detalle = document.getElementById('fDetalle').value.trim();
+  var fecha   = document.getElementById('fFecha').value.trim();
+  var monto   = parseFloat(document.getElementById('fMonto').value);
+  var banco   = document.getElementById('fBanco').value.trim();
+
+  if (!detalle)             { alert('Ingresá un detalle.'); return; }
+  if (!fecha)               { alert('La fecha es obligatoria.'); return; }
+  if (!monto || monto <= 0) { alert('Ingresá un monto válido.'); return; }
+  if (!banco)               { alert('Seleccioná el banco.'); return; }
+
+  var btn = document.getElementById('btnGuardar');
+  showMsg('msgGuardar', 'wait', '⏳ Guardando…');
+  btn.disabled = true;
+
+  var payload = {
+    tipo:         STATE.tipo,
+    descripcion:  detalle,
+    fecha:        fecha,
+    monto:        monto,
+    moneda:       document.getElementById('fMoneda').value,
+    banco:        banco,
+    persona:      document.getElementById('fPersona').value,
+    categoria:    document.getElementById('fCategoria').value.trim(),
+    subcategoria: document.getElementById('fSubcategoria').value.trim(),
+    etiqueta:     document.getElementById('fEtiqueta').value,
+    pagado:       document.getElementById('fPagado').checked,
+    notas:        document.getElementById('fNotas').value.trim()
+  };
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      btn.disabled = false;
+      if (!res || !res.ok) {
+        showMsg('msgGuardar', 'err', '❌ ' + (res && res.error || 'Error desconocido'));
+        return;
+      }
+
+      // Aprender en background (patrón = original que disparó el lookup, alias = detalle final guardado)
+      if (payload.descripcion && (payload.categoria || payload.subcategoria)) {
+        google.script.run
+          .withSuccessHandler(function() {})
+          .withFailureHandler(function() {})
+          .api_dictAprender(
+            descripcionOriginalDelParser || payload.descripcion,
+            payload.categoria,
+            payload.subcategoria,
+            payload.etiqueta,
+            'Manual',
+            payload.descripcion,
+            payload.persona
+          );
+      }
+
+      var monedaSym = payload.moneda === 'USD' ? 'USD ' : '$ ';
+      var icon      = STATE.tipo === 'Ingreso' ? '💵' : '💸';
+      document.getElementById('paso2Icon').textContent  = icon;
+      document.getElementById('paso2Monto').textContent = monedaSym + fmtMonto(monto);
+      document.getElementById('paso2Desc').textContent  = payload.descripcion;
+
+      showMsg('msgFinal', 'ok',
+        '<strong>' + (STATE.tipo === 'Ingreso' ? 'Ingreso registrado' : 'Movimiento guardado') + '</strong><br>' +
+        esc(payload.descripcion) + ' — ' + monedaSym + fmtMonto(monto) +
+        (payload.pagado ? ' · <strong>Completado</strong>' : ' · Pendiente'));
+
+      document.getElementById('paso1').style.display = 'none';
+      document.getElementById('paso2').style.display = '';
+      setStep(2);
+      window.scrollTo(0, 0);
+    })
+    .withFailureHandler(function(err) {
+      btn.disabled = false;
+      showMsg('msgGuardar', 'err', '❌ Error de red: ' + err.message);
+    })
+    .api_guardarManual(payload);
+}
+
+// ── RESET ─────────────────────────────────────────────────────────────────────
+function resetForm() {
+  document.getElementById('paso2').style.display = 'none';
+  document.getElementById('paso1').style.display = '';
+  document.getElementById('fDetalle').value      = '';
+  document.getElementById('fCategoria').value    = '';
+  onCategoriaChange_();
+  document.getElementById('fSubcategoria').value = '';
+  document.getElementById('fEtiqueta').value     = '';
+  document.getElementById('fMonto').value        = '';
+  document.getElementById('fNotas').value        = '';
+  document.getElementById('hintLookup').style.display = 'none';
+  document.getElementById('hintGastos').style.display = 'none';
+  hideMsg('msgGuardar'); hideMsg('msgGlobal');
+  var hoy = new Date();
+  document.getElementById('fFecha').value = fmtDateInput(hoy);
+  document.getElementById('fPagado').checked = true;
+  sincronizarTogglePagado_(true);
+  actualizarHero_();
+  if (STATE.persona) document.getElementById('fPersona').value = STATE.persona;
+  setStep(1);
+  window.scrollTo(0, 0);
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function onCategoriaChange_() {
+  var cat  = document.getElementById('fCategoria').value;
+  var mapa = STATE.subcategoriasPorCategoria || {};
+  var subs = (cat && mapa[cat] && mapa[cat].length) ? mapa[cat] : STATE.subcategorias;
+  poblarDatalist('dlSub', subs);
+}
+
+function fmtDateInput(d) {
+  var mm = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
+  return d.getFullYear() + '-' + mm + '-' + dd;
+}
+
+initQnav('<?!= webAppBaseUrl ?>');
+</script>
+</body>
+</html>
