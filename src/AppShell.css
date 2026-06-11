@@ -1,0 +1,91 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, sans-serif;
+  background: #f5f5f5;
+  color: #1a1a1a;
+}
+
+/* Pantallas centradas: cargando / noAutenticado / noAutorizado */
+.shell-center {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 1rem;
+  text-align: center;
+}
+
+.shell-center h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+/* Layout autenticado: header fijo + contenido scrollable */
+.shell-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0 1rem;
+  height: 3.5rem;
+  background: #1e3a5f;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.shell-header-title {
+  font-weight: 700;
+  font-size: 1rem;
+  flex: 1;
+}
+
+.shell-header-user {
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.shell-content {
+  flex: 1;
+  padding: 1.5rem 1rem;
+}
+
+.shell-placeholder {
+  color: #888;
+  font-style: italic;
+}
+
+/* Botones */
+.btn-primary {
+  padding: 0.6rem 1.4rem;
+  background: #1e3a5f;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.btn-primary:hover { background: #16305a; }
+
+.btn-secondary {
+  padding: 0.4rem 1rem;
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.btn-secondary:hover { opacity: 1; }

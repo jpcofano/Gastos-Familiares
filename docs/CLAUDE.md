@@ -11,10 +11,10 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 
 ## Estado actual
 
-- Fase 0 — Setup: en curso (este commit).
+- Fase 0 — Setup: cerrado.
 - Fase 1 — Modelo de datos: cerrado.
 - Fase 2 — Seed Sheets a Firestore: codigo listo, pendiente correr en produccion.
-- Fase 3 — Auth + shell PWA: pendiente.
+- Fase 3 — Auth + shell PWA: cerrado.
 - Fase 4 — Vistas read-only (Dashboard, Resumen, pantalla de hijos): pendiente.
 - Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): pendiente.
 - Fase 6 — Tarjetas + Comprobantes con Cloud Functions: pendiente.
@@ -33,6 +33,8 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Audit = solo timestamps (createdAt, updatedAt, creadoPor). Sin subcoleccion history.
 - Naming: castellano camelCase para colecciones y campos.
 - Etiquetas tecnicas (JuanARS, etc.) se convierten a persona + moneda en seed.
+- Router: React Router (react-router-dom), se instala al inicio de F4.
+  Rutas montadas en shell-content; header fijo queda fuera del router.
 
 ## Reglas operativas
 
@@ -54,6 +56,8 @@ Estas mejoras quedan registradas pero no se implementan en F2:
 - F0/F6: COOP/COEP headers en `firebase.json` (ya estan), TTL en `/temp/` de Storage,
   Cloud Scheduler para backup diario, tests de Security Rules con
   `@firebase/rules-unit-testing` antes de las Rules mismas.
+- Antes de produccion: exportar `public/icons/icon.svg` a PNG 192x192 y 512x512.
+  SVG funciona en Chrome 98+ para instalabilidad local; PNG requerido para stores e iOS.
 
 ## Trabajando con Claude Code
 
@@ -102,7 +106,8 @@ Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracio
 - `scripts/seed/` — script de migracion Sheets a Firestore.
 - `data/` — snapshots .xlsx versionados.
 - `secrets/` — service account JSON (gitignored).
-- `src/` — frontend (vacio hasta F3).
+- `src/` — frontend React + TypeScript (F3 completo).
+- `public/` — manifest PWA, service worker, iconos.
 - `firestore.rules` — Security Rules.
 - `firestore.indexes.json` — indices compuestos.
 - `firebase.json` — config de Hosting + Emulators + Headers.
