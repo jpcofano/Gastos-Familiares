@@ -21,19 +21,19 @@ const TYPE_MOVEMENT = new Set([
   'idLegacy','fecha','fechaConsumoOriginal','mes','descripcion','descripcionOriginal',
   'monto','moneda','tcUsdArs','tipo','subtipo','origen','categoria','subcategoria',
   'etiqueta','banco','cuenta','tarjetaCodigo','tarjeta','persona','creadoPor','pagado',
-  'excluirDash','incluirResumenMes','parentId','cardStatementId','expectedItemId',
-  'numeroComprobante','pdfHash','pdfStorageRef','notas','createdAt','updatedAt',
+  'excluirDash','incluirResumenMes','padreId','resumenTarjetaId','itemEsperadoId',
+  'numeroComprobante','hashPdf','refStoragePdf','notas','creadoEn','actualizadoEn',
 ]);
 
 const TYPE_CARD_STATEMENT = new Set([
   'tarjetaCodigo','banco','tarjeta','periodo','fechaCierre','fechaVencimiento',
-  'totalARS','totalUSD','pagoMinimoARS','cuentaDebito','pdfHash','pdfStorageRef',
-  'parsedAt','confirmedAt','confirmedBy','observaciones',
+  'totalARS','totalUSD','pagoMinimoARS','cuentaDebito','hashPdf','refStoragePdf',
+  'parseadoEn','confirmadoEn','confirmadoPor','observaciones',
 ]);
 
 const TYPE_EXPECTED_ITEM = new Set([
   'tipo','activo','categoria','subcategoria','etiqueta','persona','moneda','banco',
-  'montoEsperado','diaVencimiento','autoCalendar','notas',
+  'montoEsperado','diaVencimiento','autoCalendario','notas',
 ]);
 
 const TYPE_FAMILIA_CONFIG = new Set([
@@ -96,10 +96,10 @@ async function main() {
   console.log('\n🔍 F3.1.2 — Auditoría emulador vs src/types/index.ts');
   console.log('   Solo lectura. Emulador local (localhost:8080).\n');
 
-  // ── movements ──────────────────────────────────────────────────────────────
-  const movSnap = await db.collection('movements').limit(2).get();
+  // ── movimientos ──────────────────────────────────────────────────────────────
+  const movSnap = await db.collection('movimientos').limit(2).get();
   if (movSnap.empty) {
-    console.log('\n⚠ movements: colección vacía — ¿corrió el seed?');
+    console.log('\n⚠ movimientos: colección vacía — ¿corrió el seed?');
   } else {
     const doc = movSnap.docs[0];
     const data = doc.data() as Record<string, unknown>;
@@ -107,10 +107,10 @@ async function main() {
     fieldTable(data);
   }
 
-  // ── cardStatements ─────────────────────────────────────────────────────────
-  const csSnap = await db.collection('cardStatements').limit(1).get();
+  // ── resumenesTarjeta ─────────────────────────────────────────────────────────
+  const csSnap = await db.collection('resumenesTarjeta').limit(1).get();
   if (csSnap.empty) {
-    console.log('\n⚠ cardStatements: colección vacía');
+    console.log('\n⚠ resumenesTarjeta: colección vacía');
   } else {
     const doc = csSnap.docs[0];
     const data = doc.data() as Record<string, unknown>;
@@ -118,10 +118,10 @@ async function main() {
     fieldTable(data);
   }
 
-  // ── expectedItems ──────────────────────────────────────────────────────────
-  const eiSnap = await db.collection('expectedItems').limit(1).get();
+  // ── itemsEsperados ──────────────────────────────────────────────────────────
+  const eiSnap = await db.collection('itemsEsperados').limit(1).get();
   if (eiSnap.empty) {
-    console.log('\n⚠ expectedItems: colección vacía');
+    console.log('\n⚠ itemsEsperados: colección vacía');
   } else {
     const doc = eiSnap.docs[0];
     const data = doc.data() as Record<string, unknown>;
@@ -166,21 +166,13 @@ async function main() {
      • FamiliaConfig no lo declara.
      → Acción propuesta: agregar  actualizadoEn: Date  a FamiliaConfig.
 
-  2. pdfHash (Movement) vs hashPDF (CardStatement) — INCONSISTENCIA DE NOMBRES:
-     • movements: seed escribe 'pdfHash', tipo declara 'pdfHash'   → match ✓
-     • cardStatements: seed escribe 'hashPDF', tipo declara 'hashPDF' → match ✓
-     • Ambos representan el hash de un PDF adjunto; nombre distinto en cada colección.
-     → No es un bug tipo/Firestore, pero viola la consistencia del dominio.
-     → Opción A (recomendada): unificar en 'hashPDF' en Movement (1 cambio en seed + tipo).
-     → Opción B: documentar la asimetría y dejarlo así.
+  2. hashPdf — unificado en F3.1.3 y castellanizado en F4.0. Campo final: hashPdf.
 
-  3. Campos en inglés en seed+tipo (violación naming, pero sin discrepancia interna):
-     • movements:      createdAt, updatedAt, pdfHash, pdfStorageRef,
-                       parentId, cardStatementId, expectedItemId
-     • cardStatements: hashPDF, pdfStorageRef, parsedAt, confirmedAt, confirmedBy
-     → Estos son consistent (seed y tipo coinciden) pero no son castellano camelCase.
-     → Quedan fuera del scope de F3.1.2 (no hay discrepancia tipo/Firestore).
-     → Registrar como deuda técnica para resolver en bloque antes de F4.
+  3. Castellanización completada en F4.0:
+     • movimientos:      creadoEn, actualizadoEn, hashPdf, refStoragePdf,
+                         padreId, resumenTarjetaId, itemEsperadoId
+     • resumenesTarjeta: hashPdf, refStoragePdf, parseadoEn, confirmadoEn, confirmadoPor
+     → Deuda técnica saldada. Seed, tipos y reglas en castellano camelCase.
   `);
 
   console.log(`${HR}\n`);

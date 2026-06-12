@@ -26,7 +26,7 @@ function parseEtiquetaTecnica(etiqOrig: string | null): Parsed {
 }
 
 export async function seedDictionary(db: Firestore, data: SheetData, dryRun: boolean) {
-  console.log('-> dictionary');
+  console.log('-> diccionario');
 
   const rules: NormRule[] = data.diccionarioNorm
     .filter(r => r.Activo === true || r.Activo === 'VERDADERO')
@@ -72,12 +72,12 @@ export async function seedDictionary(db: Firestore, data: SheetData, dryRun: boo
       activo:        r.Activo === true || r.Activo === 'VERDADERO',
       origen:        r.Origen ?? 'Tarjeta',
       creadoPor:     r.CreadoPor ?? 'Sistema',
-      createdAt:     r.CreadoEn ? Timestamp.fromDate(r.CreadoEn as Date) : Timestamp.now(),
+      creadoEn:      r.CreadoEn ? Timestamp.fromDate(r.CreadoEn as Date) : Timestamp.now(),
       notas:         r.Notas ?? null,
     };
   });
 
-  // Agrupar por ID, sumando UsoCount y tomando MAX de UltimoUso/createdAt
+  // Agrupar por ID, sumando UsoCount y tomando MAX de UltimoUso/creadoEn
   const grouped = new Map<string, any>();
   for (const c of candidates) {
     const existing = grouped.get(c.id);
@@ -88,7 +88,7 @@ export async function seedDictionary(db: Firestore, data: SheetData, dryRun: boo
       if (c.ultimoUso && (!existing.ultimoUso || c.ultimoUso.toMillis() > existing.ultimoUso.toMillis())) {
         existing.ultimoUso = c.ultimoUso;
       }
-      if (c.createdAt && existing.createdAt && c.createdAt.toMillis() > existing.createdAt.toMillis()) {
+      if (c.creadoEn && existing.creadoEn && c.creadoEn.toMillis() > existing.creadoEn.toMillis()) {
         existing.categoria = c.categoria;
         existing.subcategoria = c.subcategoria;
         existing.descripcionLimpia = c.descripcionLimpia;
@@ -101,6 +101,6 @@ export async function seedDictionary(db: Firestore, data: SheetData, dryRun: boo
   console.log(`   ${candidates.length - docs.length} consolidadas por hash (suma UsoCount)`);
   console.log(`   ${convertidos} con etiqueta tecnica convertida a persona+moneda`);
   if (dryRun) return;
-  await writeBatch(db, 'dictionary', docs);
+  await writeBatch(db, 'diccionario', docs);
   console.log('   OK\n');
 }

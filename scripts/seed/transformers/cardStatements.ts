@@ -7,7 +7,7 @@ function periodoYYYYMM(d: Date): string {
 }
 
 export async function seedCardStatements(db: Firestore, data: SheetData, dryRun: boolean) {
-  console.log('-> cardStatements');
+  console.log('-> resumenesTarjeta');
 
   const docs = data.tarjetasResumen
     .filter(r => r.ResumenID)
@@ -25,18 +25,18 @@ export async function seedCardStatements(db: Firestore, data: SheetData, dryRun:
       totalUSD: Number(r.TotalUSD ?? 0),
       pagoMinimoARS: Number(r.PagoMinimoARS ?? 0),
       cuentaDebito: r.CuentaDebitoDetalle ?? null,
-      pdfHash: r.HashPDF ?? null,
-      pdfStorageRef: null,
-      parsedAt:     r.ImportadoEn
+      hashPdf: r.HashPDF ?? null,
+      refStoragePdf: null,
+      parseadoEn:   r.ImportadoEn
         ? Timestamp.fromDate(r.ImportadoEn as Date) : Timestamp.now(),
-      confirmedAt:  r.EstadoImport === 'aplicado'
+      confirmadoEn: r.EstadoImport === 'aplicado'
         ? Timestamp.fromDate(r.ImportadoEn as Date) : null,
-      confirmedBy:  r.ImportadoPor ?? null,
+      confirmadoPor: r.ImportadoPor ?? null,
       observaciones: r.Observaciones ?? null,
     }));
 
   console.log(`   ${docs.length} resumenes`);
   if (dryRun) return;
-  await writeBatch(db, 'cardStatements', docs);
+  await writeBatch(db, 'resumenesTarjeta', docs);
   console.log('   OK\n');
 }

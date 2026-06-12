@@ -27,15 +27,15 @@ export interface Movement {
   pagado: boolean;
   excluirDash: boolean;
   incluirResumenMes: boolean;
-  parentId: string | null;
-  cardStatementId: string | null;
-  expectedItemId: string | null;
+  padreId: string | null;
+  resumenTarjetaId: string | null;
+  itemEsperadoId: string | null;
   numeroComprobante: string | null;
-  pdfHash: string | null;
-  pdfStorageRef: string | null;
+  hashPdf: string | null;
+  refStoragePdf: string | null;
   notas: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+  creadoEn: Date;
+  actualizadoEn: Date;
 }
 
 export interface CardStatement {
@@ -50,11 +50,11 @@ export interface CardStatement {
   totalUSD: number;
   pagoMinimoARS: number;
   cuentaDebito: string | null;
-  pdfHash: string | null;
-  pdfStorageRef: string | null;
-  parsedAt: Date;
-  confirmedAt: Date | null;
-  confirmedBy: string | null;
+  hashPdf: string | null;
+  refStoragePdf: string | null;
+  parseadoEn: Date;
+  confirmadoEn: Date | null;
+  confirmadoPor: string | null;
   observaciones: string | null;
 }
 
@@ -70,8 +70,10 @@ export interface ExpectedItem {
   banco: string | null;
   montoEsperado: number | null;
   diaVencimiento: number | null;
-  autoCalendar: boolean;
+  autoCalendario: boolean;
   notas: string | null;
+  tarjetaCodigo: string | null;
+  matchTexto: string | null;
 }
 
 export interface FamiliaMiembro {

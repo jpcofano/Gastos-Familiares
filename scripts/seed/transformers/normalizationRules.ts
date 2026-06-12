@@ -3,7 +3,7 @@ import { SheetData } from '../readExcel';
 import { writeBatch } from '../utils/firestore';
 
 export async function seedNormalizationRules(db: Firestore, data: SheetData, dryRun: boolean) {
-  console.log('-> normalizationRules');
+  console.log('-> reglasNormalizacion');
 
   const docs = data.diccionarioNorm
     .filter(r => r.Activo === true || r.Activo === 'VERDADERO')
@@ -19,6 +19,6 @@ export async function seedNormalizationRules(db: Firestore, data: SheetData, dry
 
   console.log(`   ${docs.length} reglas activas`);
   if (dryRun) return;
-  await writeBatch(db, 'normalizationRules', docs);
+  await writeBatch(db, 'reglasNormalizacion', docs);
   console.log('   OK\n');
 }

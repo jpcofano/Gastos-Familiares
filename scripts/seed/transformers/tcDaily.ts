@@ -7,7 +7,7 @@ function isoDate(d: Date): string {
 }
 
 export async function seedTcDaily(db: Firestore, data: SheetData, dryRun: boolean) {
-  console.log('-> tcDaily');
+  console.log('-> tcDiario');
 
   const docs = data.tcDiario
     .filter(r => r.Fecha && r.TC_USDARS)
@@ -21,6 +21,6 @@ export async function seedTcDaily(db: Firestore, data: SheetData, dryRun: boolea
 
   console.log(`   ${docs.length} dias con TC`);
   if (dryRun) return;
-  await writeBatch(db, 'tcDaily', docs);
+  await writeBatch(db, 'tcDiario', docs);
   console.log('   OK\n');
 }

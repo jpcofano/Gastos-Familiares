@@ -55,7 +55,7 @@ async function main() {
   }
 
   console.log('\n=== 2. Movements en Firestore ===\n');
-  const movsFs = await db.collection('movements').count().get();
+  const movsFs = await db.collection('movimientos').count().get();
   const expected = data.historico.length - sinFecha.length;
   console.log(`  Firestore: ${movsFs.data().count}`);
   console.log(`  Esperado (Excel sin descartados): ${expected}`);
@@ -116,7 +116,7 @@ async function main() {
   console.log(`  Rango de TC_Diario: ${tcMin} → ${tcMax}`);
 
   // Movements de Firestore que no tienen TC
-  const sinTcSnap = await db.collection('movements').where('tcUsdArs', '==', null).get();
+  const sinTcSnap = await db.collection('movimientos').where('tcUsdArs', '==', null).get();
   let antesDelMin = 0;
   let dentroDelRango = 0;
   let sinFechaCount = 0;
@@ -130,7 +130,7 @@ async function main() {
     else if (iso > tcMax) despuesDelMax++;
     else dentroDelRango++;
   }
-  console.log(`  Total movements sin TC: ${sinTcSnap.size}`);
+  console.log(`  Total movimientos sin TC: ${sinTcSnap.size}`);
   console.log(`    Anteriores al primer TC del Sheet: ${antesDelMin}`);
   console.log(`    Posteriores al último TC del Sheet: ${despuesDelMax}`);
   console.log(`    Dentro del rango pero sin TC del día: ${dentroDelRango}`);

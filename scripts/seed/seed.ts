@@ -23,7 +23,7 @@ function parseFlags(): Flags {
   const excelArg = args.find(a => a.startsWith('--excel='));
   const excelPath = excelArg
     ? excelArg.split('=')[1]
-    : './data/2026-05-29_sheet_snapshot.xlsx';
+    : './data/2026-06-12_sheet_snapshot.xlsx';
 
   if (target === 'production' && !args.includes('--i-am-sure')) {
     console.error('ERROR: --target=production requiere flag --i-am-sure');

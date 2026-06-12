@@ -1,6 +1,8 @@
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { SheetData } from '../readExcel';
+import { sha256Hex } from '../utils/hash';
 import { writeBatch } from '../utils/firestore';
+import { ALIAS_PERSONA, normPersona } from './expectedItems';
 
 const TECNICA_RE = /^(Juan|Mar[ií]a)(ARS|USD)$|^(Galicia|Frances|BBVA)\s+(Visa|Master)(ARS|USD)$/i;
 
@@ -19,18 +21,23 @@ function buildTCMap(tcRows: any[]): TCMap {
   return map;
 }
 
+function buildResumenTCMap(tarjetasResumen: any[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const r of tarjetasResumen) {
+    if (r.ResumenID && r.TarjetaCodigo) map.set(String(r.ResumenID), String(r.TarjetaCodigo));
+  }
+  return map;
+}
+
 function tcForDate(map: TCMap, fecha: Date): number | null {
   const target = isoDate(fecha);
   if (map[target]) return map[target];
   const sortedDates = Object.keys(map).sort();
-  // Buscar TC más cercano hacia atrás
   let best: string | null = null;
   for (const d of sortedDates) {
     if (d <= target) best = d; else break;
   }
   if (best) return map[best];
-  // Fallback hacia adelante: usar el TC más antiguo disponible
-  // (caso típico: movement legacy anterior al primer TC registrado)
   return sortedDates.length > 0 ? map[sortedDates[0]] : null;
 }
 
@@ -41,13 +48,38 @@ function inferSubtipo(r: any): { subtipo: string; origen: string } {
   return { subtipo: 'EventualDirecto', origen: 'WebApp' };
 }
 
-export async function seedMovements(db: Firestore, data: SheetData, dryRun: boolean) {
-  console.log('-> movements');
+// A.3 — mapa OBL-id → nuevo id de itemsEsperados
+function buildOblMap(gastosEsperados: any[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const r of gastosEsperados) {
+    const oblId = r.ID ? String(r.ID) : '';
+    if (!oblId.startsWith('OBL-')) continue;
+    const persona = normPersona(r.Persona);
+    const id = sha256Hex(
+      'exp', 'Gasto',
+      r.Categoria ?? r['Categoría'] ?? '',
+      r.Subcategoria ?? '',
+      persona,
+      r.Moneda ?? 'ARS'
+    ).slice(0, 20);
+    map.set(oblId, id);
+  }
+  return map;
+}
 
-  const tcMap = buildTCMap(data.tcDiario);
-  let descartados = 0;
-  let tcRelleno = 0;
+export async function seedMovements(db: Firestore, data: SheetData, dryRun: boolean) {
+  console.log('-> movimientos');
+
+  const tcMap        = buildTCMap(data.tcDiario);
+  const oblMap       = buildOblMap(data.gastosEsperados);
+  const resumenTCMap = buildResumenTCMap(data.tarjetasResumen);
+
+  let descartados     = 0;
+  let tcRelleno       = 0;
   let subtipoInferido = 0;
+  let resumenOverride = 0; // A.2
+  let oblBackfill     = 0; // A.3
+  let tcCodigoBackfill = 0; // F4.2.1
 
   const docs = data.historico
     .filter(r => {
@@ -64,12 +96,22 @@ export async function seedMovements(db: Firestore, data: SheetData, dryRun: bool
         tcUsdArs = tcForDate(tcMap, fecha);
         if (tcUsdArs !== null) tcRelleno++;
       }
-      const idBase = r.ID;
+
+      const idBase   = r.ID ? String(r.ID) : '';
       const fechaISO = fecha.toISOString().slice(0, 10);
-      const idFinal = `${idBase}_${fechaISO}`;
+      const idFinal  = `${idBase}_${fechaISO}`;
+
+      // A.2 — TarjetaPago siempre incluirResumenMes=true
+      const inclResumen = subtipo === 'TarjetaPago' ? true : r.FlagResumenMes === true;
+      if (subtipo === 'TarjetaPago' && r.FlagResumenMes !== true) resumenOverride++;
+
+      // A.3 — backfill itemEsperadoId para OBL- legacy
+      const itemEsperadoId = oblMap.get(idBase) ?? null;
+      if (itemEsperadoId) oblBackfill++;
+
       return {
         id: idFinal,
-        idLegacy: idBase,  
+        idLegacy: idBase,
         fecha: Timestamp.fromDate(fecha),
         fechaConsumoOriginal: r.FechaConsumoOriginal
           ? Timestamp.fromDate(r.FechaConsumoOriginal as Date) : null,
@@ -87,22 +129,27 @@ export async function seedMovements(db: Firestore, data: SheetData, dryRun: bool
         etiqueta: r.Etiqueta ?? null,
         banco: r.Banco ?? null,
         cuenta: r.Cuenta ?? null,
-        tarjetaCodigo: null,
+        tarjetaCodigo: (() => {
+          if (subtipo !== 'TarjetaPago' || !r.ResumenTarjetaID) return null;
+          const cod = resumenTCMap.get(String(r.ResumenTarjetaID)) ?? null;
+          if (cod) tcCodigoBackfill++;
+          return cod;
+        })(),
         tarjeta: r.Tarjeta ?? null,
         persona: r.Persona ?? null,
         creadoPor: r.Usuario ?? 'Sistema',
         pagado: r.Pagado === true,
         excluirDash: r.ExcluirDash === true,
-        incluirResumenMes: r.FlagResumenMes === true,
-        parentId: r.ParentID ?? null,
-        cardStatementId: r.ResumenTarjetaID ?? null,
-        expectedItemId: null,
+        incluirResumenMes: inclResumen,
+        padreId: r.ParentID ?? null,
+        resumenTarjetaId: r.ResumenTarjetaID ?? null,
+        itemEsperadoId,
         numeroComprobante: r.NumeroComprobante ?? null,
-        pdfHash: null,
-        pdfStorageRef: null,
+        hashPdf: null,
+        refStoragePdf: null,
         notas: r.Notas ?? null,
-        createdAt: r.CreatedAt ? Timestamp.fromDate(r.CreatedAt as Date) : Timestamp.fromDate(fecha),
-        updatedAt: r.UpdatedAt ? Timestamp.fromDate(r.UpdatedAt as Date) : Timestamp.fromDate(fecha),
+        creadoEn:      r.CreatedAt ? Timestamp.fromDate(r.CreatedAt as Date) : Timestamp.fromDate(fecha),
+        actualizadoEn: r.UpdatedAt ? Timestamp.fromDate(r.UpdatedAt as Date) : Timestamp.fromDate(fecha),
       };
     })
     .map(d => {
@@ -114,8 +161,11 @@ export async function seedMovements(db: Firestore, data: SheetData, dryRun: bool
 
   console.log(`   ${docs.length} movimientos (${descartados} descartados)`);
   console.log(`   ${subtipoInferido} subtipos inferidos (OBL- legacy)`);
-  console.log(`   ${tcRelleno} TC rellenados desde tcDaily`);
+  console.log(`   ${tcRelleno} TC rellenados desde tcDiario`);
+  console.log(`   ${resumenOverride} TarjetaPago con incluirResumenMes forzado (A.2)`);
+  console.log(`   ${oblBackfill} itemEsperadoId backfills OBL- (A.3)`);
+  console.log(`   ${tcCodigoBackfill} TarjetaPago con tarjetaCodigo backfill (F4.2.1)`);
   if (dryRun) return;
-  await writeBatch(db, 'movements', docs);
+  await writeBatch(db, 'movimientos', docs);
   console.log('   OK\n');
 }

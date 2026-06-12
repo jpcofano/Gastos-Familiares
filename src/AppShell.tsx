@@ -1,9 +1,13 @@
+import { NavLink, Routes, Route } from 'react-router-dom';
 import './AppShell.css';
 import { signInConGoogle, signOutUsuario } from './auth';
 import { useMiembro } from './hooks/useMiembro';
+import { MiembroContext } from './contexto/MiembroContext';
+import Dashboard from './vistas/Dashboard';
+import Resumen from './vistas/Resumen';
 
 export default function AppShell() {
-  const { estado, miembro, firebaseUser } = useMiembro();
+  const { estado, memberId, miembro, firebaseUser } = useMiembro();
 
   if (estado === 'cargando') {
     return (
@@ -33,16 +37,33 @@ export default function AppShell() {
     );
   }
 
+  const esAdmin = miembro!.rol === 'admin';
+
   return (
-    <div className="shell-layout">
-      <header className="shell-header">
-        <span className="shell-header-title">Gastos Familiares</span>
-        <span className="shell-header-user">{miembro!.nombre}</span>
-        <button className="btn-secondary" onClick={() => signOutUsuario()}>Salir</button>
-      </header>
-      <main className="shell-content">
-        <p className="shell-placeholder">Próximamente: Dashboard</p>
-      </main>
-    </div>
+    <MiembroContext.Provider value={{ memberId: memberId!, miembro: miembro! }}>
+      <div className="shell-layout">
+        <header className="shell-header">
+          <span className="shell-header-title">Gastos Familiares</span>
+          <nav className="shell-nav">
+            <NavLink to="/" end className={({ isActive }) => 'shell-nav-link' + (isActive ? ' shell-nav-link--active' : '')}>
+              Dashboard
+            </NavLink>
+            {esAdmin && (
+              <NavLink to="/resumen" className={({ isActive }) => 'shell-nav-link' + (isActive ? ' shell-nav-link--active' : '')}>
+                Resumen
+              </NavLink>
+            )}
+          </nav>
+          <span className="shell-header-user">{miembro!.nombre}</span>
+          <button className="btn-secondary" onClick={() => signOutUsuario()}>Salir</button>
+        </header>
+        <main className="shell-content">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/resumen" element={<Resumen />} />
+          </Routes>
+        </main>
+      </div>
+    </MiembroContext.Provider>
   );
 }

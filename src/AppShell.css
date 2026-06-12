@@ -46,8 +46,28 @@ body {
 .shell-header-title {
   font-weight: 700;
   font-size: 1rem;
-  flex: 1;
 }
+
+/* Nav */
+.shell-nav {
+  display: flex;
+  gap: 0.25rem;
+  flex: 1;
+  margin-left: 0.5rem;
+}
+
+.shell-nav-link {
+  color: rgba(255,255,255,0.75);
+  text-decoration: none;
+  font-size: 0.875rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.shell-nav-link:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+.shell-nav-link--active { color: #fff; background: rgba(255,255,255,0.18); font-weight: 600; }
 
 .shell-header-user {
   font-size: 0.9rem;

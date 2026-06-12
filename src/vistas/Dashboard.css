@@ -1,0 +1,165 @@
+.dash {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Selector de mes */
+.dash-mes-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dash-mes-btn {
+  background: transparent;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.25rem;
+  cursor: pointer;
+  line-height: 1;
+  color: #1e3a5f;
+}
+
+.dash-mes-btn:hover { background: #f0f4f8; }
+
+.dash-mes-label {
+  font-size: 1.1rem;
+  font-weight: 600;
+  min-width: 160px;
+  text-align: center;
+}
+
+/* Estados */
+.dash-estado {
+  color: #666;
+  font-style: italic;
+}
+
+.dash-error { color: #c0392b; font-style: normal; }
+.dash-exito { color: #27ae60; font-style: normal; font-weight: 500; }
+
+/* Botón flotante para alta manual */
+.dash-fab {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  border: none;
+  background: #1e3a5f;
+  color: #fff;
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  transition: background 0.15s, transform 0.1s;
+}
+.dash-fab:hover  { background: #2a5080; }
+.dash-fab:active { transform: scale(0.94); }
+
+/* Totales */
+.dash-totales {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.dash-totales-moneda {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  min-width: 220px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.dash-totales-titulo {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #666;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+
+.dash-totales-fila {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.dash-totales-balance {
+  margin-top: 0.25rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #eee;
+  font-weight: 600;
+}
+
+.dash-ingreso { color: #27ae60; }
+.dash-gasto   { color: #c0392b; }
+
+/* Tarjeta equivalente — borde destacado */
+.dash-totales-eq {
+  border-color: #1e3a5f;
+  background: #f7f9fc;
+  flex: 1.4;
+}
+
+/* Valor USD equivalente secundario */
+.dash-eq-sec {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.65;
+  font-weight: 400;
+}
+
+/* Tabla */
+.dash-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dash-tabla th {
+  background: #f5f7fa;
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  font-weight: 600;
+  color: #444;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.dash-tabla td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #f0f0f0;
+  color: #222;
+}
+
+.dash-tabla tr:last-child td { border-bottom: none; }
+
+.dash-tabla tr:hover td { background: #fafbfc; }
+
+.dash-col-fecha  { white-space: nowrap; color: #666; width: 60px; }
+.dash-col-cat    { color: #555; max-width: 120px; }
+.dash-col-monto  { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 600px) {
+  .dash-col-cat { display: none; }
+}
