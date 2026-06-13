@@ -22,28 +22,47 @@ const TARJETA_CODIGO_MAP: Record<string, string> = {
   'Visa Galicia':       'GAL-VISA',
 };
 
-// matchTexto hardcodeado para los items que necesitan discriminación por descripción
+// matchTexto hardcodeado para los items que necesitan discriminación por descripción.
+// La clave incluye categoria para separar ABL Cochera (Auto) de ABL Casa.
 const MATCH_TEXTO_OVERRIDES: Array<{
   tipo: 'Gasto' | 'Ingreso';
+  categoria: string;
   subcategoria: string;
   persona: string;
-  matchTexto: string;
+  matchTexto: { incluye: string[]; excluye: string[] };
 }> = [
-  { tipo: 'Gasto', subcategoria: 'Actividades extracurriculares', persona: 'Federico', matchTexto: 'micro rugby' },
+  { tipo: 'Gasto', categoria: 'Auto',               subcategoria: 'Cochera',                       persona: '',         matchTexto: { incluye: ['signo 2', 'depto 030', 'cochera'], excluye: [] } },
+  { tipo: 'Gasto', categoria: 'Casa',               subcategoria: 'Agua',                          persona: '',         matchTexto: { incluye: ['aysa', 'agua'], excluye: ['signo 2', 'depto 030', 'cochera'] } },
+  { tipo: 'Gasto', categoria: 'Auto',               subcategoria: 'ABL',                           persona: '',         matchTexto: { incluye: ['abl cochera'], excluye: [] } },
+  { tipo: 'Gasto', categoria: 'Casa',               subcategoria: 'ABL',                           persona: '',         matchTexto: { incluye: ['abl'], excluye: ['cochera'] } },
+  { tipo: 'Gasto', categoria: 'Educación y chicos', subcategoria: 'Colegio Fede',                  persona: 'Federico', matchTexto: { incluye: ['colegio federico', 'philips'], excluye: [] } },
+  { tipo: 'Gasto', categoria: 'Casa',               subcategoria: 'Internet',                      persona: '',         matchTexto: { incluye: ['internet'], excluye: [] } },
+  { tipo: 'Gasto', categoria: 'Educación y chicos', subcategoria: 'Actividades extracurriculares', persona: 'Federico', matchTexto: { incluye: ['micro rugby'], excluye: [] } },
 ];
+
+export function buildItemId(r: any, tipo: 'Gasto' | 'Ingreso'): string {
+  const persona   = normPersona(r.Persona);
+  const categoria = r.Categoria ?? r['Categoría'] ?? '';
+  const tarjetaCodigo = r.Tarjeta ? (TARJETA_CODIGO_MAP[r.Tarjeta as string] ?? null) : null;
+  const override  = MATCH_TEXTO_OVERRIDES.find(o =>
+    o.tipo === tipo &&
+    o.categoria === categoria &&
+    o.subcategoria === (r.Subcategoria ?? '') &&
+    o.persona === persona,
+  );
+  const matchTexto = override?.matchTexto ?? null;
+  return sha256Hex(
+    'exp', tipo, categoria, r.Subcategoria ?? '', persona, r.Moneda ?? 'ARS',
+    tarjetaCodigo ?? '',
+    matchTexto ? matchTexto.incluye.join('|') : '',
+  ).slice(0, 20);
+}
 
 function buildItem(r: any, tipo: 'Gasto' | 'Ingreso') {
   const persona = normPersona(r.Persona);
-  const id = sha256Hex(
-    'exp',
-    tipo,
-    r.Categoria ?? r['Categoría'] ?? '',
-    r.Subcategoria ?? '',
-    persona,
-    r.Moneda ?? 'ARS'
-  ).slice(0, 20);
+  const categoria = r.Categoria ?? r['Categoría'] ?? '';
 
-  // tarjetaCodigo: solo para items de tarjeta (campo Tarjeta presente)
+  // tarjetaCodigo: falla explícitamente si hay un nombre de tarjeta sin mapeo canónico
   let tarjetaCodigo: string | null = null;
   if (r.Tarjeta) {
     const code = TARJETA_CODIGO_MAP[r.Tarjeta as string];
@@ -53,19 +72,20 @@ function buildItem(r: any, tipo: 'Gasto' | 'Ingreso') {
     tarjetaCodigo = code;
   }
 
-  // matchTexto: hardcodeado para los casos que lo necesitan
   const override = MATCH_TEXTO_OVERRIDES.find(o =>
     o.tipo === tipo &&
+    o.categoria === categoria &&
     o.subcategoria === (r.Subcategoria ?? '') &&
     o.persona === persona,
   );
   const matchTexto = override?.matchTexto ?? null;
+  const id = buildItemId(r, tipo);
 
   return {
     id,
     tipo,
     activo: r.Activo === true || r.Activo === 'VERDADERO',
-    categoria: r.Categoria ?? r['Categoría'] ?? null,
+    categoria: categoria || null,
     subcategoria: r.Subcategoria ?? null,
     etiqueta: r.Etiqueta ?? null,
     persona: persona || null,

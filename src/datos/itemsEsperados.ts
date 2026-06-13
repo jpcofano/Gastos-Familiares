@@ -18,7 +18,9 @@ export function docAItemEsperado(id: string, data: DocumentData): ExpectedItem {
     autoCalendario: data.autoCalendario ?? false,
     notas:          data.notas          ?? null,
     tarjetaCodigo:  data.tarjetaCodigo  ?? null,
-    matchTexto:     data.matchTexto     ?? null,
+    matchTexto:     data.matchTexto
+      ? { incluye: data.matchTexto.incluye ?? [], excluye: data.matchTexto.excluye ?? [] }
+      : null,
   };
 }
 

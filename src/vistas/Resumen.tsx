@@ -93,16 +93,19 @@ function movimientosDelItem(item: ExpectedItem, movs: Movement[]): Movement[] {
     );
   }
 
-  // Rama 2: clave categoria+subcategoria+moneda (+ persona para ingresos, + matchTexto si existe)
+  // Rama 2: matchTexto manda (relaja cat/subcat) — o, sin matchTexto, clave cat+subcat
   return movs.filter(m => {
     if (m.tipo !== item.tipo) return false;
     if (m.moneda !== item.moneda) return false;
+    if (item.matchTexto) {
+      const desc = (m.descripcion ?? '').toLowerCase();
+      const inc = item.matchTexto.incluye.some(t => desc.includes(t));
+      const exc = item.matchTexto.excluye.some(t => desc.includes(t));
+      return inc && !exc;
+    }
     if (item.categoria    !== null && m.categoria    !== item.categoria)    return false;
     if (item.subcategoria !== null && m.subcategoria !== item.subcategoria) return false;
     if (item.tipo === 'Ingreso' && item.persona !== null && m.persona !== item.persona) return false;
-    if (item.matchTexto !== null) {
-      if (!(m.descripcion ?? '').toLowerCase().includes(item.matchTexto)) return false;
-    }
     return true;
   });
 }

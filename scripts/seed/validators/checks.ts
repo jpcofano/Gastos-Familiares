@@ -66,6 +66,14 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
     detail: `firestore=${stmts.data().count} excel=${data.tarjetasResumen.length}`,
   });
 
+  const totalItemsExcel = data.gastosEsperados.length + data.ingresosEsperados.length;
+  const itemsCount = await db.collection('itemsEsperados').count().get();
+  results.push({
+    name: 'itemsEsperados sin colision',
+    ok: itemsCount.data().count === totalItemsExcel,
+    detail: `firestore=${itemsCount.data().count} excel=${totalItemsExcel}`,
+  });
+
   const tc = await db.collection('tcDiario').count().get();
   results.push({
     name: 'tcDiario count',

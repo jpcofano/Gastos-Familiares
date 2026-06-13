@@ -1,8 +1,7 @@
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { SheetData } from '../readExcel';
-import { sha256Hex } from '../utils/hash';
 import { writeBatch } from '../utils/firestore';
-import { ALIAS_PERSONA, normPersona } from './expectedItems';
+import { ALIAS_PERSONA, buildItemId } from './expectedItems';
 
 const TECNICA_RE = /^(Juan|Mar[ií]a)(ARS|USD)$|^(Galicia|Frances|BBVA)\s+(Visa|Master)(ARS|USD)$/i;
 
@@ -54,15 +53,7 @@ function buildOblMap(gastosEsperados: any[]): Map<string, string> {
   for (const r of gastosEsperados) {
     const oblId = r.ID ? String(r.ID) : '';
     if (!oblId.startsWith('OBL-')) continue;
-    const persona = normPersona(r.Persona);
-    const id = sha256Hex(
-      'exp', 'Gasto',
-      r.Categoria ?? r['Categoría'] ?? '',
-      r.Subcategoria ?? '',
-      persona,
-      r.Moneda ?? 'ARS'
-    ).slice(0, 20);
-    map.set(oblId, id);
+    map.set(oblId, buildItemId(r, 'Gasto'));
   }
   return map;
 }

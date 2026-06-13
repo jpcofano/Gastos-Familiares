@@ -58,6 +58,8 @@ export interface CardStatement {
   observaciones: string | null;
 }
 
+export interface MatchTexto { incluye: string[]; excluye: string[]; }
+
 export interface ExpectedItem {
   id: string;
   tipo: 'Gasto' | 'Ingreso';
@@ -73,7 +75,7 @@ export interface ExpectedItem {
   autoCalendario: boolean;
   notas: string | null;
   tarjetaCodigo: string | null;
-  matchTexto: string | null;
+  matchTexto: MatchTexto | null;
 }
 
 export interface FamiliaMiembro {
