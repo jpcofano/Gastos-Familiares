@@ -107,5 +107,34 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
       : `${mesErrors.length} docs con mes incorrecto: ${mesErrors.slice(0, 3).map(d => d._id).join(', ')}`,
   });
 
+  // Autorizados: cada email de miembro activo tiene su doc con memberId/rol correctos
+  const activeEmails = new Map<string, { memberId: string; rol: string }>();
+  for (const u of data.usuarios) {
+    if (!u.Activo || !u.Persona || !u.Email || typeof u.Email !== 'string') continue;
+    const email = u.Email.trim().toLowerCase();
+    if (!activeEmails.has(email)) {
+      activeEmails.set(email, {
+        memberId: u.Persona,
+        rol: u.Rol === 'admin' ? 'admin' : 'dependiente',
+      });
+    }
+  }
+  const authSnap = await db.collection('autorizados').get();
+  const authMap = new Map(authSnap.docs.map(d => [d.id, d.data()]));
+  const missingEmails = [...activeEmails.keys()].filter(e => !authMap.has(e));
+  const badDocs = authSnap.docs.filter(d => {
+    const fields = d.data();
+    return !['admin', 'dependiente'].includes(fields.rol) || !fields.memberId;
+  });
+  const extraDocs = authSnap.docs.filter(d => !activeEmails.has(d.id));
+  const authOk = missingEmails.length === 0 && badDocs.length === 0 && extraDocs.length === 0;
+  results.push({
+    name: 'autorizados integridad',
+    ok: authOk,
+    detail: authOk
+      ? `OK (${authSnap.size} docs)`
+      : `missing=${missingEmails.join(',')} bad=${badDocs.map(d => d.id).join(',')} extra=${extraDocs.map(d => d.id).join(',')}`,
+  });
+
   return results;
 }

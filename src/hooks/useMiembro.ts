@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { type User } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
 import { useFirebaseUser } from './useFirebaseUser';
 import { cargarFamiliaConfig, resolverMiembro } from '../familia';
-import { db } from '../firebase';
 import type { FamiliaMiembro } from '../types';
 
 type Estado = 'cargando' | 'noAutenticado' | 'noAutorizado' | 'autenticado';
@@ -44,11 +42,6 @@ export function useMiembro(): UseMiembroResult {
         }
         const resultado = resolverMiembro(user.email ?? '', config);
         if (resultado) {
-          // Escribe {rol, memberId} en /autorizados para que las Security Rules puedan leerlo
-          setDoc(doc(db, 'autorizados', user.uid), {
-            memberId: resultado.memberId,
-            rol: resultado.miembro.rol,
-          }).catch(err => console.warn('[useMiembro] No se pudo escribir usuarios/{uid}:', err));
           setMemberId(resultado.memberId);
           setMiembro(resultado.miembro);
           setEstado('autenticado');

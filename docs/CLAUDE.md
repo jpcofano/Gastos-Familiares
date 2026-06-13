@@ -16,7 +16,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Fase 2 — Seed Sheets a Firestore: codigo listo, pendiente correr en produccion.
 - Fase 3 — Auth + shell PWA: cerrado.
 - Fase 4 — Vistas read-only (Dashboard, Resumen, pantalla de hijos): cerrado.
-- Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado (Rules escritura, alta manual, validators).
+- Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado (Rules escritura, alta manual, validators). F5.1.0 hotfix P0 cerrado (autorización por /autorizados/{email}, write bloqueado desde el cliente).
 - Fase 6 — Tarjetas + Comprobantes con Cloud Functions: pendiente.
 - Fase 7 — Cutover y archivo del Sheet: pendiente.
 
@@ -37,6 +37,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   Rutas montadas en shell-content; header fijo queda fuera del router.
 - Resumenes se pagan al vencimiento. No hay flujo de revision por estados;
   pendiente_revision del legacy es vestigial y no se porta.
+- ResumenMes es vista calculada en vivo, no se materializa.
 
 ## Reglas operativas
 
@@ -88,7 +89,7 @@ Solo despues de validar contra emulador. Pasos:
 3. `npm run validate -- --target=production`
 4. Confirmar que los 10 validators dan verde.
 
-Si algun validator falla, no avanzar a F3. Diagnosticar primero.
+Si algun validator falla, diagnosticar antes de continuar.
 
 ## Modelo de datos
 
@@ -98,11 +99,11 @@ Colecciones:
 - `/etiquetas/{id}`: 13 docs (las tecnicas se descartan).
 - `/reglasNormalizacion/{id}`: 7 reglas.
 - `/tcDiario/{YYYY-MM-DD}`: 147+ docs, escritura solo desde Function.
-- `/autorizados/{uid}`: 1 doc por usuario logueado; contiene {memberId, rol} para las Security Rules.
+- `/autorizados/{email}`: un doc por email de miembro activo; sembrado; read-only vía Rules por token.email.lower().
 - `/movimientos/{id}`: 1136 docs (snapshot 2026-06-12), source of truth de movimientos.
-- `/resumenesTarjeta/{id}`: 14 docs iniciales, cabeceras de resumenes.
+- `/resumenesTarjeta/{id}`: 18 docs iniciales, cabeceras de resumenes.
 - `/itemsEsperados/{id}`: 24 docs (20 gastos + 4 ingresos), unificada con `tipo`.
-- `/diccionario/{id}`: 412 entradas de aprendizaje, dict global.
+- `/diccionario/{id}`: ~470 entradas de aprendizaje, dict global.
 
 Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracion.
 

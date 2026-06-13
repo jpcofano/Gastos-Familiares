@@ -4,22 +4,21 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isSignedIn() { return request.auth != null; }
-    function authDoc()    { return get(/databases/$(database)/documents/autorizados/$(request.auth.uid)); }
+    function authDoc()    { return get(/databases/$(database)/documents/autorizados/$(request.auth.token.email.lower())); }
     function esAdmin() {
       let d = authDoc();
-      return isSignedIn() && d != null && d.data.rol == 'admin';
+      return isSignedIn() && request.auth.token.email_verified == true && d != null && d.data.rol == 'admin';
     }
     function esMiembro() {
       let d = authDoc();
-      return isSignedIn() && d != null && d.data.memberId != null;
+      return isSignedIn() && request.auth.token.email_verified == true && d != null && d.data.memberId != null;
     }
     function miMemberId() {
       let d = authDoc();
       return d != null ? d.data.memberId : null;
     }
 
-    // config/familia: legible por cualquier signed-in (necesario para bootstrap:
-    // useMiembro lo lee ANTES de escribir autorizados/{uid})
+    // config/familia: legible por cualquier signed-in (necesario para bootstrap)
     match /config/{doc} {
       allow read:  if isSignedIn();
       allow write: if false;
@@ -39,9 +38,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Doc propio del usuario (escrito por el cliente al resolver memberId)
-    match /autorizados/{uid} {
-      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    // Whitelist de acceso — sembrado, inmutable desde el cliente
+    match /autorizados/{email} {
+      allow read:  if isSignedIn() && request.auth.token.email_verified == true;
+      allow write: if false;
     }
 
     // Movimientos — lectura scoped, create validado campo a campo, update/delete cerrado

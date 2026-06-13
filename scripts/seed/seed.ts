@@ -8,6 +8,7 @@ import { seedTcDaily }            from './transformers/tcDaily';
 import { seedDictionary }         from './transformers/dictionary';
 import { seedExpectedItems }      from './transformers/expectedItems';
 import { seedCardStatements }     from './transformers/cardStatements';
+import { seedAutorizados }        from './transformers/autorizados';
 import { seedMovements }          from './transformers/movements';
 
 interface Flags {
@@ -49,6 +50,7 @@ async function main() {
   await seedDictionary(db, data, flags.dryRun);
   await seedExpectedItems(db, data, flags.dryRun);
   await seedCardStatements(db, data, flags.dryRun);
+  await seedAutorizados(db, data, flags.dryRun);
   await seedMovements(db, data, flags.dryRun);
 
   console.log('\nSeed completo. Correr `npm run validate` para verificar totales.\n');
