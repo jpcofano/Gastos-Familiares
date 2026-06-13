@@ -1,0 +1,341 @@
+.cfg {
+  padding: 1rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.cfg-titulo {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 1.25rem;
+}
+
+/* ── Tabs ── */
+.cfg-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+.cfg-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+}
+.cfg-tab:hover { color: #374151; }
+.cfg-tab--activo {
+  color: #1d4ed8;
+  border-bottom-color: #1d4ed8;
+}
+
+/* ── Acciones globales ── */
+.cfg-acciones { margin-bottom: 1rem; }
+.cfg-btn-nuevo {
+  padding: 0.45rem 1rem;
+  background: #1d4ed8;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cfg-btn-nuevo:hover { background: #1e40af; }
+
+/* ── Estado / error ── */
+.cfg-estado { color: #6b7280; font-style: italic; padding: 0.5rem 0; }
+.cfg-error  { color: #dc2626; }
+
+/* ── Encabezado sección inactivos ── */
+.cfg-seccion-sub {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9ca3af;
+  margin: 1.5rem 0 0.5rem;
+}
+
+/* ── Lista de ítems ── */
+.cfg-lista {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cfg-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fafafa;
+  font-size: 0.875rem;
+}
+.cfg-item--inactivo { opacity: 0.5; }
+
+.cfg-item-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+.cfg-item-cat  { font-weight: 500; }
+.cfg-item-monto {
+  font-size: 0.8rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+/* ── Chips de info en lista ── */
+.cfg-chip-persona,
+.cfg-chip-moneda,
+.cfg-chip-auto,
+.cfg-chip-tarj {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.1em 0.45em;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.cfg-chip-persona { background: #e5e7eb; color: #374151; }
+.cfg-chip-moneda  { background: #dbeafe; color: #1d4ed8; }
+.cfg-chip-auto    { background: #d1fae5; color: #065f46; }
+.cfg-chip-tarj    { background: #fef3c7; color: #92400e; }
+
+/* ── Botones de ítem ── */
+.cfg-item-acciones {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.cfg-btn-sm {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2em 0.6em;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: white;
+  color: #374151;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cfg-btn-sm:hover { background: #f3f4f6; }
+.cfg-btn-sm--warn   { border-color: #f59e0b; color: #b45309; }
+.cfg-btn-sm--warn:hover  { background: #fffbeb; }
+.cfg-btn-sm--danger { border-color: #f87171; color: #dc2626; }
+.cfg-btn-sm--danger:hover { background: #fff1f2; }
+
+/* ── Overlay modal ── */
+.cfg-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1rem;
+  z-index: 200;
+  overflow-y: auto;
+}
+
+.cfg-panel {
+  background: white;
+  border-radius: 10px;
+  width: 100%;
+  max-width: 580px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+
+.cfg-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+.cfg-panel-titulo {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.cfg-panel-cerrar {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0.1rem 0.35rem;
+  line-height: 1;
+  border-radius: 4px;
+}
+.cfg-panel-cerrar:hover { background: #f3f4f6; color: #374151; }
+
+/* ── Formulario ── */
+.cfg-form {
+  padding: 1rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.cfg-form-fila {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.cfg-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.cfg-campo label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.cfg-campo input[type="text"],
+.cfg-campo input[type="number"],
+.cfg-campo select,
+.cfg-campo textarea {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  font-size: 0.875rem;
+  background: white;
+  box-sizing: border-box;
+}
+.cfg-campo input:focus,
+.cfg-campo select:focus,
+.cfg-campo textarea:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+  border-color: transparent;
+}
+.cfg-campo textarea { resize: vertical; min-height: 3rem; }
+
+/* ── Toggle checkbox inline ── */
+.cfg-toggle-fila {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+.cfg-toggle-fila input[type="checkbox"] { width: 1rem; height: 1rem; cursor: pointer; }
+
+/* ── Editor de chips ── */
+.cfg-chips-area {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  padding: 0.35rem 0.5rem;
+  min-height: 2.2rem;
+  background: white;
+}
+.cfg-chips-area:focus-within {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+  border-color: transparent;
+}
+.cfg-chip-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15em 0.5em;
+  border-radius: 3px;
+}
+.cfg-chip-tag button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 0.85em;
+  color: #0369a1;
+  line-height: 1;
+}
+.cfg-chip-tag button:hover { color: #dc2626; }
+.cfg-chips-input {
+  border: none;
+  outline: none;
+  font-size: 0.8rem;
+  flex: 1;
+  min-width: 80px;
+  padding: 0.1rem 0;
+  background: transparent;
+}
+.cfg-chips-add {
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  padding: 0.1em 0.45em;
+  cursor: pointer;
+  color: #374151;
+  line-height: 1.4;
+}
+.cfg-chips-add:hover { background: #f3f4f6; }
+
+/* ── Error inline + acciones form ── */
+.cfg-form-error {
+  font-size: 0.82rem;
+  color: #dc2626;
+  background: #fff1f2;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  padding: 0.4rem 0.65rem;
+}
+.cfg-form-acciones {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding-top: 0.25rem;
+}
+.cfg-btn-sec {
+  padding: 0.45rem 1rem;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: #374151;
+}
+.cfg-btn-sec:hover { background: #f3f4f6; }
+.cfg-btn-sec:disabled,
+.cfg-btn-pri:disabled { opacity: 0.6; cursor: default; }
+.cfg-btn-pri {
+  padding: 0.45rem 1.1rem;
+  background: #1d4ed8;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cfg-btn-pri:hover:not(:disabled) { background: #1e40af; }
