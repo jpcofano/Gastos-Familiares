@@ -61,7 +61,11 @@ service cloud.firestore {
         && request.resource.data.actualizadoEn == request.time
         && request.resource.data.descripcion is string
         && request.resource.data.descripcion.size() > 0;
-      allow update, delete: if false;
+      allow update: if esAdmin()
+        && request.resource.data.creadoPor == resource.data.creadoPor
+        && request.resource.data.creadoEn == resource.data.creadoEn
+        && request.resource.data.actualizadoEn == request.time;
+      allow delete: if false;
     }
 
     // Solo admins
@@ -69,11 +73,25 @@ service cloud.firestore {
       allow read, write: if esAdmin();
     }
     match /itemsEsperados/{id} {
-      allow read, write: if esAdmin();
+      allow read: if esMiembro();
+      allow create, update: if esAdmin()
+        && request.resource.data.tipo in ['Gasto', 'Ingreso']
+        && request.resource.data.moneda in ['ARS', 'USD']
+        && request.resource.data.activo is bool
+        && request.resource.data.periodicidad in ['mensual', 'bimestral', 'trimestral', 'anual', 'unico']
+        && request.resource.data.pagoAutomatico is bool;
+      allow delete: if esAdmin();
     }
     match /reglasNormalizacion/{id} {
       allow read:  if esAdmin();
       allow write: if false;
+    }
+
+    // Comprobantes — subida por cualquier miembro, update/delete solo admin
+    match /comprobantes/{hash} {
+      allow read:   if esMiembro();
+      allow create: if esMiembro();
+      allow update, delete: if esAdmin();
     }
 
     // Diccionario — lectura admin + escritura manual por cualquier miembro

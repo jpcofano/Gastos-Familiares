@@ -30,6 +30,7 @@ export interface Movement {
   padreId: string | null;
   resumenTarjetaId: string | null;
   itemEsperadoId: string | null;
+  confirmadoPago: boolean;
   numeroComprobante: string | null;
   hashPdf: string | null;
   refStoragePdf: string | null;
@@ -78,6 +79,18 @@ export interface ExpectedItem {
   matchTexto: MatchTexto | null;
   periodicidad: 'mensual' | 'bimestral' | 'trimestral' | 'anual' | 'unico';
   pagoAutomatico: boolean;
+}
+
+export interface Comprobante {
+  id: string;         // = hashPdf (doc-id)
+  hashPdf: string;
+  nombreArchivo: string;
+  contentType: string;
+  tamano: number;
+  refStoragePdf: string;
+  subidoPor: string;  // memberId
+  subidoEn: Date;
+  estado: 'subido' | 'extraido' | 'vinculado';
 }
 
 export interface FamiliaMiembro {

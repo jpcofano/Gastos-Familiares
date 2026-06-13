@@ -1,0 +1,18 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /comprobantes/{hash} {
+      // Storage Rules no pueden consultar Firestore para verificar rol.
+      // request.auth != null es deliberadamente más laxo que las Rules de Firestore:
+      // cualquier autenticado puede operar — el control fino (esMiembro / esAdmin)
+      // cae en el doc /comprobantes/{hash} de Firestore.
+      // Cerrar con custom claim si se necesita control granular por rol en Storage.
+      allow read:   if request.auth != null;
+      allow write:  if request.auth != null
+                    && request.resource.size < 10 * 1024 * 1024
+                    && request.resource.contentType.matches('application/pdf|image/.*');
+      allow delete: if false;
+    }
+  }
+}

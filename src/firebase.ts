@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -11,12 +12,14 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID              ?? '',
 };
 
-export const app  = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db   = getFirestore(app);
+export const app     = initializeApp(firebaseConfig);
+export const auth    = getAuth(app);
+export const db      = getFirestore(app);
+export const storage = getStorage(app);
 
 if (import.meta.env.DEV) {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
-  console.log('[Firebase] conectado al emulador — Auth:9099  Firestore:8080');
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  console.log('[Firebase] conectado al emulador — Auth:9099  Firestore:8080  Storage:9199');
 }
