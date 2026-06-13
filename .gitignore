@@ -10,6 +10,7 @@ secrets/serviceAccountKey*.json
 .DS_Store
 Thumbs.db
 emulator-data/
+firebase-export-*/
 *.zip
 service-account*.json
 **/service-account*.json
