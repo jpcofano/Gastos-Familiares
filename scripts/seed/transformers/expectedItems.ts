@@ -97,6 +97,8 @@ function buildItem(r: any, tipo: 'Gasto' | 'Ingreso') {
     notas: r.Notas ?? null,
     tarjetaCodigo,
     matchTexto,
+    periodicidad:   r.Periodicidad || 'mensual',
+    pagoAutomatico: r.PagoAutomatico === true || r.PagoAutomatico === 'VERDADERO',
   };
 }
 

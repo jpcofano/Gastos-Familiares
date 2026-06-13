@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { cargarSubcategorias, cargarEtiquetas, type SubcategoriaItem, type EtiquetaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig } from '../familia';
 import { crearMovimiento } from '../datos/movimientos';
@@ -6,11 +6,22 @@ import { tcParaFecha } from '../datos/tcDiario';
 import type { FamiliaConfig, FamiliaMiembro } from '../types';
 import './AltaMovimiento.css';
 
+interface Preload {
+  tipo?: 'Gasto' | 'Ingreso';
+  categoria?: string;
+  subcategoria?: string;
+  persona?: string;
+  moneda?: 'ARS' | 'USD';
+  monto?: string;
+  itemEsperadoId?: string;
+}
+
 interface Props {
   memberId: string;
   miembro: FamiliaMiembro;
   onGuardado: () => void;
   onCancelar: () => void;
+  preload?: Preload;
 }
 
 function hoyISO(): string {
@@ -18,7 +29,7 @@ function hoyISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar }: Props) {
+export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload }: Props) {
   const esAdmin = miembro.rol === 'admin';
 
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
@@ -27,16 +38,18 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [config,    setConfig]    = useState<FamiliaConfig | null>(null);
 
   const [fecha,             setFecha]             = useState(hoyISO);
-  const [tipo,              setTipo]              = useState<'Gasto' | 'Ingreso'>('Gasto');
+  const [tipo,              setTipo]              = useState<'Gasto' | 'Ingreso'>(preload?.tipo ?? 'Gasto');
   const [descripcion,       setDescripcion]       = useState('');
-  const [monto,             setMonto]             = useState('');
-  const [moneda,            setMoneda]            = useState<'ARS' | 'USD'>('ARS');
-  const [categoria,         setCategoria]         = useState('');
-  const [subcategoria,      setSubcategoria]      = useState('');
+  const [monto,             setMonto]             = useState(preload?.monto ?? '');
+  const [moneda,            setMoneda]            = useState<'ARS' | 'USD'>(preload?.moneda ?? 'ARS');
+  const [categoria,         setCategoria]         = useState(preload?.categoria ?? '');
+  const [subcategoria,      setSubcategoria]      = useState(preload?.subcategoria ?? '');
   const [etiqueta,          setEtiqueta]          = useState('');
   const [banco,             setBanco]             = useState('');
-  const [persona,           setPersona]           = useState(memberId);
+  const [persona,           setPersona]           = useState(preload?.persona ?? memberId);
   const [incluirResumenMes, setIncluirResumenMes] = useState(true);
+
+  const subcatInitRef = useRef(true);
 
   const [tcUsdArs,    setTcUsdArs]    = useState<number | null>(null);
   const [tcCargando,  setTcCargando]  = useState(false);
@@ -50,7 +63,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
         setEtiquetas(e);
         if (fam) {
           setConfig(fam);
-          if (esAdmin) {
+          if (esAdmin && !preload?.persona) {
             const primero = Object.keys(fam.miembros).find(k => fam.miembros[k].activo);
             if (primero) setPersona(primero);
           }
@@ -59,8 +72,11 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       });
   }, [esAdmin]);
 
-  // Reset subcategoria cuando cambia la categoría
-  useEffect(() => { setSubcategoria(''); }, [categoria]);
+  // Reset subcategoria cuando cambia la categoría (saltar en el mount inicial para respetar preload)
+  useEffect(() => {
+    if (subcatInitRef.current) { subcatInitRef.current = false; return; }
+    setSubcategoria('');
+  }, [categoria]);
 
   // Lookup TC al cambiar fecha o moneda
   useEffect(() => {
@@ -110,6 +126,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       persona,
       creadoPor:         memberId,
       incluirResumenMes,
+      itemEsperadoId:    preload?.itemEsperadoId,
     });
     setGuardando(false);
 

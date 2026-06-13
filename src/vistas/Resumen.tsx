@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { movimientosDelMes } from '../datos/movimientos';
 import { itemsEsperadosActivos } from '../datos/itemsEsperados';
 import { useMiembroCtx } from '../contexto/MiembroContext';
+import AltaMovimiento from './AltaMovimiento';
 import type { Movement, ExpectedItem } from '../types';
 import './Resumen.css';
 
@@ -77,7 +78,7 @@ function fmtMonto(n: number, moneda: 'ARS' | 'USD'): string {
 }
 function claseBalance(n: number) { return n >= 0 ? 'res-ingreso' : 'res-gasto'; }
 
-// ── Checklist ─────────────────────────────────────────────────────────────────
+// ── Checklist — match de movimientos ─────────────────────────────────────────
 
 function movimientosDelItem(item: ExpectedItem, movs: Movement[]): Movement[] {
   // Rama 0: vínculo directo por itemEsperadoId (manda sobre todo)
@@ -110,13 +111,67 @@ function movimientosDelItem(item: ExpectedItem, movs: Movement[]): Movement[] {
   });
 }
 
-type EstadoItem = 'registrado' | 'pendiente' | 'vencido';
+// ── State machine ─────────────────────────────────────────────────────────────
 
-function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr: string, mes: string): EstadoItem {
-  if (matches.length > 0) return 'registrado';
-  if (mes === mesActualStr && item.diaVencimiento && item.diaVencimiento < new Date().getDate()) return 'vencido';
+type EstadoItem =
+  | 'pagado' | 'parcial' | 'automatico'
+  | 'pendiente' | 'vencido'
+  | 'programado'
+  | 'no_registrado'
+  | 'no_aplica';
+
+function aplicaEnMes(item: ExpectedItem, _mes: string): boolean {
+  switch (item.periodicidad) {
+    case 'mensual': return true;
+    // TODO: requiere mes-ancla para periodicidades no mensuales
+    case 'bimestral':
+    case 'trimestral':
+    case 'anual':
+    case 'unico':
+      return true;
+    default: return true;
+  }
+}
+
+function estadoItem(
+  item: ExpectedItem,
+  matches: Movement[],
+  mesActualStr: string,
+  mes: string,
+): EstadoItem {
+  if (!aplicaEnMes(item, mes)) return 'no_aplica';
+  if (matches.length > 0) {
+    const montoMatched = matches.reduce((s, m) => s + Math.abs(m.monto), 0);
+    if (item.montoEsperado != null && montoMatched < item.montoEsperado * 0.99) return 'parcial';
+    return 'pagado';
+  }
+  if (item.pagoAutomatico) return 'automatico';
+  if (mes > mesActualStr) return 'programado';
+  if (mes < mesActualStr) return 'no_registrado';
+  if (item.diaVencimiento && item.diaVencimiento < new Date().getDate()) return 'vencido';
   return 'pendiente';
 }
+
+function cubierto(estado: EstadoItem): boolean {
+  return estado === 'pagado' || estado === 'automatico';
+}
+
+const ORDEN_ESTADO: Record<EstadoItem, number> = {
+  vencido: 0, pendiente: 1, parcial: 2,
+  no_registrado: 3, programado: 4, automatico: 5,
+  pagado: 6, no_aplica: 7,
+};
+
+const BADGE_LABEL: Record<EstadoItem, string> = {
+  pagado:        'pagado',
+  parcial:       'parcial',
+  automatico:    'automático',
+  pendiente:     'pendiente',
+  vencido:       'vencido',
+  programado:    'programado',
+  no_registrado: 'no registrado',
+  no_aplica:     'no aplica',
+};
 
 // ── Subcomponentes ────────────────────────────────────────────────────────────
 
@@ -125,18 +180,25 @@ function TarjBadge() {
 }
 
 function EstadoBadge({ estado }: { estado: EstadoItem }) {
-  return <span className={`res-badge-estado res-badge-estado--${estado}`}>{estado}</span>;
+  return (
+    <span className={`res-badge-estado res-badge-estado--${estado}`}>
+      {BADGE_LABEL[estado]}
+    </span>
+  );
 }
 
 interface CheckItemRowProps {
   item: ExpectedItem;
   matches: Movement[];
   estado: EstadoItem;
+  onRegistrar: () => void;
 }
 
-function CheckItemRow({ item, matches, estado }: CheckItemRowProps) {
-  const montoReal = matches.reduce((s, m) => s + m.monto, 0);
-  const etiqueta = [item.categoria, item.subcategoria].filter(Boolean).join(' › ');
+function CheckItemRow({ item, matches, estado, onRegistrar }: CheckItemRowProps) {
+  const montoReal      = matches.reduce((s, m) => s + m.monto, 0);
+  const etiqueta       = [item.categoria, item.subcategoria].filter(Boolean).join(' › ');
+  const tieneMatch     = estado === 'pagado' || estado === 'parcial';
+  const puedeRegistrar = estado === 'pendiente' || estado === 'vencido' || estado === 'parcial';
 
   return (
     <div className={`res-check-item res-check-item--${estado}`}>
@@ -147,20 +209,25 @@ function CheckItemRow({ item, matches, estado }: CheckItemRowProps) {
         <span className="res-check-moneda">{item.moneda}</span>
       </div>
       <div className="res-check-montos">
-        {estado === 'registrado' && (
+        {tieneMatch && (
           <span className={item.tipo === 'Ingreso' ? 'res-ingreso' : 'res-gasto'}>
             {fmtMonto(montoReal, item.moneda)}
             {matches.length > 1 && <span className="res-check-multi"> ({matches.length} movs.)</span>}
           </span>
         )}
-        {item.montoEsperado !== null && estado === 'registrado' && (
+        {item.montoEsperado !== null && tieneMatch && (
           <span className="res-check-esperado">esp. {fmtMonto(item.montoEsperado, item.moneda)}</span>
         )}
-        {item.montoEsperado !== null && estado !== 'registrado' && (
+        {item.montoEsperado !== null && !tieneMatch && estado !== 'automatico' && (
           <span className="res-check-esperado">{fmtMonto(item.montoEsperado, item.moneda)}</span>
         )}
-        {estado !== 'registrado' && item.diaVencimiento && (
+        {(estado === 'pendiente' || estado === 'vencido') && item.diaVencimiento && (
           <span className="res-check-vence">vence día {item.diaVencimiento}</span>
+        )}
+        {puedeRegistrar && (
+          <button className="res-btn-registrar" onClick={onRegistrar} type="button">
+            Registrar
+          </button>
         )}
       </div>
     </div>
@@ -168,18 +235,25 @@ function CheckItemRow({ item, matches, estado }: CheckItemRowProps) {
 }
 
 // ── Vista principal ───────────────────────────────────────────────────────────
+// Separar guard de hooks para no violar reglas de React (P2 fix)
 
 export default function Resumen() {
   const { miembro } = useMiembroCtx();
   if (miembro.rol !== 'admin') return <Navigate to="/" replace />;
+  return <ResumenAdmin />;
+}
 
-  const [mes, setMes]               = useState(mesActual);
-  const [cargando, setCargando]     = useState(true);
-  const [error, setError]           = useState<string | null>(null);
-  const [movimientos, setMovimientos] = useState<Movement[]>([]);
-  const [items, setItems]           = useState<ExpectedItem[]>([]);
+function ResumenAdmin() {
+  const { memberId, miembro } = useMiembroCtx();
 
-  // Items: fetch una vez (no dependen del mes)
+  const [mes, setMes]                         = useState(mesActual);
+  const [refetch, setRefetch]                 = useState(0);
+  const [cargando, setCargando]               = useState(true);
+  const [error, setError]                     = useState<string | null>(null);
+  const [movimientos, setMovimientos]         = useState<Movement[]>([]);
+  const [items, setItems]                     = useState<ExpectedItem[]>([]);
+  const [registrandoItem, setRegistrandoItem] = useState<ExpectedItem | null>(null);
+
   useEffect(() => {
     itemsEsperadosActivos().then(res => {
       if (res.ok) setItems(res.data);
@@ -187,7 +261,6 @@ export default function Resumen() {
     });
   }, []);
 
-  // Movimientos: fetch por mes
   useEffect(() => {
     let cancelado = false;
     setCargando(true);
@@ -199,7 +272,7 @@ export default function Resumen() {
       setCargando(false);
     });
     return () => { cancelado = true; };
-  }, [mes]);
+  }, [mes, refetch]);
 
   // ── Caja del mes (incluirResumenMes=true)
   const cajaMov = movimientos
@@ -216,7 +289,7 @@ export default function Resumen() {
   const hayUSD = cajaMov.some(m => m.moneda === 'USD');
 
   // ── Checklist
-  const mesHoy = mesActual();
+  const mesHoy        = mesActual();
   const gastosItems   = items.filter(i => i.tipo === 'Gasto');
   const ingresosItems = items.filter(i => i.tipo === 'Ingreso');
 
@@ -226,17 +299,25 @@ export default function Resumen() {
     return { item, matches, estado };
   }
 
-  const gastosCheck   = gastosItems.map(checkData).sort((a, b) => {
-    const ord: Record<EstadoItem, number> = { vencido: 0, pendiente: 1, registrado: 2 };
-    return ord[a.estado] - ord[b.estado];
-  });
-  const ingresosCheck = ingresosItems.map(checkData).sort((a, b) => {
-    const ord: Record<EstadoItem, number> = { vencido: 0, pendiente: 1, registrado: 2 };
-    return ord[a.estado] - ord[b.estado];
-  });
+  const gastosCheck = gastosItems.map(checkData).sort((a, b) =>
+    ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado],
+  );
+  const ingresosCheck = ingresosItems.map(checkData).sort((a, b) =>
+    ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado],
+  );
 
-  const gastosReg   = gastosCheck.filter(c => c.estado === 'registrado').length;
-  const ingresosReg = ingresosCheck.filter(c => c.estado === 'registrado').length;
+  const gastosReg   = gastosCheck.filter(c => cubierto(c.estado)).length;
+  const ingresosReg = ingresosCheck.filter(c => cubierto(c.estado)).length;
+
+  function handleRegistrar(item: ExpectedItem, matches: Movement[]) {
+    if (matches.length > 0) {
+      const ok = window.confirm(
+        `Ya hay ${matches.length} movimiento${matches.length > 1 ? 's' : ''} para este ítem en ${formatMes(mes)}. ¿Registrar de todas formas?`,
+      );
+      if (!ok) return;
+    }
+    setRegistrandoItem(item);
+  }
 
   return (
     <div className="res">
@@ -256,7 +337,6 @@ export default function Resumen() {
           <section className="res-seccion">
             <h2 className="res-seccion-titulo">Caja — {formatMes(mes)}</h2>
 
-            {/* Totales */}
             <div className="res-totales">
               <div className="res-totales-card res-totales-eq">
                 <span className="res-totales-titulo">Equivalente</span>
@@ -291,7 +371,6 @@ export default function Resumen() {
               )}
             </div>
 
-            {/* Lista agrupada */}
             {cajaMov.length === 0 ? (
               <p className="res-estado">Sin movimientos de caja para {formatMes(mes)}.</p>
             ) : (
@@ -305,9 +384,7 @@ export default function Resumen() {
                           <tr key={m.id}>
                             <td className="res-col-fecha">{formatFecha(m.fecha)}</td>
                             <td>{m.descripcion}</td>
-                            <td className="res-col-monto res-ingreso">
-                              +{fmtMonto(m.monto, m.moneda)}
-                            </td>
+                            <td className="res-col-monto res-ingreso">+{fmtMonto(m.monto, m.moneda)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -327,9 +404,7 @@ export default function Resumen() {
                               {m.descripcion}
                               {m.subtipo === 'TarjetaPago' && <TarjBadge />}
                             </td>
-                            <td className="res-col-monto res-gasto">
-                              -{fmtMonto(m.monto, m.moneda)}
-                            </td>
+                            <td className="res-col-monto res-gasto">-{fmtMonto(m.monto, m.moneda)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -345,36 +420,70 @@ export default function Resumen() {
             <h2 className="res-seccion-titulo">Checklist de esperados</h2>
 
             <div className="res-checklist-bloques">
-              {/* Gastos */}
               <div className="res-checklist-bloque">
                 <h3 className="res-checklist-titulo">
                   Gastos esperados
-                  <span className="res-checklist-contador">{gastosReg} de {gastosItems.length} registrados</span>
+                  <span className="res-checklist-contador">{gastosReg} de {gastosItems.length} cubiertos</span>
                 </h3>
                 {gastosCheck.length === 0
                   ? <p className="res-estado">Sin gastos esperados activos.</p>
                   : gastosCheck.map(({ item, matches, estado }) => (
-                      <CheckItemRow key={item.id} item={item} matches={matches} estado={estado} />
+                      <CheckItemRow
+                        key={item.id}
+                        item={item}
+                        matches={matches}
+                        estado={estado}
+                        onRegistrar={() => handleRegistrar(item, matches)}
+                      />
                     ))
                 }
               </div>
 
-              {/* Ingresos */}
               <div className="res-checklist-bloque">
                 <h3 className="res-checklist-titulo">
                   Ingresos esperados
-                  <span className="res-checklist-contador">{ingresosReg} de {ingresosItems.length} registrados</span>
+                  <span className="res-checklist-contador">{ingresosReg} de {ingresosItems.length} cubiertos</span>
                 </h3>
                 {ingresosCheck.length === 0
                   ? <p className="res-estado">Sin ingresos esperados activos.</p>
                   : ingresosCheck.map(({ item, matches, estado }) => (
-                      <CheckItemRow key={item.id} item={item} matches={matches} estado={estado} />
+                      <CheckItemRow
+                        key={item.id}
+                        item={item}
+                        matches={matches}
+                        estado={estado}
+                        onRegistrar={() => handleRegistrar(item, matches)}
+                      />
                     ))
                 }
               </div>
             </div>
           </section>
         </>
+      )}
+
+      {/* Modal alta desde checklist */}
+      {registrandoItem && (
+        <AltaMovimiento
+          memberId={memberId}
+          miembro={miembro}
+          onGuardado={() => {
+            setRegistrandoItem(null);
+            setRefetch(n => n + 1);
+          }}
+          onCancelar={() => setRegistrandoItem(null)}
+          preload={{
+            tipo:          registrandoItem.tipo,
+            categoria:     registrandoItem.categoria    ?? undefined,
+            subcategoria:  registrandoItem.subcategoria ?? undefined,
+            persona:       registrandoItem.persona      ?? undefined,
+            moneda:        registrandoItem.moneda,
+            monto:         registrandoItem.montoEsperado != null
+                             ? String(registrandoItem.montoEsperado)
+                             : undefined,
+            itemEsperadoId: registrandoItem.id,
+          }}
+        />
       )}
     </div>
   );

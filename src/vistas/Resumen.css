@@ -184,9 +184,14 @@
   font-size: 0.875rem;
   border-left: 3px solid transparent;
 }
-.res-check-item--registrado { background: #f0fdf4; border-left-color: #16a34a; }
-.res-check-item--pendiente  { background: #fafafa; border-left-color: #d1d5db; }
-.res-check-item--vencido    { background: #fff7ed; border-left-color: #ea580c; }
+.res-check-item--pagado        { background: #f0fdf4; border-left-color: #16a34a; }
+.res-check-item--parcial       { background: #fffbeb; border-left-color: #d97706; }
+.res-check-item--automatico    { background: #eff6ff; border-left-color: #3b82f6; }
+.res-check-item--pendiente     { background: #fafafa; border-left-color: #d1d5db; }
+.res-check-item--vencido       { background: #fff7ed; border-left-color: #ea580c; }
+.res-check-item--programado    { background: #f8fafc; border-left-color: #cbd5e1; }
+.res-check-item--no_registrado { background: #fff1f2; border-left-color: #f43f5e; }
+.res-check-item--no_aplica     { background: #f9fafb; border-left-color: #e5e7eb; opacity: 0.6; }
 
 .res-check-main {
   display: flex;
@@ -235,6 +240,26 @@
   border-radius: 3px;
   white-space: nowrap;
 }
-.res-badge-estado--registrado { background: #dcfce7; color: #15803d; }
-.res-badge-estado--pendiente  { background: #f3f4f6; color: #6b7280; }
-.res-badge-estado--vencido    { background: #fed7aa; color: #c2410c; }
+.res-badge-estado--pagado        { background: #dcfce7; color: #15803d; }
+.res-badge-estado--parcial       { background: #fef3c7; color: #b45309; }
+.res-badge-estado--automatico    { background: #dbeafe; color: #1d4ed8; }
+.res-badge-estado--pendiente     { background: #f3f4f6; color: #6b7280; }
+.res-badge-estado--vencido       { background: #fed7aa; color: #c2410c; }
+.res-badge-estado--programado    { background: #f1f5f9; color: #64748b; }
+.res-badge-estado--no_registrado { background: #ffe4e6; color: #be123c; }
+.res-badge-estado--no_aplica     { background: #f3f4f6; color: #9ca3af; }
+
+/* ── Botón registrar desde checklist ── */
+.res-btn-registrar {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2em 0.55em;
+  border: 1px solid #3b82f6;
+  border-radius: 3px;
+  background: white;
+  color: #3b82f6;
+  cursor: pointer;
+  margin-top: 0.2rem;
+  line-height: 1.4;
+}
+.res-btn-registrar:hover { background: #eff6ff; }

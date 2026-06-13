@@ -21,6 +21,8 @@ export function docAItemEsperado(id: string, data: DocumentData): ExpectedItem {
     matchTexto:     data.matchTexto
       ? { incluye: data.matchTexto.incluye ?? [], excluye: data.matchTexto.excluye ?? [] }
       : null,
+    periodicidad:   data.periodicidad   || 'mensual',
+    pagoAutomatico: data.pagoAutomatico ?? false,
   };
 }
 

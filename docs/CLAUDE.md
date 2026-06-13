@@ -16,7 +16,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Fase 2 — Seed Sheets a Firestore: codigo listo, pendiente correr en produccion.
 - Fase 3 — Auth + shell PWA: cerrado.
 - Fase 4 — Vistas read-only (Dashboard, Resumen, pantalla de hijos): cerrado.
-- Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado (Rules escritura, alta manual, validators). F5.1.0 hotfix P0 cerrado (autorización por /autorizados/{email}, write bloqueado desde el cliente).
+- Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado. F5.1.0 hotfix P0 cerrado (autorizados por email). F5.2 cerrado (state machine 8 estados, registrar desde checklist, itemEsperadoId).
 - Fase 6 — Tarjetas + Comprobantes con Cloud Functions: pendiente.
 - Fase 7 — Cutover y archivo del Sheet: pendiente.
 
@@ -63,7 +63,6 @@ Estas mejoras quedan registradas pero no se implementan en F2:
   `@firebase/rules-unit-testing` antes de las Rules mismas.
 - Antes de produccion: exportar `public/icons/icon.svg` a PNG 192x192 y 512x512.
   SVG funciona en Chrome 98+ para instalabilidad local; PNG requerido para stores e iOS.
-- F5.2: aviso de duplicados al cargar.
 - Pre-F7: `npm run dups` + limpieza de planilla.
 - F6: comprobantes con prompt endurecido (CUIT vs numero, pseudo-numero).
   Spec completa: docs/flujos_incompletos_spec.md.
@@ -102,10 +101,31 @@ Colecciones:
 - `/autorizados/{email}`: un doc por email de miembro activo; sembrado; read-only vía Rules por token.email.lower().
 - `/movimientos/{id}`: 1136 docs (snapshot 2026-06-12), source of truth de movimientos.
 - `/resumenesTarjeta/{id}`: 18 docs iniciales, cabeceras de resumenes.
-- `/itemsEsperados/{id}`: 24 docs (20 gastos + 4 ingresos), unificada con `tipo`.
+- `/itemsEsperados/{id}`: 24 docs (20 gastos + 4 ingresos), unificada con `tipo`. Campos: `periodicidad` (default `mensual`; bimestral/trimestral/anual/unico previstos, sin uso hoy), `pagoAutomatico` (default `false`).
 - `/diccionario/{id}`: ~470 entradas de aprendizaje, dict global.
 
 Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracion.
+
+## State machine de esperados (ResumenMes)
+
+Derivada en vivo, NO materializada. Ocho estados:
+
+- `pagado`: tiene match(es); monto >= 99% del esperado.
+- `parcial`: tiene match(es); monto < 99% del esperado (no cuenta como cubierto).
+- `automatico`: sin match, `pagoAutomatico=true`; cubierto sin conciliar. No suma monto aparte.
+- `pendiente`: mes en curso, sin match, diaVencimiento no alcanzado (o sin diaVencimiento).
+- `vencido`: mes en curso, sin match, diaVencimiento < hoy.
+- `programado`: mes futuro, sin match.
+- `no_registrado`: mes cerrado, sin match (solo manuales; un pagoAutomatico nunca llega acá).
+- `no_aplica`: periodicidad no incluye este mes (placeholder; requiere mes-ancla cuando se active).
+
+Cubierto = `pagado` || `automatico`. El contador "X de Y" cuenta cubiertos; `parcial` queda abierto.
+
+"Registrar desde checklist" abre alta precargada y estampa `itemEsperadoId` en el movimiento creado
+→ match por Rama 0 (link duro, no depende del match difuso).
+
+Pendiente: periodicidades no-mensuales (bimestral/trimestral/anual/unico) necesitan mes-ancla cuando
+se activen. Hoy `aplicaEnMes` devuelve `true` para todas como placeholder.
 
 ## Estructura del repo
 

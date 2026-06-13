@@ -76,6 +76,8 @@ export interface ExpectedItem {
   notas: string | null;
   tarjetaCodigo: string | null;
   matchTexto: MatchTexto | null;
+  periodicidad: 'mensual' | 'bimestral' | 'trimestral' | 'anual' | 'unico';
+  pagoAutomatico: boolean;
 }
 
 export interface FamiliaMiembro {

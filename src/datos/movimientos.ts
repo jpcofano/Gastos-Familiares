@@ -62,6 +62,7 @@ export interface NuevoMovimiento {
   persona: string;
   creadoPor: string;
   incluirResumenMes: boolean;
+  itemEsperadoId?: string;
 }
 
 type ResultadoCreacion =
@@ -90,6 +91,7 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       excluirDash:       false,
       pagado:            true,
       incluirResumenMes: payload.incluirResumenMes,
+      itemEsperadoId:    payload.itemEsperadoId ?? null,
       // idLegacy intencionalmente ausente — los validators lo usan para distinguir docs del seed
       creadoEn:          serverTimestamp(),
       actualizadoEn:     serverTimestamp(),
