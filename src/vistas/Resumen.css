@@ -185,6 +185,7 @@
   border-left: 3px solid transparent;
 }
 .res-check-item--pagado        { background: #f0fdf4; border-left-color: #16a34a; }
+.res-check-item--por_confirmar { background: #f0f9ff; border-left-color: #0284c7; }
 .res-check-item--parcial       { background: #fffbeb; border-left-color: #d97706; }
 .res-check-item--automatico    { background: #eff6ff; border-left-color: #3b82f6; }
 .res-check-item--pendiente     { background: #fafafa; border-left-color: #d1d5db; }
@@ -241,6 +242,7 @@
   white-space: nowrap;
 }
 .res-badge-estado--pagado        { background: #dcfce7; color: #15803d; }
+.res-badge-estado--por_confirmar { background: #e0f2fe; color: #0369a1; }
 .res-badge-estado--parcial       { background: #fef3c7; color: #b45309; }
 .res-badge-estado--automatico    { background: #dbeafe; color: #1d4ed8; }
 .res-badge-estado--pendiente     { background: #f3f4f6; color: #6b7280; }
@@ -263,3 +265,17 @@
   line-height: 1.4;
 }
 .res-btn-registrar:hover { background: #eff6ff; }
+
+/* ── Botón deshacer confirmación ── */
+.res-btn-deshacer {
+  font-size: 0.65rem;
+  background: none;
+  border: none;
+  padding: 0.1em 0.2em;
+  color: #9ca3af;
+  cursor: pointer;
+  text-decoration: underline;
+  margin-top: 0.1rem;
+  line-height: 1.4;
+}
+.res-btn-deshacer:hover { color: #374151; }

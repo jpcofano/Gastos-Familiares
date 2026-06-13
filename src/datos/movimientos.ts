@@ -1,9 +1,9 @@
 import {
-  collection, getDocs, query, where, addDoc,
+  collection, getDocs, query, where, addDoc, writeBatch, doc,
   serverTimestamp, Timestamp, type DocumentData,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { Movement } from '../types';
+import type { Movement, ExpectedItem } from '../types';
 
 export function docAMovimiento(id: string, data: DocumentData): Movement {
   return {
@@ -35,6 +35,7 @@ export function docAMovimiento(id: string, data: DocumentData): Movement {
     padreId:                data.padreId                          ?? null,
     resumenTarjetaId:       data.resumenTarjetaId                 ?? null,
     itemEsperadoId:         data.itemEsperadoId                   ?? null,
+    confirmadoPago:         data.confirmadoPago                   ?? false,
     numeroComprobante:      data.numeroComprobante                ?? null,
     hashPdf:                data.hashPdf                          ?? null,
     refStoragePdf:          data.refStoragePdf                    ?? null,
@@ -97,6 +98,44 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       actualizadoEn:     serverTimestamp(),
     });
     return { ok: true, id: docRef.id };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
+
+export async function confirmarPagoEsperado(
+  item: ExpectedItem,
+  matches: Movement[],
+): Promise<Resultado<void>> {
+  try {
+    const batch = writeBatch(db);
+    for (const m of matches) {
+      batch.update(doc(db, 'movimientos', m.id), {
+        confirmadoPago: true,
+        itemEsperadoId: item.id,
+        actualizadoEn: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+export async function desmarcarPago(matches: Movement[]): Promise<Resultado<void>> {
+  try {
+    const batch = writeBatch(db);
+    for (const m of matches) {
+      batch.update(doc(db, 'movimientos', m.id), {
+        confirmadoPago: false,
+        actualizadoEn: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    return { ok: true, data: undefined };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }

@@ -108,24 +108,31 @@ Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracio
 
 ## State machine de esperados (ResumenMes)
 
-Derivada en vivo, NO materializada. Ocho estados:
+Derivada en vivo, NO materializada. Nueve estados (F5.5):
 
-- `pagado`: tiene match(es); monto >= 99% del esperado.
-- `parcial`: tiene match(es); monto < 99% del esperado (no cuenta como cubierto).
-- `automatico`: sin match, `pagoAutomatico=true`; cubierto sin conciliar. No suma monto aparte.
+- `pagado`: mes cerrado con match(es), O mes en curso con al menos un match confirmado y monto >= 99%.
+- `por_confirmar`: mes en curso/futuro con match(es) detectados pero ninguno con `confirmadoPago=true`.
+- `parcial`: mes en curso/futuro con confirmados pero monto confirmado < 99% esperado.
+- `automatico`: sin match, `pagoAutomatico=true`; cubierto sin conciliar.
 - `pendiente`: mes en curso, sin match, diaVencimiento no alcanzado (o sin diaVencimiento).
 - `vencido`: mes en curso, sin match, diaVencimiento < hoy.
 - `programado`: mes futuro, sin match.
-- `no_registrado`: mes cerrado, sin match (solo manuales; un pagoAutomatico nunca llega acá).
+- `no_registrado`: mes cerrado, sin match.
 - `no_aplica`: periodicidad no incluye este mes (placeholder; requiere mes-ancla cuando se active).
 
-Cubierto = `pagado` || `automatico`. El contador "X de Y" cuenta cubiertos; `parcial` queda abierto.
+Cubierto = `pagado` || `automatico`. `por_confirmar` y `parcial` NO cuentan como cubiertos.
 
-"Registrar desde checklist" abre alta precargada y estampa `itemEsperadoId` en el movimiento creado
-→ match por Rama 0 (link duro, no depende del match difuso).
+Confirmación (F5.5): el checklist NO crea movimientos. "Confirmar pago" opera solo sobre un movimiento
+ya matcheado (estado `por_confirmar`): escribe `confirmadoPago=true` + `itemEsperadoId` vía
+`writeBatch` (admin). "Deshacer" lo revierte (solo mes en curso). Meses cerrados con match = pagado
+automáticamente sin acción (asunción: sin migración retroactiva).
 
-Pendiente: periodicidades no-mensuales (bimestral/trimestral/anual/unico) necesitan mes-ancla cuando
-se activen. Hoy `aplicaEnMes` devuelve `true` para todas como placeholder.
+`confirmadoPago: boolean` existe en `Movement` (default false al leer; los docs migrados no tienen el
+campo → se normaliza a false). El alta global puede presetear `itemEsperadoId` al crear un movimiento
+vinculado a un esperado puntual; ese movimiento entra por Rama 0 y se puede confirmar.
+
+Pendiente: periodicidades no-mensuales necesitan mes-ancla cuando se activen. Hoy `aplicaEnMes`
+devuelve `true` para todas como placeholder.
 
 ## Estructura del repo
 

@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { movimientosDelMes } from '../datos/movimientos';
+import { movimientosDelMes, confirmarPagoEsperado, desmarcarPago } from '../datos/movimientos';
 import { itemsEsperadosActivos } from '../datos/itemsEsperados';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import AltaMovimiento from './AltaMovimiento';
 import type { Movement, ExpectedItem } from '../types';
 import './Resumen.css';
 
@@ -114,7 +113,7 @@ function movimientosDelItem(item: ExpectedItem, movs: Movement[]): Movement[] {
 // ── State machine ─────────────────────────────────────────────────────────────
 
 type EstadoItem =
-  | 'pagado' | 'parcial' | 'automatico'
+  | 'pagado' | 'por_confirmar' | 'parcial' | 'automatico'
   | 'pendiente' | 'vencido'
   | 'programado'
   | 'no_registrado'
@@ -141,9 +140,14 @@ function estadoItem(
 ): EstadoItem {
   if (!aplicaEnMes(item, mes)) return 'no_aplica';
   if (matches.length > 0) {
-    const montoMatched = matches.reduce((s, m) => s + Math.abs(m.monto), 0);
-    if (item.montoEsperado != null && montoMatched < item.montoEsperado * 0.99) return 'parcial';
-    return 'pagado';
+    if (mes < mesActualStr) return 'pagado';  // meses cerrados: match = pagado (sin confirmar)
+    const confirmados = matches.filter(m => m.confirmadoPago);
+    if (confirmados.length > 0) {
+      const montoConf = confirmados.reduce((s, m) => s + Math.abs(m.monto), 0);
+      if (item.montoEsperado != null && montoConf < item.montoEsperado * 0.99) return 'parcial';
+      return 'pagado';
+    }
+    return 'por_confirmar';  // hay match pero falta confirmación
   }
   if (item.pagoAutomatico) return 'automatico';
   if (mes > mesActualStr) return 'programado';
@@ -157,13 +161,14 @@ function cubierto(estado: EstadoItem): boolean {
 }
 
 const ORDEN_ESTADO: Record<EstadoItem, number> = {
-  vencido: 0, pendiente: 1, parcial: 2,
-  no_registrado: 3, programado: 4, automatico: 5,
-  pagado: 6, no_aplica: 7,
+  vencido: 0, pendiente: 1, por_confirmar: 2, parcial: 3,
+  no_registrado: 4, programado: 5, automatico: 6,
+  pagado: 7, no_aplica: 8,
 };
 
 const BADGE_LABEL: Record<EstadoItem, string> = {
   pagado:        'pagado',
+  por_confirmar: 'por confirmar',
   parcial:       'parcial',
   automatico:    'automático',
   pendiente:     'pendiente',
@@ -191,14 +196,17 @@ interface CheckItemRowProps {
   item: ExpectedItem;
   matches: Movement[];
   estado: EstadoItem;
-  onRegistrar: () => void;
+  esMesActual: boolean;
+  onConfirmar: () => void;
+  onDesmarcar: () => void;
 }
 
-function CheckItemRow({ item, matches, estado, onRegistrar }: CheckItemRowProps) {
-  const montoReal      = matches.reduce((s, m) => s + m.monto, 0);
-  const etiqueta       = [item.categoria, item.subcategoria].filter(Boolean).join(' › ');
-  const tieneMatch     = estado === 'pagado' || estado === 'parcial';
-  const puedeRegistrar = estado === 'pendiente' || estado === 'vencido' || estado === 'parcial';
+function CheckItemRow({ item, matches, estado, esMesActual, onConfirmar, onDesmarcar }: CheckItemRowProps) {
+  const montoReal     = matches.reduce((s, m) => s + m.monto, 0);
+  const etiqueta      = [item.categoria, item.subcategoria].filter(Boolean).join(' › ');
+  const tieneMatch    = estado === 'pagado' || estado === 'parcial' || estado === 'por_confirmar';
+  const puedeConfirmar = estado === 'por_confirmar';
+  const puedeDeshacer  = estado === 'pagado' && esMesActual;
 
   return (
     <div className={`res-check-item res-check-item--${estado}`}>
@@ -224,9 +232,14 @@ function CheckItemRow({ item, matches, estado, onRegistrar }: CheckItemRowProps)
         {(estado === 'pendiente' || estado === 'vencido') && item.diaVencimiento && (
           <span className="res-check-vence">vence día {item.diaVencimiento}</span>
         )}
-        {puedeRegistrar && (
-          <button className="res-btn-registrar" onClick={onRegistrar} type="button">
-            Registrar
+        {puedeConfirmar && (
+          <button className="res-btn-registrar" onClick={onConfirmar} type="button">
+            Confirmar pago
+          </button>
+        )}
+        {puedeDeshacer && (
+          <button className="res-btn-deshacer" onClick={onDesmarcar} type="button">
+            deshacer
           </button>
         )}
       </div>
@@ -244,15 +257,12 @@ export default function Resumen() {
 }
 
 function ResumenAdmin() {
-  const { memberId, miembro } = useMiembroCtx();
-
-  const [mes, setMes]                         = useState(mesActual);
-  const [refetch, setRefetch]                 = useState(0);
-  const [cargando, setCargando]               = useState(true);
-  const [error, setError]                     = useState<string | null>(null);
-  const [movimientos, setMovimientos]         = useState<Movement[]>([]);
-  const [items, setItems]                     = useState<ExpectedItem[]>([]);
-  const [registrandoItem, setRegistrandoItem] = useState<ExpectedItem | null>(null);
+  const [mes, setMes]               = useState(mesActual);
+  const [refetch, setRefetch]       = useState(0);
+  const [cargando, setCargando]     = useState(true);
+  const [error, setError]           = useState<string | null>(null);
+  const [movimientos, setMovimientos] = useState<Movement[]>([]);
+  const [items, setItems]           = useState<ExpectedItem[]>([]);
 
   useEffect(() => {
     itemsEsperadosActivos().then(res => {
@@ -309,14 +319,16 @@ function ResumenAdmin() {
   const gastosReg   = gastosCheck.filter(c => cubierto(c.estado)).length;
   const ingresosReg = ingresosCheck.filter(c => cubierto(c.estado)).length;
 
-  function handleRegistrar(item: ExpectedItem, matches: Movement[]) {
-    if (matches.length > 0) {
-      const ok = window.confirm(
-        `Ya hay ${matches.length} movimiento${matches.length > 1 ? 's' : ''} para este ítem en ${formatMes(mes)}. ¿Registrar de todas formas?`,
-      );
-      if (!ok) return;
-    }
-    setRegistrandoItem(item);
+  async function handleConfirmar(item: ExpectedItem, matches: Movement[]) {
+    const res = await confirmarPagoEsperado(item, matches);
+    if (res.ok) setRefetch(n => n + 1);
+    else setError(res.error.message);
+  }
+
+  async function handleDesmarcar(matches: Movement[]) {
+    const res = await desmarcarPago(matches);
+    if (res.ok) setRefetch(n => n + 1);
+    else setError(res.error.message);
   }
 
   return (
@@ -433,7 +445,9 @@ function ResumenAdmin() {
                         item={item}
                         matches={matches}
                         estado={estado}
-                        onRegistrar={() => handleRegistrar(item, matches)}
+                        esMesActual={mes === mesHoy}
+                        onConfirmar={() => handleConfirmar(item, matches)}
+                        onDesmarcar={() => handleDesmarcar(matches)}
                       />
                     ))
                 }
@@ -452,7 +466,9 @@ function ResumenAdmin() {
                         item={item}
                         matches={matches}
                         estado={estado}
-                        onRegistrar={() => handleRegistrar(item, matches)}
+                        esMesActual={mes === mesHoy}
+                        onConfirmar={() => handleConfirmar(item, matches)}
+                        onDesmarcar={() => handleDesmarcar(matches)}
                       />
                     ))
                 }
@@ -462,29 +478,6 @@ function ResumenAdmin() {
         </>
       )}
 
-      {/* Modal alta desde checklist */}
-      {registrandoItem && (
-        <AltaMovimiento
-          memberId={memberId}
-          miembro={miembro}
-          onGuardado={() => {
-            setRegistrandoItem(null);
-            setRefetch(n => n + 1);
-          }}
-          onCancelar={() => setRegistrandoItem(null)}
-          preload={{
-            tipo:          registrandoItem.tipo,
-            categoria:     registrandoItem.categoria    ?? undefined,
-            subcategoria:  registrandoItem.subcategoria ?? undefined,
-            persona:       registrandoItem.persona      ?? undefined,
-            moneda:        registrandoItem.moneda,
-            monto:         registrandoItem.montoEsperado != null
-                             ? String(registrandoItem.montoEsperado)
-                             : undefined,
-            itemEsperadoId: registrandoItem.id,
-          }}
-        />
-      )}
     </div>
   );
 }
