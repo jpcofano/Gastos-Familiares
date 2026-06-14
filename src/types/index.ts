@@ -83,12 +83,16 @@ export interface ExpectedItem {
 
 export interface DatosExtraidos {
   tipoDocumento: string;
-  fecha: string | null;              // ISO YYYY-MM-DD
-  montoTotal: number | null;
+  fecha: string | null;              // ISO YYYY-MM-DD, emisión
+  montoTotal: number | null;         // = primer vencimiento / monto base
   moneda: 'ARS' | 'USD';
   comercioRazonSocial: string | null;
   cuit: string | null;               // XX-XXXXXXXX-X
-  numeroOperacion: string;           // real o pseudo-número
+  numeroOperacion: string;           // real o pseudo-número YYYY-MM-<slug>
+  // F6.2.2 — opcionales para compat con docs pre-F6.2.2
+  periodoFacturado?: string | null;  // "YYYY-MM" o texto crudo
+  numeroCliente?: string | null;     // nro cliente/cuenta/suministro
+  vencimientos?: Array<{ fecha: string | null; monto: number | null }>;  // [] si no aplica
 }
 
 export interface Comprobante {
