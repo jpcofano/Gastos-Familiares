@@ -79,6 +79,13 @@ Estas mejoras quedan registradas pero no se implementan en F2:
 - Claude Code NO corre `npm install`, `npm run seed`, ni `firebase deploy` por
   iniciativa propia. Esos comandos los corro yo manualmente.
 
+## Proceso de prompts (modo B)
+- Un prompt BASE por feature en docs/prompts/ (ej: F5.3_realtime_base.md), congelado al entregarse.
+- Cambios posteriores → ADDENDUMS numerados (ej: F5.3_addendum_1.md) que indican qué sección del
+  base modifican. NUNCA se reescribe un .md ya entregado a Code (evita confundirlo con versiones).
+- Las idas y vueltas de diseño se resuelven en chat (claude.ai); el .md nace solo con lo acordado.
+- Regla: cada cierre de feature actualiza docs/CLAUDE.md (estado + backlog) en el MISMO commit.
+
 ## Como correr el seed contra produccion
 
 Solo despues de validar contra emulador. Pasos:
@@ -110,6 +117,22 @@ Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracio
 ## Backlog de inflación (fase propia, futura)
 
 Inflación en esperados/proyecciones ARS (fase propia, futura): los `itemsEsperados` con `moneda: "ARS"` tienen `montoEsperado` estático. Para proyecciones reales habría que ajustar por inflación mensual (INDEC IPC). Opciones: campo `ajusteInflacion: boolean` + factor mensual en `/config/familia`, o bien dejar que el usuario actualice `montoEsperado` manualmente cada N meses. No se implementa hasta que el caso de uso sea claro.
+
+## Backlog (post F5.3)
+- **F6.4 — Carga manual de movimiento (ingreso/gasto) desde Comprobantes.**
+  Botón que abre AltaMovimiento sin pasar por extracción. Feature chica.
+
+- **F6.5 — Pipeline de resumen de tarjeta (1 resumen → N movimientos).**
+  Un resumen_tarjeta NO es un pago único: es un estado de cuenta con N consumos → mapea a la
+  colección resumenesTarjeta y genera N movimientos. Pipeline distinto al de F6 (extracción
+  multi-línea, alta masiva con confirmación). Versión moderna del folder-scan de
+  49_Tarjetas_API.gs (detectaba tarjetaCodigo por nombre de archivo, dedup por ResumenID).
+  Fase propia, requiere ronda de diseño dedicada.
+
+- **F6.6 — PWA share-target (compartir desde el celular).**
+  Paridad con el sistema viejo (12_ShareTemp.gs: carpeta Drive temporal + token + TTL). En Firebase
+  colapsa: share-target llama directo a subirComprobante → Storage (F6.1) + dedup SHA-256 + trigger
+  onCreate (F6.2). No se porta la carpeta Drive. Feature chica (la infra pesada ya existe).
 
 ## State machine de esperados (ResumenMes)
 

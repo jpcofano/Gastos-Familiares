@@ -14,3 +14,5 @@ firebase-export-*/
 *.zip
 service-account*.json
 **/service-account*.json
+data/*
+!data/.gitkeep
