@@ -269,6 +269,7 @@ export default function Comprobantes() {
   // Lista — onSnapshot
   const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes();
   const { items } = useItemsEsperados();
+  const [mostrarAltaManual, setMostrarAltaManual] = useState(false);
 
   async function handleSubir() {
     if (!archivo) return;
@@ -345,6 +346,23 @@ export default function Comprobantes() {
           Error al subir: {resultado.mensaje}
         </div>
       )}
+
+      {/* ── Alta manual ────────────────────────────────────────────────── */}
+      <div className="cmp-alta-manual">
+        {!mostrarAltaManual ? (
+          <button className="cmp-btn-manual" onClick={() => setMostrarAltaManual(true)}>
+            Cargar movimiento manual
+          </button>
+        ) : (
+          <AltaMovimiento
+            memberId={memberId}
+            miembro={miembro}
+            preload={{ esManual: true }}
+            onGuardado={() => setMostrarAltaManual(false)}
+            onCancelar={() => setMostrarAltaManual(false)}
+          />
+        )}
+      </div>
 
       {/* ── Lista ──────────────────────────────────────────────────────── */}
       <section className="cmp-lista">

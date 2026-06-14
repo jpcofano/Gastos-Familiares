@@ -64,6 +64,7 @@ export interface NuevoMovimiento {
   creadoPor: string;
   incluirResumenMes: boolean;
   itemEsperadoId?: string;
+  numeroComprobante?: string;
   // F6.3 — link a comprobante (opcionales)
   hashPdf?: string;
   refStoragePdf?: string;
@@ -96,10 +97,11 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       excluirDash:       false,
       pagado:            true,
       incluirResumenMes: payload.incluirResumenMes,
-      itemEsperadoId:    payload.itemEsperadoId  ?? null,
-      confirmadoPago:    payload.confirmadoPago  ?? false,
-      hashPdf:           payload.hashPdf         ?? null,
-      refStoragePdf:     payload.refStoragePdf   ?? null,
+      itemEsperadoId:    payload.itemEsperadoId     ?? null,
+      numeroComprobante: payload.numeroComprobante ?? null,
+      confirmadoPago:    payload.confirmadoPago     ?? false,
+      hashPdf:           payload.hashPdf            ?? null,
+      refStoragePdf:     payload.refStoragePdf      ?? null,
       // idLegacy intencionalmente ausente — los validators lo usan para distinguir docs del seed
       creadoEn:          serverTimestamp(),
       actualizadoEn:     serverTimestamp(),
@@ -145,6 +147,17 @@ export async function desmarcarPago(matches: Movement[]): Promise<Resultado<void
     return { ok: true, data: undefined };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+export async function existeNumeroComprobante(numero: string): Promise<boolean> {
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'movimientos'), where('numeroComprobante', '==', numero))
+    );
+    return !snap.empty;
+  } catch {
+    return false;
   }
 }
 

@@ -207,3 +207,18 @@
 .cmp-estado--extraido { background: #dcfce7; color: #15803d; }
 .cmp-estado--vinculado{ background: #ede9fe; color: #5b21b6; }
 .cmp-estado--error    { background: #ffe4e6; color: #be123c; }
+
+.cmp-alta-manual {
+  margin: 1rem 0;
+}
+.cmp-btn-manual {
+  background: none;
+  border: 1.5px dashed var(--color-border, #d1d5db);
+  border-radius: 8px;
+  color: var(--color-text-sec, #6b7280);
+  cursor: pointer;
+  font-size: 0.875rem;
+  padding: 0.6rem 1.2rem;
+  width: 100%;
+}
+.cmp-btn-manual:hover { border-color: var(--color-primary, #6366f1); color: var(--color-primary, #6366f1); }

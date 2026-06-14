@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { cargarSubcategorias, cargarEtiquetas, type SubcategoriaItem, type EtiquetaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig } from '../familia';
-import { crearMovimiento } from '../datos/movimientos';
+import { crearMovimiento, existeNumeroComprobante } from '../datos/movimientos';
 import { tcParaFecha } from '../datos/tcDiario';
 import type { FamiliaConfig, FamiliaMiembro } from '../types';
 import './AltaMovimiento.css';
@@ -20,6 +20,20 @@ interface Preload {
   hashPdf?: string;
   refStoragePdf?: string;
   confirmadoPago?: boolean;
+  // F6.4 — alta manual sin comprobante
+  esManual?: boolean;
+}
+
+function generarNumeroManual(fecha: string, texto: string): string {
+  const mes = fecha.slice(0, 7);
+  const slug = texto
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .slice(0, 12);
+  return `${mes}-${slug || 'manual'}`;
 }
 
 interface Props {
@@ -61,6 +75,8 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [tcCargando,  setTcCargando]  = useState(false);
   const [guardando,   setGuardando]   = useState(false);
   const [errorMsg,    setErrorMsg]    = useState<string | null>(null);
+  const [dupWarning,  setDupWarning]  = useState(false);
+  const pendingPayload = useRef<Parameters<typeof crearMovimiento>[0] | null>(null);
 
   useEffect(() => {
     Promise.all([cargarSubcategorias(), cargarEtiquetas(), cargarFamiliaConfig()])
@@ -104,9 +120,21 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
         .map(([id, m]) => ({ id, nombre: m.nombre }))
     : [];
 
+  const ejecutarGuardar = useCallback(async (payload: Parameters<typeof crearMovimiento>[0]) => {
+    setGuardando(true);
+    const resultado = await crearMovimiento(payload);
+    setGuardando(false);
+    if (resultado.ok) {
+      onGuardado();
+    } else {
+      setErrorMsg(resultado.error.message);
+    }
+  }, [onGuardado]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setDupWarning(false);
 
     if (!categoria)    { setErrorMsg('La categoría es obligatoria.');    return; }
     if (!subcategoria) { setErrorMsg('La subcategoría es obligatoria.'); return; }
@@ -117,8 +145,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       return;
     }
 
-    setGuardando(true);
-    const resultado = await crearMovimiento({
+    const payload: Parameters<typeof crearMovimiento>[0] = {
       fecha:             new Date(fecha + 'T12:00:00'),
       tipo,
       descripcion,
@@ -136,14 +163,20 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       hashPdf:           preload?.hashPdf,
       refStoragePdf:     preload?.refStoragePdf,
       confirmadoPago:    preload?.confirmadoPago,
-    });
-    setGuardando(false);
+    };
 
-    if (resultado.ok) {
-      onGuardado();
-    } else {
-      setErrorMsg(resultado.error.message);
+    if (preload?.esManual) {
+      const numero = generarNumeroManual(fecha, descripcion || categoria);
+      payload.numeroComprobante = numero;
+      const existe = await existeNumeroComprobante(numero);
+      if (existe) {
+        pendingPayload.current = payload;
+        setDupWarning(true);
+        return;
+      }
     }
+
+    await ejecutarGuardar(payload);
   };
 
   if (cargandoCatalogos) {
@@ -341,23 +374,50 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
 
           {errorMsg && <p className="alta-error" role="alert">{errorMsg}</p>}
 
-          <div className="alta-acciones">
-            <button
-              type="button"
-              className="alta-btn-sec"
-              onClick={onCancelar}
-              disabled={guardando}
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="alta-btn-pri"
-              disabled={guardando}
-            >
-              {guardando ? 'Guardando…' : 'Guardar'}
-            </button>
-          </div>
+          {dupWarning && (
+            <div className="alta-dup-aviso" role="alert">
+              <p>Ya hay un movimiento con este número. ¿Cargar igual?</p>
+              <div className="alta-dup-acciones">
+                <button
+                  type="button"
+                  className="alta-btn-sec"
+                  onClick={() => setDupWarning(false)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="alta-btn-pri"
+                  disabled={guardando}
+                  onClick={() => {
+                    if (pendingPayload.current) ejecutarGuardar(pendingPayload.current);
+                  }}
+                >
+                  {guardando ? 'Guardando…' : 'Cargar igual'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!dupWarning && (
+            <div className="alta-acciones">
+              <button
+                type="button"
+                className="alta-btn-sec"
+                onClick={onCancelar}
+                disabled={guardando}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="alta-btn-pri"
+                disabled={guardando}
+              >
+                {guardando ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          )}
 
         </form>
       </div>
