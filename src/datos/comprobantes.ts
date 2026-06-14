@@ -9,7 +9,7 @@ import type { Comprobante, PropuestaMatch } from '../types';
 
 type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
 
-function docAComprobante(id: string, data: DocumentData): Comprobante {
+export function docAComprobante(id: string, data: DocumentData): Comprobante {
   const pm = data.propuestaMatch as Record<string, unknown> | null | undefined;
   return {
     id,

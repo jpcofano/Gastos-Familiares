@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import {
-  subirComprobante, listarComprobantes, confirmarRama1, marcarVinculado,
-} from '../datos/comprobantes';
-import { itemsEsperadosTodos } from '../datos/itemsEsperados';
+import { subirComprobante, confirmarRama1, marcarVinculado } from '../datos/comprobantes';
+import { useComprobantes } from '../hooks/useComprobantes';
+import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import AltaMovimiento from './AltaMovimiento';
 import type { Comprobante, ExpectedItem, DatosExtraidos } from '../types';
 import './Comprobantes.css';
@@ -48,10 +47,9 @@ interface PropuestaProps {
   items: ExpectedItem[];
   memberId: string;
   miembro: import('../types').FamiliaMiembro;
-  onAccion: () => void;
 }
 
-function PropuestaCard({ comp, items, memberId, miembro, onAccion }: PropuestaProps) {
+function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
   const [confirmando,    setConfirmando]    = useState(false);
@@ -111,7 +109,7 @@ function PropuestaCard({ comp, items, memberId, miembro, onAccion }: PropuestaPr
               setErrorLocal(null);
               const res = await confirmarRama1(comp, candidatoSel, pm.itemEsperadoId);
               setConfirmando(false);
-              if (res.ok) onAccion();
+              if (res.ok) { /* onSnapshot actualiza la lista */ }
               else setErrorLocal(res.error.message);
             }}
           >
@@ -137,7 +135,7 @@ function PropuestaCard({ comp, items, memberId, miembro, onAccion }: PropuestaPr
             setErrorLocal(null);
             const res = await confirmarRama1(comp, pm.movimientoId, pm.itemEsperadoId);
             setConfirmando(false);
-            if (res.ok) onAccion();
+            if (res.ok) { /* onSnapshot actualiza la lista */ }
             else setErrorLocal(res.error.message);
           }}
         >
@@ -186,7 +184,6 @@ function PropuestaCard({ comp, items, memberId, miembro, onAccion }: PropuestaPr
             onGuardado={async () => {
               await marcarVinculado(comp.id);
               setMostrarAlta(false);
-              onAccion();
             }}
             onCancelar={() => setMostrarAlta(false)}
           />
@@ -225,13 +222,12 @@ function PropuestaCard({ comp, items, memberId, miembro, onAccion }: PropuestaPr
 // ── Tarjeta de comprobante ────────────────────────────────────────────────────
 
 function ComprobanteCard({
-  comp, items, memberId, miembro, onAccion,
+  comp, items, memberId, miembro,
 }: {
   comp:     Comprobante;
   items:    ExpectedItem[];
   memberId: string;
   miembro:  import('../types').FamiliaMiembro;
-  onAccion: () => void;
 }) {
   return (
     <div className={`cmp-card cmp-card--${comp.estado}`}>
@@ -245,13 +241,7 @@ function ComprobanteCard({
         <p className="cmp-error-detalle">{comp.errorExtraccion}</p>
       )}
       {comp.estado === 'extraido' && comp.propuestaMatch && (
-        <PropuestaCard
-          comp={comp}
-          items={items}
-          memberId={memberId}
-          miembro={miembro}
-          onAccion={onAccion}
-        />
+        <PropuestaCard comp={comp} items={items} memberId={memberId} miembro={miembro} />
       )}
       {comp.estado === 'extraido' && !comp.propuestaMatch && (
         <p className="cmp-nota">Calculando match…</p>
@@ -276,24 +266,9 @@ export default function Comprobantes() {
   const [resultado, setResultado] = useState<ResultadoSubida | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Lista
-  const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
-  const [items,        setItems]        = useState<ExpectedItem[]>([]);
-  const [cargandoLista, setCargandoLista] = useState(true);
-  const [errorLista,    setErrorLista]    = useState<string | null>(null);
-  const [refetch,       setRefetch]       = useState(0);
-
-  const recargar = useCallback(() => setRefetch(n => n + 1), []);
-
-  useEffect(() => {
-    setCargandoLista(true);
-    Promise.all([listarComprobantes(), itemsEsperadosTodos()]).then(([resC, resI]) => {
-      if (resC.ok) setComprobantes(resC.data);
-      else setErrorLista(resC.error.message);
-      if (resI.ok) setItems(resI.data);
-      setCargandoLista(false);
-    });
-  }, [refetch]);
+  // Lista — onSnapshot
+  const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes();
+  const { items } = useItemsEsperados();
 
   async function handleSubir() {
     if (!archivo) return;
@@ -309,7 +284,6 @@ export default function Comprobantes() {
       setResultado({ tipo: 'subido', comprobante: res.comprobante });
       setArchivo(null);
       if (inputRef.current) inputRef.current.value = '';
-      recargar();
     }
   }
 
@@ -374,10 +348,7 @@ export default function Comprobantes() {
 
       {/* ── Lista ──────────────────────────────────────────────────────── */}
       <section className="cmp-lista">
-        <h2 className="cmp-lista-titulo">
-          Historial
-          <button className="cmp-btn-refetch" onClick={recargar} title="Refrescar">↺</button>
-        </h2>
+        <h2 className="cmp-lista-titulo">Historial</h2>
         {cargandoLista && <p className="cmp-nota">Cargando…</p>}
         {errorLista    && <p className="cmp-error-detalle">Error: {errorLista}</p>}
         {!cargandoLista && comprobantes.length === 0 && (
@@ -390,7 +361,6 @@ export default function Comprobantes() {
             items={items}
             memberId={memberId}
             miembro={miembro}
-            onAccion={recargar}
           />
         ))}
       </section>

@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { cargarSubcategorias, cargarEtiquetas, type SubcategoriaItem, type EtiquetaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig } from '../familia';
+import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import {
-  itemsEsperadosTodos, crearItemEsperado, actualizarItemEsperado,
+  crearItemEsperado, actualizarItemEsperado,
   desactivarItemEsperado, reactivarItemEsperado, eliminarItemEsperado,
   type NuevoItemEsperado,
 } from '../datos/itemsEsperados';
@@ -440,44 +441,31 @@ function FormItemEsperado({
 /* ── Admin panel ── */
 function ConfigEsperadosAdmin() {
   const [tab,      setTab]      = useState<'Gasto' | 'Ingreso'>('Gasto');
-  const [items,    setItems]    = useState<ExpectedItem[]>([]);
-  const [cargando, setCargando] = useState(true);
-  const [error,    setError]    = useState<string | null>(null);
   const [editando, setEditando] = useState<ExpectedItem | null>(null);
   const [creando,  setCreando]  = useState(false);
-  const [refetch,  setRefetch]  = useState(0);
   const [subcats,  setSubcats]  = useState<SubcategoriaItem[]>([]);
   const [etiquetas,setEtiquetas]= useState<EtiquetaItem[]>([]);
   const [config,   setConfig]   = useState<FamiliaConfig | null>(null);
+
+  const { items, cargando, error } = useItemsEsperados();
 
   useEffect(() => {
     Promise.all([cargarSubcategorias(), cargarEtiquetas(), cargarFamiliaConfig()])
       .then(([s, e, fam]) => { setSubcats(s); setEtiquetas(e); if (fam) setConfig(fam); });
   }, []);
 
-  useEffect(() => {
-    setCargando(true);
-    itemsEsperadosTodos().then(res => {
-      if (res.ok) setItems(res.data);
-      else setError(res.error.message);
-      setCargando(false);
-    });
-  }, [refetch]);
-
-  function reload() { setRefetch(n => n + 1); }
-
   async function handleDesactivar(item: ExpectedItem) {
     const res = await desactivarItemEsperado(item.id);
-    if (res.ok) reload(); else alert('Error al desactivar: ' + res.error.message);
+    if (!res.ok) alert('Error al desactivar: ' + res.error.message);
   }
   async function handleReactivar(item: ExpectedItem) {
     const res = await reactivarItemEsperado(item.id);
-    if (res.ok) reload(); else alert('Error al reactivar: ' + res.error.message);
+    if (!res.ok) alert('Error al reactivar: ' + res.error.message);
   }
   async function handleEliminar(item: ExpectedItem) {
     if (!window.confirm('¿Eliminar permanentemente este ítem? No se puede deshacer.')) return;
     const res = await eliminarItemEsperado(item.id);
-    if (res.ok) reload(); else alert('Error al eliminar: ' + res.error.message);
+    if (!res.ok) alert('Error al eliminar: ' + res.error.message);
   }
 
   const delTab    = items.filter(i => i.tipo === tab);

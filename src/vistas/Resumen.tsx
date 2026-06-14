@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { movimientosDelMes, confirmarPagoEsperado, desmarcarPago } from '../datos/movimientos';
-import { itemsEsperadosActivos } from '../datos/itemsEsperados';
+import { confirmarPagoEsperado, desmarcarPago } from '../datos/movimientos';
+import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
+import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import type { Movement, ExpectedItem } from '../types';
 import './Resumen.css';
@@ -257,32 +258,12 @@ export default function Resumen() {
 }
 
 function ResumenAdmin() {
-  const [mes, setMes]               = useState(mesActual);
-  const [refetch, setRefetch]       = useState(0);
-  const [cargando, setCargando]     = useState(true);
-  const [error, setError]           = useState<string | null>(null);
-  const [movimientos, setMovimientos] = useState<Movement[]>([]);
-  const [items, setItems]           = useState<ExpectedItem[]>([]);
+  const [mes,         setMes]         = useState(mesActual);
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
 
-  useEffect(() => {
-    itemsEsperadosActivos().then(res => {
-      if (res.ok) setItems(res.data);
-      else setError(res.error.message);
-    });
-  }, []);
-
-  useEffect(() => {
-    let cancelado = false;
-    setCargando(true);
-    setError(null);
-    movimientosDelMes(mes).then(res => {
-      if (cancelado) return;
-      if (res.ok) setMovimientos(res.data);
-      else setError(res.error.message);
-      setCargando(false);
-    });
-    return () => { cancelado = true; };
-  }, [mes, refetch]);
+  const { movimientos, cargando, error }  = useMovimientosDelMes(mes);
+  const { items: todosItems }             = useItemsEsperados();
+  const items = todosItems.filter(i => i.activo);
 
   // ── Caja del mes (incluirResumenMes=true)
   const cajaMov = movimientos
@@ -321,14 +302,12 @@ function ResumenAdmin() {
 
   async function handleConfirmar(item: ExpectedItem, matches: Movement[]) {
     const res = await confirmarPagoEsperado(item, matches);
-    if (res.ok) setRefetch(n => n + 1);
-    else setError(res.error.message);
+    if (!res.ok) setErrorAccion(res.error.message);
   }
 
   async function handleDesmarcar(matches: Movement[]) {
     const res = await desmarcarPago(matches);
-    if (res.ok) setRefetch(n => n + 1);
-    else setError(res.error.message);
+    if (!res.ok) setErrorAccion(res.error.message);
   }
 
   return (
@@ -340,8 +319,9 @@ function ResumenAdmin() {
         <button className="res-mes-btn" onClick={() => setMes(m => desplazarMes(m, +1))} aria-label="Mes siguiente">›</button>
       </div>
 
-      {cargando && <p className="res-estado">Cargando…</p>}
-      {error    && <p className="res-estado res-error">Error: {error}</p>}
+      {cargando     && <p className="res-estado">Cargando…</p>}
+      {error        && <p className="res-estado res-error">Error: {error}</p>}
+      {errorAccion  && <p className="res-estado res-error">{errorAccion}</p>}
 
       {!cargando && !error && (
         <>

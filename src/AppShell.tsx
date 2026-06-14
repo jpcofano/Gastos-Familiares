@@ -3,6 +3,7 @@ import './AppShell.css';
 import { signInConGoogle, signOutUsuario } from './auth';
 import { useMiembro } from './hooks/useMiembro';
 import { MiembroContext } from './contexto/MiembroContext';
+import { ItemsEsperadosProvider } from './contexto/ItemsEsperadosContext';
 import Dashboard from './vistas/Dashboard';
 import Resumen from './vistas/Resumen';
 import ConfigEsperados from './vistas/ConfigEsperados';
@@ -43,6 +44,7 @@ export default function AppShell() {
 
   return (
     <MiembroContext.Provider value={{ memberId: memberId!, miembro: miembro! }}>
+    <ItemsEsperadosProvider>
       <div className="shell-layout">
         <header className="shell-header">
           <span className="shell-header-title">Gastos Familiares</span>
@@ -76,6 +78,7 @@ export default function AppShell() {
           </Routes>
         </main>
       </div>
+    </ItemsEsperadosProvider>
     </MiembroContext.Provider>
   );
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { movimientosDelMes } from '../datos/movimientos';
+import { useState } from 'react';
+import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import AltaMovimiento from './AltaMovimiento';
 import type { Movement } from '../types';
@@ -89,31 +89,18 @@ export default function Dashboard() {
   const { memberId, miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
 
-  const [mes, setMes]                 = useState(mesActual);
-  const [clave, setClave]             = useState(0);
-  const [cargando, setCargando]       = useState(true);
-  const [error, setError]             = useState<string | null>(null);
-  const [movimientos, setMovimientos] = useState<Movement[]>([]);
+  const [mes,         setMes]         = useState(mesActual);
   const [mostrarAlta, setMostrarAlta] = useState(false);
-  const [exito, setExito]             = useState(false);
+  const [exito,       setExito]       = useState(false);
 
-  useEffect(() => {
-    let cancelado = false;
-    setCargando(true);
-    setError(null);
-    movimientosDelMes(mes, esAdmin ? undefined : memberId).then(res => {
-      if (cancelado) return;
-      if (res.ok) setMovimientos(res.data);
-      else setError(res.error.message);
-      setCargando(false);
-    });
-    return () => { cancelado = true; };
-  }, [mes, memberId, esAdmin, clave]);
+  const { movimientos, cargando, error } = useMovimientosDelMes(
+    mes,
+    esAdmin ? undefined : memberId,
+  );
 
   const handleGuardado = () => {
     setMostrarAlta(false);
     setExito(true);
-    setClave(k => k + 1);
     setTimeout(() => setExito(false), 3000);
   };
 

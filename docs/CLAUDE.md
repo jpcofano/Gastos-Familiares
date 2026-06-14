@@ -16,7 +16,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Fase 2 — Seed Sheets a Firestore: codigo listo, pendiente correr en produccion.
 - Fase 3 — Auth + shell PWA: cerrado.
 - Fase 4 — Vistas read-only (Dashboard, Resumen, pantalla de hijos): cerrado.
-- Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado. F5.1.0 hotfix P0 cerrado (autorizados por email). F5.2 cerrado (state machine 8 estados, registrar desde checklist, itemEsperadoId).
+- Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado. F5.1.0 hotfix P0 cerrado (autorizados por email). F5.2 cerrado (state machine 8 estados, registrar desde checklist, itemEsperadoId). F5.3 cerrado (realtime onSnapshot + offline persistentLocalCache; latency compensation automática, sin optimistic manual).
 - Fase 6 — Tarjetas + Comprobantes con Cloud Functions: F6.2 (infra Functions + extracción Anthropic) cerrado. F6.3 (match server-side propone→confirmás, 3 ramas + dedup) cerrado.
 - Fase 7 — Cutover y archivo del Sheet: pendiente.
 
@@ -45,8 +45,8 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Toda query filtra por `mes` o usa `limit()`. Nunca query sin filtro temporal.
 - Dependientes siempre consultan movimientos con where('persona','==',memberId).
   Sin ese filtro, las Rules deniegan la query entera (fail-closed).
-- Listeners `onSnapshot` solo donde el realtime aporta valor (carga sincronizada
-  Juan-Maria). Dashboard y pantallas historicas: one-shot.
+- Listeners `onSnapshot` en `movimientos`, `comprobantes` e `itemsEsperados` (F5.3).
+  `itemsEsperados` se suscribe una vez en `ItemsEsperadosContext` (AppShell), compartido por Resumen, Comprobantes y ConfigEsperados. `movimientos` suscribe por vista (`useMovimientosDelMes`). Colecciones quasi-estáticas (subcategorias, etiquetas, config/familia): one-shot.
 - Backup diario de Firestore a GCS configurado en F0.
 - `serviceAccountKey.json` SIEMPRE gitignored. Si se filtra, Google revoca la key.
 
