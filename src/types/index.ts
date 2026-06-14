@@ -81,6 +81,16 @@ export interface ExpectedItem {
   pagoAutomatico: boolean;
 }
 
+export interface DatosExtraidos {
+  tipoDocumento: string;
+  fecha: string | null;              // ISO YYYY-MM-DD
+  montoTotal: number | null;
+  moneda: 'ARS' | 'USD';
+  comercioRazonSocial: string | null;
+  cuit: string | null;               // XX-XXXXXXXX-X
+  numeroOperacion: string;           // real o pseudo-número
+}
+
 export interface Comprobante {
   id: string;         // = hashPdf (doc-id)
   hashPdf: string;
@@ -90,7 +100,9 @@ export interface Comprobante {
   refStoragePdf: string;
   subidoPor: string;  // memberId
   subidoEn: Date;
-  estado: 'subido' | 'extraido' | 'vinculado';
+  estado: 'subido' | 'extraido' | 'vinculado' | 'error';
+  errorExtraccion?: string;
+  datosExtraidos?: DatosExtraidos;
 }
 
 export interface FamiliaMiembro {

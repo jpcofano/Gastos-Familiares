@@ -68,17 +68,28 @@ export default function Comprobantes() {
 
       {resultado?.tipo === 'subido' && (
         <div className="cmp-resultado cmp-resultado--ok">
-          Subido correctamente: <strong>{resultado.comprobante.nombreArchivo}</strong>
+          Subido: <strong>{resultado.comprobante.nombreArchivo}</strong>
+          <span className="cmp-estado-badge cmp-estado--subido">subido</span>
+          <span className="cmp-nota">La function de extracción lo procesará en breve.</span>
         </div>
       )}
-      {resultado?.tipo === 'duplicado' && (
-        <div className="cmp-resultado cmp-resultado--dup">
-          Este comprobante ya estaba cargado ({resultado.comprobante.nombreArchivo}).
-        </div>
-      )}
+      {resultado?.tipo === 'duplicado' && (() => {
+        const c = resultado.comprobante;
+        return (
+          <div className={`cmp-resultado cmp-resultado--${c.estado === 'error' ? 'err' : 'dup'}`}>
+            <span>
+              Este comprobante ya estaba cargado: <strong>{c.nombreArchivo}</strong>
+            </span>
+            <span className={`cmp-estado-badge cmp-estado--${c.estado}`}>{c.estado}</span>
+            {c.estado === 'error' && c.errorExtraccion && (
+              <span className="cmp-error-detalle">Error de extracción: {c.errorExtraccion}</span>
+            )}
+          </div>
+        );
+      })()}
       {resultado?.tipo === 'error' && (
         <div className="cmp-resultado cmp-resultado--err">
-          Error: {resultado.mensaje}
+          Error al subir: {resultado.mensaje}
         </div>
       )}
     </div>

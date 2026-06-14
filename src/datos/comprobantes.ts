@@ -7,14 +7,16 @@ import type { Comprobante } from '../types';
 function docAComprobante(id: string, data: DocumentData): Comprobante {
   return {
     id,
-    hashPdf:       data.hashPdf,
-    nombreArchivo: data.nombreArchivo,
-    contentType:   data.contentType,
-    tamano:        data.tamano,
-    refStoragePdf: data.refStoragePdf,
-    subidoPor:     data.subidoPor,
-    subidoEn:      data.subidoEn?.toDate() ?? new Date(0),
-    estado:        data.estado,
+    hashPdf:          data.hashPdf,
+    nombreArchivo:    data.nombreArchivo,
+    contentType:      data.contentType,
+    tamano:           data.tamano,
+    refStoragePdf:    data.refStoragePdf,
+    subidoPor:        data.subidoPor,
+    subidoEn:         data.subidoEn?.toDate() ?? new Date(0),
+    estado:           data.estado,
+    errorExtraccion:  data.errorExtraccion  ?? undefined,
+    datosExtraidos:   data.datosExtraidos   ?? undefined,
   };
 }
 
