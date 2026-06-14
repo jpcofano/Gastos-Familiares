@@ -1,10 +1,16 @@
-import { doc, getDoc, setDoc, serverTimestamp, type DocumentData } from 'firebase/firestore';
+import {
+  doc, getDoc, setDoc, updateDoc, serverTimestamp, writeBatch,
+  collection, query, orderBy, getDocs, type DocumentData,
+} from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { sha256Archivo } from './hashArchivo';
-import type { Comprobante } from '../types';
+import type { Comprobante, PropuestaMatch } from '../types';
+
+type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
 
 function docAComprobante(id: string, data: DocumentData): Comprobante {
+  const pm = data.propuestaMatch as Record<string, unknown> | null | undefined;
   return {
     id,
     hashPdf:          data.hashPdf,
@@ -17,6 +23,13 @@ function docAComprobante(id: string, data: DocumentData): Comprobante {
     estado:           data.estado,
     errorExtraccion:  data.errorExtraccion  ?? undefined,
     datosExtraidos:   data.datosExtraidos   ?? undefined,
+    propuestaMatch:   pm ? {
+      rama:           pm.rama           as PropuestaMatch['rama'],
+      movimientoId:   pm.movimientoId   as string | undefined,
+      itemEsperadoId: pm.itemEsperadoId as string | undefined,
+      candidatos:     pm.candidatos     as PropuestaMatch['candidatos'],
+      calculadoEn:    (pm.calculadoEn as { toDate?: () => Date } | null)?.toDate?.() ?? new Date(),
+    } : undefined,
   };
 }
 
@@ -67,6 +80,56 @@ export async function subirComprobante(
       estado:        'subido',
     };
     return { ok: true, duplicado: false, comprobante };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+export async function listarComprobantes(): Promise<Resultado<Comprobante[]>> {
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'comprobantes'), orderBy('subidoEn', 'desc')),
+    );
+    return { ok: true, data: snap.docs.map(d => docAComprobante(d.id, d.data())) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+// Rama 1: adjuntar hashPdf al movimiento existente + confirmar pago + marcar comprobante vinculado
+export async function confirmarRama1(
+  comp: Comprobante,
+  movimientoId: string,
+  itemEsperadoId: string | undefined,
+): Promise<Resultado<void>> {
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'movimientos', movimientoId), {
+      hashPdf:       comp.hashPdf,
+      refStoragePdf: comp.refStoragePdf,
+      confirmadoPago: true,
+      ...(itemEsperadoId ? { itemEsperadoId } : {}),
+      actualizadoEn: serverTimestamp(),
+    });
+    batch.update(doc(db, 'comprobantes', comp.id), {
+      estado:       'vinculado',
+      actualizadoEn: serverTimestamp(),
+    });
+    await batch.commit();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+// Ramas 2/3: marcar comprobante vinculado tras crear el movimiento desde AltaMovimiento
+export async function marcarVinculado(compId: string): Promise<Resultado<void>> {
+  try {
+    await updateDoc(doc(db, 'comprobantes', compId), {
+      estado:       'vinculado',
+      actualizadoEn: serverTimestamp(),
+    });
+    return { ok: true, data: undefined };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }

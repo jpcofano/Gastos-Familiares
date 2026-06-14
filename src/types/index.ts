@@ -95,6 +95,14 @@ export interface DatosExtraidos {
   vencimientos?: Array<{ fecha: string | null; monto: number | null }>;  // [] si no aplica
 }
 
+export interface PropuestaMatch {
+  rama: 0 | 1 | 2 | 3;
+  movimientoId?: string;
+  itemEsperadoId?: string;
+  candidatos?: Array<{ tipo: 'movimiento' | 'esperado'; id: string; score?: number }>;
+  calculadoEn: Date;
+}
+
 export interface Comprobante {
   id: string;         // = hashPdf (doc-id)
   hashPdf: string;
@@ -107,6 +115,7 @@ export interface Comprobante {
   estado: 'subido' | 'extraido' | 'vinculado' | 'error';
   errorExtraccion?: string;
   datosExtraidos?: DatosExtraidos;
+  propuestaMatch?: PropuestaMatch;
 }
 
 export interface FamiliaMiembro {

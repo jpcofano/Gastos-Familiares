@@ -64,6 +64,10 @@ export interface NuevoMovimiento {
   creadoPor: string;
   incluirResumenMes: boolean;
   itemEsperadoId?: string;
+  // F6.3 — link a comprobante (opcionales)
+  hashPdf?: string;
+  refStoragePdf?: string;
+  confirmadoPago?: boolean;
 }
 
 type ResultadoCreacion =
@@ -92,7 +96,10 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       excluirDash:       false,
       pagado:            true,
       incluirResumenMes: payload.incluirResumenMes,
-      itemEsperadoId:    payload.itemEsperadoId ?? null,
+      itemEsperadoId:    payload.itemEsperadoId  ?? null,
+      confirmadoPago:    payload.confirmadoPago  ?? false,
+      hashPdf:           payload.hashPdf         ?? null,
+      refStoragePdf:     payload.refStoragePdf   ?? null,
       // idLegacy intencionalmente ausente — los validators lo usan para distinguir docs del seed
       creadoEn:          serverTimestamp(),
       actualizadoEn:     serverTimestamp(),

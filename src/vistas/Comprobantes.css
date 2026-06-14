@@ -65,6 +65,133 @@
   font-style: italic;
 }
 
+/* ── Lista ──────────────────────────────────────────────────────────────── */
+
+.cmp-lista { margin-top: 2rem; }
+
+.cmp-lista-titulo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+}
+
+.cmp-btn-refetch {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: #6b7280;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+.cmp-btn-refetch:hover { color: #111827; }
+
+/* ── Tarjeta de comprobante ─────────────────────────────────────────────── */
+
+.cmp-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  background: #fff;
+}
+.cmp-card--vinculado { background: #faf5ff; border-color: #ddd6fe; }
+.cmp-card--error     { background: #fff1f2; border-color: #fecdd3; }
+.cmp-card--extraido  { border-color: #bbf7d0; }
+
+.cmp-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.cmp-card-nombre { font-size: 0.85rem; font-weight: 500; flex: 1 1 auto; }
+.cmp-card-size   { font-size: 0.75rem; color: #9ca3af; }
+
+/* ── datosExtraidos resumen ─────────────────────────────────────────────── */
+
+.cmp-datos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  color: #374151;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: #f9fafb;
+  border-radius: 5px;
+}
+.cmp-datos-tipo  { font-weight: 600; text-transform: uppercase; font-size: 0.7rem; color: #6b7280; }
+.cmp-datos-monto { font-weight: 700; color: #111827; }
+.cmp-datos-fecha { color: #6b7280; }
+
+/* ── Propuesta match ────────────────────────────────────────────────────── */
+
+.cmp-propuesta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 6px;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+.cmp-propuesta--0 { background: #ede9fe; color: #5b21b6; }
+.cmp-propuesta--1 { background: #f0fdf4; color: #14532d; }
+.cmp-propuesta--2 { background: #eff6ff; color: #1e3a8a; }
+.cmp-propuesta--3 { background: #fafafa; color: #374151; border: 1px solid #e5e7eb; }
+
+.cmp-propuesta-label { font-weight: 600; }
+
+.cmp-mov-id {
+  font-family: monospace;
+  font-size: 0.75rem;
+  background: rgba(0,0,0,.06);
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  align-self: flex-start;
+}
+
+.cmp-btn-confirmar {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  padding: 0.35rem 1rem;
+  background: #1d4ed8;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cmp-btn-confirmar:hover:not(:disabled) { background: #1e40af; }
+.cmp-btn-confirmar:disabled { opacity: 0.6; cursor: default; }
+
+/* Candidatos (rama 1 múltiple) */
+.cmp-candidatos { display: flex; flex-direction: column; gap: 0.35rem; }
+.cmp-candidato {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.cmp-score {
+  font-size: 0.72rem;
+  color: #6b7280;
+  background: rgba(0,0,0,.06);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+.cmp-error-local {
+  font-size: 0.78rem;
+  color: #be123c;
+}
+
 /* Badges de estado del comprobante */
 .cmp-estado-badge {
   display: inline-block;

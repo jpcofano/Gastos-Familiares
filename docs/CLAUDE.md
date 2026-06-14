@@ -17,7 +17,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Fase 3 — Auth + shell PWA: cerrado.
 - Fase 4 — Vistas read-only (Dashboard, Resumen, pantalla de hijos): cerrado.
 - Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado. F5.1.0 hotfix P0 cerrado (autorizados por email). F5.2 cerrado (state machine 8 estados, registrar desde checklist, itemEsperadoId).
-- Fase 6 — Tarjetas + Comprobantes con Cloud Functions: pendiente.
+- Fase 6 — Tarjetas + Comprobantes con Cloud Functions: F6.2 (infra Functions + extracción Anthropic) cerrado. F6.3 (match server-side propone→confirmás, 3 ramas + dedup) cerrado.
 - Fase 7 — Cutover y archivo del Sheet: pendiente.
 
 ## Decisiones cerradas
@@ -102,9 +102,14 @@ Colecciones:
 - `/movimientos/{id}`: 1136 docs (snapshot 2026-06-12), source of truth de movimientos.
 - `/resumenesTarjeta/{id}`: 18 docs iniciales, cabeceras de resumenes.
 - `/itemsEsperados/{id}`: 24 docs (20 gastos + 4 ingresos), unificada con `tipo`. Campos: `periodicidad` (default `mensual`; bimestral/trimestral/anual/unico previstos, sin uso hoy), `pagoAutomatico` (default `false`).
+- `/comprobantes/{hashPdf}`: un doc por comprobante subido (id = SHA-256 del archivo). Estados: `subido` → `extraido` → `vinculado` | `error`. Campos: `datosExtraidos` (tipoDocumento, fecha, montoTotal, moneda, comercioRazonSocial, cuit, numeroOperacion, periodoFacturado, numeroCliente, vencimientos[]), `propuestaMatch` (rama 0-3, movimientoId?, itemEsperadoId?, candidatos?), `refStoragePdf`, `contentType`, `tamano`, `subidoPor`, `subidoEn`, `actualizadoEn`. La function `extraerComprobante` (onDocumentCreated) llama a Claude claude-sonnet-4-6 (PDF o imagen). La function `matchComprobante` (onDocumentUpdated, guard anti-loop) calcula la propuesta vía matchLogica.ts.
 - `/diccionario/{id}`: ~470 entradas de aprendizaje, dict global.
 
 Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracion.
+
+## Backlog de inflación (fase propia, futura)
+
+Inflación en esperados/proyecciones ARS (fase propia, futura): los `itemsEsperados` con `moneda: "ARS"` tienen `montoEsperado` estático. Para proyecciones reales habría que ajustar por inflación mensual (INDEC IPC). Opciones: campo `ajusteInflacion: boolean` + factor mensual en `/config/familia`, o bien dejar que el usuario actualice `montoEsperado` manualmente cada N meses. No se implementa hasta que el caso de uso sea claro.
 
 ## State machine de esperados (ResumenMes)
 

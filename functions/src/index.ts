@@ -1,10 +1,16 @@
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { setGlobalOptions }   from 'firebase-functions/v2';
 import { defineSecret }       from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import Anthropic from '@anthropic-ai/sdk';
+import {
+  calcularPropuesta,
+  type DatosExtractosMin,
+  type MovimientoMin,
+  type ItemEsperadoMin,
+} from './matchLogica';
 
 if (!getApps().length) initializeApp();
 
@@ -107,7 +113,6 @@ export const extraerComprobante = onDocumentCreated(
         ],
       });
 
-      // Concatenar bloques de texto y limpiar fences defensivamente
       const raw = response.content
         .filter((b): b is Anthropic.TextBlock => b.type === 'text')
         .map(b => b.text)
@@ -126,24 +131,17 @@ export const extraerComprobante = onDocumentCreated(
         throw new Error(`JSON inválido — raw (500c): ${raw.slice(0, 500)}`);
       }
 
-      // Normalizar vencimientos: garantizar array aunque el modelo lo omita
-      if (!Array.isArray(parsed.vencimientos)) {
-        parsed.vencimientos = [];
-      }
+      if (!Array.isArray(parsed.vencimientos)) parsed.vencimientos = [];
 
-      // Derivar montoTotal desde vencimientos[0] si vino null
       if (
         parsed.montoTotal === null &&
         Array.isArray(parsed.vencimientos) &&
         parsed.vencimientos.length > 0
       ) {
         const primerVenc = parsed.vencimientos[0] as { monto?: unknown };
-        if (typeof primerVenc.monto === 'number') {
-          parsed.montoTotal = primerVenc.monto;
-        }
+        if (typeof primerVenc.monto === 'number') parsed.montoTotal = primerVenc.monto;
       }
 
-      // Validación mínima viable
       const { tipoDocumento, moneda, numeroOperacion } = parsed;
       if (!tipoDocumento || typeof tipoDocumento !== 'string' || tipoDocumento.trim() === '') {
         throw new Error(`tipoDocumento ausente — raw (500c): ${raw.slice(0, 500)}`);
@@ -167,12 +165,114 @@ export const extraerComprobante = onDocumentCreated(
     } catch (e) {
       const mensaje = e instanceof Error ? e.message : String(e);
       console.error(`[extraerComprobante] error en ${snap.id}:`, mensaje);
-
       await ref.update({
         estado:          'error',
         errorExtraccion: mensaje,
         actualizadoEn:   FieldValue.serverTimestamp(),
       });
     }
+  },
+);
+
+export const matchComprobante = onDocumentUpdated(
+  {
+    document:       'comprobantes/{hash}',
+    timeoutSeconds: 60,
+    memory:         '256MiB',
+  },
+  async (event) => {
+    if (!event.data) return;
+
+    const before = event.data.before.data();
+    const after  = event.data.after.data();
+
+    // Guard anti-loop: solo cuando estado transiciona a 'extraido'
+    if (before.estado === 'extraido' || after.estado !== 'extraido') return;
+
+    const datos = after.datosExtraidos as DatosExtractosMin | undefined;
+    if (!datos) return;
+
+    const ref        = db.collection('comprobantes').doc(event.data.after.id);
+    const hashActual = event.data.after.id;
+
+    // Rama 0: dedup — ¿ya existe un movimiento con este hashPdf?
+    const dedupSnap = await db.collection('movimientos')
+      .where('hashPdf', '==', hashActual)
+      .limit(1)
+      .get();
+
+    if (!dedupSnap.empty) {
+      const movId = dedupSnap.docs[0].id;
+      await ref.update({
+        estado: 'vinculado',
+        propuestaMatch: {
+          rama:         0,
+          movimientoId: movId,
+          calculadoEn:  FieldValue.serverTimestamp(),
+        },
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      console.log(`[matchComprobante] ${hashActual} → rama 0 (dedup, mov ${movId})`);
+      return;
+    }
+
+    // Derivar mes del comprobante + meses adyacentes para la ventana ±7d
+    const mesComp = datos.fecha ? datos.fecha.slice(0, 7) : '';
+    const mesesAConsultar: string[] = [];
+    if (mesComp) {
+      const [y, m] = mesComp.split('-').map(Number);
+      const prev = new Date(y, m - 2);
+      const next = new Date(y, m);
+      mesesAConsultar.push(
+        `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`,
+        mesComp,
+        `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`,
+      );
+    }
+
+    const [movsSnap, itemsSnap] = await Promise.all([
+      mesesAConsultar.length > 0
+        ? db.collection('movimientos').where('mes', 'in', mesesAConsultar).get()
+        : db.collection('movimientos').limit(0).get(),
+      db.collection('itemsEsperados').where('activo', '==', true).get(),
+    ]);
+
+    const movs: MovimientoMin[] = movsSnap.docs.map(d => {
+      const data = d.data();
+      return {
+        id:            d.id,
+        monto:         data.monto as number,
+        moneda:        data.moneda as 'ARS' | 'USD',
+        tipo:          data.tipo   as 'Gasto' | 'Ingreso',
+        fecha:         (data.fecha as FirebaseFirestore.Timestamp | null)?.toDate() ?? new Date(0),
+        mes:           data.mes as string,
+        descripcion:   (data.descripcion as string) ?? '',
+        itemEsperadoId: (data.itemEsperadoId as string | null) ?? null,
+      };
+    });
+
+    const items: ItemEsperadoMin[] = itemsSnap.docs.map(d => {
+      const data = d.data();
+      const mt   = data.matchTexto as { incluye?: string[]; excluye?: string[] } | null;
+      return {
+        id:         d.id,
+        tipo:       data.tipo   as 'Gasto' | 'Ingreso',
+        moneda:     data.moneda as 'ARS' | 'USD',
+        activo:     (data.activo as boolean) ?? false,
+        matchTexto: mt ? { incluye: mt.incluye ?? [], excluye: mt.excluye ?? [] } : null,
+      };
+    });
+
+    const propuesta = calcularPropuesta(datos, movs, items, mesComp);
+
+    await ref.update({
+      propuestaMatch: {
+        ...propuesta,
+        calculadoEn: FieldValue.serverTimestamp(),
+      },
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+
+    console.log(`[matchComprobante] ${hashActual} → rama ${propuesta.rama}`);
   },
 );

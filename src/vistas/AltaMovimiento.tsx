@@ -8,12 +8,18 @@ import './AltaMovimiento.css';
 
 interface Preload {
   tipo?: 'Gasto' | 'Ingreso';
+  fecha?: string;           // ISO YYYY-MM-DD
+  descripcion?: string;
   categoria?: string;
   subcategoria?: string;
   persona?: string;
   moneda?: 'ARS' | 'USD';
   monto?: string;
   itemEsperadoId?: string;
+  // F6.3 — link a comprobante
+  hashPdf?: string;
+  refStoragePdf?: string;
+  confirmadoPago?: boolean;
 }
 
 interface Props {
@@ -37,9 +43,9 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [etiquetas, setEtiquetas] = useState<EtiquetaItem[]>([]);
   const [config,    setConfig]    = useState<FamiliaConfig | null>(null);
 
-  const [fecha,             setFecha]             = useState(hoyISO);
+  const [fecha,             setFecha]             = useState(preload?.fecha ?? hoyISO());
   const [tipo,              setTipo]              = useState<'Gasto' | 'Ingreso'>(preload?.tipo ?? 'Gasto');
-  const [descripcion,       setDescripcion]       = useState('');
+  const [descripcion,       setDescripcion]       = useState(preload?.descripcion ?? '');
   const [monto,             setMonto]             = useState(preload?.monto ?? '');
   const [moneda,            setMoneda]            = useState<'ARS' | 'USD'>(preload?.moneda ?? 'ARS');
   const [categoria,         setCategoria]         = useState(preload?.categoria ?? '');
@@ -127,6 +133,9 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       creadoPor:         memberId,
       incluirResumenMes,
       itemEsperadoId:    preload?.itemEsperadoId,
+      hashPdf:           preload?.hashPdf,
+      refStoragePdf:     preload?.refStoragePdf,
+      confirmadoPago:    preload?.confirmadoPago,
     });
     setGuardando(false);
 
