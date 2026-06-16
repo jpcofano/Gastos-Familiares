@@ -16,3 +16,4 @@ service-account*.json
 **/service-account*.json
 data/*
 !data/.gitkeep
+*.xlsx
