@@ -11,6 +11,7 @@ import {
   type MovimientoMin,
   type ItemEsperadoMin,
 } from './matchLogica';
+import { normalizar, type NormRule } from './normalizador';
 
 if (!getApps().length) initializeApp();
 
@@ -300,23 +301,40 @@ export const matchComprobante = onDocumentUpdated(
 
 import { createHash } from 'crypto';
 
-function idAprendido(patron: string, bancoFiltro: string, tarjetaFiltro: string): string {
+// sync manual con src/datos/clasificador.ts
+const CONFIANZA_INCREMENTO = 0.1;
+
+function idAprendido(patronNormalizado: string, bancoFiltro: string, tarjetaFiltro: string): string {
   return createHash('sha256')
-    .update(`${patron}\x00${bancoFiltro}\x00${tarjetaFiltro}`)
+    .update(`${patronNormalizado}\x00${bancoFiltro}\x00${tarjetaFiltro}`)
     .digest('hex')
     .slice(0, 24);
 }
 
+async function cargarReglasNormalizacion(): Promise<NormRule[]> {
+  const snap = await db.collection('reglasNormalizacion').get();
+  return snap.docs
+    .map(d => d.data())
+    .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+    .map(d => ({ tipo: d.tipo, patron: d.patron, reemplazo: d.reemplazo ?? '' } as NormRule));
+}
+
 async function aprender(data: FirebaseFirestore.DocumentData): Promise<void> {
-  const descripcion:  string | null = (data.descripcion  as string)  ?? null;
+  const descripcionFinal:    string | null = (data.descripcion         as string) ?? null;
+  const descripcionOriginal: string | null = (data.descripcionOriginal as string) ?? null;
   const categoria:    string | null = (data.categoria    as string)  ?? null;
   const subcategoria: string | null = (data.subcategoria as string)  ?? null;
   const banco:        string | null = (data.banco        as string)  ?? null;
   // tarjetaCodigo es el identificador único de tarjeta (ej: "gal-visa-sig")
   const tarjeta:      string | null = (data.tarjetaCodigo as string) ?? null;
 
-  if (!descripcion || !categoria) return;
-  const patron = descripcion.toLowerCase().trim();
+  if (!descripcionFinal || !categoria) return;
+  // textoRaw: la cruda si existe (precarga desde comprobante), sino la descripción tal cual se guardó.
+  const textoRaw = (descripcionOriginal ?? descripcionFinal).trim();
+  if (!textoRaw) return;
+
+  const reglas = await cargarReglasNormalizacion();
+  const patron = normalizar(textoRaw, reglas).toLowerCase();
   if (!patron) return;
 
   // Validar subcategoría contra el catálogo antes de persistirla
@@ -336,36 +354,44 @@ async function aprender(data: FirebaseFirestore.DocumentData): Promise<void> {
   const doc = await ref.get();
 
   if (doc.exists) {
-    await ref.update({
+    const existing = doc.data()!;
+    const correccion = existing.categoria !== categoria || existing.subcategoria !== subcatValidada;
+    const updatePayload: Record<string, unknown> = {
       categoria,
-      subcategoria:  subcatValidada,
-      usoCount:      FieldValue.increment(1),
-      ultimoUso:     FieldValue.serverTimestamp(),
-      actualizadoEn: FieldValue.serverTimestamp(),
-    });
-    console.log(`[aprender] upsert ${id} → ${categoria} / ${subcatValidada ?? 'sin subcat'}`);
+      subcategoria:      subcatValidada,
+      descripcionLimpia: descripcionFinal,
+      usoCount:          FieldValue.increment(1),
+      ultimoUso:         FieldValue.serverTimestamp(),
+      actualizadoEn:     FieldValue.serverTimestamp(),
+    };
+    if (correccion) {
+      const prevConfianza = typeof existing.confianza === 'number' ? existing.confianza : 0.8;
+      updatePayload.confianza = Math.min(1.0, prevConfianza + CONFIANZA_INCREMENTO);
+    }
+    await ref.update(updatePayload);
+    console.log(`[aprender] upsert ${id} → ${categoria} / ${subcatValidada ?? 'sin subcat'}${correccion ? ' (+confianza)' : ''}`);
   } else {
     await ref.set({
       patron,
-      patronOriginal:   descripcion,
-      tipoMatch:        'contains',
-      descripcionLimpia: null,
+      patronOriginal:    textoRaw,
+      tipoMatch:         'contains',
+      descripcionLimpia: descripcionFinal,
       categoria,
-      subcategoria:     subcatValidada,
-      etiqueta:         null,
-      personaDefault:   null,
-      monedaDefault:    null,
-      bancoFiltro:      banco   ?? null,
-      tarjetaFiltro:    tarjeta ?? null,
-      confianza:        0.8,
-      accionDefault:    '',
-      usoCount:         1,
-      ultimoUso:        FieldValue.serverTimestamp(),
-      activo:           true,
-      origen:           'Manual',
-      creadoPor:        'aprendizaje',
-      creadoEn:         FieldValue.serverTimestamp(),
-      notas:            null,
+      subcategoria:      subcatValidada,
+      etiqueta:          null,
+      personaDefault:    null,
+      monedaDefault:     null,
+      bancoFiltro:       banco   ?? null,
+      tarjetaFiltro:     tarjeta ?? null,
+      confianza:         0.8,
+      accionDefault:     '',
+      usoCount:          1,
+      ultimoUso:         FieldValue.serverTimestamp(),
+      activo:            true,
+      origen:            'Manual',
+      creadoPor:         'aprendizaje',
+      creadoEn:          FieldValue.serverTimestamp(),
+      notas:             null,
     });
     console.log(`[aprender] insert ${id} → ${categoria} / ${subcatValidada ?? 'sin subcat'}`);
   }

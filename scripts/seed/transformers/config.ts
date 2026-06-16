@@ -20,6 +20,27 @@ const TARJETAS = [
     titular: 'María', cuentaDebito: 'C.A. 0406142034' },
 ];
 
+const normNombreSeed = (s: string) =>
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+const ALIAS_MAP: Record<string, string[]> = {
+  'juan': [
+    'juan', 'juan pablo', 'juan pablo cofano', 'cofano juan pablo', 'cofano juan',
+  ],
+  'maria': [
+    'maria', 'may', 'maria lascano', 'lascano maria', 'maria lascano cofano',
+  ],
+  'federico': [
+    'fede', 'federico', 'federico nicolas', 'federico cofano',
+    'federico cofano lascano', 'federico nicolas cofano lascano',
+    'cofano lascano federico nicolas',
+  ],
+  'sofia': [
+    'sofi', 'sofia', 'sofia cofano', 'sofia cofano lascano', 'sofia ines',
+    'sofia ines cofano lascano', 'cofano lascano sofia ines',
+  ],
+};
+
 export async function seedConfig(db: Firestore, data: SheetData, dryRun: boolean) {
   console.log('-> config/familia');
 
@@ -39,6 +60,7 @@ export async function seedConfig(db: Firestore, data: SheetData, dryRun: boolean
       emails: info.emails,
       rol: info.rol === 'admin' ? 'admin' : 'dependiente',
       activo: info.activo,
+      alias: ALIAS_MAP[normNombreSeed(persona)] ?? [],
     };
   }
 

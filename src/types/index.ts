@@ -123,6 +123,7 @@ export interface FamiliaMiembro {
   emails: string[];
   rol: 'admin' | 'dependiente';
   activo: boolean;
+  alias?: string[];  // minúscula, sin acentos — solo para resolverNombreMiembro(), nunca se muestran en UI
 }
 
 export interface FamiliaConfig {

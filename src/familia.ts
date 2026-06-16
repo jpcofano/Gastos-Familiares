@@ -19,6 +19,41 @@ export async function cargarFamiliaConfig(): Promise<FamiliaConfig | null> {
   return docAFamiliaConfig(snap.data());
 }
 
+function normNombre(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Resuelve un nombre crudo (ej: titular en PDF) a memberId vía alias[].
+// Paso 1: igualdad exacta. Paso 2: inclusión como fallback tolerante.
+// El nombre canónico (miembro.nombre) cuenta como alias implícito.
+export function resolverNombreMiembro(
+  nombreCrudo: string,
+  config: FamiliaConfig,
+): string | null {
+  if (!nombreCrudo) return null;
+  const input = normNombre(nombreCrudo);
+  if (!input) return null;
+
+  for (const [memberId, miembro] of Object.entries(config.miembros)) {
+    if (!miembro.activo) continue;
+    const aliases = [...(miembro.alias ?? []), normNombre(miembro.nombre)];
+    if (aliases.some(a => a === input)) return memberId;
+  }
+
+  for (const [memberId, miembro] of Object.entries(config.miembros)) {
+    if (!miembro.activo) continue;
+    const aliases = [...(miembro.alias ?? []), normNombre(miembro.nombre)];
+    if (aliases.some(a => input.includes(a) || a.includes(input))) return memberId;
+  }
+
+  return null;
+}
+
 export function resolverMiembro(
   email: string,
   config: FamiliaConfig,

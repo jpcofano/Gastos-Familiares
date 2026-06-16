@@ -83,7 +83,7 @@ service cloud.firestore {
       allow delete: if esAdmin();
     }
     match /reglasNormalizacion/{id} {
-      allow read:  if esAdmin();
+      allow read:  if esMiembro();
       allow write: if false;
     }
 

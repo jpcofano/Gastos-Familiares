@@ -1,8 +1,16 @@
+import { normalizar, type NormRule } from './normalizador';
+
+export const CONFIANZA_UMBRAL     = 0.7;  // threshold para prellenar sugerencia
+export const CONFIANZA_INCREMENTO = 0.1;  // bump cuando el usuario corrige (sync con functions/src/index.ts)
+
 export interface EntradaDict {
   patron: string | null;
   tipoMatch: 'exact' | 'contains';
+  descripcionLimpia: string | null;
   categoria: string | null;
   subcategoria: string | null;
+  personaDefault: string | null;
+  monedaDefault: 'ARS' | 'USD' | null;
   bancoFiltro: string | null;
   tarjetaFiltro: string | null;
   confianza: number;
@@ -10,8 +18,11 @@ export interface EntradaDict {
 }
 
 export interface ClasificacionResult {
+  descripcionLimpia: string | null;
   categoria: string;
   subcategoria: string | null;
+  personaDefault: string | null;
+  monedaDefault: 'ARS' | 'USD' | null;
   confianza: number;
 }
 
@@ -19,9 +30,11 @@ export interface ClasificacionResult {
 export function clasificar(
   texto: string,
   entradas: EntradaDict[],
+  reglas: NormRule[],
   opts: { banco?: string | null; tarjeta?: string | null } = {},
 ): ClasificacionResult | null {
-  const norm = texto.toLowerCase().trim();
+  const textoNormalizado = normalizar(texto.trim(), reglas);
+  const norm = textoNormalizado.toLowerCase();
   if (!norm) return null;
 
   const banco   = opts.banco   ?? null;
@@ -32,7 +45,9 @@ export function clasificar(
   for (const e of entradas) {
     if (!e.activo || !e.patron || !e.categoria) continue;
 
-    const patronNorm = e.patron.toLowerCase();
+    // El patron guardado ya viene normalizado (on-write), pero se renormaliza acá también:
+    // robustece el lookup si las reglas cambian sin migrar datos viejos (igual que el sistema viejo).
+    const patronNorm = normalizar(e.patron, reglas).toLowerCase();
     const matchTexto =
       e.tipoMatch === 'exact'
         ? norm === patronNorm
@@ -52,7 +67,14 @@ export function clasificar(
 
     if (!mejor || especificidad > mejor.especificidad) {
       mejor = {
-        result: { categoria: e.categoria, subcategoria: e.subcategoria ?? null, confianza: e.confianza },
+        result: {
+          descripcionLimpia: e.descripcionLimpia ?? textoNormalizado,
+          categoria:         e.categoria,
+          subcategoria:      e.subcategoria ?? null,
+          personaDefault:    e.personaDefault ?? null,
+          monedaDefault:     e.monedaDefault ?? null,
+          confianza:         e.confianza,
+        },
         especificidad,
       };
     }

@@ -4,6 +4,8 @@ import { subirComprobante, confirmarRama1, marcarVinculado } from '../datos/comp
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
+import { useDiccionario } from '../contexto/DiccionarioContext';
+import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import AltaMovimiento from './AltaMovimiento';
 import type { Comprobante, ExpectedItem, DatosExtraidos } from '../types';
 import './Comprobantes.css';
@@ -53,6 +55,7 @@ interface PropuestaProps {
 function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
+  const { clasificar } = useDiccionario();
   const [confirmando,    setConfirmando]    = useState(false);
   const [mostrarAlta,    setMostrarAlta]    = useState(false);
   const [candidatoSel,   setCandidatoSel]   = useState<string>('');
@@ -147,14 +150,22 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   }
 
   // Ramas 2 y 3: crear movimiento
+  // descripcionLimpia solo se aplica si confianza >= CONFIANZA_UMBRAL (addendum_3).
+  // persona = memberId (quién subió) como fuente primaria (addendum_3).
+  const descripcionCruda  = d.comercioRazonSocial ?? undefined;
+  const sugerencia        = descripcionCruda ? clasificar(descripcionCruda) : null;
+  const sugerenciaValida  = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
+  const descripcionFinal  = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
   const preloadBase = {
     tipo:          'Gasto'  as const,
     fecha:         d.fecha  ?? undefined,
-    descripcion:   d.comercioRazonSocial ?? undefined,
+    descripcion:   descripcionFinal,
+    descripcionOriginal: (descripcionCruda && descripcionFinal !== descripcionCruda) ? descripcionCruda : undefined,
     moneda:        d.moneda,
     monto:         d.montoTotal != null ? String(d.montoTotal) : undefined,
     hashPdf:       comp.hashPdf,
     refStoragePdf: comp.refStoragePdf,
+    persona:       memberId,  // addendum_3: quien sube = fuente primaria, editable en AltaMovimiento
   };
 
   if (pm.rama === 2) {
@@ -162,7 +173,7 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
       ...preloadBase,
       categoria:     esperado?.categoria    ?? undefined,
       subcategoria:  esperado?.subcategoria ?? undefined,
-      persona:       esperado?.persona      ?? undefined,
+      // persona ya viene en preloadBase = memberId (addendum_3)
       itemEsperadoId: pm.itemEsperadoId,
       confirmadoPago: true,
     };
@@ -211,7 +222,6 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
           onGuardado={async () => {
             await marcarVinculado(comp.id);
             setMostrarAlta(false);
-            onAccion();
           }}
           onCancelar={() => setMostrarAlta(false)}
         />

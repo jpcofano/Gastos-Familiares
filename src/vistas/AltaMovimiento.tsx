@@ -4,6 +4,7 @@ import { cargarFamiliaConfig } from '../familia';
 import { crearMovimiento, existeNumeroComprobante } from '../datos/movimientos';
 import { tcParaFecha } from '../datos/tcDiario';
 import { useDiccionario } from '../contexto/DiccionarioContext';
+import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import type { FamiliaConfig, FamiliaMiembro } from '../types';
 import './AltaMovimiento.css';
 
@@ -11,6 +12,7 @@ interface Preload {
   tipo?: 'Gasto' | 'Ingreso';
   fecha?: string;           // ISO YYYY-MM-DD
   descripcion?: string;
+  descripcionOriginal?: string; // F6.4.5 addendum_2 — cruda, para trazabilidad si descripcion viene limpia
   categoria?: string;
   subcategoria?: string;
   persona?: string;
@@ -104,18 +106,19 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
     setSubcategoria('');
   }, [categoria]);
 
-  // Sugerencia de categoría/subcategoría desde el diccionario al cambiar descripción
+  // Sugerencia de categoría/subcategoría/moneda desde el diccionario al cambiar descripción
   useEffect(() => {
     if (cargandoCatalogos || cargandoDict) return;
     if (categoria !== '') return; // no pisar elección del usuario
     const norm = descripcion.trim();
     if (!norm) return;
     const sug = clasificar(norm);
-    if (!sug) return;
+    if (!sug || sug.confianza < CONFIANZA_UMBRAL) return;
     suggestionRef.current = true;
     setCategoria(sug.categoria);
     if (sug.subcategoria) setSubcategoria(sug.subcategoria);
-  }, [descripcion, cargandoCatalogos, cargandoDict, clasificar]);
+    if (sug.monedaDefault && moneda === 'ARS') setMoneda(sug.monedaDefault);
+  }, [descripcion, cargandoCatalogos, cargandoDict, clasificar, moneda]);
 
   // Lookup TC al cambiar fecha o moneda
   useEffect(() => {
@@ -166,6 +169,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       fecha:             new Date(fecha + 'T12:00:00'),
       tipo,
       descripcion,
+      descripcionOriginal: preload?.descripcionOriginal,
       monto:             montoNum,
       moneda,
       tcUsdArs:          moneda === 'USD' ? tcUsdArs : null,

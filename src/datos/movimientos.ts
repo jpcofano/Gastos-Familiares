@@ -53,6 +53,7 @@ export interface NuevoMovimiento {
   fecha: Date;
   tipo: 'Gasto' | 'Ingreso';
   descripcion: string;
+  descripcionOriginal?: string;
   monto: number;
   moneda: 'ARS' | 'USD';
   tcUsdArs: number | null;
@@ -83,6 +84,7 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       mes,
       tipo:              payload.tipo,
       descripcion:       payload.descripcion,
+      descripcionOriginal: payload.descripcionOriginal ?? null,
       monto:             payload.monto,
       moneda:            payload.moneda,
       tcUsdArs:          payload.tcUsdArs,
