@@ -276,3 +276,98 @@ export const matchComprobante = onDocumentUpdated(
     console.log(`[matchComprobante] ${hashActual} → rama ${propuesta.rama}`);
   },
 );
+
+// ── F6.4.5 — Aprendizaje del diccionario (trigger on movimientos) ─────────────
+
+import { createHash } from 'crypto';
+
+function idAprendido(patron: string, bancoFiltro: string, tarjetaFiltro: string): string {
+  return createHash('sha256')
+    .update(`${patron}\x00${bancoFiltro}\x00${tarjetaFiltro}`)
+    .digest('hex')
+    .slice(0, 24);
+}
+
+async function aprender(data: FirebaseFirestore.DocumentData): Promise<void> {
+  const descripcion:  string | null = (data.descripcion  as string)  ?? null;
+  const categoria:    string | null = (data.categoria    as string)  ?? null;
+  const subcategoria: string | null = (data.subcategoria as string)  ?? null;
+  const banco:        string | null = (data.banco        as string)  ?? null;
+  // tarjetaCodigo es el identificador único de tarjeta (ej: "gal-visa-sig")
+  const tarjeta:      string | null = (data.tarjetaCodigo as string) ?? null;
+
+  if (!descripcion || !categoria) return;
+  const patron = descripcion.toLowerCase().trim();
+  if (!patron) return;
+
+  // Validar subcategoría contra el catálogo antes de persistirla
+  let subcatValidada: string | null = null;
+  if (subcategoria) {
+    const snap = await db.collection('subcategorias')
+      .where('categoriaPadre', '==', categoria)
+      .where('valor', '==', subcategoria)
+      .where('activo', '==', true)
+      .limit(1)
+      .get();
+    subcatValidada = snap.empty ? null : subcategoria;
+  }
+
+  const id  = idAprendido(patron, banco ?? '', tarjeta ?? '');
+  const ref = db.collection('diccionario').doc(id);
+  const doc = await ref.get();
+
+  if (doc.exists) {
+    await ref.update({
+      categoria,
+      subcategoria:  subcatValidada,
+      usoCount:      FieldValue.increment(1),
+      ultimoUso:     FieldValue.serverTimestamp(),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+    console.log(`[aprender] upsert ${id} → ${categoria} / ${subcatValidada ?? 'sin subcat'}`);
+  } else {
+    await ref.set({
+      patron,
+      patronOriginal:   descripcion,
+      tipoMatch:        'contains',
+      descripcionLimpia: null,
+      categoria,
+      subcategoria:     subcatValidada,
+      etiqueta:         null,
+      personaDefault:   null,
+      monedaDefault:    null,
+      bancoFiltro:      banco   ?? null,
+      tarjetaFiltro:    tarjeta ?? null,
+      confianza:        0.8,
+      accionDefault:    '',
+      usoCount:         1,
+      ultimoUso:        FieldValue.serverTimestamp(),
+      activo:           true,
+      origen:           'Manual',
+      creadoPor:        'aprendizaje',
+      creadoEn:         FieldValue.serverTimestamp(),
+      notas:            null,
+    });
+    console.log(`[aprender] insert ${id} → ${categoria} / ${subcatValidada ?? 'sin subcat'}`);
+  }
+}
+
+export const aprenderMovimientoCreado = onDocumentCreated(
+  { document: 'movimientos/{id}', memory: '128MiB' },
+  async event => {
+    const data = event.data?.data();
+    if (!data?.categoria || !data?.subcategoria) return;
+    await aprender(data).catch(e => console.error('[aprender] error en create:', e));
+  },
+);
+
+export const aprenderMovimientoActualizado = onDocumentUpdated(
+  { document: 'movimientos/{id}', memory: '128MiB' },
+  async event => {
+    const before = event.data?.before.data();
+    const after  = event.data?.after.data();
+    if (!after?.categoria || !after?.subcategoria) return;
+    if (before?.categoria === after.categoria && before?.subcategoria === after.subcategoria) return;
+    await aprender(after).catch(e => console.error('[aprender] error en update:', e));
+  },
+);

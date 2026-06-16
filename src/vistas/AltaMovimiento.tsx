@@ -3,6 +3,7 @@ import { cargarSubcategorias, cargarEtiquetas, type SubcategoriaItem, type Etiqu
 import { cargarFamiliaConfig } from '../familia';
 import { crearMovimiento, existeNumeroComprobante } from '../datos/movimientos';
 import { tcParaFecha } from '../datos/tcDiario';
+import { useDiccionario } from '../contexto/DiccionarioContext';
 import type { FamiliaConfig, FamiliaMiembro } from '../types';
 import './AltaMovimiento.css';
 
@@ -51,6 +52,7 @@ function hoyISO(): string {
 
 export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload }: Props) {
   const esAdmin = miembro.rol === 'admin';
+  const { clasificar, cargando: cargandoDict } = useDiccionario();
 
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [subcats,   setSubcats]   = useState<SubcategoriaItem[]>([]);
@@ -69,7 +71,8 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [persona,           setPersona]           = useState(preload?.persona ?? memberId);
   const [incluirResumenMes, setIncluirResumenMes] = useState(true);
 
-  const subcatInitRef = useRef(true);
+  const subcatInitRef  = useRef(true);
+  const suggestionRef  = useRef(false); // señal para que el reset no borre la subcategoría sugerida
 
   const [tcUsdArs,    setTcUsdArs]    = useState<number | null>(null);
   const [tcCargando,  setTcCargando]  = useState(false);
@@ -94,11 +97,25 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       });
   }, [esAdmin]);
 
-  // Reset subcategoria cuando cambia la categoría (saltar en el mount inicial para respetar preload)
+  // Reset subcategoria cuando cambia la categoría (saltar mount inicial y cambios de sugerencia)
   useEffect(() => {
     if (subcatInitRef.current) { subcatInitRef.current = false; return; }
+    if (suggestionRef.current) { suggestionRef.current = false; return; }
     setSubcategoria('');
   }, [categoria]);
+
+  // Sugerencia de categoría/subcategoría desde el diccionario al cambiar descripción
+  useEffect(() => {
+    if (cargandoCatalogos || cargandoDict) return;
+    if (categoria !== '') return; // no pisar elección del usuario
+    const norm = descripcion.trim();
+    if (!norm) return;
+    const sug = clasificar(norm);
+    if (!sug) return;
+    suggestionRef.current = true;
+    setCategoria(sug.categoria);
+    if (sug.subcategoria) setSubcategoria(sug.subcategoria);
+  }, [descripcion, cargandoCatalogos, cargandoDict, clasificar]);
 
   // Lookup TC al cambiar fecha o moneda
   useEffect(() => {

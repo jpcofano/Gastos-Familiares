@@ -94,9 +94,9 @@ service cloud.firestore {
       allow update, delete: if esAdmin();
     }
 
-    // Diccionario — lectura admin + escritura manual por cualquier miembro
+    // Diccionario — lectura por todos los miembros (clasificador client-side); escritura admin + manual
     match /diccionario/{id} {
-      allow read: if esAdmin();
+      allow read: if esMiembro();
       allow create, update: if esAdmin() || (esMiembro() && request.resource.data.origen == 'Manual');
       allow delete: if esAdmin();
     }

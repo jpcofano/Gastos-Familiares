@@ -4,6 +4,7 @@ import { signInConGoogle, signOutUsuario } from './auth';
 import { useMiembro } from './hooks/useMiembro';
 import { MiembroContext } from './contexto/MiembroContext';
 import { ItemsEsperadosProvider } from './contexto/ItemsEsperadosContext';
+import { DiccionarioProvider }    from './contexto/DiccionarioContext';
 import Dashboard from './vistas/Dashboard';
 import Resumen from './vistas/Resumen';
 import ConfigEsperados from './vistas/ConfigEsperados';
@@ -44,6 +45,7 @@ export default function AppShell() {
 
   return (
     <MiembroContext.Provider value={{ memberId: memberId!, miembro: miembro! }}>
+    <DiccionarioProvider>
     <ItemsEsperadosProvider>
       <div className="shell-layout">
         <header className="shell-header">
@@ -79,6 +81,7 @@ export default function AppShell() {
         </main>
       </div>
     </ItemsEsperadosProvider>
+    </DiccionarioProvider>
     </MiembroContext.Provider>
   );
 }
