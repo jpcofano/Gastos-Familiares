@@ -17,7 +17,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Fase 3 — Auth + shell PWA: cerrado.
 - Fase 4 — Vistas read-only (Dashboard, Resumen, pantalla de hijos): cerrado.
 - Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado. F5.1.0 hotfix P0 cerrado (autorizados por email). F5.2 cerrado (state machine 8 estados, registrar desde checklist, itemEsperadoId). F5.3 cerrado (realtime onSnapshot + offline persistentLocalCache; latency compensation automática, sin optimistic manual).
-- Fase 6 — Tarjetas + Comprobantes con Cloud Functions: F6.2 (infra Functions + extracción Anthropic) cerrado. F6.3 (match server-side propone→confirmás, 3 ramas + dedup) cerrado. F6.4 (carga manual sin comprobante, dedup advisory no-bloqueante, origen Manual) cerrado. F6.4.5 (clasificador completo: lookup DiccionarioContext consciente de banco/tarjeta + trigger aprendizaje server-side + normalización on-write vía `reglasNormalizacion`; `descripcionLimpia` como descripción visible al crear movimiento desde comprobante; `descripcionOriginal` preserva texto crudo para trazabilidad; CONFIANZA_UMBRAL=0.7 para prellenar sugerencias — corrección del usuario sube confianza +0.1; persona=quien-sube como fuente primaria en comprobante ramas 2/3; alias de miembros en `config/familia` + `resolverNombreMiembro()` listo para F6.5; corrige Rules `reglasNormalizacion` esAdmin→esMiembro y bug `onAccion()` indefinido en rama 3) cerrado. F6.6 (PWA share-target Android: manifest + SW handler IDB + auto-subida en Comprobantes; iOS fallback via input file existente) pendiente prueba en dispositivo real.
+- Fase 6 — Tarjetas + Comprobantes con Cloud Functions: F6.2 (infra Functions + extracción Anthropic) cerrado. F6.3 (match server-side propone→confirmás, 3 ramas + dedup) cerrado. F6.4 (carga manual sin comprobante, dedup advisory no-bloqueante, origen Manual) cerrado. F6.4.5 (clasificador completo: lookup DiccionarioContext consciente de banco/tarjeta + trigger aprendizaje server-side + normalización on-write vía `reglasNormalizacion`; `descripcionLimpia` como descripción visible al crear movimiento desde comprobante; `descripcionOriginal` preserva texto crudo para trazabilidad; CONFIANZA_UMBRAL=0.7 para prellenar sugerencias — corrección del usuario sube confianza +0.1; persona=quien-sube como fuente primaria en comprobante ramas 2/3; alias de miembros en `config/familia` + `resolverNombreMiembro()` listo para F6.5; corrige Rules `reglasNormalizacion` esAdmin→esMiembro y bug `onAccion()` indefinido en rama 3. Addendum 5: fix preload congelado en PropuestaCard — categoria/subcategoria/etiqueta/banco prellenan en alta desde comprobante; `etiqueta` fluye por toda la cadena EntradaDict→ClasificacionResult→DiccionarioContext→preloadBase; `subcatInitCatRef` reemplaza flag booleano para sobrevivir React Strict Mode double-fire; guard `cargandoDict` en botones de apertura; `incluirResumenMes` default true solo si fecha > hoy; banco default `Efectivo` para comprobantes, rama 2 (esperado) no lo hereda) cerrado. F6.6 (PWA share-target Android: manifest + SW handler IDB + auto-subida en Comprobantes; iOS fallback via input file existente) pendiente prueba en dispositivo real.
 - Fase 7 — Cutover y archivo del Sheet: pendiente.
 
 ## Decisiones cerradas
@@ -46,7 +46,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Dependientes siempre consultan movimientos con where('persona','==',memberId).
   Sin ese filtro, las Rules deniegan la query entera (fail-closed).
 - Listeners `onSnapshot` en `movimientos`, `comprobantes` e `itemsEsperados` (F5.3).
-  `itemsEsperados` se suscribe una vez en `ItemsEsperadosContext` (AppShell), compartido por Resumen, Comprobantes y ConfigEsperados. `movimientos` suscribe por vista (`useMovimientosDelMes`). Colecciones quasi-estáticas (subcategorias, etiquetas, config/familia): one-shot. `diccionario` + `reglasNormalizacion`: one-shot conjunto en `DiccionarioContext` (Promise.all al montar AppShell), ~470 entradas + 7 reglas en memoria para el clasificador (normalización on-write).
+  `itemsEsperados` se suscribe una vez en `ItemsEsperadosContext` (AppShell), compartido por Resumen, Comprobantes y ConfigEsperados. `movimientos` suscribe por vista (`useMovimientosDelMes`). Colecciones quasi-estáticas (subcategorias, etiquetas, config/familia): one-shot. `diccionario` + `reglasNormalizacion`: one-shot conjunto en `DiccionarioContext` (Promise.all al montar AppShell), ~479 entradas de seed + entradas creadas por el trigger de aprendizaje (crece con el uso) + 7 reglas en memoria para el clasificador (normalización on-write).
 - Backup diario de Firestore a GCS configurado en F0.
 - `serviceAccountKey.json` SIEMPRE gitignored. Si se filtra, Google revoca la key.
 - El normalizador de descripciones (`normalizar()` + reglas de `reglasNormalizacion`) existe en TRES copias idénticas: `scripts/seed/utils/normalize.ts` (canónico, usado por el seed), `src/datos/normalizador.ts` (cliente) y `functions/src/normalizador.ts` (trigger de aprendizaje). Paquetes independientes, no se importan cruzados — sync manual si cambia el algoritmo.
@@ -97,7 +97,7 @@ Solo despues de validar contra emulador. Pasos:
 1. Verificar que `secrets/serviceAccountKey.json` existe y esta gitignored.
 2. `npm run seed:prod -- --i-am-sure`
 3. `npm run validate -- --target=production`
-4. Confirmar que los 10 validators dan verde.
+4. Confirmar que los 12 validators dan verde.
 
 Si algun validator falla, diagnosticar antes de continuar.
 
@@ -114,7 +114,7 @@ Colecciones:
 - `/resumenesTarjeta/{id}`: 18 docs iniciales, cabeceras de resumenes.
 - `/itemsEsperados/{id}`: 24 docs (20 gastos + 4 ingresos), unificada con `tipo`. Campos: `periodicidad` (default `mensual`; bimestral/trimestral/anual/unico previstos, sin uso hoy), `pagoAutomatico` (default `false`).
 - `/comprobantes/{hashPdf}`: un doc por comprobante subido (id = SHA-256 del archivo). Estados: `subido` → `extraido` → `vinculado` | `error`. Campos: `datosExtraidos` (tipoDocumento, fecha, montoTotal, moneda, comercioRazonSocial, cuit, numeroOperacion, periodoFacturado, numeroCliente, vencimientos[]), `propuestaMatch` (rama 0-3, movimientoId?, itemEsperadoId?, candidatos?), `refStoragePdf`, `contentType`, `tamano`, `subidoPor`, `subidoEn`, `actualizadoEn`. La function `extraerComprobante` (onDocumentCreated) llama a Claude claude-sonnet-4-6 (PDF o imagen). La function `matchComprobante` (onDocumentUpdated, guard anti-loop) calcula la propuesta vía matchLogica.ts.
-- `/diccionario/{id}`: ~470 entradas de aprendizaje, dict global.
+- `/diccionario/{id}`: seed ~479 entradas; crece vía trigger de aprendizaje F6.4.5 (no hay upper bound fijo). Validator chequea `count >= excel - 15`.
 
 Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracion.
 
@@ -123,9 +123,6 @@ Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracio
 Inflación en esperados/proyecciones ARS (fase propia, futura): los `itemsEsperados` con `moneda: "ARS"` tienen `montoEsperado` estático. Para proyecciones reales habría que ajustar por inflación mensual (INDEC IPC). Opciones: campo `ajusteInflacion: boolean` + factor mensual en `/config/familia`, o bien dejar que el usuario actualice `montoEsperado` manualmente cada N meses. No se implementa hasta que el caso de uso sea claro.
 
 ## Backlog (post F5.3)
-- **F6.4 — Carga manual de movimiento (ingreso/gasto) desde Comprobantes.**
-  Botón que abre AltaMovimiento sin pasar por extracción. Feature chica.
-
 - **F6.5 — Pipeline de resumen de tarjeta (1 resumen → N movimientos).**
   Un resumen_tarjeta NO es un pago único: es un estado de cuenta con N consumos → mapea a la
   colección resumenesTarjeta y genera N movimientos. Pipeline distinto al de F6 (extracción
