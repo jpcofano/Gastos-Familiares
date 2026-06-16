@@ -15,6 +15,8 @@ interface Preload {
   descripcionOriginal?: string; // F6.4.5 addendum_2 — cruda, para trazabilidad si descripcion viene limpia
   categoria?: string;
   subcategoria?: string;
+  etiqueta?: string;
+  banco?: string;
   persona?: string;
   moneda?: 'ARS' | 'USD';
   monto?: string;
@@ -68,13 +70,15 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [moneda,            setMoneda]            = useState<'ARS' | 'USD'>(preload?.moneda ?? 'ARS');
   const [categoria,         setCategoria]         = useState(preload?.categoria ?? '');
   const [subcategoria,      setSubcategoria]      = useState(preload?.subcategoria ?? '');
-  const [etiqueta,          setEtiqueta]          = useState('');
-  const [banco,             setBanco]             = useState('');
+  const [etiqueta,          setEtiqueta]          = useState(preload?.etiqueta ?? '');
+  const [banco,             setBanco]             = useState(preload?.banco ?? '');
   const [persona,           setPersona]           = useState(preload?.persona ?? memberId);
-  const [incluirResumenMes, setIncluirResumenMes] = useState(true);
+  const [incluirResumenMes, setIncluirResumenMes] = useState(
+    () => (preload?.fecha ?? hoyISO()) > hoyISO()
+  );
 
-  const subcatInitRef  = useRef(true);
-  const suggestionRef  = useRef(false); // señal para que el reset no borre la subcategoría sugerida
+  const subcatInitCatRef = useRef(preload?.categoria ?? null); // categoría preloadeada: no limpiar mientras coincida
+  const suggestionRef    = useRef(false); // señal para que el reset no borre la subcategoría sugerida
 
   const [tcUsdArs,    setTcUsdArs]    = useState<number | null>(null);
   const [tcCargando,  setTcCargando]  = useState(false);
@@ -101,7 +105,10 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
 
   // Reset subcategoria cuando cambia la categoría (saltar mount inicial y cambios de sugerencia)
   useEffect(() => {
-    if (subcatInitRef.current) { subcatInitRef.current = false; return; }
+    // No limpiar mientras categoria siga siendo el valor preloadeado.
+    // Cubre el doble-fire de React Strict Mode que agotaba el flag booleano anterior.
+    if (subcatInitCatRef.current !== null && categoria === subcatInitCatRef.current) return;
+    subcatInitCatRef.current = null; // consumido: desde aquí cualquier cambio limpia
     if (suggestionRef.current) { suggestionRef.current = false; return; }
     setSubcategoria('');
   }, [categoria]);

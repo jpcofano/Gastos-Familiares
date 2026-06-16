@@ -9,6 +9,7 @@ export interface EntradaDict {
   descripcionLimpia: string | null;
   categoria: string | null;
   subcategoria: string | null;
+  etiqueta: string | null;
   personaDefault: string | null;
   monedaDefault: 'ARS' | 'USD' | null;
   bancoFiltro: string | null;
@@ -21,6 +22,7 @@ export interface ClasificacionResult {
   descripcionLimpia: string | null;
   categoria: string;
   subcategoria: string | null;
+  etiqueta: string | null;
   personaDefault: string | null;
   monedaDefault: 'ARS' | 'USD' | null;
   confianza: number;
@@ -71,6 +73,7 @@ export function clasificar(
           descripcionLimpia: e.descripcionLimpia ?? textoNormalizado,
           categoria:         e.categoria,
           subcategoria:      e.subcategoria ?? null,
+          etiqueta:          e.etiqueta ?? null,
           personaDefault:    e.personaDefault ?? null,
           monedaDefault:     e.monedaDefault ?? null,
           confianza:         e.confianza,

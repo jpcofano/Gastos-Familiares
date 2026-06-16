@@ -30,6 +30,7 @@ export function DiccionarioProvider({ children }: { children: ReactNode }) {
             descripcionLimpia: data.descripcionLimpia  ?? null,
             categoria:         data.categoria          ?? null,
             subcategoria:      data.subcategoria       ?? null,
+            etiqueta:          data.etiqueta           ?? null,
             personaDefault:    data.personaDefault     ?? null,
             monedaDefault:     data.monedaDefault       ?? null,
             bancoFiltro:       data.bancoFiltro         ?? null,

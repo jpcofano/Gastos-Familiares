@@ -55,7 +55,7 @@ interface PropuestaProps {
 function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
-  const { clasificar } = useDiccionario();
+  const { clasificar, cargando: cargandoDict } = useDiccionario();
   const [confirmando,    setConfirmando]    = useState(false);
   const [mostrarAlta,    setMostrarAlta]    = useState(false);
   const [candidatoSel,   setCandidatoSel]   = useState<string>('');
@@ -166,11 +166,16 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     hashPdf:       comp.hashPdf,
     refStoragePdf: comp.refStoragePdf,
     persona:       memberId,  // addendum_3: quien sube = fuente primaria, editable en AltaMovimiento
+    categoria:     sugerenciaValida?.categoria    ?? undefined,
+    subcategoria:  sugerenciaValida?.subcategoria ?? undefined,
+    etiqueta:      sugerenciaValida?.etiqueta     ?? undefined,
+    banco:         'Efectivo',
   };
 
   if (pm.rama === 2) {
     const preload = {
       ...preloadBase,
+      banco:         undefined,           // esperados tienen su propio banco; no pisar
       categoria:     esperado?.categoria    ?? undefined,
       subcategoria:  esperado?.subcategoria ?? undefined,
       // persona ya viene en preloadBase = memberId (addendum_3)
@@ -183,8 +188,8 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
           Esperado detectado{esperadoLabel ? `: ${esperadoLabel}` : ''}
         </span>
         {!mostrarAlta && (
-          <button className="cmp-btn-confirmar" onClick={() => setMostrarAlta(true)}>
-            Crear movimiento vinculado
+          <button className="cmp-btn-confirmar" disabled={cargandoDict} onClick={() => setMostrarAlta(true)}>
+            {cargandoDict ? 'Cargando…' : 'Crear movimiento vinculado'}
           </button>
         )}
         {mostrarAlta && (
@@ -209,8 +214,8 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     <div className="cmp-propuesta cmp-propuesta--3">
       <span className="cmp-propuesta-label">Sin match detectado — alta manual</span>
       {!mostrarAlta && (
-        <button className="cmp-btn-confirmar" onClick={() => setMostrarAlta(true)}>
-          Cargar movimiento
+        <button className="cmp-btn-confirmar" disabled={cargandoDict} onClick={() => setMostrarAlta(true)}>
+          {cargandoDict ? 'Cargando…' : 'Cargar movimiento'}
         </button>
       )}
       {mostrarAlta && (
