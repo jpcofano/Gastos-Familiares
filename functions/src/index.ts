@@ -20,8 +20,15 @@ const db            = getFirestore();
 const storage       = getStorage();
 const anthropicKey  = defineSecret('ANTHROPIC_API_KEY');
 
-const SYSTEM_PROMPT = `\
+function hoyArgentinaISO(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+function buildSystemPrompt(hoy: string): string {
+  return `\
 Sos un extractor de datos de comprobantes argentinos (facturas, tickets, comprobantes de pago/transferencia, resúmenes de tarjeta, recibos de servicios).
+
+Hoy es ${hoy} (zona horaria America/Argentina/Buenos_Aires).
 
 Devolvés EXCLUSIVAMENTE un objeto JSON válido. Sin markdown, sin \`\`\`json, sin texto antes ni después.
 
@@ -35,7 +42,13 @@ REGLAS DURAS:
 - numeroOperacion: el número de operación / transacción / comprobante / factura. NO es el CUIT. NO es el monto. NO es la fecha.
 - Si el comprobante NO tiene número de operación real, generá un pseudo-número con formato YYYY-MM-<slug>. YYYY-MM: usá periodoFacturado si existe y es claro, sino la fecha de emisión. <slug>: comercio en minúsculas, sin espacios ni acentos. Ej: "2026-06-edesur".
 - moneda: "ARS" o "USD". Inferí por símbolo ($ = ARS salvo que diga USD / U$S / dólares), contexto y emisor. Ante la duda, "ARS".
-- fecha: ISO "YYYY-MM-DD", fecha de emisión del documento.
+- fecha: ISO "YYYY-MM-DD" con año de 4 dígitos SIEMPRE. Es la fecha de emisión.
+  Si el documento NO muestra el año explícitamente (ej. "13/jun"), asumí el año tal que la fecha sea
+  la ocurrencia MÁS RECIENTE de ese día/mes que NO sea futura respecto de hoy. Ejemplos (hoy = 2026-06-16):
+  "13/jun" → 2026-06-13; "20/dic" → 2025-12-20 (porque dic 2026 todavía no pasó).
+  NUNCA elijas un año pasado arbitrario ni dejes un año por defecto.
+- Aplicá el mismo criterio de año (ocurrencia más reciente no futura respecto de hoy) a las fechas de
+  vencimientos[] y al YYYY-MM del pseudo-número / periodoFacturado cuando el año no esté explícito.
 - montoTotal: el monto del PRIMER vencimiento (pronto pago / monto base). NUNCA el segundo vencimiento (que lleva recargo). Si no hay vencimientos, montoTotal = total del documento.
 - comercioRazonSocial: razón social o nombre de fantasía del emisor.
 - periodoFacturado: el período que cubre la factura/servicio. Si es claro, normalizá a "YYYY-MM" (ej: "junio 2026" → "2026-06"). Si no es normalizable, ponelo tal cual. null si no hay período.
@@ -57,6 +70,7 @@ Esquema de salida EXACTO:
   "numeroCliente": "..." | null,
   "vencimientos": [{ "fecha": "YYYY-MM-DD" | null, "monto": number | null }]
 }`;
+}
 
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
@@ -91,12 +105,13 @@ export const extraerComprobante = onDocumentCreated(
       const base64      = fileBytes.toString('base64');
       const contentType = comp.contentType as string;
       const isPdf       = contentType === 'application/pdf';
+      const hoy         = hoyArgentinaISO();
 
       const client   = new Anthropic({ apiKey: anthropicKey.value() });
       const response = await client.messages.create({
         model:      'claude-sonnet-4-6',
         max_tokens: 1536,
-        system:     SYSTEM_PROMPT,
+        system:     buildSystemPrompt(hoy),
         messages: [
           {
             role: 'user',
@@ -151,6 +166,10 @@ export const extraerComprobante = onDocumentCreated(
       }
       if (!numeroOperacion || typeof numeroOperacion !== 'string' || numeroOperacion.trim() === '') {
         throw new Error(`numeroOperacion ausente — raw (500c): ${raw.slice(0, 500)}`);
+      }
+
+      if (typeof parsed.fecha === 'string' && parsed.fecha > hoy) {
+        console.warn(`[extraerComprobante] ${snap.id} → fecha futura sospechosa: ${parsed.fecha} (hoy=${hoy})`);
       }
 
       await ref.update({
