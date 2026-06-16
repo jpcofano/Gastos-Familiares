@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { subirComprobante, confirmarRama1, marcarVinculado } from '../datos/comprobantes';
+import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import AltaMovimiento from './AltaMovimiento';
@@ -265,6 +266,39 @@ export default function Comprobantes() {
   const [subiendo,  setSubiendo]  = useState(false);
   const [resultado, setResultado] = useState<ResultadoSubida | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Share-target (F6.6): Android PWA comparte un archivo → SW guarda en IDB → redirige aquí
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('share')) return;
+    // Limpiar el query param antes de cualquier await — evita re-disparo en navegación
+    window.history.replaceState({}, '', window.location.pathname);
+    leerYBorrarArchivoCompartido().then(file => {
+      if (!file) return; // IDB vacío (ya procesado o fallo en SW); silencioso
+      const TIPOS = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+      if (!TIPOS.includes(file.type)) {
+        setResultado({ tipo: 'error', mensaje: `Tipo no permitido: ${file.type}` });
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        setResultado({ tipo: 'error', mensaje: 'El archivo supera los 10 MB.' });
+        return;
+      }
+      setSubiendo(true);
+      setResultado(null);
+      subirComprobante(file, memberId)
+        .then(res => {
+          setSubiendo(false);
+          if (!res.ok) setResultado({ tipo: 'error', mensaje: res.error.message });
+          else if (res.duplicado) setResultado({ tipo: 'duplicado', comprobante: res.comprobante });
+          else setResultado({ tipo: 'subido', comprobante: res.comprobante });
+        })
+        .catch(err => {
+          setSubiendo(false);
+          setResultado({ tipo: 'error', mensaje: (err as Error).message });
+        });
+    }).catch(() => {}); // silencioso si IDB falla
+  }, [memberId]);
 
   // Lista — onSnapshot
   const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes();
