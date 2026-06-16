@@ -46,9 +46,8 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
   const dict = await db.collection('diccionario').count().get();
   results.push({
     name: 'diccionario count',
-    ok: dict.data().count >= data.diccionarioAprendido.length - 15
-      && dict.data().count <= data.diccionarioAprendido.length,
-    detail: `firestore=${dict.data().count} excel=${data.diccionarioAprendido.length} (consolidación esperada)`,
+    ok: dict.data().count >= data.diccionarioAprendido.length - 15,
+    detail: `firestore=${dict.data().count} excel=${data.diccionarioAprendido.length} (seed + entradas del trigger de aprendizaje)`,
   });
 
   const etiqs = await db.collection('etiquetas').get();
