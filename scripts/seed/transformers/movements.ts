@@ -103,6 +103,7 @@ export async function seedMovements(db: Firestore, data: SheetData, dryRun: bool
       return {
         id: idFinal,
         idLegacy: idBase,
+        seedImport: true,
         fecha: Timestamp.fromDate(fecha),
         fechaConsumoOriginal: r.FechaConsumoOriginal
           ? Timestamp.fromDate(r.FechaConsumoOriginal as Date) : null,

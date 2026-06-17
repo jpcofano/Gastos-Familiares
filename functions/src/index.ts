@@ -401,6 +401,7 @@ export const aprenderMovimientoCreado = onDocumentCreated(
   { document: 'movimientos/{id}', memory: '128MiB' },
   async event => {
     const data = event.data?.data();
+    if (data?.seedImport) return;
     if (!data?.categoria || !data?.subcategoria) return;
     await aprender(data).catch(e => console.error('[aprender] error en create:', e));
   },
@@ -411,6 +412,7 @@ export const aprenderMovimientoActualizado = onDocumentUpdated(
   async event => {
     const before = event.data?.before.data();
     const after  = event.data?.after.data();
+    if (after?.seedImport) return;
     if (!after?.categoria || !after?.subcategoria) return;
     if (before?.categoria === after.categoria && before?.subcategoria === after.subcategoria) return;
     await aprender(after).catch(e => console.error('[aprender] error en update:', e));
