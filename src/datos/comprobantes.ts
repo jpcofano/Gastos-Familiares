@@ -96,6 +96,16 @@ export async function listarComprobantes(): Promise<Resultado<Comprobante[]>> {
   }
 }
 
+function hoyArgentinaISO(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+// Fecha de comprobante (YYYY-MM-DD) ≤ hoy en Argentina → ya se pagó
+export function confirmadoPagoPorFecha(fechaISO: string | null | undefined): boolean {
+  if (!fechaISO) return false;
+  return fechaISO <= hoyArgentinaISO();
+}
+
 // Rama 1: adjuntar hashPdf al movimiento existente + confirmar pago + marcar comprobante vinculado
 export async function confirmarRama1(
   comp: Comprobante,
@@ -105,11 +115,11 @@ export async function confirmarRama1(
   try {
     const batch = writeBatch(db);
     batch.update(doc(db, 'movimientos', movimientoId), {
-      hashPdf:       comp.hashPdf,
-      refStoragePdf: comp.refStoragePdf,
-      confirmadoPago: true,
+      hashPdf:        comp.hashPdf,
+      refStoragePdf:  comp.refStoragePdf,
+      confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.fecha),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
-      actualizadoEn: serverTimestamp(),
+      actualizadoEn:  serverTimestamp(),
     });
     batch.update(doc(db, 'comprobantes', comp.id), {
       estado:       'vinculado',
