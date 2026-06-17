@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { subirComprobante, confirmarRama1, marcarVinculado } from '../datos/comprobantes';
+import { subirComprobante, confirmarRama1, marcarVinculado, confirmadoPagoPorFecha } from '../datos/comprobantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
@@ -56,38 +56,46 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
   const { clasificar, cargando: cargandoDict } = useDiccionario();
-  const [confirmando,    setConfirmando]    = useState(false);
-  const [mostrarAlta,    setMostrarAlta]    = useState(false);
-  const [candidatoSel,   setCandidatoSel]   = useState<string>('');
-  const [errorLocal,     setErrorLocal]     = useState<string | null>(null);
+  const [confirmando,  setConfirmando]  = useState(false);
+  const [mostrarAlta,  setMostrarAlta]  = useState(false);
+  const [candidatoSel, setCandidatoSel] = useState<string>('');
+  const [errorLocal,   setErrorLocal]   = useState<string | null>(null);
+  const autoConfirmadoRef = useRef(false);
+
+  // Rama 1 candidato único: vincular automáticamente, sin acción del usuario
+  useEffect(() => {
+    if (pm?.rama !== 1 || !pm.movimientoId) return;
+    if (autoConfirmadoRef.current) return;
+    autoConfirmadoRef.current = true;
+    setConfirmando(true);
+    confirmarRama1(comp, pm.movimientoId, pm.itemEsperadoId).then(res => {
+      setConfirmando(false);
+      if (!res.ok) setErrorLocal(res.error.message);
+      // si ok, onSnapshot actualiza el card a estado vinculado
+    });
+  // comp.id es estable para la vida de este card
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.id]);
 
   if (!pm || !d) return null;
 
-  // Rama 0: ya vinculado
+  // Rama 0: ya cargado
   if (pm.rama === 0) {
     return (
       <div className="cmp-propuesta cmp-propuesta--0">
-        <span className="cmp-propuesta-label">Ya vinculado al movimiento</span>
-        <code className="cmp-mov-id">{pm.movimientoId?.slice(0, 12)}…</code>
+        <span className="cmp-propuesta-label">Ya cargado</span>
       </div>
     );
   }
 
-  const esperado = pm.itemEsperadoId
-    ? items.find(i => i.id === pm.itemEsperadoId)
-    : undefined;
-  const esperadoLabel = esperado
-    ? [esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ')
-    : pm.itemEsperadoId?.slice(0, 12);
-
   // Rama 1: movimiento ya existe
   if (pm.rama === 1) {
-    // Múltiples candidatos
+    // Múltiples candidatos: elección real del usuario
     if (!pm.movimientoId && pm.candidatos && pm.candidatos.length > 0) {
       const movCands = pm.candidatos.filter(c => c.tipo === 'movimiento');
       return (
         <div className="cmp-propuesta cmp-propuesta--1">
-          <span className="cmp-propuesta-label">Múltiples movimientos candidatos — seleccioná:</span>
+          <span className="cmp-propuesta-label">Seleccioná el movimiento correspondiente</span>
           <div className="cmp-candidatos">
             {movCands.map(c => (
               <label key={c.id} className="cmp-candidato">
@@ -113,8 +121,7 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
               setErrorLocal(null);
               const res = await confirmarRama1(comp, candidatoSel, pm.itemEsperadoId);
               setConfirmando(false);
-              if (res.ok) { /* onSnapshot actualiza la lista */ }
-              else setErrorLocal(res.error.message);
+              if (!res.ok) setErrorLocal(res.error.message);
             }}
           >
             {confirmando ? 'Confirmando…' : 'Confirmar selección'}
@@ -123,99 +130,62 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
       );
     }
 
-    // Candidato único
+    // Candidato único: auto-vinculando en background (ver useEffect arriba)
     return (
       <div className="cmp-propuesta cmp-propuesta--1">
-        <span className="cmp-propuesta-label">Movimiento detectado</span>
-        {pm.movimientoId && <code className="cmp-mov-id">{pm.movimientoId.slice(0, 16)}…</code>}
-        {esperadoLabel && <span className="cmp-nota">Esperado: {esperadoLabel}</span>}
-        {errorLocal && <span className="cmp-error-local">{errorLocal}</span>}
-        <button
-          className="cmp-btn-confirmar"
-          disabled={!pm.movimientoId || confirmando}
-          onClick={async () => {
-            if (!pm.movimientoId) return;
-            setConfirmando(true);
-            setErrorLocal(null);
-            const res = await confirmarRama1(comp, pm.movimientoId, pm.itemEsperadoId);
-            setConfirmando(false);
-            if (res.ok) { /* onSnapshot actualiza la lista */ }
-            else setErrorLocal(res.error.message);
-          }}
-        >
-          {confirmando ? 'Confirmando…' : 'Confirmar pago'}
-        </button>
+        {errorLocal
+          ? <span className="cmp-error-local">{errorLocal}</span>
+          : <span className="cmp-propuesta-label">{confirmando ? 'Vinculando…' : 'Ya cargado'}</span>
+        }
       </div>
     );
   }
 
-  // Ramas 2 y 3: crear movimiento
-  // descripcionLimpia solo se aplica si confianza >= CONFIANZA_UMBRAL (addendum_3).
-  // persona = memberId (quién subió) como fuente primaria (addendum_3).
-  const descripcionCruda  = d.comercioRazonSocial ?? undefined;
-  const sugerencia        = descripcionCruda ? clasificar(descripcionCruda) : null;
-  const sugerenciaValida  = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
-  const descripcionFinal  = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
+  // Ramas 2 y 3: para el usuario el gesto es idéntico — alta pre-clasificada
+  const descripcionCruda = d.comercioRazonSocial ?? undefined;
+  const sugerencia       = descripcionCruda ? clasificar(descripcionCruda) : null;
+  const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
+  const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
+
   const preloadBase = {
-    tipo:          'Gasto'  as const,
-    fecha:         d.fecha  ?? undefined,
-    descripcion:   descripcionFinal,
+    tipo:                'Gasto' as const,
+    fecha:               d.fecha         ?? undefined,
+    descripcion:         descripcionFinal,
     descripcionOriginal: (descripcionCruda && descripcionFinal !== descripcionCruda) ? descripcionCruda : undefined,
-    moneda:        d.moneda,
-    monto:         d.montoTotal != null ? String(d.montoTotal) : undefined,
-    hashPdf:       comp.hashPdf,
-    refStoragePdf: comp.refStoragePdf,
-    persona:       memberId,  // addendum_3: quien sube = fuente primaria, editable en AltaMovimiento
-    categoria:     sugerenciaValida?.categoria    ?? undefined,
-    subcategoria:  sugerenciaValida?.subcategoria ?? undefined,
-    etiqueta:      sugerenciaValida?.etiqueta     ?? undefined,
-    banco:         'Efectivo',
+    moneda:              d.moneda,
+    monto:               d.montoTotal != null ? String(d.montoTotal) : undefined,
+    hashPdf:             comp.hashPdf,
+    refStoragePdf:       comp.refStoragePdf,
+    persona:             memberId,
+    categoria:           sugerenciaValida?.categoria    ?? undefined,
+    subcategoria:        sugerenciaValida?.subcategoria ?? undefined,
+    etiqueta:            sugerenciaValida?.etiqueta     ?? undefined,
+    banco:               'Efectivo' as const,
+    confirmadoPago:      confirmadoPagoPorFecha(d.fecha),
   };
 
-  if (pm.rama === 2) {
-    const preload = {
-      ...preloadBase,
-      banco:         undefined,           // esperados tienen su propio banco; no pisar
-      categoria:     esperado?.categoria    ?? undefined,
-      subcategoria:  esperado?.subcategoria ?? undefined,
-      // persona ya viene en preloadBase = memberId (addendum_3)
-      itemEsperadoId: pm.itemEsperadoId,
-      confirmadoPago: true,
-    };
-    return (
-      <div className="cmp-propuesta cmp-propuesta--2">
-        <span className="cmp-propuesta-label">
-          Esperado detectado{esperadoLabel ? `: ${esperadoLabel}` : ''}
-        </span>
-        {!mostrarAlta && (
-          <button className="cmp-btn-confirmar" disabled={cargandoDict} onClick={() => setMostrarAlta(true)}>
-            {cargandoDict ? 'Cargando…' : 'Crear movimiento vinculado'}
-          </button>
-        )}
-        {mostrarAlta && (
-          <AltaMovimiento
-            key={comp.id}
-            memberId={memberId}
-            miembro={miembro}
-            preload={preload}
-            onGuardado={async () => {
-              await marcarVinculado(comp.id);
-              setMostrarAlta(false);
-            }}
-            onCancelar={() => setMostrarAlta(false)}
-          />
-        )}
-      </div>
-    );
-  }
+  const esperado = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
 
-  // Rama 3
+  const preload = pm.rama === 2
+    ? {
+        ...preloadBase,
+        banco:          undefined,
+        categoria:      esperado?.categoria    ?? undefined,
+        subcategoria:   esperado?.subcategoria ?? undefined,
+        itemEsperadoId: pm.itemEsperadoId,
+      }
+    : preloadBase;
+
   return (
-    <div className="cmp-propuesta cmp-propuesta--3">
-      <span className="cmp-propuesta-label">Sin match detectado — alta manual</span>
+    <div className="cmp-propuesta cmp-propuesta--accion">
+      {sugerenciaValida && <span className="cmp-preclasificado">Pre-clasificado</span>}
       {!mostrarAlta && (
-        <button className="cmp-btn-confirmar" disabled={cargandoDict} onClick={() => setMostrarAlta(true)}>
-          {cargandoDict ? 'Cargando…' : 'Cargar movimiento'}
+        <button
+          className="cmp-btn-confirmar"
+          disabled={cargandoDict}
+          onClick={() => setMostrarAlta(true)}
+        >
+          {cargandoDict ? 'Cargando…' : 'Revisar y cargar'}
         </button>
       )}
       {mostrarAlta && (
@@ -223,7 +193,7 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
           key={comp.id}
           memberId={memberId}
           miembro={miembro}
-          preload={preloadBase}
+          preload={preload}
           onGuardado={async () => {
             await marcarVinculado(comp.id);
             setMostrarAlta(false);
