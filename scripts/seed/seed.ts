@@ -1,4 +1,5 @@
 import { readExcel } from './readExcel';
+import { inyectarEmailsDependientes } from './emailsDependientes';
 import { getDb } from './utils/firestore';
 import { seedConfig }             from './transformers/config';
 import { seedSubcategorias }      from './transformers/subcategorias';
@@ -10,6 +11,7 @@ import { seedExpectedItems }      from './transformers/expectedItems';
 import { seedCardStatements }     from './transformers/cardStatements';
 import { seedAutorizados }        from './transformers/autorizados';
 import { seedMovements }          from './transformers/movements';
+
 
 interface Flags {
   target: 'emulator' | 'production';
@@ -40,6 +42,7 @@ async function main() {
   console.log(`   Excel: ${flags.excelPath}\n`);
 
   const data = readExcel(flags.excelPath);
+  inyectarEmailsDependientes(data);
   const db = getDb(flags.target);
 
   await seedConfig(db, data, flags.dryRun);

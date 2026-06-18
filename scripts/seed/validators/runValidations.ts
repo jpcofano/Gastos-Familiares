@@ -1,5 +1,6 @@
 import { getDb } from '../utils/firestore';
 import { readExcel } from '../readExcel';
+import { inyectarEmailsDependientes } from '../emailsDependientes';
 import { runChecks } from './checks';
 
 async function main() {
@@ -7,6 +8,7 @@ async function main() {
   const excelPath = './data/2026-06-12_sheet_snapshot.xlsx';
 
   const data = readExcel(excelPath);
+  inyectarEmailsDependientes(data);
   const db = getDb(target);
 
   const results = await runChecks(db, data);
