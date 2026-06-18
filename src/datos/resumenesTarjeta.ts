@@ -387,7 +387,7 @@ export async function asignarTarjetaResumen(
       tarjetaCodigo,
       banco:         tarjetaMeta.banco,
       tarjeta:       tarjetaMeta.tipo,
-      estado:        'subido',
+      estado:        'parseado',
       actualizadoEn: serverTimestamp(),
     });
     return { ok: true, data: undefined };
