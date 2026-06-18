@@ -219,6 +219,69 @@
 .cmp-estado--vinculado{ background: #ede9fe; color: #5b21b6; }
 .cmp-estado--error    { background: #ffe4e6; color: #be123c; }
 
+/* ── Bandeja de entrada ─────────────────────────────────────────────────── */
+
+.bnd-seccion { margin: 1.5rem 0; }
+
+.bnd-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 0.6rem;
+  background: #fff;
+}
+.bnd-card--pendiente  { border-color: #bfdbfe; background: #eff6ff; }
+.bnd-card--ruteado    { border-color: #bbf7d0; background: #f0fdf4; }
+.bnd-card--ambiguo    { border-color: #fde68a; background: #fffbeb; }
+.bnd-card--error      { border-color: #fecdd3; background: #fff1f2; }
+
+.bnd-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.bnd-nombre { font-size: 0.85rem; font-weight: 500; flex: 1 1 auto; }
+.bnd-size   { font-size: 0.75rem; color: #9ca3af; }
+
+.bnd-motivo {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin: 0.3rem 0 0;
+  font-style: italic;
+}
+
+.bnd-destino {
+  font-size: 0.78rem;
+  color: #374151;
+  margin: 0.3rem 0 0;
+}
+.bnd-col { font-weight: 600; }
+
+.bnd-resolver { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.bnd-resolver-label { font-size: 0.8rem; font-weight: 600; color: #92400e; }
+.bnd-resolver-btns  { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.bnd-btn {
+  padding: 0.3rem 0.9rem;
+  border: none;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bnd-btn:disabled { opacity: 0.6; cursor: default; }
+.bnd-btn--comp { background: #dbeafe; color: #1e40af; }
+.bnd-btn--comp:hover:not(:disabled) { background: #bfdbfe; }
+.bnd-btn--res  { background: #ede9fe; color: #5b21b6; }
+.bnd-btn--res:hover:not(:disabled)  { background: #ddd6fe; }
+
+/* Badges de estado de entrante */
+.bnd-estado--pendiente  { background: #dbeafe; color: #1e40af; }
+.bnd-estado--ruteado    { background: #dcfce7; color: #15803d; }
+.bnd-estado--ambiguo    { background: #fef3c7; color: #92400e; }
+.bnd-estado--error      { background: #ffe4e6; color: #be123c; }
+
 .cmp-alta-manual {
   margin: 1rem 0;
 }

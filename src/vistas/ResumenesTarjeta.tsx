@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import {
-  subirResumenTarjeta,
   asignarTarjetaResumen,
   suscribirResumenesTarjeta,
   confirmarResumenTarjeta,
@@ -10,6 +9,7 @@ import {
   calcularCuadre,
   type CuadreResult,
 } from '../datos/resumenesTarjeta';
+import { subirEntrante } from '../datos/entrantes';
 import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig, resolverNombreMiembro } from '../familia';
 import type { CardStatement, MovimientoParseado, FamiliaConfig } from '../types';
@@ -405,14 +405,14 @@ export default function ResumenesTarjeta() {
     if (!archivo) return;
     setSubiendo(true);
     setResSubida(null);
-    const res = await subirResumenTarjeta(archivo, memberId);
+    const res = await subirEntrante(archivo, memberId, 'app');
     setSubiendo(false);
     if (!res.ok) { setResSubida({ tipo: 'err', msg: res.error.message }); return; }
     if (res.duplicado) {
-      setResSubida({ tipo: 'dup', msg: `Ya cargado (${res.resumen.periodo || 'sin período'})` });
+      setResSubida({ tipo: 'dup', msg: 'Ya existe — aparecerá en el historial cuando sea ruteado' });
       return;
     }
-    setResSubida({ tipo: 'ok', msg: 'Subido — extrayendo PDF en segundo plano…' });
+    setResSubida({ tipo: 'ok', msg: 'Subido a bandeja — en breve aparecerá en el historial' });
     setArchivo(null);
   }
 

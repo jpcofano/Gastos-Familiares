@@ -1,8 +1,9 @@
 import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions }   from 'firebase-functions/v2';
 import { defineSecret }       from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -857,5 +858,264 @@ export const extraerResumenTarjeta = onDocumentCreated(
         actualizadoEn:   FieldValue.serverTimestamp(),
       });
     }
+  },
+);
+
+// ── F6.7 — Router de entrantes ────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse') as (b: Buffer, o?: { max: number }) => Promise<{ text: string }>;
+
+const MARCADORES_RESUMEN = [
+  'TOTAL A PAGAR', 'VENCIMIENTO', 'CIERRE',
+  'SALDO PENDIENTE', 'PAGO MINIMO',
+];
+const RE_TARJETA_ENMASCARADA = /\d{4}[\s*X]{4,10}\d{4}/;
+
+function normalizarParaDeteccion(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+}
+
+function contarMarcadores(texto: string): { count: number; hits: string[] } {
+  const norm = normalizarParaDeteccion(texto);
+  const hits: string[] = [];
+  for (const m of MARCADORES_RESUMEN) {
+    if (norm.includes(m)) hits.push(m);
+  }
+  if (RE_TARJETA_ENMASCARADA.test(texto)) hits.push('nro_tarjeta_enmascarado');
+  return { count: hits.length, hits };
+}
+
+async function clasificarConVision(pdfBase64: string, client: Anthropic): Promise<'comprobante' | 'resumen' | 'ambiguo'> {
+  try {
+    const resp = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 16,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+          { type: 'text', text: '¿Es este un resumen mensual de tarjeta de crédito? Responde solo una palabra: "resumen" o "comprobante".' },
+        ],
+      }],
+    });
+    const text = resp.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text?.trim().toLowerCase() ?? '';
+    if (text.startsWith('resumen'))     return 'resumen';
+    if (text.startsWith('comprobante')) return 'comprobante';
+    return 'ambiguo';
+  } catch {
+    return 'ambiguo';
+  }
+}
+
+async function crearDocComprobante(
+  fsDb: Firestore,
+  hash: string,
+  entrante: Record<string, unknown>,
+  rutaStorage: string,
+): Promise<void> {
+  await fsDb.collection('comprobantes').doc(hash).set({
+    hashPdf:       hash,
+    nombreArchivo: (entrante.nombreArchivo as string | null) ?? hash,
+    contentType:   entrante.mimeType as string,
+    tamano:        (entrante.tamano   as number | null) ?? 0,
+    refStoragePdf: rutaStorage,
+    subidoPor:     entrante.creadoPor as string,
+    estado:        'subido',
+    subidoEn:      FieldValue.serverTimestamp(),
+  });
+}
+
+async function crearDocResumen(
+  fsDb: Firestore,
+  hash: string,
+  entrante: Record<string, unknown>,
+  rutaStorage: string,
+): Promise<void> {
+  await fsDb.collection('resumenesTarjeta').doc(hash).set({
+    tarjetaCodigo:        null,
+    banco:                '',
+    tarjeta:              '',
+    periodo:              '',
+    estado:               'subido',
+    nroResumen:           null,
+    titular:              null,
+    fechaCierre:          null,
+    fechaVencimiento:     null,
+    totalARS:             0,
+    totalUSD:             0,
+    pagoMinimoARS:        0,
+    cuentaDebito:         null,
+    hashPdf:              hash,
+    refStoragePdf:        rutaStorage,
+    subidoPor:            entrante.creadoPor as string,
+    subidoEn:             FieldValue.serverTimestamp(),
+    movimientosParseados: [],
+    ajustesConsolidado:   [],
+    errorExtraccion:      null,
+    creadoEn:             FieldValue.serverTimestamp(),
+    actualizadoEn:        FieldValue.serverTimestamp(),
+  });
+}
+
+export const routearEntrante = onDocumentCreated(
+  {
+    document:       'entrantes/{hash}',
+    secrets:        [anthropicKey],
+    timeoutSeconds: 120,
+    memory:         '512MiB',
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const data = snap.data();
+    const hash = snap.id;
+
+    if (data.estado !== 'pendiente') return;
+
+    const entranteRef = db.collection('entrantes').doc(hash);
+
+    try {
+      // Idempotencia: ya existe en destino
+      const [cmpSnap, rtSnap] = await Promise.all([
+        db.collection('comprobantes').doc(hash).get(),
+        db.collection('resumenesTarjeta').doc(hash).get(),
+      ]);
+      if (cmpSnap.exists) {
+        await entranteRef.update({ estado: 'ruteado', destino: { coleccion: 'comprobantes', id: hash }, actualizadoEn: FieldValue.serverTimestamp() });
+        return;
+      }
+      if (rtSnap.exists) {
+        await entranteRef.update({ estado: 'ruteado', destino: { coleccion: 'resumenesTarjeta', id: hash }, actualizadoEn: FieldValue.serverTimestamp() });
+        return;
+      }
+
+      // Rol del uploader
+      const creadoPor = data.creadoPor as string;
+      const autSnap   = await db.collection('autorizados').where('memberId', '==', creadoPor).limit(1).get();
+      const rol: 'admin' | 'dependiente' = autSnap.empty
+        ? 'dependiente'
+        : ((autSnap.docs[0].data().rol as string) === 'admin' ? 'admin' : 'dependiente');
+
+      const mimeType    = data.mimeType    as string;
+      const rutaStorage = data.rutaStorage as string;
+
+      let tipoDetectado: 'comprobante' | 'resumen' | 'ambiguo';
+      let motivoDeteccion: string;
+
+      if (mimeType.startsWith('image/')) {
+        tipoDetectado   = 'comprobante';
+        motivoDeteccion = 'imagen → comprobante directo';
+      } else {
+        const [fileBytes] = await storage.bucket().file(rutaStorage).download();
+        let textoPag1 = '';
+
+        try {
+          const pdfData = await pdfParse(fileBytes as Buffer, { max: 1 });
+          textoPag1 = pdfData.text;
+        } catch {
+          // Sin texto extraíble → fallback visión
+        }
+
+        if (textoPag1.trim().length < 50) {
+          const base64 = (fileBytes as Buffer).toString('base64');
+          const client = new Anthropic({ apiKey: anthropicKey.value() });
+          tipoDetectado   = await clasificarConVision(base64, client);
+          motivoDeteccion = `sin_texto → vision → ${tipoDetectado}`;
+        } else {
+          const { count, hits } = contarMarcadores(textoPag1);
+          if (count >= 2) {
+            tipoDetectado   = 'resumen';
+            motivoDeteccion = `${count} marcadores: ${hits.join(', ')}`;
+          } else if (count === 0) {
+            tipoDetectado   = 'comprobante';
+            motivoDeteccion = '0 marcadores → comprobante';
+          } else {
+            tipoDetectado   = 'ambiguo';
+            motivoDeteccion = `1 marcador: ${hits.join(', ')}`;
+          }
+        }
+      }
+
+      // Prior por rol para ambiguo
+      let tipoFinal = tipoDetectado;
+      if (tipoDetectado === 'ambiguo' && rol === 'dependiente') {
+        tipoFinal        = 'comprobante';
+        motivoDeteccion += ' → dependiente → comprobante';
+      }
+
+      if (tipoFinal === 'comprobante') {
+        await crearDocComprobante(db, hash, data, rutaStorage);
+        await entranteRef.update({
+          estado: 'ruteado', tipoDetectado, motivoDeteccion,
+          destino: { coleccion: 'comprobantes', id: hash },
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+      } else if (tipoFinal === 'resumen') {
+        await crearDocResumen(db, hash, data, rutaStorage);
+        await entranteRef.update({
+          estado: 'ruteado', tipoDetectado, motivoDeteccion,
+          destino: { coleccion: 'resumenesTarjeta', id: hash },
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+      } else {
+        await entranteRef.update({
+          estado: 'ambiguo', tipoDetectado: 'ambiguo', motivoDeteccion,
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+      }
+
+      console.log(`[routearEntrante] ${hash} → ${tipoFinal} (${motivoDeteccion})`);
+    } catch (e) {
+      const mensaje = e instanceof Error ? e.message : String(e);
+      console.error(`[routearEntrante] error en ${hash}:`, mensaje);
+      await entranteRef.update({
+        estado: 'error', motivoDeteccion: mensaje,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+    }
+  },
+);
+
+export const resolverEntranteAmbiguo = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { hash, tipo } = request.data as { hash?: string; tipo?: string };
+    if (!hash || !tipo) throw new HttpsError('invalid-argument', 'hash y tipo son requeridos');
+    if (tipo !== 'comprobante' && tipo !== 'resumen') throw new HttpsError('invalid-argument', 'tipo debe ser "comprobante" o "resumen"');
+
+    const entranteRef  = db.collection('entrantes').doc(hash);
+    const entranteSnap = await entranteRef.get();
+    if (!entranteSnap.exists) throw new HttpsError('not-found', 'Entrante no encontrado');
+
+    const entData = entranteSnap.data()!;
+    if (entData.estado !== 'ambiguo') throw new HttpsError('failed-precondition', `Estado inválido: ${String(entData.estado)}`);
+
+    const rutaStorage = entData.rutaStorage as string;
+
+    if (tipo === 'comprobante') {
+      await crearDocComprobante(db, hash, entData, rutaStorage);
+    } else {
+      await crearDocResumen(db, hash, entData, rutaStorage);
+    }
+
+    await entranteRef.update({
+      estado:        'ruteado',
+      destino:       { coleccion: tipo === 'comprobante' ? 'comprobantes' : 'resumenesTarjeta', id: hash },
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+
+    console.log(`[resolverEntranteAmbiguo] ${hash} → ${tipo} (por ${email})`);
+    return { ok: true };
   },
 );

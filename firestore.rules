@@ -94,6 +94,16 @@ service cloud.firestore {
       allow update, delete: if esAdmin();
     }
 
+    // Entrantes — punto de entrada único para subida de archivos
+    match /entrantes/{hash} {
+      allow read:   if esMiembro() && (esAdmin() || resource.data.creadoPor == miMemberId());
+      allow create: if esMiembro()
+        && request.resource.data.creadoPor == miMemberId()
+        && request.resource.data.estado == 'pendiente'
+        && request.resource.data.hash is string;
+      allow update, delete: if false;   // solo el router (admin SDK) escribe estado/destino
+    }
+
     // Diccionario — lectura por todos los miembros (clasificador client-side); escritura admin + manual
     match /diccionario/{id} {
       allow read: if esMiembro();

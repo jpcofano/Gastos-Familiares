@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { subirComprobante, confirmarRama1, marcarVinculado, confirmadoPagoPorFecha } from '../datos/comprobantes';
+import { confirmarRama1, marcarVinculado, confirmadoPagoPorFecha } from '../datos/comprobantes';
+import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import AltaMovimiento from './AltaMovimiento';
-import type { Comprobante, ExpectedItem, DatosExtraidos } from '../types';
+import type { Comprobante, Entrante, ExpectedItem, DatosExtraidos } from '../types';
 import './Comprobantes.css';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -236,30 +237,105 @@ function ComprobanteCard({
   );
 }
 
+// ── Bandeja de entrada ────────────────────────────────────────────────────────
+
+function BadgeEntrante({ estado }: { estado: string }) {
+  return <span className={`cmp-estado-badge bnd-estado--${estado}`}>{estado}</span>;
+}
+
+function EntranteCard({
+  e,
+  esAdmin,
+}: {
+  e: Entrante;
+  esAdmin: boolean;
+}) {
+  const [resolviendo, setResolviendo] = useState(false);
+  const [errLocal,    setErrLocal]    = useState<string | null>(null);
+
+  async function resolver(tipo: 'comprobante' | 'resumen') {
+    setResolviendo(true);
+    setErrLocal(null);
+    const res = await resolverEntranteAmbiguo(e.hash, tipo);
+    setResolviendo(false);
+    if (!res.ok) setErrLocal(res.error.message);
+  }
+
+  const nombre = e.nombreArchivo ?? e.hash.slice(0, 16) + '…';
+  const kb     = e.tamano != null ? `${(e.tamano / 1024).toFixed(0)} KB` : '';
+
+  return (
+    <div className={`bnd-card bnd-card--${e.estado}`}>
+      <div className="bnd-card-header">
+        <BadgeEntrante estado={e.estado} />
+        <span className="bnd-nombre">{nombre}</span>
+        {kb && <span className="bnd-size">{kb}</span>}
+      </div>
+
+      {e.motivoDeteccion && (
+        <p className="bnd-motivo">{e.motivoDeteccion}</p>
+      )}
+
+      {e.estado === 'ruteado' && e.destino && (
+        <p className="bnd-destino">
+          → <span className="bnd-col">{e.destino.coleccion}</span>
+        </p>
+      )}
+
+      {e.estado === 'ambiguo' && esAdmin && (
+        <div className="bnd-resolver">
+          <span className="bnd-resolver-label">¿Qué es este archivo?</span>
+          <div className="bnd-resolver-btns">
+            <button
+              className="bnd-btn bnd-btn--comp"
+              disabled={resolviendo}
+              onClick={() => resolver('comprobante')}
+            >
+              Comprobante
+            </button>
+            <button
+              className="bnd-btn bnd-btn--res"
+              disabled={resolviendo}
+              onClick={() => resolver('resumen')}
+            >
+              Resumen tarjeta
+            </button>
+          </div>
+          {errLocal && <span className="cmp-error-local">{errLocal}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Vista principal ───────────────────────────────────────────────────────────
 
-type ResultadoSubida =
-  | { tipo: 'subido';    comprobante: Comprobante }
-  | { tipo: 'duplicado'; comprobante: Comprobante }
+type ResultadoEnvio =
+  | { tipo: 'enviado';   nombre: string }
+  | { tipo: 'duplicado'; nombre: string }
   | { tipo: 'error';     mensaje: string };
 
 export default function Comprobantes() {
   const { memberId, miembro } = useMiembroCtx();
+  const esAdmin = miembro.rol === 'admin';
 
   // Upload
   const [archivo,   setArchivo]   = useState<File | null>(null);
   const [subiendo,  setSubiendo]  = useState(false);
-  const [resultado, setResultado] = useState<ResultadoSubida | null>(null);
+  const [resultado, setResultado] = useState<ResultadoEnvio | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Share-target (F6.6): Android PWA comparte un archivo → SW guarda en IDB → redirige aquí
+  // Bandeja
+  const [entrantes, setEntrantes] = useState<Entrante[]>([]);
+  useEffect(() => suscribirEntrantes(memberId, esAdmin, setEntrantes), [memberId, esAdmin]);
+
+  // Share-target (F6.6 → F6.7): redirige a entrantes con origen:'share_target'
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has('share')) return;
-    // Limpiar el query param antes de cualquier await — evita re-disparo en navegación
     window.history.replaceState({}, '', window.location.pathname);
     leerYBorrarArchivoCompartido().then(file => {
-      if (!file) return; // IDB vacío (ya procesado o fallo en SW); silencioso
+      if (!file) return;
       const TIPOS = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
       if (!TIPOS.includes(file.type)) {
         setResultado({ tipo: 'error', mensaje: `Tipo no permitido: ${file.type}` });
@@ -271,18 +347,18 @@ export default function Comprobantes() {
       }
       setSubiendo(true);
       setResultado(null);
-      subirComprobante(file, memberId)
+      subirEntrante(file, memberId, 'share_target')
         .then(res => {
           setSubiendo(false);
-          if (!res.ok) setResultado({ tipo: 'error', mensaje: res.error.message });
-          else if (res.duplicado) setResultado({ tipo: 'duplicado', comprobante: res.comprobante });
-          else setResultado({ tipo: 'subido', comprobante: res.comprobante });
+          if (!res.ok)         setResultado({ tipo: 'error',     mensaje: res.error.message });
+          else if (res.duplicado) setResultado({ tipo: 'duplicado', nombre: res.entrante.nombreArchivo ?? file.name });
+          else                 setResultado({ tipo: 'enviado',   nombre: file.name });
         })
         .catch(err => {
           setSubiendo(false);
           setResultado({ tipo: 'error', mensaje: (err as Error).message });
         });
-    }).catch(() => {}); // silencioso si IDB falla
+    }).catch(() => {});
   }, [memberId]);
 
   // Lista — onSnapshot
@@ -294,14 +370,14 @@ export default function Comprobantes() {
     if (!archivo) return;
     setSubiendo(true);
     setResultado(null);
-    const res = await subirComprobante(archivo, memberId);
+    const res = await subirEntrante(archivo, memberId, 'app');
     setSubiendo(false);
     if (!res.ok) {
       setResultado({ tipo: 'error', mensaje: res.error.message });
     } else if (res.duplicado) {
-      setResultado({ tipo: 'duplicado', comprobante: res.comprobante });
+      setResultado({ tipo: 'duplicado', nombre: res.entrante.nombreArchivo ?? archivo.name });
     } else {
-      setResultado({ tipo: 'subido', comprobante: res.comprobante });
+      setResultado({ tipo: 'enviado', nombre: archivo.name });
       setArchivo(null);
       if (inputRef.current) inputRef.current.value = '';
     }
@@ -337,33 +413,34 @@ export default function Comprobantes() {
           onClick={handleSubir}
           disabled={!archivo || subiendo}
         >
-          {subiendo ? 'Subiendo…' : 'Subir comprobante'}
+          {subiendo ? 'Subiendo…' : 'Subir'}
         </button>
       </div>
 
-      {resultado?.tipo === 'subido' && (
+      {resultado?.tipo === 'enviado' && (
         <div className="cmp-resultado cmp-resultado--ok">
-          Subido: <strong>{resultado.comprobante.nombreArchivo}</strong>
-          <span className="cmp-estado-badge cmp-estado--subido">subido</span>
-          <span className="cmp-nota">La function de extracción lo procesará en breve.</span>
+          <strong>{resultado.nombre}</strong> en bandeja — será ruteado en breve.
         </div>
       )}
-      {resultado?.tipo === 'duplicado' && (() => {
-        const c = resultado.comprobante;
-        return (
-          <div className={`cmp-resultado cmp-resultado--${c.estado === 'error' ? 'err' : 'dup'}`}>
-            <span>Ya cargado: <strong>{c.nombreArchivo}</strong></span>
-            <span className={`cmp-estado-badge cmp-estado--${c.estado}`}>{c.estado}</span>
-            {c.estado === 'error' && c.errorExtraccion && (
-              <span className="cmp-error-detalle">{c.errorExtraccion}</span>
-            )}
-          </div>
-        );
-      })()}
+      {resultado?.tipo === 'duplicado' && (
+        <div className="cmp-resultado cmp-resultado--dup">
+          Ya existe: <strong>{resultado.nombre}</strong>
+        </div>
+      )}
       {resultado?.tipo === 'error' && (
         <div className="cmp-resultado cmp-resultado--err">
           Error al subir: {resultado.mensaje}
         </div>
+      )}
+
+      {/* ── Bandeja de entrada ─────────────────────────────────────────── */}
+      {entrantes.length > 0 && (
+        <section className="bnd-seccion">
+          <h2 className="cmp-lista-titulo">Bandeja de entrada</h2>
+          {entrantes.map(e => (
+            <EntranteCard key={e.hash} e={e} esAdmin={esAdmin} />
+          ))}
+        </section>
       )}
 
       {/* ── Alta manual ────────────────────────────────────────────────── */}

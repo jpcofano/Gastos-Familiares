@@ -10,7 +10,8 @@
   "dependencies": {
     "@anthropic-ai/sdk":  "^0.50.0",
     "firebase-admin":     "^13",
-    "firebase-functions": "^7"
+    "firebase-functions": "^7",
+    "pdf-parse":          "^1.1.1"
   },
   "devDependencies": {
     "typescript": "^5"

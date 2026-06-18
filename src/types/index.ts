@@ -162,6 +162,22 @@ export interface FamiliaMiembro {
   alias?: string[];  // minúscula, sin acentos — solo para resolverNombreMiembro(), nunca se muestran en UI
 }
 
+export interface Entrante {
+  hash: string;
+  rutaStorage: string;
+  mimeType: string;
+  nombreArchivo: string | null;
+  tamano: number | null;
+  creadoPor: string;
+  origen: 'app' | 'share_target';
+  estado: 'pendiente' | 'ruteado' | 'ambiguo' | 'error';
+  tipoDetectado?: 'comprobante' | 'resumen' | 'ambiguo';
+  destino?: { coleccion: 'comprobantes' | 'resumenesTarjeta'; id: string };
+  motivoDeteccion?: string;
+  creadoEn: Date;
+  actualizadoEn: Date;
+}
+
 export interface FamiliaConfig {
   miembros: Record<string, FamiliaMiembro>;
   categorias: string[];
