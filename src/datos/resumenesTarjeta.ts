@@ -396,6 +396,36 @@ export async function asignarTarjetaResumen(
   }
 }
 
+// ── Ajuste manual de cuadre ───────────────────────────────────────────────────
+
+export async function agregarAjusteCuadreManual(
+  resumen: CardStatement,
+  lineas: MovimientoParseado[],
+  memberId: string,
+): Promise<Resultado<void>> {
+  try {
+    const cuadre = calcularCuadre(lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado);
+    const residuoARS = +(resumen.totalARS - cuadre.sumaARS).toFixed(2);
+    const residuoUSD = +(resumen.totalUSD - cuadre.sumaUSD).toFixed(2);
+    if (Math.abs(residuoARS) <= 1 && Math.abs(residuoUSD) <= 1) {
+      return { ok: false, error: new Error('No hay diferencia para ajustar') };
+    }
+    const entrada: AjusteConsolidado = {
+      concepto:  'Diferencia no identificada (ajuste manual)',
+      montoARS:  residuoARS,
+      montoUSD:  residuoUSD,
+      origen:    'manual',
+    };
+    await updateDoc(doc(db, 'resumenesTarjeta', resumen.id), {
+      ajustesConsolidado: [...resumen.ajustesConsolidado, entrada],
+      actualizadoEn:      serverTimestamp(),
+    });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
 // ── onSnapshot helper ─────────────────────────────────────────────────────────
 
 import { onSnapshot, type Unsubscribe } from 'firebase/firestore';

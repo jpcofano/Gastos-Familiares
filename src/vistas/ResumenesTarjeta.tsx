@@ -6,6 +6,7 @@ import {
   asignarTarjetaResumen,
   suscribirResumenesTarjeta,
   confirmarResumenTarjeta,
+  agregarAjusteCuadreManual,
   calcularCuadre,
   type CuadreResult,
 } from '../datos/resumenesTarjeta';
@@ -48,8 +49,9 @@ interface PreviewProps {
 function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCerrar }: PreviewProps) {
   const { clasificar } = useDiccionario();
   const [lineas, setLineas] = useState<MovimientoParseado[]>([]);
-  const [guardando, setGuardando] = useState(false);
-  const [errorLocal, setErrorLocal] = useState<string | null>(null);
+  const [guardando,   setGuardando]   = useState(false);
+  const [ajustando,   setAjustando]   = useState(false);
+  const [errorLocal,  setErrorLocal]  = useState<string | null>(null);
   const inicializadoRef = useRef(false);
 
   useEffect(() => {
@@ -87,6 +89,24 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
   const actualizar = useCallback((idx: number, cambios: Partial<MovimientoParseado>) => {
     setLineas(prev => prev.map((l, i) => i === idx ? { ...l, ...cambios } : l));
   }, []);
+
+  async function cerrarDiferencia() {
+    const umbralARS = Math.min(5000, resumen.totalARS * 0.02);
+    const esGrande  = cuadre.diffARS > umbralARS || cuadre.diffUSD > 2;
+    if (esGrande) {
+      const ok = window.confirm(
+        `Diferencia grande (${cuadre.diffARS > 0 ? fmtMonto(cuadre.diffARS, 'ARS') : ''}` +
+        `${cuadre.diffUSD > 0 ? ` U$S ${cuadre.diffUSD.toFixed(2)}` : ''}) — puede ser una ` +
+        `línea real no leída, no un error de redondeo. ¿Absorber igual?`,
+      );
+      if (!ok) return;
+    }
+    setAjustando(true);
+    setErrorLocal(null);
+    const res = await agregarAjusteCuadreManual(resumen, lineas, memberId);
+    setAjustando(false);
+    if (!res.ok) setErrorLocal(res.error.message);
+  }
 
   async function confirmar() {
     setGuardando(true);
@@ -154,9 +174,16 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
           </div>
         )}
         {!cuadreOk && (
-          <p className="rt-cuadre-warn">
-            El detalle no cuadra con el total a pagar — revisá las líneas antes de confirmar.
-          </p>
+          <div className="rt-cuadre-warn">
+            <p>El detalle no cuadra con el total a pagar — revisá las líneas antes de confirmar.</p>
+            <button
+              className="rt-btn rt-btn--sm"
+              onClick={cerrarDiferencia}
+              disabled={ajustando || guardando}
+            >
+              {ajustando ? 'Ajustando…' : 'Cerrar diferencia manualmente'}
+            </button>
+          </div>
         )}
       </div>
 

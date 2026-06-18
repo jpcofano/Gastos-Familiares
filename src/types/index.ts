@@ -43,6 +43,7 @@ export interface AjusteConsolidado {
   concepto: string;
   montoARS: number;
   montoUSD: number;
+  origen?: 'pdf' | 'manual';  // undefined ⇒ 'pdf' (compat con docs existentes)
 }
 
 export interface MovimientoParseado {
