@@ -189,6 +189,7 @@ export interface FamiliaConfig {
     titular: string;
     cuentaDebito: string;
     numeroCuenta?: string;
+    ultimos4?: string;
   }>;
   actualizadoEn: Date;
 }

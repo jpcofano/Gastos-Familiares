@@ -466,6 +466,9 @@ Extraé los siguientes campos:
   (BBVA: cerca de "Cuenta:" o "N° DE CUENTA" en el membrete; Galicia: campo "CUENTA" o "Nro. cuenta")
   Este número identifica la tarjeta específica (ej: "0916360348", "2380140-0-6"). NO es cuentaDebito.
   Si no se puede determinar con certeza, null.
+- ultimos4: últimos 4 dígitos del PAN de la tarjeta tal como aparece en el encabezado
+  (buscar el número enmascarado tipo "4509 XX** **** 1234" o "XXXX XXXX XXXX 5678" → devolver "1234" o "5678")
+  Si no hay PAN enmascarado en el encabezado, null.
 - ajustesConsolidado: array de ajustes de período ANTERIOR que aparecen en el CONSOLIDADO entre
   "SU PAGO" y "SALDO PENDIENTE". Típicamente son devoluciones de percepción del período anterior
   (ej: "DEV PER RG 4815 30% -67.399,98"). Estos NO van en movimientos (no son gasto del mes actual)
@@ -643,6 +646,7 @@ No incluyas texto antes ni después del bloque.
     "pagoMinimoARS": 0.00,
     "cuentaDebito": "...",
     "numeroCuenta": "...",
+    "ultimos4": "...",
     "ajustesConsolidado": [
       { "concepto": "DEV PER RG 4815 30%", "montoARS": -67399.98, "montoUSD": 0 }
     ]
@@ -781,23 +785,45 @@ export const extraerResumenTarjeta = onDocumentCreated(
       const resumen    = parsed.resumen;
       const movsBrutos = parsed.movimientos;
 
-      // Resolver tarjetaCodigo: numeroCuenta → banco+tipo → requiere_tarjeta
+      // Resolver tarjetaCodigo en capas (cada capa necesita match único; si hay ambigüedad baja)
       const configSnap   = await db.collection('config').doc('familia').get();
       const tarjetasConf = ((configSnap.data()?.tarjetas ?? []) as Array<{
-        codigo: string; banco: string; tipo: string; numeroCuenta?: string;
+        codigo: string; banco: string; tipo: string; titular?: string;
+        numeroCuenta?: string; ultimos4?: string;
       }>);
       const numeroCuentaExtraido = (resumen.numeroCuenta as string | null) ?? null;
+      const ultimos4Extraido      = (resumen.ultimos4     as string | null) ?? null;
+      const bancoRes              = (resumen.banco         as string) || banco;
+      const tarjetaRes            = (resumen.tarjeta       as string) || tarjeta;
+      const titularExtraido       = (resumen.titular       as string | null) ?? null;
+
       let tarjetaCodigoResuelto: string | null = null;
-      if (numeroCuentaExtraido) {
-        tarjetaCodigoResuelto = tarjetasConf.find(t => t.numeroCuenta === numeroCuentaExtraido)?.codigo ?? null;
+
+      // Capa 1: numeroCuenta exacto (único match)
+      if (!tarjetaCodigoResuelto && numeroCuentaExtraido) {
+        const m = tarjetasConf.filter(t => t.numeroCuenta === numeroCuentaExtraido);
+        if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
       }
+      // Capa 2: ultimos4 exacto (único match) — ancla principal para tarjetas sin numeroCuenta legible
+      if (!tarjetaCodigoResuelto && ultimos4Extraido) {
+        const m = tarjetasConf.filter(t => t.ultimos4 === ultimos4Extraido);
+        if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
+      }
+      // Capa 3: banco + tipo (solo si EXACTAMENTE una tarjeta)
       if (!tarjetaCodigoResuelto) {
-        const bancoRes   = (resumen.banco   as string) || banco;
-        const tarjetaRes = (resumen.tarjeta as string) || tarjeta;
-        tarjetaCodigoResuelto = tarjetasConf.find(
-          t => t.banco === bancoRes && t.tipo === tarjetaRes,
-        )?.codigo ?? null;
+        const m = tarjetasConf.filter(t => t.banco === bancoRes && t.tipo === tarjetaRes);
+        if (m.length === 1) {
+          tarjetaCodigoResuelto = m[0].codigo;
+        } else if (m.length > 1 && titularExtraido) {
+          // Capa 4: desempate por titular (nombre del PDF vs titular en config)
+          const normStr = (s: string) =>
+            s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+          const normTitular = normStr(titularExtraido);
+          const byTitular = m.filter(t => t.titular && normTitular.includes(normStr(t.titular)));
+          if (byTitular.length === 1) tarjetaCodigoResuelto = byTitular[0].codigo;
+        }
       }
+
       const estadoFinal = tarjetaCodigoResuelto ? 'parseado' : 'requiere_tarjeta';
 
       const movimientosParseados = movsBrutos.map((m, i) => ({
@@ -838,6 +864,7 @@ export const extraerResumenTarjeta = onDocumentCreated(
         pagoMinimoARS:       Number(resumen.pagoMinimoARS ?? 0),
         cuentaDebito:        resumen.cuentaDebito        ?? null,
         numeroCuenta:        numeroCuentaExtraido,
+        ultimos4:            ultimos4Extraido,
         ajustesConsolidado:  Array.isArray(resumen.ajustesConsolidado)
           ? resumen.ajustesConsolidado
           : [],
@@ -866,24 +893,33 @@ export const extraerResumenTarjeta = onDocumentCreated(
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require('pdf-parse') as (b: Buffer, o?: { max: number }) => Promise<{ text: string }>;
 
-const MARCADORES_RESUMEN = [
-  'TOTAL A PAGAR', 'VENCIMIENTO', 'CIERRE',
-  'SALDO PENDIENTE', 'PAGO MINIMO',
+// Marcadores genéricos: aparecen en boletas, facturas y resúmenes de tarjeta
+const MARCADORES_GENERICOS = [
+  'TOTAL A PAGAR', 'VENCIMIENTO', 'CIERRE', 'SALDO PENDIENTE',
 ];
-const RE_TARJETA_ENMASCARADA = /\d{4}[\s*X]{4,10}\d{4}/;
+// Marcadores decisivos: solo presentes en resúmenes de tarjeta de crédito
+const MARCADORES_DECISIVOS = [
+  'PAGO MINIMO', 'LIMITE DE COMPRA', 'LIMITE DE CREDITO', 'SALDO ANTERIOR',
+];
+// PAN enmascarado tipo "4509 XX** **** 1234" o "XXXX XXXX XXXX 1234"
+const RE_PAN_ENMASCARADO = /\d{4}[\s*X]{4,10}\d{4}/;
 
 function normalizarParaDeteccion(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
 }
 
-function contarMarcadores(texto: string): { count: number; hits: string[] } {
+function contarMarcadores(texto: string): { count: number; hits: string[]; tieneDecisivo: boolean } {
   const norm = normalizarParaDeteccion(texto);
   const hits: string[] = [];
-  for (const m of MARCADORES_RESUMEN) {
+  let tieneDecisivo = false;
+  for (const m of MARCADORES_GENERICOS) {
     if (norm.includes(m)) hits.push(m);
   }
-  if (RE_TARJETA_ENMASCARADA.test(texto)) hits.push('nro_tarjeta_enmascarado');
-  return { count: hits.length, hits };
+  for (const m of MARCADORES_DECISIVOS) {
+    if (norm.includes(m)) { hits.push(m); tieneDecisivo = true; }
+  }
+  if (RE_PAN_ENMASCARADO.test(texto)) { hits.push('pan_enmascarado'); tieneDecisivo = true; }
+  return { count: hits.length, hits, tieneDecisivo };
 }
 
 async function clasificarConVision(pdfBase64: string, client: Anthropic): Promise<'comprobante' | 'resumen' | 'ambiguo'> {
@@ -952,6 +988,8 @@ async function crearDocResumen(
     subidoEn:             FieldValue.serverTimestamp(),
     movimientosParseados: [],
     ajustesConsolidado:   [],
+    numeroCuenta:         null,
+    ultimos4:             null,
     errorExtraccion:      null,
     creadoEn:             FieldValue.serverTimestamp(),
     actualizadoEn:        FieldValue.serverTimestamp(),
@@ -1023,16 +1061,18 @@ export const routearEntrante = onDocumentCreated(
           tipoDetectado   = await clasificarConVision(base64, client);
           motivoDeteccion = `sin_texto → vision → ${tipoDetectado}`;
         } else {
-          const { count, hits } = contarMarcadores(textoPag1);
-          if (count >= 2) {
+          const { count, hits, tieneDecisivo } = contarMarcadores(textoPag1);
+          if (tieneDecisivo && count >= 2) {
             tipoDetectado   = 'resumen';
-            motivoDeteccion = `${count} marcadores: ${hits.join(', ')}`;
-          } else if (count === 0) {
+            motivoDeteccion = `${count} marcadores (decisivo): ${hits.join(', ')}`;
+          } else if (count === 0 || !tieneDecisivo) {
             tipoDetectado   = 'comprobante';
-            motivoDeteccion = '0 marcadores → comprobante';
+            motivoDeteccion = !tieneDecisivo && count > 0
+              ? `${count} marcadores sin decisivo → comprobante`
+              : '0 marcadores → comprobante';
           } else {
             tipoDetectado   = 'ambiguo';
-            motivoDeteccion = `1 marcador: ${hits.join(', ')}`;
+            motivoDeteccion = `${count} marcador${count !== 1 ? 'es' : ''}: ${hits.join(', ')}`;
           }
         }
       }
