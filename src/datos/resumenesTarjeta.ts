@@ -1,6 +1,6 @@
 import {
-  collection, doc, getDoc, getDocs, query, updateDoc, where,
-  serverTimestamp, writeBatch, Timestamp, type DocumentData,
+  collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where,
+  serverTimestamp, writeBatch, Timestamp, type DocumentData, type Unsubscribe,
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../firebase';
@@ -427,8 +427,6 @@ export async function agregarAjusteCuadreManual(
 }
 
 // ── onSnapshot helper ─────────────────────────────────────────────────────────
-
-import { onSnapshot, type Unsubscribe } from 'firebase/firestore';
 
 export function suscribirResumenesTarjeta(
   cb: (resumenes: CardStatement[]) => void,
