@@ -11,13 +11,13 @@ const BANCOS = ['BBVA','Galicia','Personal Pay','Efectivo'];
 
 const TARJETAS = [
   { codigo: 'BBVA-VISA-SIG',   banco: 'BBVA',    tipo: 'Visa Signature',
-    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134' },
+    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134', numeroCuenta: '0916360348' },
   { codigo: 'BBVA-MASTER-BLK', banco: 'BBVA',    tipo: 'Mastercard Black',
-    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134' },
+    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134', numeroCuenta: '1262521647' },
   { codigo: 'GAL-VISA',        banco: 'Galicia', tipo: 'Visa',
-    titular: 'Juan',  cuentaDebito: 'C.A. 0406142030' },
+    titular: 'Juan',  cuentaDebito: 'C.A. 0406142030', numeroCuenta: '1235391051' },
   { codigo: 'GAL-MASTER-BLK',  banco: 'Galicia', tipo: 'Mastercard Black',
-    titular: 'María', cuentaDebito: 'C.A. 0406142034' },
+    titular: 'María', cuentaDebito: 'C.A. 0406142034', numeroCuenta: '2380140-0-6' },
 ];
 
 const normNombreSeed = (s: string) =>

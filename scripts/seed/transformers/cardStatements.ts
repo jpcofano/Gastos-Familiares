@@ -13,6 +13,7 @@ export async function seedCardStatements(db: Firestore, data: SheetData, dryRun:
     .filter(r => r.ResumenID)
     .map(r => ({
       id: r.ResumenID,
+      estado: r.EstadoImport === 'aplicado' ? 'confirmado' : 'parseado',
       tarjetaCodigo: r.TarjetaCodigo,
       banco: r.Banco,
       tarjeta: r.Tarjeta,

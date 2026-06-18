@@ -68,11 +68,11 @@ export interface MovimientoParseado {
 
 export interface CardStatement {
   id: string;
-  tarjetaCodigo: string;
+  tarjetaCodigo: string | null;
   banco: string;
   tarjeta: string;
   periodo: string;
-  estado: 'subido' | 'parseado' | 'confirmado' | 'error';
+  estado: 'subido' | 'parseado' | 'confirmado' | 'error' | 'requiere_tarjeta';
   nroResumen: string | null;
   titular: string | null;
   fechaCierre: Date | null;
@@ -171,6 +171,7 @@ export interface FamiliaConfig {
     tipo: string;
     titular: string;
     cuentaDebito: string;
+    numeroCuenta?: string;
   }>;
   actualizadoEn: Date;
 }

@@ -3,6 +3,7 @@ import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import {
   subirResumenTarjeta,
+  asignarTarjetaResumen,
   suscribirResumenesTarjeta,
   confirmarResumenTarjeta,
   calcularCuadre,
@@ -265,12 +266,28 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
 // ── Tarjeta de resumen en la lista ────────────────────────────────────────────
 
 function ResumenCard({
-  resumen, onVerPreview,
-}: { resumen: CardStatement; onVerPreview: () => void }) {
+  resumen, config, onVerPreview,
+}: { resumen: CardStatement; config: FamiliaConfig | null; onVerPreview: () => void }) {
+  const [tarjetaSel, setTarjetaSel] = useState(config?.tarjetas[0]?.codigo ?? '');
+  const [asignando,  setAsignando]  = useState(false);
+  const [errorAsg,   setErrorAsg]   = useState<string | null>(null);
+
+  async function handleAsignar() {
+    if (!config || !tarjetaSel) return;
+    setAsignando(true);
+    setErrorAsg(null);
+    const res = await asignarTarjetaResumen(resumen.id, tarjetaSel, config);
+    setAsignando(false);
+    if (!res.ok) setErrorAsg(res.error.message);
+  }
+
   return (
     <div className="rt-card">
       <div className="rt-card-top">
-        <span className="rt-card-nombre">{resumen.tarjeta} — {resumen.banco}</span>
+        <span className="rt-card-nombre">
+          {resumen.tarjeta || resumen.banco || '—'}
+          {resumen.banco && resumen.tarjeta ? ` — ${resumen.banco}` : ''}
+        </span>
         <BadgeEstado estado={resumen.estado} />
       </div>
       <div className="rt-card-body">
@@ -288,6 +305,30 @@ function ResumenCard({
           <span className="rt-error-inline" title={resumen.errorExtraccion}>
             Error — ver consola
           </span>
+        )}
+        {resumen.estado === 'requiere_tarjeta' && config && (
+          <div className="rt-asignar-form">
+            <select
+              className="rt-select"
+              value={tarjetaSel}
+              onChange={e => setTarjetaSel(e.target.value)}
+              disabled={asignando}
+            >
+              {config.tarjetas.map(t => (
+                <option key={t.codigo} value={t.codigo}>
+                  {t.banco} — {t.tipo} ({t.titular})
+                </option>
+              ))}
+            </select>
+            <button
+              className="rt-btn rt-btn--sm rt-btn--primary"
+              onClick={handleAsignar}
+              disabled={!tarjetaSel || asignando}
+            >
+              {asignando ? 'Asignando…' : 'Asignar'}
+            </button>
+            {errorAsg && <span className="rt-error-inline">{errorAsg}</span>}
+          </div>
         )}
         {resumen.estado === 'parseado' && (
           <button className="rt-btn rt-btn--sm" onClick={onVerPreview}>
@@ -317,7 +358,6 @@ export default function ResumenesTarjeta() {
   const [resumenes, setResumenes] = useState<CardStatement[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
 
-  const [tarjetaSel, setTarjetaSel] = useState('');
   const [archivo,    setArchivo]    = useState<File | null>(null);
   const [subiendo,   setSubiendo]   = useState(false);
   const [resSubida,  setResSubida]  = useState<{ tipo: 'ok' | 'dup' | 'err'; msg: string } | null>(null);
@@ -325,10 +365,7 @@ export default function ResumenesTarjeta() {
   useEffect(() => {
     Promise.all([cargarFamiliaConfig(), cargarSubcategorias()])
       .then(([cfg, sc]) => {
-        if (cfg) {
-          setConfig(cfg);
-          if (cfg.tarjetas.length > 0) setTarjetaSel(cfg.tarjetas[0].codigo);
-        }
+        if (cfg) setConfig(cfg);
         setSubcats(sc);
         setCargando(false);
       })
@@ -338,10 +375,10 @@ export default function ResumenesTarjeta() {
   useEffect(() => suscribirResumenesTarjeta(setResumenes), []);
 
   async function handleSubir() {
-    if (!archivo || !tarjetaSel || !config) return;
+    if (!archivo) return;
     setSubiendo(true);
     setResSubida(null);
-    const res = await subirResumenTarjeta(archivo, tarjetaSel, memberId, config);
+    const res = await subirResumenTarjeta(archivo, memberId);
     setSubiendo(false);
     if (!res.ok) { setResSubida({ tipo: 'err', msg: res.error.message }); return; }
     if (res.duplicado) {
@@ -375,21 +412,10 @@ export default function ResumenesTarjeta() {
     <div className="rt">
       <h1 className="rt-titulo">Resúmenes de tarjeta</h1>
 
-      {esAdmin && config && (
+      {esAdmin && (
         <section className="rt-seccion">
           <h2 className="rt-subtitulo">Subir nuevo resumen</h2>
           <div className="rt-subida-form">
-            <select
-              className="rt-select-tarjeta"
-              value={tarjetaSel}
-              onChange={e => setTarjetaSel(e.target.value)}
-            >
-              {config.tarjetas.map(t => (
-                <option key={t.codigo} value={t.codigo}>
-                  {t.banco} — {t.tipo} ({t.titular})
-                </option>
-              ))}
-            </select>
             <label className="rt-file-label">
               <input
                 type="file"
@@ -402,7 +428,7 @@ export default function ResumenesTarjeta() {
             <button
               className="rt-btn rt-btn--primary"
               onClick={handleSubir}
-              disabled={!archivo || !tarjetaSel || subiendo}
+              disabled={!archivo || subiendo}
             >
               {subiendo ? 'Subiendo…' : 'Subir'}
             </button>
@@ -420,7 +446,7 @@ export default function ResumenesTarjeta() {
         ) : (
           <div className="rt-lista">
             {resumenes.map(r => (
-              <ResumenCard key={r.id} resumen={r} onVerPreview={() => setPreviewId(r.id)} />
+              <ResumenCard key={r.id} resumen={r} config={config} onVerPreview={() => setPreviewId(r.id)} />
             ))}
           </div>
         )}

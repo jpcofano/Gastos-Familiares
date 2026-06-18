@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDoc, getDocs, query, where,
+  collection, doc, getDoc, getDocs, query, updateDoc, where,
   serverTimestamp, writeBatch, Timestamp, type DocumentData,
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
@@ -28,11 +28,11 @@ export function docACardStatement(id: string, data: DocumentData): CardStatement
     : [];
   return {
     id,
-    tarjetaCodigo:       data.tarjetaCodigo       ?? '',
+    tarjetaCodigo:       data.tarjetaCodigo        ?? null,
     banco:               data.banco               ?? '',
     tarjeta:             data.tarjeta              ?? '',
     periodo:             data.periodo              ?? '',
-    estado:              data.estado               ?? 'confirmado',
+    estado:              data.estado               ?? 'subido',
     nroResumen:          data.nroResumen           ?? null,
     titular:             data.titular              ?? null,
     fechaCierre:         toDateSafe(data.fechaCierre),
@@ -80,9 +80,7 @@ type ResultadoSubida =
 
 export async function subirResumenTarjeta(
   file: File,
-  tarjetaCodigo: string,
   memberId: string,
-  config: FamiliaConfig,
 ): Promise<ResultadoSubida> {
   try {
     const hashPdf = await sha256Archivo(file);
@@ -93,9 +91,6 @@ export async function subirResumenTarjeta(
       return { ok: true, duplicado: true, resumen: docACardStatement(snap.id, snap.data()) };
     }
 
-    const tarjetaMeta = config.tarjetas.find(t => t.codigo === tarjetaCodigo);
-    if (!tarjetaMeta) throw new Error(`tarjetaCodigo no encontrado en catálogo: ${tarjetaCodigo}`);
-
     const storagePath = `resumenesTarjeta/${hashPdf}`;
     await uploadBytes(ref(storage, storagePath), file, {
       contentType: file.type,
@@ -104,9 +99,9 @@ export async function subirResumenTarjeta(
 
     await writeBatch(db)
       .set(docRef, {
-        tarjetaCodigo,
-        banco:         tarjetaMeta.banco,
-        tarjeta:       tarjetaMeta.tipo,
+        tarjetaCodigo: null,
+        banco:         '',
+        tarjeta:       '',
         periodo:       '',
         estado:        'subido',
         nroResumen:    null,
@@ -130,7 +125,7 @@ export async function subirResumenTarjeta(
       .commit();
 
     const resumen: CardStatement = {
-      id: hashPdf, tarjetaCodigo, banco: tarjetaMeta.banco, tarjeta: tarjetaMeta.tipo,
+      id: hashPdf, tarjetaCodigo: null, banco: '', tarjeta: '',
       periodo: '', estado: 'subido', nroResumen: null, titular: null,
       fechaCierre: null, fechaVencimiento: null, totalARS: 0, totalUSD: 0,
       pagoMinimoARS: 0, cuentaDebito: null, hashPdf, refStoragePdf: storagePath,
@@ -372,6 +367,29 @@ export async function confirmarResumenTarjeta(
     });
 
     await batch.commit();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+// ── Asignación manual de tarjeta ──────────────────────────────────────────────
+
+export async function asignarTarjetaResumen(
+  resumenId: string,
+  tarjetaCodigo: string,
+  config: FamiliaConfig,
+): Promise<Resultado<void>> {
+  try {
+    const tarjetaMeta = config.tarjetas.find(t => t.codigo === tarjetaCodigo);
+    if (!tarjetaMeta) throw new Error(`tarjetaCodigo no encontrado: ${tarjetaCodigo}`);
+    await updateDoc(doc(db, 'resumenesTarjeta', resumenId), {
+      tarjetaCodigo,
+      banco:         tarjetaMeta.banco,
+      tarjeta:       tarjetaMeta.tipo,
+      estado:        'subido',
+      actualizadoEn: serverTimestamp(),
+    });
     return { ok: true, data: undefined };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };

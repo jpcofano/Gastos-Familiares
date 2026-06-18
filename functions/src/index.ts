@@ -461,6 +461,10 @@ Extraé los siguientes campos:
 - cuentaDebito: número de cuenta donde se debitará
   (extraer de la línea "DEBITAREMOS DE SU C.A.XXXXXXXXX" o "DEBITAREMOS DE SU CTA XXXXXXXXX"
    o "Debitaremos de su c.ahorro XXXXXXXXXX"; devolver solo el número de cuenta)
+- numeroCuenta: número de cuenta/tarjeta del CLIENTE tal como aparece en el encabezado del PDF
+  (BBVA: cerca de "Cuenta:" o "N° DE CUENTA" en el membrete; Galicia: campo "CUENTA" o "Nro. cuenta")
+  Este número identifica la tarjeta específica (ej: "0916360348", "2380140-0-6"). NO es cuentaDebito.
+  Si no se puede determinar con certeza, null.
 - ajustesConsolidado: array de ajustes de período ANTERIOR que aparecen en el CONSOLIDADO entre
   "SU PAGO" y "SALDO PENDIENTE". Típicamente son devoluciones de percepción del período anterior
   (ej: "DEV PER RG 4815 30% -67.399,98"). Estos NO van en movimientos (no son gasto del mes actual)
@@ -637,6 +641,7 @@ No incluyas texto antes ni después del bloque.
     "totalUSD": 0.00,
     "pagoMinimoARS": 0.00,
     "cuentaDebito": "...",
+    "numeroCuenta": "...",
     "ajustesConsolidado": [
       { "concepto": "DEV PER RG 4815 30%", "montoARS": -67399.98, "montoUSD": 0 }
     ]
@@ -786,6 +791,25 @@ export const extraerResumenTarjeta = onDocumentCreated(
       const resumen    = parsed.resumen;
       const movsBrutos = dedupMovimientos(parsed.movimientos);
 
+      // Resolver tarjetaCodigo: numeroCuenta → banco+tipo → requiere_tarjeta
+      const configSnap   = await db.collection('config').doc('familia').get();
+      const tarjetasConf = ((configSnap.data()?.tarjetas ?? []) as Array<{
+        codigo: string; banco: string; tipo: string; numeroCuenta?: string;
+      }>);
+      const numeroCuentaExtraido = (resumen.numeroCuenta as string | null) ?? null;
+      let tarjetaCodigoResuelto: string | null = null;
+      if (numeroCuentaExtraido) {
+        tarjetaCodigoResuelto = tarjetasConf.find(t => t.numeroCuenta === numeroCuentaExtraido)?.codigo ?? null;
+      }
+      if (!tarjetaCodigoResuelto) {
+        const bancoRes   = (resumen.banco   as string) || banco;
+        const tarjetaRes = (resumen.tarjeta as string) || tarjeta;
+        tarjetaCodigoResuelto = tarjetasConf.find(
+          t => t.banco === bancoRes && t.tipo === tarjetaRes,
+        )?.codigo ?? null;
+      }
+      const estadoFinal = tarjetaCodigoResuelto ? 'parseado' : 'requiere_tarjeta';
+
       const movimientosParseados = movsBrutos.map((m, i) => ({
         seq:               typeof m.seq === 'number' ? m.seq : i + 1,
         tipoLinea:         TIPOLINEA_VALIDOS.has(m.tipoLinea ?? '') ? m.tipoLinea : 'consumo',
@@ -810,7 +834,8 @@ export const extraerResumenTarjeta = onDocumentCreated(
       const periodo = fechaCierreStr ? fechaCierreStr.slice(0, 7) : (data.periodo as string) || '';
 
       await ref.update({
-        estado:              'parseado',
+        estado:              estadoFinal,
+        tarjetaCodigo:       tarjetaCodigoResuelto,
         nroResumen:          resumen.nroResumen         ?? null,
         titular:             resumen.titular             ?? null,
         banco:               resumen.banco               || banco,
@@ -822,6 +847,7 @@ export const extraerResumenTarjeta = onDocumentCreated(
         totalUSD:            Number(resumen.totalUSD     ?? 0),
         pagoMinimoARS:       Number(resumen.pagoMinimoARS ?? 0),
         cuentaDebito:        resumen.cuentaDebito        ?? null,
+        numeroCuenta:        numeroCuentaExtraido,
         ajustesConsolidado:  Array.isArray(resumen.ajustesConsolidado)
           ? resumen.ajustesConsolidado
           : [],
