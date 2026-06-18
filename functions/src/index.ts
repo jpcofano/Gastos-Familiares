@@ -701,17 +701,6 @@ function sanitizarJson(raw: string): string {
   return out;
 }
 
-function dedupMovimientos(movs: MovimientoRaw[]): MovimientoRaw[] {
-  const seen = new Set<string>();
-  return movs.filter(m => {
-    const k1 = `${(m.descripcionRaw ?? '').trim().toUpperCase()}|${m.monto ?? 0}`;
-    const k2 = `${m.monto ?? 0}|${m.moneda ?? 'ARS'}|${m.fechaConsumo ?? ''}`;
-    if (seen.has(k1) || seen.has(k2)) return false;
-    seen.add(k1);
-    seen.add(k2);
-    return true;
-  });
-}
 
 const TIPOLINEA_VALIDOS = new Set([
   'consumo', 'cuota', 'impuesto', 'reintegro_percepcion', 'bonificacion', 'reverso',
@@ -789,7 +778,7 @@ export const extraerResumenTarjeta = onDocumentCreated(
       }
 
       const resumen    = parsed.resumen;
-      const movsBrutos = dedupMovimientos(parsed.movimientos);
+      const movsBrutos = parsed.movimientos;
 
       // Resolver tarjetaCodigo: numeroCuenta → banco+tipo → requiere_tarjeta
       const configSnap   = await db.collection('config').doc('familia').get();
