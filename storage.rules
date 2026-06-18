@@ -2,6 +2,14 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
+    match /resumenesTarjeta/{archivo} {
+      allow read:   if request.auth != null;
+      allow write:  if request.auth != null
+                    && request.resource.size < 10 * 1024 * 1024
+                    && request.resource.contentType.matches('application/pdf');
+      allow delete: if false;
+    }
+
     match /comprobantes/{hash} {
       // Storage Rules no pueden consultar Firestore para verificar rol.
       // request.auth != null es deliberadamente más laxo que las Rules de Firestore:

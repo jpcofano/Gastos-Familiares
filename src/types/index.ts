@@ -39,12 +39,42 @@ export interface Movement {
   actualizadoEn: Date;
 }
 
+export interface AjusteConsolidado {
+  concepto: string;
+  montoARS: number;
+  montoUSD: number;
+}
+
+export interface MovimientoParseado {
+  seq: number;
+  tipoLinea: 'consumo' | 'cuota' | 'impuesto' | 'reintegro_percepcion' | 'bonificacion' | 'reverso';
+  fechaConsumo: string | null;   // YYYY-MM-DD
+  descripcionRaw: string;
+  nroCupon: string;
+  cuotaActual: number;
+  cuotaTotal: number;
+  moneda: 'ARS' | 'USD';
+  monto: number;                 // siempre positivo
+  personaDetectada: string;      // nombre canónico ('María', 'Juan', etc.) o '' si no resuelve
+  esBonificacion: boolean;
+  esReverso: boolean;
+  esImpuesto: boolean;
+  // Campos editables en el preview (rellenados por el usuario antes de confirmar)
+  personaConfirmada: string | null;
+  categoria: string | null;
+  subcategoria: string | null;
+  incluir: boolean;
+}
+
 export interface CardStatement {
   id: string;
   tarjetaCodigo: string;
   banco: string;
   tarjeta: string;
   periodo: string;
+  estado: 'subido' | 'parseado' | 'confirmado' | 'error';
+  nroResumen: string | null;
+  titular: string | null;
   fechaCierre: Date | null;
   fechaVencimiento: Date | null;
   totalARS: number;
@@ -53,10 +83,15 @@ export interface CardStatement {
   cuentaDebito: string | null;
   hashPdf: string | null;
   refStoragePdf: string | null;
-  parseadoEn: Date;
+  subidoPor: string | null;
+  subidoEn: Date | null;
+  parseadoEn: Date | null;
   confirmadoEn: Date | null;
   confirmadoPor: string | null;
   observaciones: string | null;
+  errorExtraccion: string | null;
+  movimientosParseados: MovimientoParseado[];
+  ajustesConsolidado: AjusteConsolidado[];
 }
 
 export interface MatchTexto { incluye: string[]; excluye: string[]; }

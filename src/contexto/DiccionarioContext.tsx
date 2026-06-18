@@ -15,6 +15,7 @@ export function DiccionarioProvider({ children }: { children: ReactNode }) {
   const [cargando, setCargando] = useState(true);
   const entradasRef = useRef<EntradaDict[]>([]);
   const reglasRef   = useRef<NormRule[]>([]);
+  const cacheRef    = useRef<Map<string, ClasificacionResult | null>>(new Map());
 
   useEffect(() => {
     Promise.all([
@@ -43,15 +44,21 @@ export function DiccionarioProvider({ children }: { children: ReactNode }) {
           .map(d => d.data())
           .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
           .map(d => ({ tipo: d.tipo, patron: d.patron, reemplazo: d.reemplazo ?? '' } satisfies NormRule));
+        cacheRef.current.clear();
         setCargando(false);
       })
       .catch(() => setCargando(false)); // fallo silencioso — sin sugerencias
   }, []);
 
-  // Referencia estable: nunca cambia su identidad, siempre lee del ref actualizado.
+  // Cache por texto+banco+tarjeta; se invalida cuando el diccionario recarga.
   const clasificar = useCallback(
-    (texto: string, opts?: { banco?: string | null; tarjeta?: string | null }) =>
-      clasificarPuro(texto, entradasRef.current, reglasRef.current, opts),
+    (texto: string, opts?: { banco?: string | null; tarjeta?: string | null }) => {
+      const key = `${texto}\x00${opts?.banco ?? ''}\x00${opts?.tarjeta ?? ''}`;
+      if (cacheRef.current.has(key)) return cacheRef.current.get(key) ?? null;
+      const result = clasificarPuro(texto, entradasRef.current, reglasRef.current, opts);
+      cacheRef.current.set(key, result);
+      return result;
+    },
     [],
   );
 

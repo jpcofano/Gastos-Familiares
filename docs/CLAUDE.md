@@ -17,7 +17,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Fase 3 — Auth + shell PWA: cerrado.
 - Fase 4 — Vistas read-only (Dashboard, Resumen, pantalla de hijos): cerrado.
 - Fase 5 — Flujos de escritura (Manual, Eventuales, Ingresos): F5.1 cerrado. F5.1.0 hotfix P0 cerrado (autorizados por email). F5.2 cerrado (state machine 8 estados, registrar desde checklist, itemEsperadoId). F5.3 cerrado (realtime onSnapshot + offline persistentLocalCache; latency compensation automática, sin optimistic manual).
-- Fase 6 — Tarjetas + Comprobantes con Cloud Functions: F6.2 (infra Functions + extracción Anthropic) cerrado. F6.3 (match server-side propone→confirmás, 3 ramas + dedup) cerrado. F6.4 (carga manual sin comprobante, dedup advisory no-bloqueante, origen Manual) cerrado. F6.4.5 (clasificador completo: lookup DiccionarioContext consciente de banco/tarjeta + trigger aprendizaje server-side + normalización on-write vía `reglasNormalizacion`; `descripcionLimpia` como descripción visible al crear movimiento desde comprobante; `descripcionOriginal` preserva texto crudo para trazabilidad; CONFIANZA_UMBRAL=0.7 para prellenar sugerencias — corrección del usuario sube confianza +0.1; persona=quien-sube como fuente primaria en comprobante ramas 2/3; alias de miembros en `config/familia` + `resolverNombreMiembro()` listo para F6.5; corrige Rules `reglasNormalizacion` esAdmin→esMiembro y bug `onAccion()` indefinido en rama 3. Addendum 5: fix preload congelado en PropuestaCard — categoria/subcategoria/etiqueta/banco prellenan en alta desde comprobante; `etiqueta` fluye por toda la cadena EntradaDict→ClasificacionResult→DiccionarioContext→preloadBase; `subcatInitCatRef` reemplaza flag booleano para sobrevivir React Strict Mode double-fire; guard `cargandoDict` en botones de apertura; `incluirResumenMes` default true solo si fecha > hoy; banco default `Efectivo` para comprobantes, rama 2 (esperado) no lo hereda) cerrado. F6.6 (PWA share-target Android: manifest + SW handler IDB + auto-subida en Comprobantes; iOS fallback via input file existente) pendiente prueba en dispositivo real.
+- Fase 6 — Tarjetas + Comprobantes con Cloud Functions: F6.2 (infra Functions + extracción Anthropic) cerrado. F6.3 (match server-side propone→confirmás, 3 ramas + dedup) cerrado. F6.4 (carga manual sin comprobante, dedup advisory no-bloqueante, origen Manual) cerrado. F6.4.5 (clasificador completo: lookup DiccionarioContext consciente de banco/tarjeta + trigger aprendizaje server-side + normalización on-write vía `reglasNormalizacion`; `descripcionLimpia` como descripción visible al crear movimiento desde comprobante; `descripcionOriginal` preserva texto crudo para trazabilidad; CONFIANZA_UMBRAL=0.7 para prellenar sugerencias — corrección del usuario sube confianza +0.1; persona=quien-sube como fuente primaria en comprobante ramas 2/3; alias de miembros en `config/familia` + `resolverNombreMiembro()` listo para F6.5; corrige Rules `reglasNormalizacion` esAdmin→esMiembro y bug `onAccion()` indefinido en rama 3. Addendum 5: fix preload congelado en PropuestaCard — categoria/subcategoria/etiqueta/banco prellenan en alta desde comprobante; `etiqueta` fluye por toda la cadena EntradaDict→ClasificacionResult→DiccionarioContext→preloadBase; `subcatInitCatRef` reemplaza flag booleano para sobrevivir React Strict Mode double-fire; guard `cargandoDict` en botones de apertura; `incluirResumenMes` default true solo si fecha > hoy; banco default `Efectivo` para comprobantes, rama 2 (esperado) no lo hereda) cerrado. F6.5 (pipeline resumen de tarjeta: upload PDF con tarjetaCodigo pre-seleccionado → `resumenesTarjeta/{hashPdf}` estado:subido → `extraerResumenTarjeta` onDocumentCreated (max_tokens 32000, prompt portado de 47_Tarjetas_PDF.gs con persona por bloque PDF: BBVA secciones/Galicia Visa subtotales/Galicia Master adicionales) → estado:parseado + `movimientosParseados[]` inline → preview editable por fila (persona select, cat/subcat con clasificar() memoizado) → confirmar lote → N movimientos consumo (excluirDash:false, incluirResumenMes:false) + 2 totales ARS/USD (excluirDash:true, incluirResumenMes:true, confirmadoPago por fecha vencimiento, vinculados a itemsEsperados de la tarjeta) → estado:confirmado. Memoización de clasificar(): Map<texto\x00banco\x00tarjeta, result> en DiccionarioContext, se invalida cuando el dict recarga. Movimientos creados por batch atómico. `MovimientoParseado` nuevo tipo en types/index.ts con campos editables personaConfirmada/categoria/subcategoria/incluir. persona del consumo = bloque del PDF → resolverNombreMiembro() → memberId; impuestos/percepciones sin persona. dedup post-Claude: descripcionRaw|monto + monto|moneda|fecha. Tres tipos de línea: consumo/cuota/reverso/bonificacion (persona=sí, tipo Gasto/Ingreso) · impuesto/reintegro_percepcion (persona="", categoría forzada "Impuestos y finanzas", tipo Gasto/Ingreso) · 2 totales (excluirDash:true, incluirResumenMes:true). tipoDeLinea(): reverso/bonificacion/reintegro_percepcion → Ingreso; consumo/cuota/impuesto → Gasto. Cuadre: sum(Gastos moneda) − sum(Ingresos moneda) + sum(ajustesConsolidado.monto) ≈ totalARS/USD del PDF (±$1). Los ajustes del consolidado (DEV PER período anterior, entre "SU PAGO" y "SALDO PENDIENTE") NO son movimientos pero SÍ entran en el cuadre porque el total PDF ya viene neto de ellos. Se capturan en `ajustesConsolidado[]` ({concepto, montoARS, montoUSD}) para trazabilidad y se muestran en el banner. Si falla → banner warning + botón Confirmar deshabilitado + guard en confirmarResumenTarjeta. Percepciones USD = camino único: tipoLinea="impuesto", sin flag recuperable; DEV PER CONSOLIDADO (ajuste período anterior, negativo) excluido por el prompt. Vista /tarjetas admin-only con lista + preview table + banner cuadre. Ruta separada de comprobantes — no toca extraerComprobante.) cerrado. F6.6 (PWA share-target Android: manifest + SW handler IDB + auto-subida en Comprobantes; iOS fallback via input file existente) pendiente prueba en dispositivo real.
 - Fase 7 — Cutover y archivo del Sheet: pendiente.
 
 ## Decisiones cerradas
@@ -111,7 +111,7 @@ Colecciones:
 - `/tcDiario/{YYYY-MM-DD}`: 147+ docs, escritura solo desde Function.
 - `/autorizados/{email}`: un doc por email de miembro activo; sembrado; read-only vía Rules por token.email.lower().
 - `/movimientos/{id}`: 1136 docs (snapshot 2026-06-12), source of truth de movimientos.
-- `/resumenesTarjeta/{id}`: 18 docs iniciales, cabeceras de resumenes.
+- `/resumenesTarjeta/{id}`: 18 docs seed + docs nuevos por upload. Estados: `subido` → `parseado` → `confirmado` | `error`. Campos nuevos (F6.5): `estado`, `nroResumen`, `titular`, `subidoPor`, `subidoEn`, `errorExtraccion`, `movimientosParseados[]` (inline array, ~60 líneas por resumen). La function `extraerResumenTarjeta` (onDocumentCreated) llama a Claude con el prompt portado de 47_Tarjetas_PDF.gs (persona por bloque, max_tokens 32000). Docs seed sin `estado` defaulan a 'confirmado' en `docACardStatement()`.
 - `/itemsEsperados/{id}`: 24 docs (20 gastos + 4 ingresos), unificada con `tipo`. Campos: `periodicidad` (default `mensual`; bimestral/trimestral/anual/unico previstos, sin uso hoy), `pagoAutomatico` (default `false`).
 - `/comprobantes/{hashPdf}`: un doc por comprobante subido (id = SHA-256 del archivo). Estados: `subido` → `extraido` → `vinculado` | `error`. Campos: `datosExtraidos` (tipoDocumento, fecha, montoTotal, moneda, comercioRazonSocial, cuit, numeroOperacion, periodoFacturado, numeroCliente, vencimientos[]), `propuestaMatch` (rama 0-3, movimientoId?, itemEsperadoId?, candidatos?), `refStoragePdf`, `contentType`, `tamano`, `subidoPor`, `subidoEn`, `actualizadoEn`. La function `extraerComprobante` (onDocumentCreated) llama a Claude claude-sonnet-4-6 (PDF o imagen). La function `matchComprobante` (onDocumentUpdated, guard anti-loop) calcula la propuesta vía matchLogica.ts.
 - `/diccionario/{id}`: seed ~479 entradas; crece vía trigger de aprendizaje F6.4.5 (no hay upper bound fijo). Validator chequea `count >= excel - 15`.
@@ -123,20 +123,71 @@ Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracio
 Inflación en esperados/proyecciones ARS (fase propia, futura): los `itemsEsperados` con `moneda: "ARS"` tienen `montoEsperado` estático. Para proyecciones reales habría que ajustar por inflación mensual (INDEC IPC). Opciones: campo `ajusteInflacion: boolean` + factor mensual en `/config/familia`, o bien dejar que el usuario actualice `montoEsperado` manualmente cada N meses. No se implementa hasta que el caso de uso sea claro.
 
 ## Backlog (post F5.3)
-- **F6.5 — Pipeline de resumen de tarjeta (1 resumen → N movimientos).**
-  Un resumen_tarjeta NO es un pago único: es un estado de cuenta con N consumos → mapea a la
-  colección resumenesTarjeta y genera N movimientos. Pipeline distinto al de F6 (extracción
-  multi-línea, alta masiva con confirmación). Versión moderna del folder-scan de
-  49_Tarjetas_API.gs (detectaba tarjetaCodigo por nombre de archivo, dedup por ResumenID).
-  Fase propia, requiere ronda de diseño dedicada.
-  Regla persona (anotado en F6.4.5 addendum_4, ya implementado): en resúmenes de tarjeta la persona
-  la DECIDE el `tarjetaCodigo` del catálogo (NO quién subió el PDF). `resolverNombreMiembro(titular_impreso, config)`
-  VALIDA que coincida con el titular; cualquier discrepancia es advertencia, no bloqueo.
-
 - **F6.6 — PWA share-target (compartir desde el celular).**
   Paridad con el sistema viejo (12_ShareTemp.gs: carpeta Drive temporal + token + TTL). En Firebase
   colapsa: share-target llama directo a subirComprobante → Storage (F6.1) + dedup SHA-256 + trigger
   onCreate (F6.2). No se porta la carpeta Drive. Feature chica (la infra pesada ya existe).
+
+## F6.5 — Resumen de tarjeta
+
+Estado: pipeline funcional para PDFs chicos; falta streaming para PDFs grandes.
+
+Prompts: `docs/prompts/F6.5_resumen_tarjeta_base.md` + addendums 1–5 implementados;
+addendum 6 generado sin correr.
+
+### Decisiones de modelo (cerradas, no re-litigar)
+
+1. **Trigger separado** `extraerResumenTarjeta` (onDocumentCreated en `resumenesTarjeta`),
+   NO branch en `extraerComprobante`. Ruta de upload dedicada. Single call, sin detección de tipo.
+2. **Persona del consumo** = bloque del PDF (encabezados "Consumos {Nombre}" /
+   "Total Consumos de {Nombre}" / "TOTAL ADICIONAL DE {Apellido},{Nombre}"), resuelta vía
+   `resolverNombreMiembro`. NO se deriva del `tarjetaCodigo`. Impuestos/percepciones → persona vacía.
+   Titular vacío ese mes → todo al adicional (funciona solo). Nombre que no resuelve → sin persona
+   en preview, lo completa el usuario.
+3. **Clasificación**: el LLM extrae y limpia `descripcionRaw`; `clasificar()` (diccionario) categoriza.
+   Las categorías NO vienen del prompt de Claude (evita dos criterios en conflicto y permite
+   aprendizaje). Lo que el diccionario no reconoce queda en blanco y aprende al confirmar.
+4. **Tres tipos de línea** con flags anti-doble-conteo: consumo (`excluirDash:false`,
+   `incluirResumenMes:false`); impuesto/percepción (ídem, sin persona, categoría "Impuestos y
+   finanzas"); los 2 totales ARS/USD (`excluirDash:true`, `incluirResumenMes:true`).
+5. **Total** = TOTAL A PAGAR del PDF, no la suma de consumos (incluye impuestos, resta ajustes).
+6. **DEV PER del consolidado** (entre "SU PAGO" y "SALDO PENDIENTE", negativo): EXCLUIDO de
+   movimientos (no es gasto del mes actual) pero INCLUIDO en el cuadre como `ajustesConsolidado`
+   (el total del PDF ya viene neto). Campo `ajustesConsolidado: AjusteConsolidado[]` en
+   `CardStatement`; visible en banner del preview para trazabilidad.
+7. **Percepción USD**: camino único (siempre impuesto del mes, sin flag recuperable). El ajuste
+   pagaste-en-USD se refleja vía la DEV del mes siguiente (excluida). No se modela la bifurcación
+   pesos/USD.
+8. **Reintegros de percepción del mes** (CR.RG, DEV.IMP positivos en detalle, CAJA SEG-PROMO):
+   categoría "Impuestos y finanzas" (NO "Ingresos"), restan en esa categoría.
+9. **Validación de cuadre** al confirmar: `consumos + impuestos − reintegros + ajustesConsolidado
+   = total a pagar` (ARS y USD por separado). Avisa y bloquea confirmación si no cuadra.
+10. **Casos especiales** portados de `47_Tarjetas_PDF.gs`: USD sin duplicar (el ARS entre
+    paréntesis es conversión), reversos, cuotas (C.XX/YY), reintegros.
+11. **Datos**: array `movimientosParseados[]` inline en el doc (≤60 líneas, no subcolección).
+    Estado `CardStatement`: `'subido' | 'parseado' | 'confirmado'` (máquina propia, distinta del
+    estado de Comprobante).
+
+### Aprendizajes técnicos
+
+- **Bug Timestamp-vs-string**: el seed guarda `fechaCierre`/`fechaVencimiento` como `Timestamp`,
+  la Cloud Function como string `"YYYY-MM-DD"` (viene del JSON de Claude). `docACardStatement`
+  debe manejar ambos con `toDateSafe()`; asumir solo `Timestamp` crashea el callback de `onSnapshot`
+  y deja la lista vacía sin error visible.
+- **El parseo tarda ~111–155s** para PDFs de 60 líneas. `timeoutSeconds ≥ 300` requerido en la
+  function (default 60s la cortaría en prod).
+- **`max_tokens` alto (32000)** → el SDK exige streaming; bajo (16000) → trunca PDFs grandes.
+  Solución: `client.messages.stream()` + `finalMessage()` + `max_tokens: 32000`.
+
+### Pendientes (backlog F6.5)
+
+- **Streaming para PDFs grandes** (bloqueante actual): implementado en código, pendiente de prueba.
+- **Probar el final del pipeline**: confirmar lote → crea movimientos + rellena 2 totales + aprende
+  (no probado end-to-end).
+- **Investigar** resumen que aparece marcado "confirmado" sin acción del usuario.
+- **Addendum 6** (tarjeta automática del PDF, sin selector): generado, sin correr. Requiere
+  `numeroCuenta` en `config.tarjetas`.
+- **Probar BBVA Visa** (4 personas).
 
 ## State machine de esperados (ResumenMes)
 

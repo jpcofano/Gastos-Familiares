@@ -418,3 +418,429 @@ export const aprenderMovimientoActualizado = onDocumentUpdated(
     await aprender(after).catch(e => console.error('[aprender] error en update:', e));
   },
 );
+
+// ── F6.5 — Extracción de resúmenes de tarjeta ─────────────────────────────────
+
+const PERSONAS_CANONICAS = `\
+MAPEO CANÓNICO DE PERSONAS (usá estos valores exactos en personaDetectada):
+  "MARIA LASCANO", "LASCANO MARIA", "LASCANO,MARIA", "Maria Lascano" → "María"
+  "JUAN PABLO COFANO", "COFANO JUAN", "COFANO,JUAN", "Juan Pablo Cofano" → "Juan"
+  "FEDERICO N COFANO", "Federico N Cofano" → "Federico"
+  "SOFIA COFANO", "Sofía Cofano" → "Sofía"`;
+
+function buildResumenTarjetaPrompt(banco: string, tarjeta: string): string {
+  return `Sos un parser especializado en resúmenes de tarjetas de crédito argentinas.
+Tu tarea es extraer los datos del PDF adjunto y devolver ÚNICAMENTE un bloque JSON válido
+(envuelto en \`\`\`json ... \`\`\`).
+
+CONTEXTO DE ESTA TARJETA:
+- Banco: ${banco}
+- Tarjeta: ${tarjeta}
+
+${PERSONAS_CANONICAS}
+
+═══════════════════════════════════════════════════════════
+PARTE 1 — OBJETO "resumen" (metadata del encabezado del PDF)
+═══════════════════════════════════════════════════════════
+
+Extraé los siguientes campos:
+- nroResumen: número de resumen del encabezado
+  (ej Galicia Visa: "VI00000000064559935", Galicia Master: "027032119814",
+   BBVA: número de sobre como "1445563")
+- banco: "${banco}"
+- tarjeta: "${tarjeta}"
+- titular: nombre del titular principal tal como aparece (ej: "LASCANO MARIA")
+- fechaCierre: fecha de cierre ACTUAL en formato YYYY-MM-DD
+  (no el cierre anterior; buscá "Cierre actual" o "CIERRE ACTUAL")
+- fechaVencimiento: fecha de vencimiento ACTUAL en formato YYYY-MM-DD
+  (buscá "Vencimiento actual" o "VENCIMIENTO ACTUAL")
+- totalARS: total a pagar en pesos (número decimal, sin símbolos $)
+  (buscá "TOTAL A PAGAR" o "SALDO ACTUAL $")
+- totalUSD: total a pagar en dólares (número decimal, 0 si no aplica)
+- pagoMinimoARS: pago mínimo en pesos (número decimal)
+- cuentaDebito: número de cuenta donde se debitará
+  (extraer de la línea "DEBITAREMOS DE SU C.A.XXXXXXXXX" o "DEBITAREMOS DE SU CTA XXXXXXXXX"
+   o "Debitaremos de su c.ahorro XXXXXXXXXX"; devolver solo el número de cuenta)
+- ajustesConsolidado: array de ajustes de período ANTERIOR que aparecen en el CONSOLIDADO entre
+  "SU PAGO" y "SALDO PENDIENTE". Típicamente son devoluciones de percepción del período anterior
+  (ej: "DEV PER RG 4815 30% -67.399,98"). Estos NO van en movimientos (no son gasto del mes actual)
+  pero SÍ se registran acá para que el cuadre funcione. El banco ya los restó del total a pagar.
+  Cada item: { "concepto": "...", "montoARS": -67399.98, "montoUSD": 0 }
+  Incluí el signo: devoluciones/créditos son negativos, débitos extra son positivos.
+  NO incluir "SU PAGO EN PESOS/USD" ni "SALDO ANTERIOR" (esos no afectan el cuadre del mes).
+  Si no hay ajustes, devolver [].
+
+═══════════════════════════════════════════════════════════
+PARTE 2 — ARRAY "movimientos" (uno por línea de consumo)
+═══════════════════════════════════════════════════════════
+
+── QUÉ INCLUIR ──
+✓ Todos los consumos y cuotas del "DETALLE DEL CONSUMO"
+✓ Percepciones e impuestos (IIBB, IVA RG, DB.RG, PERCEPCION)
+✓ Devoluciones de percepciones (DEV.IMP, CR.RG, DEV PER, CAJA SEG-PROMO)
+✓ Bonificaciones (BONIF. CONSUMO) y reversos (montos negativos en la sección de consumos)
+
+── QUÉ EXCLUIR ──
+✗ Saldo anterior
+✗ Pagos del resumen anterior (SU PAGO EN PESOS, SU PAGO EN USD)
+✗ Devoluciones de percepciones que aparecen en el CONSOLIDADO entre
+  "SU PAGO" y "SALDO PENDIENTE" (ej: DEV PER RG 4815 30% con monto
+  negativo). Estas son ajustes del período anterior, NO del mes actual.
+  SOLO incluir devoluciones que aparezcan en el DETALLE DEL CONSUMO
+  o debajo del SUBTOTAL como percepciones del mes.
+✗ Subtotales por persona o tarjeta (esas líneas solo sirven para detectar persona)
+✗ Todo el texto legal, tablas de financiación, información institucional
+✗ Cuotas a vencer (tabla de proyección futura)
+
+── CAMPOS POR MOVIMIENTO ──
+
+seq (number): secuencia desde 1
+
+tipoLinea (string): uno de estos valores:
+  "consumo"              → gasto en un solo pago (cuotaTotal=1)
+  "cuota"                → cuota de compra en cuotas (cuotaTotal>1)
+  "impuesto"             → percepción o impuesto (IIBB, IVA RG, DB.RG, PERCEPCION)
+  "reintegro_percepcion" → devolución de percepción (DEV.IMP, CR.RG, DEV PER, CAJA SEG-PROMO)
+  "bonificacion"         → descuento explícito (BONIF. CONSUMO ...)
+  "reverso"              → anulación de consumo previo (monto negativo en sección de consumos)
+
+fechaConsumo (string|null): fecha en formato YYYY-MM-DD.
+  - Para percepciones sin fecha propia, usar la fechaCierre del resumen.
+  - Para devoluciones en el CONSOLIDADO (CR.RG, DEV PER), usar la fecha que aparece en esa línea.
+  - Las fechas del PDF vienen en formato DD-MM-YY o DD-MM-AAAA; convertir a YYYY-MM-DD.
+
+descripcionRaw (string): descripción limpia del comercio o concepto.
+  REGLAS DE LIMPIEZA:
+  • BBVA cuotas: quitar el sufijo " C.XX/YY" al final
+    (ej: "LAS MARGARITAS C.02/03" → "LAS MARGARITAS")
+  • BBVA consumos USD: quitar "USD X,XX" o "USD X.XX" de la descripción
+    (ej: "PLAYSTATION USD 9,99" → "PLAYSTATION";
+         "NETFLIX.COM EaDrY5hBOUSD 14,34" → "NETFLIX.COM EaDrY5hBOH";
+         "APPLE.COM/BILL USD 6,99" → "APPLE.COM/BILL")
+  • Galicia Visa consumos USD: la descripción termina con el código de sesión y el monto USD
+    (ej: "AMAZON PRIME*5B5 1VaRjv8EhUSD" → "AMAZON PRIME*5B5 1VaRjv8Eh";
+         el monto USD aparece como número en la misma línea)
+  • No modificar el resto de la descripción; preservar mayúsculas como están
+
+nroCupon (string): número de cupón/comprobante. Vacío si no hay.
+
+cuotaActual (number): número de cuota actual. 0 si no aplica, 1 si es un solo pago.
+cuotaTotal (number): total de cuotas. 0 si no aplica, 1 si es un solo pago.
+  DETECCIÓN DE CUOTAS:
+  • BBVA: el sufijo " C.XX/YY" en la descripción indica cuotaActual=XX, cuotaTotal=YY
+  • Galicia Visa: columna CUOTA explícita con formato "XX/YY"
+  • Galicia Master: sección "CUOTA DEL MES" o "CUOTAS DEL MES" + columna cuota "XX/YY"
+  • Si cuotaTotal=1 o no hay info de cuotas → tipoLinea="consumo", no "cuota"
+
+moneda (string): "ARS" o "USD".
+  Un movimiento es en USD si:
+  • El monto aparece en la columna DÓLARES (no en PESOS)
+  • La descripción contiene "USD X,XX" o el monto USD está separado
+
+monto (number): monto en la moneda indicada. SIEMPRE positivo.
+  (para bonificaciones y reversos el monto también es positivo;
+   el carácter negativo lo indica tipoLinea/esBonificacion/esReverso)
+  CONVERSIÓN: los números argentinos usan punto como miles y coma como decimal.
+  "1.447,94" → 1447.94   "301.393,73" → 301393.73   "9,99" → 9.99
+
+personaDetectada (string): nombre canónico (ver mapeos arriba). Vacío si no se puede determinar.
+  DETECCIÓN POR FORMATO:
+
+  BBVA (Visa y Mastercard):
+  El PDF tiene secciones tituladas "Consumos [Nombre Apellido]" o
+  "Consumos [Nombre] [Apellido]". Todos los movimientos bajo esa sección
+  son de esa persona, hasta que aparece la siguiente sección.
+  Ejemplo: bajo "Consumos Maria Lascano" → personaDetectada="María"
+
+  GALICIA VISA:
+  El detalle se divide en bloques cerrados por subtotales:
+  "TARJETA XXXX Total Consumos de NOMBRE APELLIDO"
+  Los movimientos ANTES de ese subtotal son de esa persona.
+  Ejemplo: si la línea "TARJETA 9318 Total Consumos de MARIA LASCANO" aparece
+  después de un bloque, todos los movimientos de ese bloque → personaDetectada="María".
+  Si hubiera movimientos antes del primer subtotal, son del titular principal.
+
+  GALICIA MASTERCARD:
+  El titular principal (la persona en el encabezado) tiene los consumos principales.
+  Los adicionales aparecen antes del subtotal "TOTAL ADICIONAL DE NOMBRE,APELLIDO".
+  Ejemplo: movimientos antes de "TOTAL ADICIONAL DE COFANO,JUAN" → personaDetectada="Juan".
+  Los movimientos del titular principal son los del bloque inicial.
+
+  PERCEPCIONES E IMPUESTOS: dejar personaDetectada = "" (vacío).
+
+esBonificacion (boolean): true solo si es un descuento explícito (BONIF. CONSUMO)
+esReverso (boolean): true solo si anula/revierte un consumo previo (monto negativo en consumos)
+esImpuesto (boolean): true si tipoLinea = "impuesto"
+esPagoAnterior (boolean): false siempre (los pagos no se incluyen)
+
+═══════════════════════════════════════════════════════════
+DUPLICACIONES A EVITAR
+═══════════════════════════════════════════════════════════
+
+DEV PER RG 4815 30% en Galicia Master: aparece UNA SOLA VEZ en el
+  CONSOLIDADO. NO duplicar. Usar fechaCierre como fecha si no tiene fecha propia.
+
+Consumos en USD (ej PARAMOUNT+): aparecen UNA SOLA VEZ. El PDF puede mostrar
+  el monto ARS equivalente en la misma línea entre paréntesis (USA,ARS,1321.49).
+  Eso NO es un segundo movimiento — es la conversión. Generar UN solo movimiento
+  con moneda=USD y el monto en USD.
+
+═══════════════════════════════════════════════════════════
+CASOS ESPECIALES IMPORTANTES
+═══════════════════════════════════════════════════════════
+
+CR.RG 5617 en BBVA (sección "Sus pagos y ajustes realizados"):
+  → tipoLinea="reintegro_percepcion", monto positivo (ignorar signo negativo)
+  → fechaConsumo = fecha de la línea, personaDetectada = ""
+
+DEV.IMP. RG 5617 en Galicia Visa (sección CONSOLIDADO):
+  → tipoLinea="reintegro_percepcion", monto positivo
+
+DEV PER RG 4815 en Galicia Master:
+  → Si aparece en el CONSOLIDADO (entre SU PAGO y SALDO PENDIENTE)
+    con monto NEGATIVO: es del período anterior. EXCLUIR (igual que SU PAGO).
+  → Si aparece en el DETALLE DEL CONSUMO o como percepción del mes
+    con monto POSITIVO: es un reintegro del mes actual.
+    tipoLinea="reintegro_percepcion", monto positivo.
+
+PERCEPCIONES EN GALICIA MASTER (aparecen en el CONSOLIDADO, no en el detalle):
+  "PERCEPCION IVA DTO 354/18", "PERCEP.AFIP RG 4815 30%", "PERC IIBB SERV DIG CABA"
+  → tipoLinea="impuesto", esImpuesto=true
+  → fechaConsumo = fechaCierre del resumen
+
+CAJA SEG-PROMO en BBVA (aparece en la sección de consumos con monto positivo):
+  → tipoLinea="reintegro_percepcion", monto positivo
+
+4F SOLUCIONES y similares (monto negativo en consumos, cancela una compra previa):
+  → tipoLinea="reverso", esReverso=true, monto positivo (valor absoluto)
+
+BONIF. CONSUMO CABIFY y similares:
+  → tipoLinea="bonificacion", esBonificacion=true, monto positivo (valor absoluto)
+
+═══════════════════════════════════════════════════════════
+FORMATO DE RESPUESTA REQUERIDO
+═══════════════════════════════════════════════════════════
+
+Devolvé ÚNICAMENTE el JSON en un bloque \`\`\`json ... \`\`\`.
+No incluyas texto antes ni después del bloque.
+
+\`\`\`json
+{
+  "resumen": {
+    "nroResumen": "...",
+    "banco": "...",
+    "tarjeta": "...",
+    "titular": "...",
+    "fechaCierre": "YYYY-MM-DD",
+    "fechaVencimiento": "YYYY-MM-DD",
+    "totalARS": 0.00,
+    "totalUSD": 0.00,
+    "pagoMinimoARS": 0.00,
+    "cuentaDebito": "...",
+    "ajustesConsolidado": [
+      { "concepto": "DEV PER RG 4815 30%", "montoARS": -67399.98, "montoUSD": 0 }
+    ]
+  },
+  "movimientos": [
+    {
+      "seq": 1,
+      "tipoLinea": "consumo",
+      "fechaConsumo": "YYYY-MM-DD",
+      "descripcionRaw": "...",
+      "nroCupon": "...",
+      "cuotaActual": 1,
+      "cuotaTotal": 1,
+      "moneda": "ARS",
+      "monto": 0.00,
+      "personaDetectada": "",
+      "esBonificacion": false,
+      "esReverso": false,
+      "esImpuesto": false,
+      "esPagoAnterior": false
+    }
+  ]
+}
+\`\`\``;
+}
+
+type MovimientoRaw = {
+  seq?: number;
+  tipoLinea?: string;
+  fechaConsumo?: string | null;
+  descripcionRaw?: string;
+  nroCupon?: string;
+  cuotaActual?: number;
+  cuotaTotal?: number;
+  moneda?: string;
+  monto?: number;
+  personaDetectada?: string;
+  esBonificacion?: boolean;
+  esReverso?: boolean;
+  esImpuesto?: boolean;
+};
+
+function sanitizarJson(raw: string): string {
+  let out = '';
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (esc)                     { out += ch; esc = false; continue; }
+    if (ch === '\\' && inStr)    { out += ch; esc = true;  continue; }
+    if (ch === '"')               { inStr = !inStr; out += ch; continue; }
+    if (inStr && ch === '\n')     { out += '\\n'; continue; }
+    if (inStr && ch === '\r')     { out += '\\r'; continue; }
+    if (inStr && ch === '\t')     { out += '\\t'; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+function dedupMovimientos(movs: MovimientoRaw[]): MovimientoRaw[] {
+  const seen = new Set<string>();
+  return movs.filter(m => {
+    const k1 = `${(m.descripcionRaw ?? '').trim().toUpperCase()}|${m.monto ?? 0}`;
+    const k2 = `${m.monto ?? 0}|${m.moneda ?? 'ARS'}|${m.fechaConsumo ?? ''}`;
+    if (seen.has(k1) || seen.has(k2)) return false;
+    seen.add(k1);
+    seen.add(k2);
+    return true;
+  });
+}
+
+const TIPOLINEA_VALIDOS = new Set([
+  'consumo', 'cuota', 'impuesto', 'reintegro_percepcion', 'bonificacion', 'reverso',
+]);
+
+export const extraerResumenTarjeta = onDocumentCreated(
+  {
+    document:       'resumenesTarjeta/{id}',
+    secrets:        [anthropicKey],
+    timeoutSeconds: 300,
+    memory:         '1GiB',
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const data = snap.data();
+
+    if (data.estado !== 'subido') return;
+
+    const ref = db.collection('resumenesTarjeta').doc(snap.id);
+
+    try {
+      const refStorage = data.refStoragePdf as string;
+      if (!refStorage) throw new Error('refStoragePdf ausente');
+
+      const [fileBytes] = await storage.bucket().file(refStorage).download();
+      if (!fileBytes || fileBytes.length === 0) throw new Error('Archivo vacío en Storage');
+
+      const base64  = fileBytes.toString('base64');
+      const banco   = (data.banco   as string) || '';
+      const tarjeta = (data.tarjeta as string) || '';
+      const prompt  = buildResumenTarjetaPrompt(banco, tarjeta);
+
+      const client = new Anthropic({ apiKey: anthropicKey.value() });
+      const stream = client.messages.stream({
+        model:      'claude-sonnet-4-6',
+        max_tokens: 32000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 } },
+            { type: 'text'     as const, text: prompt },
+          ],
+        }],
+      });
+
+      const finalMessage = await stream.finalMessage();
+      if (finalMessage.stop_reason !== 'end_turn') {
+        throw new Error(
+          `Respuesta incompleta (stop_reason: ${finalMessage.stop_reason}) — JSON truncado; ` +
+          `tokens usados: ${finalMessage.usage?.output_tokens ?? '?'}`,
+        );
+      }
+
+      const rawText = finalMessage.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map(b => b.text)
+        .join('')
+        .trim();
+
+      const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
+      const rawMatch = rawText.match(/(\{[\s\S]*\})/);
+      const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
+      if (!jsonStr) throw new Error(`Sin JSON en la respuesta (500c): ${rawText.slice(0, 500)}`);
+
+      let parsed: { resumen: Record<string, unknown>; movimientos: MovimientoRaw[] };
+      try {
+        parsed = JSON.parse(sanitizarJson(jsonStr));
+      } catch {
+        throw new Error(`JSON inválido (500c): ${jsonStr.slice(0, 500)}`);
+      }
+
+      if (!parsed.resumen || !Array.isArray(parsed.movimientos)) {
+        throw new Error('Estructura incompleta: falta resumen o movimientos');
+      }
+
+      const resumen    = parsed.resumen;
+      const movsBrutos = dedupMovimientos(parsed.movimientos);
+
+      const movimientosParseados = movsBrutos.map((m, i) => ({
+        seq:               typeof m.seq === 'number' ? m.seq : i + 1,
+        tipoLinea:         TIPOLINEA_VALIDOS.has(m.tipoLinea ?? '') ? m.tipoLinea : 'consumo',
+        fechaConsumo:      m.fechaConsumo  ?? null,
+        descripcionRaw:    m.descripcionRaw ?? '',
+        nroCupon:          m.nroCupon      ?? '',
+        cuotaActual:       m.cuotaActual   ?? 1,
+        cuotaTotal:        m.cuotaTotal    ?? 1,
+        moneda:            m.moneda === 'USD' ? 'USD' : 'ARS',
+        monto:             Math.abs(m.monto ?? 0),
+        personaDetectada:  m.personaDetectada ?? '',
+        esBonificacion:    m.esBonificacion   ?? false,
+        esReverso:         m.esReverso         ?? false,
+        esImpuesto:        m.esImpuesto        ?? false,
+        personaConfirmada: null,
+        categoria:         null,
+        subcategoria:      null,
+        incluir:           true,
+      }));
+
+      const fechaCierreStr = resumen.fechaCierre as string | null;
+      const periodo = fechaCierreStr ? fechaCierreStr.slice(0, 7) : (data.periodo as string) || '';
+
+      await ref.update({
+        estado:              'parseado',
+        nroResumen:          resumen.nroResumen         ?? null,
+        titular:             resumen.titular             ?? null,
+        banco:               resumen.banco               || banco,
+        tarjeta:             resumen.tarjeta             || tarjeta,
+        periodo,
+        fechaCierre:         fechaCierreStr              ?? null,
+        fechaVencimiento:    resumen.fechaVencimiento    ?? null,
+        totalARS:            Number(resumen.totalARS     ?? 0),
+        totalUSD:            Number(resumen.totalUSD     ?? 0),
+        pagoMinimoARS:       Number(resumen.pagoMinimoARS ?? 0),
+        cuentaDebito:        resumen.cuentaDebito        ?? null,
+        ajustesConsolidado:  Array.isArray(resumen.ajustesConsolidado)
+          ? resumen.ajustesConsolidado
+          : [],
+        movimientosParseados,
+        parseadoEn:          FieldValue.serverTimestamp(),
+        errorExtraccion:     FieldValue.delete(),
+        actualizadoEn:       FieldValue.serverTimestamp(),
+      });
+
+      console.log(`[extraerResumenTarjeta] ${snap.id} → parseado (${movimientosParseados.length} movs)`);
+
+    } catch (e) {
+      const mensaje = e instanceof Error ? e.message : String(e);
+      console.error(`[extraerResumenTarjeta] error en ${snap.id}:`, mensaje);
+      await ref.update({
+        estado:          'error',
+        errorExtraccion: mensaje,
+        actualizadoEn:   FieldValue.serverTimestamp(),
+      });
+    }
+  },
+);

@@ -11,7 +11,8 @@
     "emulators": "firebase emulators:start --only auth,firestore --import=./emulator-data --export-on-exit",
     "dev":       "vite",
     "build":     "vite build",
-    "preview":   "vite preview"
+    "preview":   "vite preview",
+    "emu": "firebase emulators:start --only auth,firestore,functions,storage --import=./emulator-data --export-on-exit=./emulator-data" 
   },
   "dependencies": {
     "firebase":         "^10.12.0",

@@ -9,6 +9,7 @@ import Dashboard from './vistas/Dashboard';
 import Resumen from './vistas/Resumen';
 import ConfigEsperados from './vistas/ConfigEsperados';
 import Comprobantes from './vistas/Comprobantes';
+import ResumenesTarjeta from './vistas/ResumenesTarjeta';
 
 export default function AppShell() {
   const { estado, memberId, miembro, firebaseUser } = useMiembro();
@@ -67,6 +68,11 @@ export default function AppShell() {
             <NavLink to="/comprobantes" className={({ isActive }) => 'shell-nav-link' + (isActive ? ' shell-nav-link--active' : '')}>
               Comprobantes
             </NavLink>
+            {esAdmin && (
+              <NavLink to="/tarjetas" className={({ isActive }) => 'shell-nav-link' + (isActive ? ' shell-nav-link--active' : '')}>
+                Tarjetas
+              </NavLink>
+            )}
           </nav>
           <span className="shell-header-user">{miembro!.nombre}</span>
           <button className="btn-secondary" onClick={() => signOutUsuario()}>Salir</button>
@@ -77,6 +83,7 @@ export default function AppShell() {
             <Route path="/resumen" element={<Resumen />} />
             <Route path="/config-esperados" element={<ConfigEsperados />} />
             <Route path="/comprobantes" element={<Comprobantes />} />
+            <Route path="/tarjetas" element={<ResumenesTarjeta />} />
           </Routes>
         </main>
       </div>
