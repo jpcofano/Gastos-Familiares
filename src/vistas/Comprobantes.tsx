@@ -8,6 +8,7 @@ import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import AltaMovimiento from './AltaMovimiento';
+import { SeccionTarjetas } from './ResumenesTarjeta';
 import type { Comprobante, Entrante, ExpectedItem, DatosExtraidos } from '../types';
 import './Comprobantes.css';
 
@@ -385,7 +386,7 @@ export default function Comprobantes() {
 
   return (
     <div className="cmp">
-      <h1 className="cmp-titulo">Comprobantes</h1>
+      <h1 className="cmp-titulo">Carga</h1>
 
       {/* ── Upload ─────────────────────────────────────────────────────── */}
       <div className="cmp-subida">
@@ -462,7 +463,7 @@ export default function Comprobantes() {
 
       {/* ── Lista ──────────────────────────────────────────────────────── */}
       <section className="cmp-lista">
-        <h2 className="cmp-lista-titulo">Historial</h2>
+        <h2 className="cmp-lista-titulo">Historial — Comprobantes y facturas</h2>
         {cargandoLista && <p className="cmp-nota">Cargando…</p>}
         {errorLista    && <p className="cmp-error-detalle">Error: {errorLista}</p>}
         {!cargandoLista && comprobantes.length === 0 && (
@@ -478,6 +479,9 @@ export default function Comprobantes() {
           />
         ))}
       </section>
+
+      {/* ── Resúmenes de tarjeta (solo admin) ──────────────────────────── */}
+      {esAdmin && <SeccionTarjetas />}
     </div>
   );
 }

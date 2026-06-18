@@ -9,7 +9,6 @@ import {
   calcularCuadre,
   type CuadreResult,
 } from '../datos/resumenesTarjeta';
-import { subirEntrante } from '../datos/entrantes';
 import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig, resolverNombreMiembro } from '../familia';
 import type { CardStatement, MovimientoParseado, FamiliaConfig } from '../types';
@@ -372,22 +371,16 @@ function ResumenCard({
   );
 }
 
-// ── Vista principal ───────────────────────────────────────────────────────────
+// ── Sección de tarjetas (embebible en la vista única de carga) ────────────────
 
-export default function ResumenesTarjeta() {
-  const { memberId, miembro } = useMiembroCtx();
-  const esAdmin = miembro.rol === 'admin';
+export function SeccionTarjetas() {
+  const { memberId } = useMiembroCtx();
 
   const [config,   setConfig]   = useState<FamiliaConfig | null>(null);
   const [subcats,  setSubcats]  = useState<SubcategoriaItem[]>([]);
   const [cargando, setCargando] = useState(true);
-
   const [resumenes, setResumenes] = useState<CardStatement[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
-
-  const [archivo,    setArchivo]    = useState<File | null>(null);
-  const [subiendo,   setSubiendo]   = useState(false);
-  const [resSubida,  setResSubida]  = useState<{ tipo: 'ok' | 'dup' | 'err'; msg: string } | null>(null);
 
   useEffect(() => {
     Promise.all([cargarFamiliaConfig(), cargarSubcategorias()])
@@ -401,22 +394,7 @@ export default function ResumenesTarjeta() {
 
   useEffect(() => suscribirResumenesTarjeta(setResumenes), []);
 
-  async function handleSubir() {
-    if (!archivo) return;
-    setSubiendo(true);
-    setResSubida(null);
-    const res = await subirEntrante(archivo, memberId, 'app');
-    setSubiendo(false);
-    if (!res.ok) { setResSubida({ tipo: 'err', msg: res.error.message }); return; }
-    if (res.duplicado) {
-      setResSubida({ tipo: 'dup', msg: 'Ya existe — aparecerá en el historial cuando sea ruteado' });
-      return;
-    }
-    setResSubida({ tipo: 'ok', msg: 'Subido a bandeja — en breve aparecerá en el historial' });
-    setArchivo(null);
-  }
-
-  if (cargando) return <div className="rt"><p className="rt-cargando">Cargando…</p></div>;
+  if (cargando) return <p className="rt-cargando">Cargando…</p>;
 
   const previewResumen = previewId ? resumenes.find(r => r.id === previewId) : null;
 
@@ -436,48 +414,28 @@ export default function ResumenesTarjeta() {
   }
 
   return (
+    <section className="rt-seccion">
+      <h2 className="rt-subtitulo">Historial — Resúmenes de tarjeta</h2>
+      {resumenes.length === 0 ? (
+        <p className="rt-vacio">No hay resúmenes cargados.</p>
+      ) : (
+        <div className="rt-lista">
+          {resumenes.map(r => (
+            <ResumenCard key={r.id} resumen={r} config={config} onVerPreview={() => setPreviewId(r.id)} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Vista standalone (no se usa en routing normal — /tarjetas redirige a /comprobantes) ──
+
+export default function ResumenesTarjeta() {
+  return (
     <div className="rt">
       <h1 className="rt-titulo">Resúmenes de tarjeta</h1>
-
-      {esAdmin && (
-        <section className="rt-seccion">
-          <h2 className="rt-subtitulo">Subir nuevo resumen</h2>
-          <div className="rt-subida-form">
-            <label className="rt-file-label">
-              <input
-                type="file"
-                accept="application/pdf"
-                style={{ display: 'none' }}
-                onChange={e => { setArchivo(e.target.files?.[0] ?? null); setResSubida(null); }}
-              />
-              {archivo ? archivo.name : 'Elegir PDF…'}
-            </label>
-            <button
-              className="rt-btn rt-btn--primary"
-              onClick={handleSubir}
-              disabled={!archivo || subiendo}
-            >
-              {subiendo ? 'Subiendo…' : 'Subir'}
-            </button>
-          </div>
-          {resSubida && (
-            <p className={`rt-resultado rt-resultado--${resSubida.tipo}`}>{resSubida.msg}</p>
-          )}
-        </section>
-      )}
-
-      <section className="rt-seccion">
-        <h2 className="rt-subtitulo">Historial</h2>
-        {resumenes.length === 0 ? (
-          <p className="rt-vacio">No hay resúmenes cargados.</p>
-        ) : (
-          <div className="rt-lista">
-            {resumenes.map(r => (
-              <ResumenCard key={r.id} resumen={r} config={config} onVerPreview={() => setPreviewId(r.id)} />
-            ))}
-          </div>
-        )}
-      </section>
+      <SeccionTarjetas />
     </div>
   );
 }
