@@ -158,7 +158,15 @@ export interface PropuestaMatch {
   rama: 0 | 1 | 2 | 3;
   movimientoId?: string;
   itemEsperadoId?: string;
-  candidatos?: Array<{ tipo: 'movimiento' | 'esperado'; id: string; score?: number }>;
+  candidatos?: Array<{
+    tipo: 'movimiento' | 'esperado';
+    id: string;
+    score?: number;
+    descripcion?: string;
+    monto?: number;
+    moneda?: 'ARS' | 'USD';
+    fecha?: string;            // ISO YYYY-MM-DD, para mostrar al usuario
+  }>;
   calculadoEn: Date;
   // F6.8
   origenDestino?: boolean;

@@ -108,7 +108,11 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
                   checked={candidatoSel === c.id}
                   onChange={() => setCandidatoSel(c.id)}
                 />
-                <code>{c.id.slice(0, 16)}…</code>
+                <span className="cmp-candidato-info">
+                  {c.descripcion ?? `${c.id.slice(0, 16)}…`}
+                  {c.monto != null && ` · ${fmtMonto(c.monto, c.moneda ?? 'ARS')}`}
+                  {c.fecha && ` · ${c.fecha}`}
+                </span>
                 {c.score != null && <span className="cmp-score">score {c.score}</span>}
               </label>
             ))}

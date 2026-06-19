@@ -43,7 +43,15 @@ export interface PropuestaMatch {
   rama: 0 | 1 | 2 | 3;
   movimientoId?: string;
   itemEsperadoId?: string;
-  candidatos?: Array<{ tipo: 'movimiento' | 'esperado'; id: string; score?: number }>;
+  candidatos?: Array<{
+    tipo: 'movimiento' | 'esperado';
+    id: string;
+    score?: number;
+    descripcion?: string;
+    monto?: number;
+    moneda?: 'ARS' | 'USD';
+    fecha?: string;            // ISO YYYY-MM-DD, para mostrar al usuario
+  }>;
   calculadoEn: Date;
   // F6.8
   origenDestino?: boolean;
@@ -192,7 +200,15 @@ export function calcularPropuesta(
   if (movCands.length > 1) {
     return {
       rama: 1,
-      candidatos: movCands.map(c => ({ tipo: 'movimiento' as const, id: c.mov.id, score: c.score })),
+      candidatos: movCands.map(c => ({
+        tipo:        'movimiento' as const,
+        id:          c.mov.id,
+        score:       c.score,
+        descripcion: c.mov.descripcion,
+        monto:       c.mov.monto,
+        moneda:      c.mov.moneda,
+        fecha:       c.mov.fecha.toISOString().slice(0, 10),
+      })),
       calculadoEn: ahora,
     };
   }
