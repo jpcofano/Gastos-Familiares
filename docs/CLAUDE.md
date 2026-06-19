@@ -39,6 +39,20 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Resumenes se pagan al vencimiento. No hay flujo de revision por estados;
   pendiente_revision del legacy es vestigial y no se porta.
 - ResumenMes es vista calculada en vivo, no se materializa.
+- Las pantallas de configuración viven bajo "Tu Perfil" (avatar del header → /perfil),
+  no en el nav superior. El nav pierde "Esperados". Espejo del patrón de Comidas-Familiares
+  (Header.tsx → /perfil, pila de cards, gate canEdit = esAdmin || esUnoMismo).
+- "Tu Perfil" tiene dos niveles: Personal (todos, scope self) y Configuración Familiar
+  (solo admin, scope familia).
+- El tier Configuración Familiar escribe config bloqueada en Rules (config/familia,
+  /autorizados, /subcategorias, /etiquetas, /reglasNormalizacion, /tcDiario, /destinos —
+  todas write:false o sin regla de cliente) vía callables admin-only con Admin SDK.
+  NUNCA por write directo del cliente. Excepciones que el admin ya escribe desde el cliente:
+  itemsEsperados y diccionario.
+- Agregar miembro o mail escribe miembros[].emails Y /autorizados/{email} en la MISMA
+  callable (transacción server-side). Desincronizarlos rompe el login (la whitelist lee de
+  ambos) y reabre el P0 de escalada de privilegios. Por eso /autorizados nunca es escribible
+  desde el cliente.
 
 ## Reglas operativas
 
@@ -242,6 +256,46 @@ vinculado a un esperado puntual; ese movimiento entra por Rama 0 y se puede conf
 
 Pendiente: periodicidades no-mensuales necesitan mes-ancla cuando se activen. Hoy `aplicaEnMes`
 devuelve `true` para todas como placeholder.
+
+## Tu Perfil / Configuración Familiar
+
+Entry point: avatar+nombre clickeable en el header → /perfil (reemplaza el texto plano
+actual). El dependiente solo ve su perfil Personal; el admin ve Personal + Configuración
+Familiar. ConfigEsperados se re-monta adentro; /config-esperados queda como redirect
+(igual que /tarjetas → /comprobantes). El nav superior queda: Dashboard · Resumen (admin) · Carga.
+
+### Nivel Personal (todos, self)
+- Tu cuenta: nombre, emails, rol (read-only)        → config/familia.miembros[self] (vía callable)
+- Instalar app (PWA)                                → local
+- Tema claro/oscuro (de Comidas, opcional)          → local
+- Notificaciones (placeholder)                      → —
+
+### Nivel Configuración Familiar (solo admin) — primer corte
+Toda escritura vía callable admin-only (Admin SDK), salvo donde se indique cliente:
+- Gastos/Ingresos esperados → itemsEsperados        → cliente admin (ya existe ConfigEsperados)
+- Miembros (nombre, emails, rol, activo, alias)     → config/familia.miembros + /autorizados (callable)
+- Tarjetas (codigo, banco, tipo, titular,
+  cuentaDebito, numeroCuenta, ultimos4[])           → config/familia.tarjetas (callable)
+  ultimos4 es el ancla confiable de resolución de resúmenes
+  (numeroCuenta → ultimos4 → banco+tipo → titular).
+- Categorías + Bancos                               → config/familia.{categorias,bancos} (callable)
+- Subcategorías + Etiquetas                         → /subcategorias, /etiquetas (callable)
+- Unidades funcionales (uf, alias, etiqueta)        → config/familia.unidades (callable)
+- Destinos aprendidos (ver/corregir/borrar)         → /destinos (callable; sin regla de cliente)
+
+### Futuro (no en el primer corte)
+- Diccionario (ver/corregir/borrar lo aprendido)    → /diccionario (cliente admin, bajo costo)
+- Reglas de normalización                           → /reglasNormalizacion — TRAMPA: viven en
+  tres copias sincronizadas a mano (seed, cliente, functions). Una UI tocaría solo Firestore
+  y rompería la sincronía. No hacer hasta cambiar ese modelo.
+- Tipo de cambio (override manual puntual)          → /tcDiario (lo escribe la Function)
+- Inflación / presupuesto                           → engancha con el backlog de inflación
+
+### Vínculo con el cutover a producción
+Las pantallas familiares (miembros, tarjetas+ultimos4, categorías, bancos, unidades,
+subcategorías, etiquetas) son la superficie que, en la migración a producción, reemplaza
+al Excel como fuente de verdad. Hoy esos datos viven solo en el seed/transformers; cuando
+estas pantallas existan y estén pobladas, el cutover puede dejar de re-seedear desde Excel.
 
 ## Estructura del repo
 
