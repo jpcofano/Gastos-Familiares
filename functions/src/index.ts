@@ -147,14 +147,17 @@ export const extraerComprobante = onDocumentCreated(
         .join('')
         .trim();
 
-      const cleaned = raw
-        .replace(/^```json\s*/i, '')
-        .replace(/\s*```$/, '')
-        .trim();
+      // Extracción robusta: el modelo puede narrar prosa antes del JSON
+      // (típico en docs complejos como liquidaciones de expensas). Mismo patrón
+      // que extraerResumenTarjeta: bloque ```json``` o primer {…último }.
+      const mdMatch  = raw.match(/```json\s*([\s\S]*?)\s*```/);
+      const rawMatch = raw.match(/(\{[\s\S]*\})/);
+      const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
+      if (!jsonStr) throw new Error(`Sin JSON en la respuesta (500c): ${raw.slice(0, 500)}`);
 
       let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(cleaned) as Record<string, unknown>;
+        parsed = JSON.parse(sanitizarJson(jsonStr)) as Record<string, unknown>;
       } catch {
         throw new Error(`JSON inválido — raw (500c): ${raw.slice(0, 500)}`);
       }

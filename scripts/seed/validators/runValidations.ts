@@ -5,7 +5,7 @@ import { runChecks } from './checks';
 
 async function main() {
   const target = process.argv.includes('--target=production') ? 'production' : 'emulator';
-  const excelPath = './data/2026-06-12_sheet_snapshot.xlsx';
+  const excelPath = './data/2026-06-19_sheet_snapshot.xlsx';
 
   const data = readExcel(excelPath);
   inyectarEmailsDependientes(data);
