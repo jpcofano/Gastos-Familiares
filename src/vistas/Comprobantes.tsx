@@ -164,6 +164,10 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     etiqueta:            sugerenciaValida?.etiqueta     ?? undefined,
     banco:               'Efectivo' as const,
     confirmadoPago:      confirmadoPagoPorFecha(d.fecha),
+    // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
+    destinoCbu:    d.destinoCbu    ?? null,
+    destinoAlias:  d.destinoAlias  ?? null,
+    destinoNombre: d.destinoNombre ?? null,
   };
 
   const esperado = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;

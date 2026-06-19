@@ -11,6 +11,7 @@ type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
 
 export function docAComprobante(id: string, data: DocumentData): Comprobante {
   const pm = data.propuestaMatch as Record<string, unknown> | null | undefined;
+  const dd = pm?.dedupInfo as Record<string, unknown> | null | undefined;
   return {
     id,
     hashPdf:          data.hashPdf,
@@ -24,11 +25,22 @@ export function docAComprobante(id: string, data: DocumentData): Comprobante {
     errorExtraccion:  data.errorExtraccion  ?? undefined,
     datosExtraidos:   data.datosExtraidos   ?? undefined,
     propuestaMatch:   pm ? {
-      rama:           pm.rama           as PropuestaMatch['rama'],
-      movimientoId:   pm.movimientoId   as string | undefined,
-      itemEsperadoId: pm.itemEsperadoId as string | undefined,
-      candidatos:     pm.candidatos     as PropuestaMatch['candidatos'],
-      calculadoEn:    (pm.calculadoEn as { toDate?: () => Date } | null)?.toDate?.() ?? new Date(),
+      rama:                pm.rama                as PropuestaMatch['rama'],
+      movimientoId:        pm.movimientoId        as string | undefined,
+      itemEsperadoId:      pm.itemEsperadoId      as string | undefined,
+      candidatos:          pm.candidatos          as PropuestaMatch['candidatos'],
+      calculadoEn:         (pm.calculadoEn as { toDate?: () => Date } | null)?.toDate?.() ?? new Date(),
+      origenDestino:       (pm.origenDestino      as boolean | undefined),
+      esAdicional:         (pm.esAdicional        as boolean | undefined),
+      categoriaPrellena:   (pm.categoriaPrellena  as string | null | undefined),
+      subcategoriaPrellena:(pm.subcategoriaPrellena as string | null | undefined),
+      etiquetaPrellena:    (pm.etiquetaPrellena   as string | null | undefined),
+      dedupInfo: dd ? {
+        movId: dd.movId as string,
+        mes:   (dd.mes   as string | null) ?? null,
+        monto: (dd.monto as number | null) ?? null,
+        item:  (dd.item  as string | null | undefined),
+      } : undefined,
     } : undefined,
   };
 }
@@ -119,6 +131,10 @@ export async function confirmarRama1(
       refStoragePdf:  comp.refStoragePdf,
       confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.fecha),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
+      // F6.8 — propagar destino para que aprenderDestino() aprenda
+      destinoCbu:    comp.datosExtraidos?.destinoCbu    ?? null,
+      destinoAlias:  comp.datosExtraidos?.destinoAlias  ?? null,
+      destinoNombre: comp.datosExtraidos?.destinoNombre ?? null,
       actualizadoEn:  serverTimestamp(),
     });
     batch.update(doc(db, 'comprobantes', comp.id), {

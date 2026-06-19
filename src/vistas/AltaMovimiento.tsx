@@ -27,6 +27,10 @@ interface Preload {
   confirmadoPago?: boolean;
   // F6.4 — alta manual sin comprobante
   esManual?: boolean;
+  // F6.8 — destino del pago (propagado desde datosExtraidos)
+  destinoCbu?: string | null;
+  destinoAlias?: string | null;
+  destinoNombre?: string | null;
 }
 
 function generarNumeroManual(fecha: string, texto: string): string {
@@ -191,6 +195,9 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       hashPdf:           preload?.hashPdf,
       refStoragePdf:     preload?.refStoragePdf,
       confirmadoPago:    preload?.confirmadoPago,
+      destinoCbu:        preload?.destinoCbu   ?? null,
+      destinoAlias:      preload?.destinoAlias ?? null,
+      destinoNombre:     preload?.destinoNombre ?? null,
     };
 
     if (preload?.esManual) {

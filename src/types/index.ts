@@ -37,6 +37,10 @@ export interface Movement {
   notas: string | null;
   creadoEn: Date;
   actualizadoEn: Date;
+  // F6.8 — propagado desde datosExtraidos del comprobante al confirmar
+  destinoCbu?: string | null;
+  destinoAlias?: string | null;
+  destinoNombre?: string | null;
 }
 
 export interface AjusteConsolidado {
