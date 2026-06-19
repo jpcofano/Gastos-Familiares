@@ -13,6 +13,10 @@ export interface DatosExtractosMin {
   fecha: string | null;           // ISO YYYY-MM-DD
   comercioRazonSocial: string | null;
   vencimientos?: Array<{ fecha: string | null; monto: number | null }>;
+  // F6.8
+  destinoCbu?: string | null;
+  destinoAlias?: string | null;
+  destinoNombre?: string | null;
 }
 
 export interface MovimientoMin {
@@ -40,6 +44,35 @@ export interface PropuestaMatch {
   itemEsperadoId?: string;
   candidatos?: Array<{ tipo: 'movimiento' | 'esperado'; id: string; score?: number }>;
   calculadoEn: Date;
+  // F6.8
+  origenDestino?: boolean;
+  esAdicional?: boolean;
+  categoriaPrellena?: string | null;
+  subcategoriaPrellena?: string | null;
+  etiquetaPrellena?: string | null;
+  dedupInfo?: { movId: string; mes: string | null; monto: number | null; item?: string | null };
+}
+
+// CBU/CVU argentino = 22 dígitos exactos
+const RE_CBU   = /^\d{22}$/;
+// Alias Banco Central: 6-20 chars alfanuméricos + puntos/guiones/underscores
+const RE_ALIAS = /^[a-z0-9._-]{6,20}$/;
+
+export function normalizarDestino(raw: string): { tipo: 'cbu' | 'alias' | 'nombre'; norm: string } | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const soloDigitos = s.replace(/\D/g, '');
+  if (RE_CBU.test(soloDigitos)) return { tipo: 'cbu', norm: soloDigitos };
+  const aliasNorm = s.toLowerCase().trim();
+  if (RE_ALIAS.test(aliasNorm)) return { tipo: 'alias', norm: aliasNorm };
+  const nombre = s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (nombre.length >= 3) return { tipo: 'nombre', norm: nombre };
+  return null;
 }
 
 const TOLERANCIA_MONTO = 0.05;

@@ -129,6 +129,22 @@ export interface DatosExtraidos {
   periodoFacturado?: string | null;  // "YYYY-MM" o texto crudo
   numeroCliente?: string | null;     // nro cliente/cuenta/suministro
   vencimientos?: Array<{ fecha: string | null; monto: number | null }>;  // [] si no aplica
+  // F6.8 — destino del pago/transferencia
+  destinoCbu?: string | null;        // CBU/CVU del destinatario (22 dígitos)
+  destinoAlias?: string | null;      // alias CVU/CBU del destinatario
+  destinoNombre?: string | null;     // nombre/razón social del destinatario
+}
+
+export interface Destino {
+  destinoNorm: string;
+  tipo: 'cbu' | 'alias' | 'nombre';
+  itemEsperadoId?: string;
+  categoria?: string;
+  subcategoria?: string;
+  etiqueta?: string;
+  confianza: number;
+  creadoPor: string;
+  actualizadoEn: Date;
 }
 
 export interface PropuestaMatch {
@@ -137,6 +153,13 @@ export interface PropuestaMatch {
   itemEsperadoId?: string;
   candidatos?: Array<{ tipo: 'movimiento' | 'esperado'; id: string; score?: number }>;
   calculadoEn: Date;
+  // F6.8
+  origenDestino?: boolean;
+  esAdicional?: boolean;
+  categoriaPrellena?: string | null;
+  subcategoriaPrellena?: string | null;
+  etiquetaPrellena?: string | null;
+  dedupInfo?: { movId: string; mes: string | null; monto: number | null; item?: string | null };
 }
 
 export interface Comprobante {
@@ -189,7 +212,7 @@ export interface FamiliaConfig {
     titular: string;
     cuentaDebito: string;
     numeroCuenta?: string;
-    ultimos4?: string;
+    ultimos4?: string[];   // últimos 4 dígitos de cada tarjeta física del cuente (titular + adicionales)
   }>;
   actualizadoEn: Date;
 }

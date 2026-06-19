@@ -9,15 +9,21 @@ const CATEGORIAS = [
 
 const BANCOS = ['BBVA','Galicia','Personal Pay','Efectivo'];
 
+// ultimos4: últimos 4 dígitos de cada tarjeta física del cuente (María primero, luego adicionales)
+// BBVA: no aparecen PANs enmascarados en el encabezado del PDF → capa 1 (numeroCuenta) resuelve
+// Galicia: "TARJETA XXXX" aparece en el cuerpo del PDF, no en el encabezado → capa 1 resuelve;
+//           ultimos4 queda como fallback si el extractor falla en numeroCuenta
+// Galicia Master: usa "N° de Socio" en el PDF (no "N° de Cuenta") → extracción de numeroCuenta frágil;
+//                 actualizar el prompt si la capa 1 falla en producción
 const TARJETAS = [
   { codigo: 'BBVA-VISA-SIG',   banco: 'BBVA',    tipo: 'Visa Signature',
-    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134', numeroCuenta: '0916360348',  ultimos4: undefined },
+    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134', numeroCuenta: '0916360348',  ultimos4: ['2308', '2316'] },
   { codigo: 'BBVA-MASTER-BLK', banco: 'BBVA',    tipo: 'Mastercard Black',
-    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134', numeroCuenta: '1262521647',  ultimos4: undefined },
+    titular: 'Juan',  cuentaDebito: 'C.A. 0203124134', numeroCuenta: '1262521647',  ultimos4: ['0082', '0108'] },
   { codigo: 'GAL-VISA',        banco: 'Galicia', tipo: 'Visa',
-    titular: 'Juan',  cuentaDebito: 'C.A. 0406142030', numeroCuenta: '1235391051',  ultimos4: undefined },
+    titular: 'Juan',  cuentaDebito: 'C.A. 0406142030', numeroCuenta: '1235391051',  ultimos4: ['9318', '9326'] },
   { codigo: 'GAL-MASTER-BLK',  banco: 'Galicia', tipo: 'Mastercard Black',
-    titular: 'María', cuentaDebito: 'C.A. 0406142034', numeroCuenta: '2380140-0-6', ultimos4: undefined },
+    titular: 'María', cuentaDebito: 'C.A. 0406142034', numeroCuenta: '2380140-0-6', ultimos4: ['3178', '2005'] },
 ];
 
 const normNombreSeed = (s: string) =>
@@ -48,7 +54,7 @@ export async function seedConfig(db: Firestore, data: SheetData, dryRun: boolean
   for (const u of data.usuarios) {
     const persona = u.Persona;
     if (!persona) continue;
-    const existing = porPersona.get(persona) ?? { emails: [], rol: u.Rol, activo: !!u.Activo };
+    const existing = porPersona.get(persona) ?? { emails: [] as string[], rol: u.Rol as string, activo: !!u.Activo };
     if (u.Email && typeof u.Email === 'string') existing.emails.push(u.Email.toLowerCase());
     porPersona.set(persona, existing);
   }

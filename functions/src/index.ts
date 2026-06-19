@@ -8,9 +8,11 @@ import { getStorage } from 'firebase-admin/storage';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   calcularPropuesta,
+  normalizarDestino,
   type DatosExtractosMin,
   type MovimientoMin,
   type ItemEsperadoMin,
+  type PropuestaMatch,
 } from './matchLogica';
 import { normalizar, type NormRule } from './normalizador';
 
@@ -56,6 +58,9 @@ REGLAS DURAS:
 - periodoFacturado: el período que cubre la factura/servicio. Si es claro, normalizá a "YYYY-MM" (ej: "junio 2026" → "2026-06"). Si no es normalizable, ponelo tal cual. null si no hay período.
 - numeroCliente: número de cliente / cuenta / suministro / NIS del emisor. NO es el CUIT. NO es el número de operación. null si no aplica.
 - vencimientos: si el comprobante tiene fechas/montos de vencimiento (1er venc, 2do venc con recargo, etc.), listalos en orden como array de {fecha, monto}. fecha en ISO YYYY-MM-DD o null. monto como número o null. vencimientos[0].monto SIEMPRE debe coincidir con montoTotal. Si no hay vencimientos explícitos, vencimientos: [].
+- destinoCbu: CBU/CVU del destinatario (22 dígitos sin espacios). Para transferencia = cuenta receptora. Para factura/servicio = CBU de cobro si figura en el documento. null si no aplica.
+- destinoAlias: alias CVU/CBU del destinatario exactamente como aparece en el documento pero en minúsculas (ej: "micooperativa.mp"). null si no aplica.
+- destinoNombre: nombre o razón social del destinatario/beneficiario. null si no aplica.
 
 Si un campo no se puede determinar con confianza, usá null (excepto numeroOperacion, que siempre lleva número real o pseudo-número).
 
@@ -70,7 +75,10 @@ Esquema de salida EXACTO:
   "numeroOperacion": "...",
   "periodoFacturado": "YYYY-MM" | "<texto crudo>" | null,
   "numeroCliente": "..." | null,
-  "vencimientos": [{ "fecha": "YYYY-MM-DD" | null, "monto": number | null }]
+  "vencimientos": [{ "fecha": "YYYY-MM-DD" | null, "monto": number | null }],
+  "destinoCbu": "..." | null,
+  "destinoAlias": "..." | null,
+  "destinoNombre": "..." | null
 }`;
 }
 
@@ -223,12 +231,20 @@ export const matchComprobante = onDocumentUpdated(
       .get();
 
     if (!dedupSnap.empty) {
-      const movId = dedupSnap.docs[0].id;
+      const movDoc  = dedupSnap.docs[0];
+      const movId   = movDoc.id;
+      const movData = movDoc.data();
       await ref.update({
         estado: 'vinculado',
         propuestaMatch: {
           rama:         0,
           movimientoId: movId,
+          dedupInfo: {
+            movId,
+            mes:   (movData.mes   as string  | null) ?? null,
+            monto: (movData.monto as number  | null) ?? null,
+            item:  (movData.descripcion as string | null) ?? null,
+          },
           calculadoEn:  FieldValue.serverTimestamp(),
         },
         actualizadoEn: FieldValue.serverTimestamp(),
@@ -284,6 +300,17 @@ export const matchComprobante = onDocumentUpdated(
       };
     });
 
+    // Rama destino: match por CBU/alias/nombre aprendido (prioridad sobre texto)
+    const propuestaDestino = await matchPorDestino(datos, movs, mesComp);
+    if (propuestaDestino) {
+      await ref.update({
+        propuestaMatch: { ...propuestaDestino, calculadoEn: FieldValue.serverTimestamp() },
+        actualizadoEn:  FieldValue.serverTimestamp(),
+      });
+      console.log(`[matchComprobante] ${hashActual} → rama destino (item=${propuestaDestino.itemEsperadoId ?? 'sin item'}, adicional=${propuestaDestino.esAdicional ?? false})`);
+      return;
+    }
+
     const propuesta = calcularPropuesta(datos, movs, items, mesComp);
 
     await ref.update({
@@ -310,6 +337,59 @@ function idAprendido(patronNormalizado: string, bancoFiltro: string, tarjetaFilt
     .update(`${patronNormalizado}\x00${bancoFiltro}\x00${tarjetaFiltro}`)
     .digest('hex')
     .slice(0, 24);
+}
+
+function idDestinoNorm(norm: string): string {
+  return createHash('sha256').update(norm).digest('hex').slice(0, 24);
+}
+
+async function matchPorDestino(
+  datos: DatosExtractosMin,
+  movs: MovimientoMin[],
+  mesComp: string,
+): Promise<Omit<PropuestaMatch, 'calculadoEn'> | null> {
+  const raws = [datos.destinoCbu, datos.destinoAlias, datos.destinoNombre]
+    .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
+
+  for (const raw of raws) {
+    const parsed = normalizarDestino(raw);
+    if (!parsed) continue;
+
+    const snap = await db.collection('destinos').doc(idDestinoNorm(parsed.norm)).get();
+    if (!snap.exists) continue;
+
+    const d = snap.data()!;
+    if (((d.confianza as number) ?? 0) < 0.7) continue;
+
+    const itemId = (d.itemEsperadoId as string | undefined);
+    if (itemId) {
+      const yaEnMes = movs.some(m => m.itemEsperadoId === itemId && m.mes === mesComp);
+      if (!yaEnMes) {
+        return { rama: 2, itemEsperadoId: itemId, origenDestino: true };
+      } else {
+        // Esperado ya pagado ese período → movimiento adicional
+        return {
+          rama: 2,
+          itemEsperadoId: itemId,
+          esAdicional:         true,
+          origenDestino:       true,
+          categoriaPrellena:    (d.categoria    as string | null) ?? null,
+          subcategoriaPrellena: (d.subcategoria as string | null) ?? null,
+          etiquetaPrellena:     (d.etiqueta     as string | null) ?? null,
+        };
+      }
+    } else if (d.categoria) {
+      // Solo categoría aprendida — prefill sin vínculo a item
+      return {
+        rama: 3,
+        origenDestino:       true,
+        categoriaPrellena:    d.categoria    as string,
+        subcategoriaPrellena: (d.subcategoria as string | null) ?? null,
+        etiquetaPrellena:     (d.etiqueta     as string | null) ?? null,
+      };
+    }
+  }
+  return null;
 }
 
 async function cargarReglasNormalizacion(): Promise<NormRule[]> {
@@ -398,13 +478,69 @@ async function aprender(data: FirebaseFirestore.DocumentData): Promise<void> {
   }
 }
 
+async function aprenderDestino(data: FirebaseFirestore.DocumentData): Promise<void> {
+  const destinoCbu    = (data.destinoCbu    as string | null) ?? null;
+  const destinoAlias  = (data.destinoAlias  as string | null) ?? null;
+  const destinoNombre = (data.destinoNombre as string | null) ?? null;
+  const itemEsperadoId = (data.itemEsperadoId as string | null) ?? null;
+  const categoria     = (data.categoria    as string | null) ?? null;
+  const subcategoria  = (data.subcategoria as string | null) ?? null;
+  const etiqueta      = (data.etiqueta     as string | null) ?? null;
+  const creadoPor     = (data.creadoPor    as string)        ?? 'sistema';
+
+  if (!categoria && !itemEsperadoId) return;
+
+  const destinoRaw = destinoCbu ?? destinoAlias ?? destinoNombre;
+  if (!destinoRaw) return;
+
+  const parsed = normalizarDestino(destinoRaw);
+  if (!parsed) return;
+
+  const id  = idDestinoNorm(parsed.norm);
+  const ref = db.collection('destinos').doc(id);
+  const doc = await ref.get();
+
+  if (doc.exists) {
+    const existing = doc.data()!;
+    const correccion =
+      (itemEsperadoId && existing.itemEsperadoId !== itemEsperadoId) ||
+      existing.categoria !== categoria;
+    const update: Record<string, unknown> = {
+      categoria, subcategoria, etiqueta,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    };
+    if (itemEsperadoId) update.itemEsperadoId = itemEsperadoId;
+    if (correccion) {
+      const prev = typeof existing.confianza === 'number' ? existing.confianza : 0.8;
+      update.confianza = Math.min(1.0, prev + CONFIANZA_INCREMENTO);
+    }
+    await ref.update(update);
+    console.log(`[aprenderDestino] upsert ${id} (${parsed.tipo}) → ${categoria ?? 'sin cat'} / item=${itemEsperadoId ?? '-'}${correccion ? ' (+confianza)' : ''}`);
+  } else {
+    await ref.set({
+      destinoNorm:  parsed.norm,
+      tipo:         parsed.tipo,
+      ...(itemEsperadoId ? { itemEsperadoId } : {}),
+      categoria, subcategoria, etiqueta,
+      confianza:    0.8,
+      creadoPor,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+    console.log(`[aprenderDestino] insert ${id} (${parsed.tipo}) → ${categoria ?? 'sin cat'} / item=${itemEsperadoId ?? '-'}`);
+  }
+}
+
 export const aprenderMovimientoCreado = onDocumentCreated(
   { document: 'movimientos/{id}', memory: '128MiB' },
   async event => {
     const data = event.data?.data();
     if (data?.seedImport) return;
-    if (!data?.categoria || !data?.subcategoria) return;
-    await aprender(data).catch(e => console.error('[aprender] error en create:', e));
+    await Promise.all([
+      data?.categoria && data?.subcategoria
+        ? aprender(data).catch(e => console.error('[aprender] error en create:', e))
+        : Promise.resolve(),
+      aprenderDestino(data ?? {}).catch(e => console.error('[aprenderDestino] error en create:', e)),
+    ]);
   },
 );
 
@@ -414,9 +550,13 @@ export const aprenderMovimientoActualizado = onDocumentUpdated(
     const before = event.data?.before.data();
     const after  = event.data?.after.data();
     if (after?.seedImport) return;
-    if (!after?.categoria || !after?.subcategoria) return;
-    if (before?.categoria === after.categoria && before?.subcategoria === after.subcategoria) return;
-    await aprender(after).catch(e => console.error('[aprender] error en update:', e));
+    await Promise.all([
+      after?.categoria && after?.subcategoria &&
+      (before?.categoria !== after.categoria || before?.subcategoria !== after.subcategoria)
+        ? aprender(after).catch(e => console.error('[aprender] error en update:', e))
+        : Promise.resolve(),
+      aprenderDestino(after ?? {}).catch(e => console.error('[aprenderDestino] error en update:', e)),
+    ]);
   },
 );
 
@@ -789,7 +929,7 @@ export const extraerResumenTarjeta = onDocumentCreated(
       const configSnap   = await db.collection('config').doc('familia').get();
       const tarjetasConf = ((configSnap.data()?.tarjetas ?? []) as Array<{
         codigo: string; banco: string; tipo: string; titular?: string;
-        numeroCuenta?: string; ultimos4?: string;
+        numeroCuenta?: string; ultimos4?: string[];
       }>);
       const numeroCuentaExtraido = (resumen.numeroCuenta as string | null) ?? null;
       const ultimos4Extraido      = (resumen.ultimos4     as string | null) ?? null;
@@ -804,9 +944,9 @@ export const extraerResumenTarjeta = onDocumentCreated(
         const m = tarjetasConf.filter(t => t.numeroCuenta === numeroCuentaExtraido);
         if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
       }
-      // Capa 2: ultimos4 exacto (único match) — ancla principal para tarjetas sin numeroCuenta legible
+      // Capa 2: ultimos4 exacto (único match) — ancla fallback; el array cubre titular + adicionales
       if (!tarjetaCodigoResuelto && ultimos4Extraido) {
-        const m = tarjetasConf.filter(t => t.ultimos4 === ultimos4Extraido);
+        const m = tarjetasConf.filter(t => t.ultimos4?.includes(ultimos4Extraido));
         if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
       }
       // Capa 3: banco + tipo (solo si EXACTAMENTE una tarjeta)
