@@ -221,5 +221,7 @@ export interface FamiliaConfig {
     numeroCuenta?: string;
     ultimos4?: string[];   // últimos 4 dígitos de cada tarjeta física del cuente (titular + adicionales)
   }>;
+  // Unidades funcionales del titular — para extracción correcta en liquidaciones de expensas
+  unidades?: Array<{ uf: string; alias?: string; etiqueta?: string }>;
   actualizadoEn: Date;
 }

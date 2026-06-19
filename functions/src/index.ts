@@ -54,6 +54,7 @@ REGLAS DURAS:
 - Aplicá el mismo criterio de año (ocurrencia más reciente no futura respecto de hoy) a las fechas de
   vencimientos[] y al YYYY-MM del pseudo-número / periodoFacturado cuando el año no esté explícito.
 - montoTotal: el monto del PRIMER vencimiento (pronto pago / monto base). NUNCA el segundo vencimiento (que lleva recargo). Si no hay vencimientos, montoTotal = total del documento.
+- EXPENSAS/CONSORCIO: Si el documento es una liquidación de expensas o consorcio (lista múltiples rubros del edificio: sueldos, cargas sociales, etc.), NO extraigas el total del edificio. Buscá la fila o sección de la unidad funcional UF 043 del titular (COFANO, Del Signo 4042) y extraé el monto a pagar de ESA unidad como montoTotal. Una sola unidad → un solo monto. Ignorá otras UF y los totales del consorcio. Si la UF 043 no figura en el documento, montoTotal = null.
 - comercioRazonSocial: razón social o nombre de fantasía del emisor.
 - periodoFacturado: el período que cubre la factura/servicio. Si es claro, normalizá a "YYYY-MM" (ej: "junio 2026" → "2026-06"). Si no es normalizable, ponelo tal cual. null si no hay período.
 - numeroCliente: número de cliente / cuenta / suministro / NIS del emisor. NO es el CUIT. NO es el número de operación. null si no aplica.

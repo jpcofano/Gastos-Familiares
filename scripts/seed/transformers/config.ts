@@ -9,6 +9,12 @@ const CATEGORIAS = [
 
 const BANCOS = ['BBVA','Galicia','Personal Pay','Efectivo'];
 
+// Unidades funcionales de la familia (inmuebles con expensas de consorcio)
+// UF 043: Depto Del Signo 4042. Cochera (030) no tiene expensa propia en el consorcio.
+const UNIDADES = [
+  { uf: '043', alias: 'Del Signo 4042 043', etiqueta: 'Expensas' },
+];
+
 // ultimos4: últimos 4 dígitos de cada tarjeta física del cuente (María primero, luego adicionales)
 // BBVA: no aparecen PANs enmascarados en el encabezado del PDF → capa 1 (numeroCuenta) resuelve
 // Galicia: "TARJETA XXXX" aparece en el cuerpo del PDF, no en el encabezado → capa 1 resuelve;
@@ -75,6 +81,7 @@ export async function seedConfig(db: Firestore, data: SheetData, dryRun: boolean
     categorias: CATEGORIAS,
     bancos: BANCOS,
     tarjetas: TARJETAS,
+    unidades: UNIDADES,
     actualizadoEn: FieldValue.serverTimestamp(),
   };
 
