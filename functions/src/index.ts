@@ -1038,8 +1038,9 @@ const MARCADORES_GENERICOS = [
   'TOTAL A PAGAR', 'VENCIMIENTO', 'CIERRE', 'SALDO PENDIENTE',
 ];
 // Marcadores decisivos: solo presentes en resúmenes de tarjeta de crédito
+// SALDO ANTERIOR excluido: aparece en facturas de telco/servicios (ej. "Mi Personal internet")
 const MARCADORES_DECISIVOS = [
-  'PAGO MINIMO', 'LIMITE DE COMPRA', 'LIMITE DE CREDITO', 'SALDO ANTERIOR',
+  'PAGO MINIMO', 'LIMITE DE COMPRA', 'LIMITE DE CREDITO',
 ];
 // PAN enmascarado tipo "4509 XX** **** 1234" o "XXXX XXXX XXXX 1234"
 const RE_PAN_ENMASCARADO = /\d{4}[\s*X]{4,10}\d{4}/;
