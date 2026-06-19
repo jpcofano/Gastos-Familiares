@@ -1307,3 +1307,76 @@ export const resolverEntranteAmbiguo = onCall(
     return { ok: true };
   },
 );
+
+export const descartarEntrada = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { tipo, id } = request.data as { tipo?: string; id?: string };
+    if (!id) throw new HttpsError('invalid-argument', 'id requerido');
+    if (tipo !== 'comprobante' && tipo !== 'resumen') {
+      throw new HttpsError('invalid-argument', 'tipo debe ser "comprobante" o "resumen"');
+    }
+
+    const coleccion = tipo === 'comprobante' ? 'comprobantes' : 'resumenesTarjeta';
+    const docRef = db.collection(coleccion).doc(id);
+    const snap   = await docRef.get();
+    if (!snap.exists) throw new HttpsError('not-found', `${tipo} no encontrado`);
+    const data = snap.data()!;
+    const refStorage = data.refStoragePdf as string | undefined;
+
+    let borrados = 0, revertidos = 0;
+    let advertenciaDestino: Record<string, unknown> | null = null;
+
+    if (tipo === 'comprobante') {
+      const movs = await db.collection('movimientos').where('hashPdf', '==', id).get();
+      const batch = db.batch();
+      for (const m of movs.docs) {
+        if (m.data().origenComprobanteId === id) { batch.delete(m.ref); borrados++; }
+        else {
+          batch.update(m.ref, {
+            hashPdf: null, refStoragePdf: null, confirmadoPago: false,
+            itemEsperadoId: FieldValue.delete(),
+            destinoCbu: null, destinoCuit: null, destinoAlias: null, destinoNombre: null,
+            vencimientos: null, actualizadoEn: FieldValue.serverTimestamp(),
+          });
+          revertidos++;
+        }
+      }
+      batch.delete(db.collection('entrantes').doc(id));
+      batch.delete(docRef);
+      await batch.commit();
+
+      const d = data.datosExtraidos ?? {};
+      if (d.destinoCbu || d.destinoCuit || d.destinoAlias) {
+        advertenciaDestino = { destinoCuit: d.destinoCuit ?? null, destinoCbu: d.destinoCbu ?? null, destinoAlias: d.destinoAlias ?? null };
+      }
+    } else {
+      // resumen: borrar todos los movimientos hijos + entrante + doc, en chunks (límite 500/batch)
+      const movs = await db.collection('movimientos').where('resumenTarjetaId', '==', id).get();
+      const refs = movs.docs.map(m => m.ref);
+      refs.push(db.collection('entrantes').doc(id), docRef);
+      for (let i = 0; i < refs.length; i += 400) {
+        const batch = db.batch();
+        for (const r of refs.slice(i, i + 400)) batch.delete(r);
+        await batch.commit();
+      }
+      borrados = movs.size;
+    }
+
+    if (refStorage) {
+      try { await getStorage().bucket().file(refStorage).delete(); }
+      catch (e) { console.warn(`[descartarEntrada] blob no borrado: ${String(e)}`); }
+    }
+
+    console.log(`[descartarEntrada] ${tipo} ${id} — borrados:${borrados} revertidos:${revertidos} (por ${email})`);
+    return { ok: true, tipo, borrados, revertidos, advertenciaDestino };
+  },
+);

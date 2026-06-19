@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { descartarEntrada } from '../datos/entrantes';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import {
@@ -294,9 +295,24 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
 function ResumenCard({
   resumen, config, onVerPreview,
 }: { resumen: CardStatement; config: FamiliaConfig | null; onVerPreview: () => void }) {
-  const [tarjetaSel, setTarjetaSel] = useState(config?.tarjetas[0]?.codigo ?? '');
-  const [asignando,  setAsignando]  = useState(false);
-  const [errorAsg,   setErrorAsg]   = useState<string | null>(null);
+  const [tarjetaSel,  setTarjetaSel]  = useState(config?.tarjetas[0]?.codigo ?? '');
+  const [asignando,   setAsignando]   = useState(false);
+  const [errorAsg,    setErrorAsg]    = useState<string | null>(null);
+  const [descartando, setDescartando] = useState(false);
+  const [errDesc,     setErrDesc]     = useState<string | null>(null);
+
+  async function handleDescartar() {
+    const n = resumen.movimientosParseados.filter(m => m.incluir).length;
+    const msg = resumen.estado === 'confirmado' && n > 0
+      ? `¿Descartar este resumen? Se borran sus ${n} movimientos importados y el archivo.`
+      : '¿Descartar este resumen? Se borra el archivo.';
+    if (!confirm(msg)) return;
+    setDescartando(true);
+    setErrDesc(null);
+    const res = await descartarEntrada('resumen', resumen.id);
+    setDescartando(false);
+    if (!res.ok) setErrDesc(res.error.message);
+  }
 
   async function handleAsignar() {
     if (!config || !tarjetaSel) return;
@@ -315,7 +331,16 @@ function ResumenCard({
           {resumen.banco && resumen.tarjeta ? ` — ${resumen.banco}` : ''}
         </span>
         <BadgeEstado estado={resumen.estado} />
+        <button
+          className="cmp-btn-descartar"
+          onClick={handleDescartar}
+          disabled={descartando}
+          title="Descartar resumen"
+        >
+          {descartando ? '…' : '✕'}
+        </button>
       </div>
+      {errDesc && <p className="cmp-error-detalle">{errDesc}</p>}
       <div className="rt-card-body">
         <span className="rt-card-periodo">{resumen.periodo || '—'}</span>
         {resumen.totalARS > 0 && (

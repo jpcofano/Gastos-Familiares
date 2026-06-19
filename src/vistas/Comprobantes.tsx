@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { confirmarRama1, marcarVinculado, confirmadoPagoPorFecha } from '../datos/comprobantes';
-import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo } from '../datos/entrantes';
+import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
@@ -169,11 +169,13 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     banco:               'Efectivo' as const,
     confirmadoPago:      confirmadoPagoPorFecha(d.fecha),
     // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
-    destinoCbu:    d.destinoCbu    ?? null,
-    destinoCuit:   d.destinoCuit   ?? null,
-    destinoAlias:  d.destinoAlias  ?? null,
-    destinoNombre: d.destinoNombre ?? null,
-    vencimientos:  d.vencimientos  ?? null,
+    destinoCbu:          d.destinoCbu    ?? null,
+    destinoCuit:         d.destinoCuit   ?? null,
+    destinoAlias:        d.destinoAlias  ?? null,
+    destinoNombre:       d.destinoNombre ?? null,
+    vencimientos:        d.vencimientos  ?? null,
+    // F6.x descartar — stamp de procedencia para distinguir de rama 1
+    origenComprobanteId: comp.id,
   };
 
   const esperado = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
@@ -220,20 +222,49 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
 // ── Tarjeta de comprobante ────────────────────────────────────────────────────
 
 function ComprobanteCard({
-  comp, items, memberId, miembro,
+  comp, items, memberId, miembro, esAdmin,
 }: {
   comp:     Comprobante;
   items:    ExpectedItem[];
   memberId: string;
   miembro:  import('../types').FamiliaMiembro;
+  esAdmin:  boolean;
 }) {
+  const [descartando,   setDescartando]   = useState(false);
+  const [errDescartar,  setErrDescartar]  = useState<string | null>(null);
+  const [advertencia,   setAdvertencia]   = useState<string | null>(null);
+
+  async function handleDescartar() {
+    if (!confirm('¿Descartar este comprobante? Se borra el archivo y su movimiento si fue creado desde este comprobante.')) return;
+    setDescartando(true);
+    setErrDescartar(null);
+    const res = await descartarEntrada('comprobante', comp.id);
+    setDescartando(false);
+    if (!res.ok) { setErrDescartar(res.error.message); return; }
+    if (res.data.advertenciaDestino) {
+      setAdvertencia('Destino aprendido — revisá /destinos manualmente si querés limpiarlo.');
+    }
+  }
+
   return (
     <div className={`cmp-card cmp-card--${comp.estado}`}>
       <div className="cmp-card-header">
         <BadgeEstado estado={comp.estado} />
         <span className="cmp-card-nombre">{comp.nombreArchivo}</span>
         <span className="cmp-card-size">{(comp.tamano / 1024).toFixed(0)} KB</span>
+        {esAdmin && (
+          <button
+            className="cmp-btn-descartar"
+            onClick={handleDescartar}
+            disabled={descartando}
+            title="Descartar comprobante"
+          >
+            {descartando ? '…' : '✕'}
+          </button>
+        )}
       </div>
+      {advertencia  && <p className="cmp-advertencia">{advertencia}</p>}
+      {errDescartar && <p className="cmp-error-detalle">{errDescartar}</p>}
       {comp.datosExtraidos && <DatosResumen d={comp.datosExtraidos} />}
       {comp.estado === 'error' && comp.errorExtraccion && (
         <p className="cmp-error-detalle">{comp.errorExtraccion}</p>
@@ -486,6 +517,7 @@ export default function Comprobantes() {
             items={items}
             memberId={memberId}
             miembro={miembro}
+            esAdmin={esAdmin}
           />
         ))}
       </section>

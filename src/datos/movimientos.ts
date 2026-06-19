@@ -81,6 +81,8 @@ export interface NuevoMovimiento {
   destinoAlias?: string | null;
   destinoNombre?: string | null;
   vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
+  // F6.x descartar — marca que este mov fue creado DESDE un comprobante (vs vinculado rama 1)
+  origenComprobanteId?: string;
 }
 
 type ResultadoCreacion =
@@ -115,11 +117,12 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       confirmadoPago:    payload.confirmadoPago     ?? false,
       hashPdf:           payload.hashPdf            ?? null,
       refStoragePdf:     payload.refStoragePdf      ?? null,
-      destinoCbu:        payload.destinoCbu         ?? null,
-      destinoCuit:       payload.destinoCuit        ?? null,
-      destinoAlias:      payload.destinoAlias       ?? null,
-      destinoNombre:     payload.destinoNombre      ?? null,
-      vencimientos:      payload.vencimientos       ?? null,
+      destinoCbu:           payload.destinoCbu            ?? null,
+      destinoCuit:          payload.destinoCuit           ?? null,
+      destinoAlias:         payload.destinoAlias          ?? null,
+      destinoNombre:        payload.destinoNombre         ?? null,
+      vencimientos:         payload.vencimientos          ?? null,
+      origenComprobanteId:  payload.origenComprobanteId   ?? null,
       // idLegacy intencionalmente ausente — los validators lo usan para distinguir docs del seed
       creadoEn:          serverTimestamp(),
       actualizadoEn:     serverTimestamp(),

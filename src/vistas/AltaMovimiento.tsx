@@ -33,6 +33,8 @@ interface Preload {
   destinoAlias?: string | null;
   destinoNombre?: string | null;
   vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
+  // F6.x descartar — stamp de procedencia
+  origenComprobanteId?: string;
 }
 
 function generarNumeroManual(fecha: string, texto: string): string {
@@ -197,11 +199,12 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       hashPdf:           preload?.hashPdf,
       refStoragePdf:     preload?.refStoragePdf,
       confirmadoPago:    preload?.confirmadoPago,
-      destinoCbu:        preload?.destinoCbu    ?? null,
-      destinoCuit:       preload?.destinoCuit   ?? null,
-      destinoAlias:      preload?.destinoAlias  ?? null,
-      destinoNombre:     preload?.destinoNombre ?? null,
-      vencimientos:      preload?.vencimientos  ?? null,
+      destinoCbu:           preload?.destinoCbu            ?? null,
+      destinoCuit:          preload?.destinoCuit           ?? null,
+      destinoAlias:         preload?.destinoAlias          ?? null,
+      destinoNombre:        preload?.destinoNombre         ?? null,
+      vencimientos:         preload?.vencimientos          ?? null,
+      origenComprobanteId:  preload?.origenComprobanteId,
     };
 
     if (preload?.esManual) {

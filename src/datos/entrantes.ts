@@ -106,3 +106,17 @@ export async function resolverEntranteAmbiguo(
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
 }
+
+export async function descartarEntrada(
+  tipo: 'comprobante' | 'resumen',
+  id: string,
+): Promise<Resultado<{ advertenciaDestino: Record<string, unknown> | null }>> {
+  try {
+    const fn  = httpsCallable(functions, 'descartarEntrada');
+    const res = await fn({ tipo, id });
+    const d   = res.data as { advertenciaDestino?: Record<string, unknown> | null };
+    return { ok: true, data: { advertenciaDestino: d.advertenciaDestino ?? null } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
