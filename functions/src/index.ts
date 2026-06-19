@@ -59,6 +59,7 @@ REGLAS DURAS:
 - numeroCliente: número de cliente / cuenta / suministro / NIS del emisor. NO es el CUIT. NO es el número de operación. null si no aplica.
 - vencimientos: si el comprobante tiene fechas/montos de vencimiento (1er venc, 2do venc con recargo, etc.), listalos en orden como array de {fecha, monto}. fecha en ISO YYYY-MM-DD o null. monto como número o null. vencimientos[0].monto SIEMPRE debe coincidir con montoTotal. Si no hay vencimientos explícitos, vencimientos: [].
 - destinoCbu: CBU/CVU del destinatario (22 dígitos sin espacios). Para transferencia = cuenta receptora. Para factura/servicio = CBU de cobro si figura en el documento. null si no aplica.
+- destinoCuit: CUIT/CUIL del destinatario (solo dígitos, 11 dígitos, sin guiones). REGLA CRÍTICA: el destino es la parte "Para"/"Destinatario"/"Beneficiario"; NUNCA la parte "De"/"Origen" (que es el CUIT del titular que paga). Si el comprobante es QR/factura de comercio, el CUIT del receptor es el comercio. null si no hay receptor claro.
 - destinoAlias: alias CVU/CBU del destinatario exactamente como aparece en el documento pero en minúsculas (ej: "micooperativa.mp"). null si no aplica.
 - destinoNombre: nombre o razón social del destinatario/beneficiario. null si no aplica.
 
@@ -77,6 +78,7 @@ Esquema de salida EXACTO:
   "numeroCliente": "..." | null,
   "vencimientos": [{ "fecha": "YYYY-MM-DD" | null, "monto": number | null }],
   "destinoCbu": "..." | null,
+  "destinoCuit": "XXXXXXXXXXX" | null,
   "destinoAlias": "..." | null,
   "destinoNombre": "..." | null
 }`;
@@ -348,7 +350,7 @@ async function matchPorDestino(
   movs: MovimientoMin[],
   mesComp: string,
 ): Promise<Omit<PropuestaMatch, 'calculadoEn'> | null> {
-  const raws = [datos.destinoCbu, datos.destinoAlias, datos.destinoNombre]
+  const raws = [datos.destinoCbu, datos.destinoCuit, datos.destinoAlias, datos.destinoNombre]
     .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
 
   for (const raw of raws) {
@@ -480,6 +482,7 @@ async function aprender(data: FirebaseFirestore.DocumentData): Promise<void> {
 
 async function aprenderDestino(data: FirebaseFirestore.DocumentData): Promise<void> {
   const destinoCbu    = (data.destinoCbu    as string | null) ?? null;
+  const destinoCuit   = (data.destinoCuit   as string | null) ?? null;
   const destinoAlias  = (data.destinoAlias  as string | null) ?? null;
   const destinoNombre = (data.destinoNombre as string | null) ?? null;
   const itemEsperadoId = (data.itemEsperadoId as string | null) ?? null;
@@ -490,7 +493,7 @@ async function aprenderDestino(data: FirebaseFirestore.DocumentData): Promise<vo
 
   if (!categoria && !itemEsperadoId) return;
 
-  const destinoRaw = destinoCbu ?? destinoAlias ?? destinoNombre;
+  const destinoRaw = destinoCbu ?? destinoCuit ?? destinoAlias ?? destinoNombre;
   if (!destinoRaw) return;
 
   const parsed = normalizarDestino(destinoRaw);

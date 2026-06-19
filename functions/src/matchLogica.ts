@@ -15,6 +15,7 @@ export interface DatosExtractosMin {
   vencimientos?: Array<{ fecha: string | null; monto: number | null }>;
   // F6.8
   destinoCbu?: string | null;
+  destinoCuit?: string | null;
   destinoAlias?: string | null;
   destinoNombre?: string | null;
 }
@@ -55,14 +56,17 @@ export interface PropuestaMatch {
 
 // CBU/CVU argentino = 22 dígitos exactos
 const RE_CBU   = /^\d{22}$/;
+// CUIT/CUIL argentino = 11 dígitos exactos (puede venir con guiones: XX-XXXXXXXX-X)
+const RE_CUIT  = /^\d{11}$/;
 // Alias Banco Central: 6-20 chars alfanuméricos + puntos/guiones/underscores
 const RE_ALIAS = /^[a-z0-9._-]{6,20}$/;
 
-export function normalizarDestino(raw: string): { tipo: 'cbu' | 'alias' | 'nombre'; norm: string } | null {
+export function normalizarDestino(raw: string): { tipo: 'cbu' | 'cuit' | 'alias' | 'nombre'; norm: string } | null {
   const s = raw.trim();
   if (!s) return null;
   const soloDigitos = s.replace(/\D/g, '');
-  if (RE_CBU.test(soloDigitos)) return { tipo: 'cbu', norm: soloDigitos };
+  if (RE_CBU.test(soloDigitos))  return { tipo: 'cbu',  norm: soloDigitos };
+  if (RE_CUIT.test(soloDigitos)) return { tipo: 'cuit', norm: soloDigitos };
   const aliasNorm = s.toLowerCase().trim();
   if (RE_ALIAS.test(aliasNorm)) return { tipo: 'alias', norm: aliasNorm };
   const nombre = s

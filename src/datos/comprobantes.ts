@@ -131,10 +131,12 @@ export async function confirmarRama1(
       refStoragePdf:  comp.refStoragePdf,
       confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.fecha),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
-      // F6.8 — propagar destino para que aprenderDestino() aprenda
+      // F6.8 — propagar destino y vencimientos para que aprenderDestino() aprenda
       destinoCbu:    comp.datosExtraidos?.destinoCbu    ?? null,
+      destinoCuit:   comp.datosExtraidos?.destinoCuit   ?? null,
       destinoAlias:  comp.datosExtraidos?.destinoAlias  ?? null,
       destinoNombre: comp.datosExtraidos?.destinoNombre ?? null,
+      vencimientos:  comp.datosExtraidos?.vencimientos  ?? null,
       actualizadoEn:  serverTimestamp(),
     });
     batch.update(doc(db, 'comprobantes', comp.id), {

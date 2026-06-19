@@ -41,8 +41,10 @@ export function docAMovimiento(id: string, data: DocumentData): Movement {
     refStoragePdf:          data.refStoragePdf                    ?? null,
     notas:                  data.notas                            ?? null,
     destinoCbu:             data.destinoCbu                       ?? null,
+    destinoCuit:            data.destinoCuit                      ?? null,
     destinoAlias:           data.destinoAlias                     ?? null,
     destinoNombre:          data.destinoNombre                    ?? null,
+    vencimientos:           data.vencimientos                     ?? null,
     creadoEn:               data.creadoEn?.toDate()               ?? new Date(0),
     actualizadoEn:          data.actualizadoEn?.toDate()          ?? new Date(0),
   };
@@ -75,8 +77,10 @@ export interface NuevoMovimiento {
   confirmadoPago?: boolean;
   // F6.8 — destino del pago, propagado desde el comprobante
   destinoCbu?: string | null;
+  destinoCuit?: string | null;
   destinoAlias?: string | null;
   destinoNombre?: string | null;
+  vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
 }
 
 type ResultadoCreacion =
@@ -112,8 +116,10 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       hashPdf:           payload.hashPdf            ?? null,
       refStoragePdf:     payload.refStoragePdf      ?? null,
       destinoCbu:        payload.destinoCbu         ?? null,
+      destinoCuit:       payload.destinoCuit        ?? null,
       destinoAlias:      payload.destinoAlias       ?? null,
       destinoNombre:     payload.destinoNombre      ?? null,
+      vencimientos:      payload.vencimientos       ?? null,
       // idLegacy intencionalmente ausente — los validators lo usan para distinguir docs del seed
       creadoEn:          serverTimestamp(),
       actualizadoEn:     serverTimestamp(),

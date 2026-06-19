@@ -29,8 +29,10 @@ interface Preload {
   esManual?: boolean;
   // F6.8 — destino del pago (propagado desde datosExtraidos)
   destinoCbu?: string | null;
+  destinoCuit?: string | null;
   destinoAlias?: string | null;
   destinoNombre?: string | null;
+  vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
 }
 
 function generarNumeroManual(fecha: string, texto: string): string {
@@ -195,9 +197,11 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       hashPdf:           preload?.hashPdf,
       refStoragePdf:     preload?.refStoragePdf,
       confirmadoPago:    preload?.confirmadoPago,
-      destinoCbu:        preload?.destinoCbu   ?? null,
-      destinoAlias:      preload?.destinoAlias ?? null,
+      destinoCbu:        preload?.destinoCbu    ?? null,
+      destinoCuit:       preload?.destinoCuit   ?? null,
+      destinoAlias:      preload?.destinoAlias  ?? null,
       destinoNombre:     preload?.destinoNombre ?? null,
+      vencimientos:      preload?.vencimientos  ?? null,
     };
 
     if (preload?.esManual) {

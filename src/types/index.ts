@@ -39,8 +39,10 @@ export interface Movement {
   actualizadoEn: Date;
   // F6.8 — propagado desde datosExtraidos del comprobante al confirmar
   destinoCbu?: string | null;
+  destinoCuit?: string | null;
   destinoAlias?: string | null;
   destinoNombre?: string | null;
+  vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
 }
 
 export interface AjusteConsolidado {
@@ -135,13 +137,14 @@ export interface DatosExtraidos {
   vencimientos?: Array<{ fecha: string | null; monto: number | null }>;  // [] si no aplica
   // F6.8 — destino del pago/transferencia
   destinoCbu?: string | null;        // CBU/CVU del destinatario (22 dígitos)
+  destinoCuit?: string | null;       // CUIT/CUIL del destinatario (11 dígitos, solo dígitos)
   destinoAlias?: string | null;      // alias CVU/CBU del destinatario
   destinoNombre?: string | null;     // nombre/razón social del destinatario
 }
 
 export interface Destino {
   destinoNorm: string;
-  tipo: 'cbu' | 'alias' | 'nombre';
+  tipo: 'cbu' | 'cuit' | 'alias' | 'nombre';
   itemEsperadoId?: string;
   categoria?: string;
   subcategoria?: string;
