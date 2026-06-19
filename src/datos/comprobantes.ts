@@ -132,6 +132,9 @@ export async function confirmarRama1(
       confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.fecha),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
       // F6.8 — propagar destino y vencimientos para que aprenderDestino() aprenda
+      // seedImport: false — gradúa el mov de "seed pristino" a "tocado por usuario"
+      //             para que aprenderMovimientoActualizado no lo saltee
+      seedImport:    false,
       destinoCbu:    comp.datosExtraidos?.destinoCbu    ?? null,
       destinoCuit:   comp.datosExtraidos?.destinoCuit   ?? null,
       destinoAlias:  comp.datosExtraidos?.destinoAlias  ?? null,
