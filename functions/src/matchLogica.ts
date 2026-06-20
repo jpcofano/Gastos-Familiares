@@ -29,6 +29,10 @@ export interface MovimientoMin {
   mes: string;
   descripcion: string;
   itemEsperadoId: string | null;
+  destinoCuit?:    string | null;
+  destinoCbu?:     string | null;
+  destinoAlias?:   string | null;
+  confirmadoPago?: boolean;
 }
 
 export interface ItemEsperadoMin {
@@ -227,4 +231,31 @@ export function calcularPropuesta(
   }
 
   return { rama: 3, calculadoEn: ahora };
+}
+
+export function reconciliarPorPayee(
+  datos: DatosExtractosMin,
+  movs: MovimientoMin[],
+): MovimientoMin[] {
+  const soloDigitos = (s: string | null | undefined) => (s ? s.replace(/\D/g, '') : '');
+  const pCuit  = soloDigitos(datos.destinoCuit);
+  const pCbu   = soloDigitos(datos.destinoCbu);
+  const pAlias = datos.destinoAlias?.trim().toLowerCase() ?? '';
+  if (!pCuit && !pCbu && !pAlias) return [];
+  if (datos.montoTotal == null)   return [];
+
+  return movs.filter(m => {
+    if (m.tipo !== 'Gasto')        return false;
+    if (m.moneda !== datos.moneda) return false;
+    if (m.confirmadoPago)          return false;
+    const mCuit  = soloDigitos(m.destinoCuit);
+    const mCbu   = soloDigitos(m.destinoCbu);
+    const mAlias = m.destinoAlias?.trim().toLowerCase() ?? '';
+    const mismoPayee =
+      (!!pCuit  && mCuit  === pCuit)  ||
+      (!!pCbu   && mCbu   === pCbu)   ||
+      (!!pAlias && mAlias === pAlias);
+    if (!mismoPayee) return false;
+    return Math.abs(m.monto - (datos.montoTotal as number)) < 0.01;
+  });
 }

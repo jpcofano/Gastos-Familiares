@@ -9,6 +9,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
   calcularPropuesta,
   normalizarDestino,
+  reconciliarPorPayee,
   type DatosExtractosMin,
   type MovimientoMin,
   type ItemEsperadoMin,
@@ -291,6 +292,10 @@ export const matchComprobante = onDocumentUpdated(
         mes:           data.mes as string,
         descripcion:   (data.descripcion as string) ?? '',
         itemEsperadoId: (data.itemEsperadoId as string | null) ?? null,
+        destinoCuit:    (data.destinoCuit    as string | null)  ?? null,
+        destinoCbu:     (data.destinoCbu     as string | null)  ?? null,
+        destinoAlias:   (data.destinoAlias   as string | null)  ?? null,
+        confirmadoPago: (data.confirmadoPago as boolean)        ?? false,
       };
     });
 
@@ -305,6 +310,45 @@ export const matchComprobante = onDocumentUpdated(
         matchTexto: mt ? { incluye: mt.incluye ?? [], excluye: mt.excluye ?? [] } : null,
       };
     });
+
+    // F6.9 — Reconciliación pago↔obligación por payee (antes que clasificación/destino)
+    const esPago = datos.tipoDocumento === 'transferencia'
+                || datos.tipoDocumento === 'comprobante_pago';
+    if (esPago) {
+      const reconc = reconciliarPorPayee(datos, movs);
+      if (reconc.length === 1) {
+        await ref.update({
+          propuestaMatch: {
+            rama: 1,
+            movimientoId: reconc[0].id,
+            origenReconciliacion: true,
+            calculadoEn: FieldValue.serverTimestamp(),
+          },
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+        console.log(`[matchComprobante] ${hashActual} → rama 1 (reconciliación por payee, mov ${reconc[0].id})`);
+        return;
+      }
+      if (reconc.length > 1) {
+        await ref.update({
+          propuestaMatch: {
+            rama: 1,
+            candidatos: reconc.map(m => ({
+              tipo: 'movimiento' as const,
+              id: m.id, score: 0,
+              descripcion: m.descripcion, monto: m.monto, moneda: m.moneda,
+              fecha: m.fecha.toISOString().slice(0, 10),
+            })),
+            origenReconciliacion: true,
+            calculadoEn: FieldValue.serverTimestamp(),
+          },
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+        console.log(`[matchComprobante] ${hashActual} → rama 1 candidatos (reconciliación, ${reconc.length})`);
+        return;
+      }
+      // 0 candidatos → cae a clasificación normal
+    }
 
     // Rama destino: match por CBU/alias/nombre aprendido (prioridad sobre texto)
     const propuestaDestino = await matchPorDestino(datos, movs, mesComp);
