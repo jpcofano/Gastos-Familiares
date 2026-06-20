@@ -361,7 +361,9 @@ export const matchComprobante = onDocumentUpdated(
       return;
     }
 
-    const propuesta = calcularPropuesta(datos, movs, items, mesComp);
+    // sin movs: elimina el rama-1 por monto+mes (autovínculo silencioso).
+    // Reconciliación de pagos → F6.9 por payee (arriba); dedup → rama 0.
+    const propuesta = calcularPropuesta(datos, [], items, mesComp);
 
     await ref.update({
       propuestaMatch: {
