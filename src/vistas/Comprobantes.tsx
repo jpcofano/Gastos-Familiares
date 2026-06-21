@@ -148,7 +148,8 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   }
 
   // Ramas 2 y 3: para el usuario el gesto es idéntico — alta pre-clasificada
-  const descripcionCruda = d.comercioRazonSocial ?? undefined;
+  // payee del comprobante: factura → emisor (comercioRazonSocial); transferencia → destinatario (destinoNombre)
+  const descripcionCruda = d.comercioRazonSocial ?? d.destinoNombre ?? undefined;
   const sugerencia       = descripcionCruda ? clasificar(descripcionCruda) : null;
   const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
   const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
@@ -165,9 +166,9 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     hashPdf:             comp.hashPdf,
     refStoragePdf:       comp.refStoragePdf,
     persona:             memberId,
-    categoria:           sugerenciaValida?.categoria    ?? undefined,
-    subcategoria:        sugerenciaValida?.subcategoria ?? undefined,
-    etiqueta:            sugerenciaValida?.etiqueta     ?? undefined,
+    categoria:           pm.categoriaPrellena    ?? sugerenciaValida?.categoria    ?? undefined,
+    subcategoria:        pm.subcategoriaPrellena ?? sugerenciaValida?.subcategoria ?? undefined,
+    etiqueta:            pm.etiquetaPrellena     ?? sugerenciaValida?.etiqueta     ?? undefined,
     banco:               'Efectivo' as const,
     confirmadoPago:      esPago ? confirmadoPagoPorFecha(d.fecha) : false,
     // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
@@ -194,7 +195,7 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
 
   return (
     <div className="cmp-propuesta cmp-propuesta--accion">
-      {sugerenciaValida && <span className="cmp-preclasificado">Pre-clasificado</span>}
+      {(pm.categoriaPrellena || sugerenciaValida) && <span className="cmp-preclasificado">Pre-clasificado</span>}
       {!mostrarAlta && (
         <button
           className="cmp-btn-confirmar"

@@ -229,6 +229,16 @@ Prompts: `docs/prompts/F6.5_resumen_tarjeta_base.md` + addendums 1–10 implemen
 - **Probar `requiere_tarjeta`**: subir PDF de tarjeta sin `numeroCuenta` en config → aparece
   asignador inline → asignar → pasa a parseado sin re-extracción.
 
+## Ciclo factura → obligación → pago (F6.9.x)
+
+- Una factura crea un movimiento como OBLIGACIÓN ABIERTA (confirmadoPago:false), clasificado por destino/texto. El payee de una factura es el EMISOR (extracción: destinoCuit/destinoNombre = emisor).
+- Un pago (transferencia/comprobante_pago) a un payee con obligación abierta del mismo monto RECONCILIA esa obligación (reconciliarPorPayee → rama 1) y la marca confirmadoPago:true, SIN crear un segundo movimiento.
+- En el flujo de comprobantes SOLO auto-confirman sin intervención del usuario: dedup por hash (rama 0) y reconciliación por payee (F6.9). Todo otro match propone y abre AltaMovimiento. El match por monto+mes quedó fuera del flujo (calcularPropuesta se llama con movs=[]).
+- Preclasificación del alta: por DESTINO (matchPorDestino → categoriaPrellena, payee aprendido por CBU/CUIT) o por TEXTO (diccionario; usa comercioRazonSocial en facturas y destinoNombre en transferencias).
+- confirmadoPago = "saldado por un pago", NO "la fecha ya pasó". Por eso una factura nace abierta aunque su emisión sea pasada.
+
+Changelog: F6.9.1 (anti-autovínculo: calcularPropuesta con movs=[]) · F6.9.2 (factura nace confirmadoPago:false, gateado por esPago) · F6.9.3 (extracción: destinoCuit/destinoNombre = emisor en facturas) · F6.9.4 (preload usa categoriaPrellena del match por destino) · F6.9.5 (preclasificación de transferencias usa destinoNombre para el clasificador de texto).
+
 ## State machine de esperados (ResumenMes)
 
 Derivada en vivo, NO materializada. Nueve estados (F5.5):
