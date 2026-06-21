@@ -61,9 +61,12 @@ REGLAS DURAS:
 - numeroCliente: número de cliente / cuenta / suministro / NIS del emisor. NO es el CUIT. NO es el número de operación. null si no aplica.
 - vencimientos: si el comprobante tiene fechas/montos de vencimiento (1er venc, 2do venc con recargo, etc.), listalos en orden como array de {fecha, monto}. fecha en ISO YYYY-MM-DD o null. monto como número o null. vencimientos[0].monto SIEMPRE debe coincidir con montoTotal. Si no hay vencimientos explícitos, vencimientos: [].
 - destinoCbu: CBU/CVU del destinatario (22 dígitos sin espacios). Para transferencia = cuenta receptora. Para factura/servicio = CBU de cobro si figura en el documento. null si no aplica.
-- destinoCuit: CUIT/CUIL del destinatario (solo dígitos, 11 dígitos, sin guiones). REGLA CRÍTICA: el destino es la parte "Para"/"Destinatario"/"Beneficiario"; NUNCA la parte "De"/"Origen" (que es el CUIT del titular que paga). Si el comprobante es QR/factura de comercio, el CUIT del receptor es el comercio. null si no hay receptor claro.
+- destinoCuit: CUIT/CUIL del PAYEE (a quién se le paga), solo dígitos, 11 dígitos, sin guiones.
+  · TRANSFERENCIA/PAGO: es la parte "Para"/"Destinatario"/"Beneficiario"; NUNCA la parte "De"/"Origen" (el titular que paga).
+  · FACTURA / COMPROBANTE DE COMERCIO: NO hay parte "Para". El payee del pago futuro ES EL EMISOR (el comercio que emite la factura). Por lo tanto destinoCuit = el MISMO CUIT del emisor (igual valor que el campo cuit, pero solo dígitos sin guiones).
+  null si no hay payee claro.
 - destinoAlias: alias CVU/CBU del destinatario exactamente como aparece en el documento pero en minúsculas (ej: "micooperativa.mp"). null si no aplica.
-- destinoNombre: nombre o razón social del destinatario/beneficiario. null si no aplica.
+- destinoNombre: nombre o razón social del PAYEE. Para transferencia/pago = el destinatario; para factura = el emisor (mismo que comercioRazonSocial). null si no aplica.
 
 Si un campo no se puede determinar con confianza, usá null (excepto numeroOperacion, que siempre lleva número real o pseudo-número).
 

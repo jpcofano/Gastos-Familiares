@@ -153,6 +153,8 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
   const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
 
+  const esPago = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
+
   const preloadBase = {
     tipo:                'Gasto' as const,
     fecha:               d.fecha         ?? undefined,
@@ -167,7 +169,7 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     subcategoria:        sugerenciaValida?.subcategoria ?? undefined,
     etiqueta:            sugerenciaValida?.etiqueta     ?? undefined,
     banco:               'Efectivo' as const,
-    confirmadoPago:      confirmadoPagoPorFecha(d.fecha),
+    confirmadoPago:      esPago ? confirmadoPagoPorFecha(d.fecha) : false,
     // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
     destinoCbu:          d.destinoCbu    ?? null,
     destinoCuit:         d.destinoCuit   ?? null,
