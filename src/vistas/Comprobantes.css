@@ -296,3 +296,18 @@
   width: 100%;
 }
 .cmp-btn-manual:hover { border-color: var(--color-primary, #6366f1); color: var(--color-primary, #6366f1); }
+
+/* F6.9.6 — feedback de match */
+.cmp-propuesta-tipo {
+  display: inline-block;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-bottom: 4px;
+}
+.cmp-tipo--reconc { background: #dcfce7; color: #166534; }   /* pagó factura/obligación */
+.cmp-tipo--nuevo  { background: #dbeafe; color: #1e40af; }   /* movimiento nuevo */
+.cmp-tipo--dedup  { background: #f3f4f6; color: #4b5563; }   /* ya cargado */

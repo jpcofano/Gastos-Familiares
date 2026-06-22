@@ -175,6 +175,8 @@ export interface PropuestaMatch {
   subcategoriaPrellena?: string | null;
   etiquetaPrellena?: string | null;
   dedupInfo?: { movId: string; mes: string | null; monto: number | null; item?: string | null };
+  // F6.9 — la rama 1 del flujo de comprobantes es siempre reconciliación por payee
+  origenReconciliacion?: boolean;
 }
 
 export interface Comprobante {

@@ -81,11 +81,17 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
 
   if (!pm || !d) return null;
 
-  // Rama 0: ya cargado
+  // Rama 0: dedup por hash — este archivo ya generó un movimiento, no hay nada nuevo
   if (pm.rama === 0) {
+    const di = pm.dedupInfo;
     return (
       <div className="cmp-propuesta cmp-propuesta--0">
-        <span className="cmp-propuesta-label">Ya cargado</span>
+        <span className="cmp-propuesta-tipo cmp-tipo--dedup">Ya cargado</span>
+        <span className="cmp-propuesta-label">
+          Este archivo ya había generado un movimiento — no se cargó de nuevo
+          {di?.mes   && ` · ${di.mes}`}
+          {di?.monto != null && ` · ${fmtMonto(di.monto, d.moneda ?? 'ARS')}`}
+        </span>
       </div>
     );
   }
@@ -97,7 +103,10 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
       const movCands = pm.candidatos.filter(c => c.tipo === 'movimiento');
       return (
         <div className="cmp-propuesta cmp-propuesta--1">
-          <span className="cmp-propuesta-label">Seleccioná el movimiento correspondiente</span>
+          <span className="cmp-propuesta-tipo cmp-tipo--reconc">Pagó una obligación</span>
+          <span className="cmp-propuesta-label">
+            Este pago salda una obligación abierta — elegí cuál movimiento
+          </span>
           <div className="cmp-candidatos">
             {movCands.map(c => (
               <label key={c.id} className="cmp-candidato">
@@ -137,12 +146,25 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     }
 
     // Candidato único: auto-vinculando en background (ver useEffect arriba)
+    // En el flujo de comprobantes la rama 1 es SIEMPRE reconciliación por payee (origenReconciliacion).
     return (
       <div className="cmp-propuesta cmp-propuesta--1">
-        {errorLocal
-          ? <span className="cmp-error-local">{errorLocal}</span>
-          : <span className="cmp-propuesta-label">{confirmando ? 'Vinculando…' : 'Ya cargado'}</span>
-        }
+        {errorLocal ? (
+          <span className="cmp-error-local">{errorLocal}</span>
+        ) : pm.origenReconciliacion ? (
+          <>
+            <span className="cmp-propuesta-tipo cmp-tipo--reconc">Pagó una factura</span>
+            <span className="cmp-propuesta-label">
+              {confirmando
+                ? 'Reconciliando con la obligación abierta…'
+                : 'Saldó una obligación abierta — no se creó un movimiento nuevo'}
+            </span>
+          </>
+        ) : (
+          <span className="cmp-propuesta-label">
+            {confirmando ? 'Vinculando…' : 'Vinculado a un movimiento existente'}
+          </span>
+        )}
       </div>
     );
   }
@@ -201,6 +223,11 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
 
   return (
     <div className="cmp-propuesta cmp-propuesta--accion">
+      <span className="cmp-propuesta-tipo cmp-tipo--nuevo">
+        {pm.rama === 2
+          ? (pm.esAdicional ? 'Pago adicional de un gasto esperado' : 'Cumple un gasto esperado')
+          : 'Movimiento nuevo'}
+      </span>
       {(pm.categoriaPrellena || sugerenciaValida) && <span className="cmp-preclasificado">Pre-clasificado</span>}
       {!mostrarAlta && (
         <button
@@ -475,7 +502,7 @@ export default function Comprobantes() {
       )}
       {resultado?.tipo === 'duplicado' && (
         <div className="cmp-resultado cmp-resultado--dup">
-          Ya existe: <strong>{resultado.nombre}</strong>
+          <strong>{resultado.nombre}</strong> ya estaba cargado — no se procesa de nuevo (mismo archivo).
         </div>
       )}
       {resultado?.tipo === 'error' && (
