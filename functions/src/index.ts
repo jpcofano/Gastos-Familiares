@@ -355,12 +355,16 @@ export const matchComprobante = onDocumentUpdated(
 
     // Rama destino: match por CBU/alias/nombre aprendido (prioridad sobre texto)
     const propuestaDestino = await matchPorDestino(datos, movs, mesComp);
-    if (propuestaDestino) {
+
+    // F6.9.7 (P2) — un destino CON itemEsperadoId (rama 2, incluido adicional) gana directo.
+    // Un destino SIN item (rama 3, solo categoría aprendida) NO corta el flujo: dejamos que
+    // matchConEsperados pruebe por texto. Si nada engancha, cae a rama 3 conservando el prefill.
+    if (propuestaDestino && propuestaDestino.rama === 2) {
       await ref.update({
         propuestaMatch: { ...propuestaDestino, calculadoEn: FieldValue.serverTimestamp() },
         actualizadoEn:  FieldValue.serverTimestamp(),
       });
-      console.log(`[matchComprobante] ${hashActual} → rama destino (item=${propuestaDestino.itemEsperadoId ?? 'sin item'}, adicional=${propuestaDestino.esAdicional ?? false})`);
+      console.log(`[matchComprobante] ${hashActual} → rama destino (item=${propuestaDestino.itemEsperadoId}, adicional=${propuestaDestino.esAdicional ?? false})`);
       return;
     }
 
@@ -368,15 +372,28 @@ export const matchComprobante = onDocumentUpdated(
     // Reconciliación de pagos → F6.9 por payee (arriba); dedup → rama 0.
     const propuesta = calcularPropuesta(datos, [], items, mesComp);
 
+    // F6.9.7 (P2) — si los esperados por texto no engancharon (rama 3) pero el destino había
+    // aprendido una categoría, conservamos ese prefill en la rama 3 (no perdemos lo aprendido).
+    const propuestaFinal =
+      propuesta.rama === 3 && propuestaDestino?.rama === 3
+        ? {
+            ...propuesta,
+            origenDestino:        true,
+            categoriaPrellena:    propuestaDestino.categoriaPrellena    ?? null,
+            subcategoriaPrellena: propuestaDestino.subcategoriaPrellena ?? null,
+            etiquetaPrellena:     propuestaDestino.etiquetaPrellena     ?? null,
+          }
+        : propuesta;
+
     await ref.update({
       propuestaMatch: {
-        ...propuesta,
+        ...propuestaFinal,
         calculadoEn: FieldValue.serverTimestamp(),
       },
       actualizadoEn: FieldValue.serverTimestamp(),
     });
 
-    console.log(`[matchComprobante] ${hashActual} → rama ${propuesta.rama}`);
+    console.log(`[matchComprobante] ${hashActual} → rama ${propuestaFinal.rama}${(propuestaFinal as { origenDestino?: boolean }).origenDestino && propuestaFinal.rama === 3 ? ' (cat. de destino)' : ''}`);
   },
 );
 
