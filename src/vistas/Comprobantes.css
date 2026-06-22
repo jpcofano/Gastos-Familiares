@@ -311,3 +311,6 @@
 .cmp-tipo--reconc { background: #dcfce7; color: #166534; }   /* pagó factura/obligación */
 .cmp-tipo--nuevo  { background: #dbeafe; color: #1e40af; }   /* movimiento nuevo */
 .cmp-tipo--dedup  { background: #f3f4f6; color: #4b5563; }   /* ya cargado */
+
+/* F6.9.8 — razón persistente en el card resuelto */
+.cmp-card-razon { margin-top: 6px; }

@@ -27,6 +27,36 @@ function BadgeEstado({ estado }: { estado: string }) {
   );
 }
 
+// F6.9.8 — etiqueta persistente de la razón del match en el card ya resuelto.
+// Lee propuestaMatch (sobrevive al estado vinculado: confirmarRama1/marcarVinculado
+// solo tocan `estado`) para conservar el "por qué" después de resolver.
+function RazonVinculado({ pm }: { pm: Comprobante['propuestaMatch'] }) {
+  if (!pm) return null;
+  let texto: string;
+  let clase: string;
+  switch (pm.rama) {
+    case 0:
+      texto = 'Ya cargado';
+      clase = 'cmp-tipo--dedup';
+      break;
+    case 1:
+      texto = pm.origenReconciliacion ? 'Pagó una factura' : 'Vinculado a un movimiento';
+      clase = pm.origenReconciliacion ? 'cmp-tipo--reconc' : 'cmp-tipo--dedup';
+      break;
+    case 2:
+      texto = pm.esAdicional ? 'Pago adicional' : 'Cumplió un gasto esperado';
+      clase = 'cmp-tipo--nuevo';
+      break;
+    case 3:
+      texto = 'Cargado como nuevo';
+      clase = 'cmp-tipo--nuevo';
+      break;
+    default:
+      return null;
+  }
+  return <span className={`cmp-propuesta-tipo ${clase}`}>{texto}</span>;
+}
+
 // ── Resumen de datosExtraidos ─────────────────────────────────────────────────
 
 function DatosResumen({ d }: { d: DatosExtraidos }) {
@@ -310,6 +340,11 @@ function ComprobanteCard({
       )}
       {comp.estado === 'extraido' && !comp.propuestaMatch && (
         <p className="cmp-nota">Calculando match…</p>
+      )}
+      {comp.estado === 'vinculado' && comp.propuestaMatch && (
+        <div className="cmp-card-razon">
+          <RazonVinculado pm={comp.propuestaMatch} />
+        </div>
       )}
     </div>
   );
