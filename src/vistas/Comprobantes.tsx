@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, marcarVinculado, confirmadoPagoPorFecha } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmadoPagoPorFecha } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -28,7 +28,7 @@ function BadgeEstado({ estado }: { estado: string }) {
 }
 
 // F6.9.8 — etiqueta persistente de la razón del match en el card ya resuelto.
-// Lee propuestaMatch (sobrevive al estado vinculado: confirmarRama1/marcarVinculado
+// Lee propuestaMatch (sobrevive al estado vinculado: confirmarRama1/cargarMovimientoDesdeComprobante
 // solo tocan `estado`) para conservar el "por qué" después de resolver.
 function RazonVinculado({ pm }: { pm: Comprobante['propuestaMatch'] }) {
   if (!pm) return null;
@@ -82,9 +82,10 @@ interface PropuestaProps {
   items: ExpectedItem[];
   memberId: string;
   miembro: import('../types').FamiliaMiembro;
+  esAdmin: boolean;
 }
 
-function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
+function PropuestaCard({ comp, items, memberId, miembro, esAdmin }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
   const { clasificar, cargando: cargandoDict } = useDiccionario();
@@ -95,7 +96,9 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
   const autoConfirmadoRef = useRef(false);
 
   // Rama 1 candidato único: vincular automáticamente, sin acción del usuario
+  // Rama 1 (conciliación de obligaciones) es admin-only por decisión (F6.9.11) — se gatea acá.
   useEffect(() => {
+    if (!esAdmin) return;
     if (pm?.rama !== 1 || !pm.movimientoId) return;
     if (autoConfirmadoRef.current) return;
     autoConfirmadoRef.current = true;
@@ -126,8 +129,17 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
     );
   }
 
-  // Rama 1: movimiento ya existe
+  // Rama 1: movimiento ya existe — conciliación de obligaciones es admin-only (F6.9.11)
   if (pm.rama === 1) {
+    if (!esAdmin) {
+      return (
+        <div className="cmp-propuesta cmp-propuesta--1">
+          <span className="cmp-propuesta-tipo cmp-tipo--reconc">Pagó una obligación</span>
+          <span className="cmp-propuesta-label">Coincide con una obligación — un admin la concilia</span>
+        </div>
+      );
+    }
+
     // Múltiples candidatos: elección real del usuario
     if (!pm.movimientoId && pm.candidatos && pm.candidatos.length > 0) {
       const movCands = pm.candidatos.filter(c => c.tipo === 'movimiento');
@@ -274,10 +286,11 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
           memberId={memberId}
           miembro={miembro}
           preload={preload}
-          onGuardado={async () => {
-            await marcarVinculado(comp.id);
-            setMostrarAlta(false);
+          onGuardarPayload={async (payload) => {
+            const res = await cargarMovimientoDesdeComprobante(comp.id, payload);
+            return { ok: res.ok, error: res.ok ? undefined : res.error };
           }}
+          onGuardado={() => setMostrarAlta(false)}
           onCancelar={() => setMostrarAlta(false)}
         />
       )}
@@ -336,7 +349,7 @@ function ComprobanteCard({
         <p className="cmp-error-detalle">{comp.errorExtraccion}</p>
       )}
       {comp.estado === 'extraido' && comp.propuestaMatch && (
-        <PropuestaCard comp={comp} items={items} memberId={memberId} miembro={miembro} />
+        <PropuestaCard comp={comp} items={items} memberId={memberId} miembro={miembro} esAdmin={esAdmin} />
       )}
       {comp.estado === 'extraido' && !comp.propuestaMatch && (
         <p className="cmp-nota">Calculando match…</p>
@@ -475,7 +488,7 @@ export default function Comprobantes() {
   }, [memberId]);
 
   // Lista — onSnapshot
-  const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes();
+  const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes(memberId, esAdmin);
   const { items } = useItemsEsperados();
   const [mostrarAltaManual, setMostrarAltaManual] = useState(false);
 

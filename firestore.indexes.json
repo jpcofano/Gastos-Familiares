@@ -39,6 +39,10 @@
     { "collectionGroup": "itemsEsperados", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "activo", "order": "ASCENDING" },
       { "fieldPath": "tipo",   "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "comprobantes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "subidoPor", "order": "ASCENDING" },
+      { "fieldPath": "subidoEn",  "order": "DESCENDING" }
     ]}
   ],
   "fieldOverrides": []

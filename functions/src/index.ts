@@ -3,7 +3,7 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { setGlobalOptions }   from 'firebase-functions/v2';
 import { defineSecret }       from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -1444,5 +1444,95 @@ export const descartarEntrada = onCall(
 
     console.log(`[descartarEntrada] ${tipo} ${id} — borrados:${borrados} revertidos:${revertidos} (por ${email})`);
     return { ok: true, tipo, borrados, revertidos, advertenciaDestino };
+  },
+);
+
+// F6.9.11 — el dependiente carga su propio comprobante como su propio movimiento.
+// Atómica (batch crear-movimiento + marcar-comprobante-vinculado) e idempotente
+// (precondición estado==='extraido': un reintento corta en failed-precondition).
+export const cargarMovimientoDesdeComprobante = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists) throw new HttpsError('permission-denied', 'No autorizado');
+    const aut = autSnap.data()!;
+    const callerMemberId = aut.memberId as string | undefined;
+    const esAdmin = aut.rol === 'admin';
+    if (!callerMemberId) throw new HttpsError('permission-denied', 'Sin memberId');
+
+    const { compId, payload } = (request.data ?? {}) as { compId?: string; payload?: any };
+    if (!compId)  throw new HttpsError('invalid-argument', 'compId requerido');
+    if (!payload || typeof payload !== 'object') throw new HttpsError('invalid-argument', 'payload requerido');
+
+    // Comprobante: existe + estado extraido (idempotencia) + dueño o admin
+    const compRef  = db.collection('comprobantes').doc(compId);
+    const compSnap = await compRef.get();
+    if (!compSnap.exists) throw new HttpsError('not-found', 'Comprobante no encontrado');
+    const comp = compSnap.data()!;
+    if (comp.estado !== 'extraido')
+      throw new HttpsError('failed-precondition', `Estado inválido: ${String(comp.estado)}`);
+    if (!esAdmin && comp.subidoPor !== callerMemberId)
+      throw new HttpsError('permission-denied', 'No es tu comprobante');
+
+    // Validación server-side (Admin SDK bypassa reglas → replicar invariantes del create)
+    const { persona, creadoPor, tipo, moneda, monto, descripcion, fechaMs, mes } = payload;
+    if (creadoPor !== callerMemberId)
+      throw new HttpsError('permission-denied', 'creadoPor debe ser vos');
+    if (!esAdmin && persona !== callerMemberId)
+      throw new HttpsError('permission-denied', 'persona debe ser vos');
+    if (!['Gasto', 'Ingreso'].includes(tipo))  throw new HttpsError('invalid-argument', 'tipo inválido');
+    if (!['ARS', 'USD'].includes(moneda))       throw new HttpsError('invalid-argument', 'moneda inválida');
+    if (typeof monto !== 'number' || !(monto > 0)) throw new HttpsError('invalid-argument', 'monto inválido');
+    if (typeof descripcion !== 'string' || descripcion.length === 0)
+      throw new HttpsError('invalid-argument', 'descripcion requerida');
+    if (typeof fechaMs !== 'number' || !Number.isFinite(fechaMs))
+      throw new HttpsError('invalid-argument', 'fecha inválida');
+    if (typeof mes !== 'string' || !/^[0-9]{4}-[0-9]{2}$/.test(mes))
+      throw new HttpsError('invalid-argument', 'mes inválido');
+
+    const fecha  = Timestamp.fromMillis(fechaMs);
+    const movRef = db.collection('movimientos').doc();
+    const batch  = db.batch();
+
+    batch.set(movRef, {
+      fecha, mes,
+      tipo, descripcion,
+      descripcionOriginal: payload.descripcionOriginal ?? null,
+      monto, moneda,
+      tcUsdArs:          payload.tcUsdArs           ?? null,
+      categoria:         payload.categoria,
+      subcategoria:      payload.subcategoria,
+      etiqueta:          payload.etiqueta           ?? null,
+      banco:             payload.banco              ?? null,
+      persona, creadoPor,
+      subtipo: 'Manual', origen: 'Manual',
+      excluirDash: false, pagado: true,
+      incluirResumenMes: payload.incluirResumenMes  ?? true,
+      itemEsperadoId:    payload.itemEsperadoId      ?? null,
+      numeroComprobante: payload.numeroComprobante  ?? null,
+      confirmadoPago:    payload.confirmadoPago      ?? false,
+      hashPdf:           payload.hashPdf             ?? null,
+      refStoragePdf:     payload.refStoragePdf       ?? null,
+      destinoCbu:        payload.destinoCbu          ?? null,
+      destinoCuit:       payload.destinoCuit         ?? null,
+      destinoAlias:      payload.destinoAlias        ?? null,
+      destinoNombre:     payload.destinoNombre       ?? null,
+      vencimientos:      payload.vencimientos        ?? null,
+      origenComprobanteId: payload.origenComprobanteId ?? compId,
+      creadoEn:      FieldValue.serverTimestamp(),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+    batch.update(compRef, {
+      estado: 'vinculado',
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+
+    console.log(`[cargarMovimientoDesdeComprobante] ${compId} → ${movRef.id} (por ${email})`);
+    return { movimientoId: movRef.id };
   },
 );

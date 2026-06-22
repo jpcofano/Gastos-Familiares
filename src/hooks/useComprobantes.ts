@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { docAComprobante } from '../datos/comprobantes';
 import type { Comprobante } from '../types';
 
-export function useComprobantes() {
+export function useComprobantes(memberId: string, esAdmin: boolean) {
   const [comprobantes, setComprobantes] = useState<Comprobante[]>([]);
   const [cargando,     setCargando]     = useState(true);
   const [error,        setError]        = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'comprobantes'), orderBy('subidoEn', 'desc'));
+    const q = esAdmin
+      ? query(collection(db, 'comprobantes'), orderBy('subidoEn', 'desc'))
+      : query(collection(db, 'comprobantes'), where('subidoPor', '==', memberId), orderBy('subidoEn', 'desc'));
     const unsub = onSnapshot(
       q,
       snap => {
@@ -23,7 +25,7 @@ export function useComprobantes() {
       },
     );
     return unsub;
-  }, []);
+  }, [memberId, esAdmin]);
 
   return { comprobantes, cargando, error };
 }

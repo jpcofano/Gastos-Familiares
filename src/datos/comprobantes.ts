@@ -1,9 +1,10 @@
 import {
-  doc, getDoc, setDoc, updateDoc, serverTimestamp, writeBatch,
+  doc, getDoc, setDoc, serverTimestamp, writeBatch,
   collection, query, orderBy, getDocs, type DocumentData,
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, storage, functions } from '../firebase';
 import { sha256Archivo } from './hashArchivo';
 import type { Comprobante, PropuestaMatch } from '../types';
 
@@ -153,14 +154,17 @@ export async function confirmarRama1(
   }
 }
 
-// Ramas 2/3: marcar comprobante vinculado tras crear el movimiento desde AltaMovimiento
-export async function marcarVinculado(compId: string): Promise<Resultado<void>> {
+// Ramas 2/3: callable server-side (Admin SDK) — crea el movimiento del dependiente/admin
+// dueño del comprobante y lo marca vinculado en un único batch atómico. Reglas de Firestore
+// no se tocan (comprobantes:update y movimientos:create siguen admin-only para el cliente).
+export async function cargarMovimientoDesdeComprobante(
+  compId: string,
+  payload: Record<string, unknown>,
+): Promise<Resultado<{ movimientoId: string }>> {
   try {
-    await updateDoc(doc(db, 'comprobantes', compId), {
-      estado:       'vinculado',
-      actualizadoEn: serverTimestamp(),
-    });
-    return { ok: true, data: undefined };
+    const fn  = httpsCallable(functions, 'cargarMovimientoDesdeComprobante');
+    const res = await fn({ compId, payload });
+    return { ok: true, data: res.data as { movimientoId: string } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }

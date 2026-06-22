@@ -89,14 +89,14 @@ service cloud.firestore {
 
     // Comprobantes — subida por cualquier miembro, update/delete solo admin
     match /comprobantes/{hash} {
-      allow read:   if esMiembro();
+      allow read:   if esAdmin() || (esMiembro() && resource.data.subidoPor == miMemberId());
       allow create: if esMiembro();
       allow update, delete: if esAdmin();
     }
 
     // Entrantes — punto de entrada único para subida de archivos
     match /entrantes/{hash} {
-      allow read:   if esMiembro() && (esAdmin() || resource.data.creadoPor == miMemberId());
+      allow read:   if esMiembro() && (esAdmin() || resource == null || resource.data.creadoPor == miMemberId());
       allow create: if esMiembro()
         && request.resource.data.creadoPor == miMemberId()
         && request.resource.data.estado == 'pendiente'

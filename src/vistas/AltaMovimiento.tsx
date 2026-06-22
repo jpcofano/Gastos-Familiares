@@ -55,6 +55,8 @@ interface Props {
   onGuardado: () => void;
   onCancelar: () => void;
   preload?: Preload;
+  // F6.9.11 — ruteo a callable server-side (atómico, owner-scoped) en vez de crearMovimiento client-side
+  onGuardarPayload?: (payload: Parameters<typeof crearMovimiento>[0]) => Promise<{ ok: boolean; error?: Error }>;
 }
 
 function hoyISO(): string {
@@ -62,7 +64,7 @@ function hoyISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload }: Props) {
+export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload, onGuardarPayload }: Props) {
   const esAdmin = miembro.rol === 'admin';
   const { clasificar, cargando: cargandoDict } = useDiccionario();
 
@@ -157,14 +159,16 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
 
   const ejecutarGuardar = useCallback(async (payload: Parameters<typeof crearMovimiento>[0]) => {
     setGuardando(true);
-    const resultado = await crearMovimiento(payload);
+    const resultado = onGuardarPayload
+      ? await onGuardarPayload(payload)
+      : await crearMovimiento(payload);
     setGuardando(false);
     if (resultado.ok) {
       onGuardado();
     } else {
-      setErrorMsg(resultado.error.message);
+      setErrorMsg(resultado.error?.message ?? 'Error al guardar');
     }
-  }, [onGuardado]);
+  }, [onGuardado, onGuardarPayload]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,6 +209,9 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       destinoNombre:        preload?.destinoNombre         ?? null,
       vencimientos:         preload?.vencimientos          ?? null,
       origenComprobanteId:  preload?.origenComprobanteId,
+      // F6.9.11 — usados solo por la callable (vía onGuardarPayload); crearMovimiento los ignora
+      fechaMs: new Date(fecha + 'T12:00:00').getTime(),
+      mes:     `${new Date(fecha + 'T12:00:00').getFullYear()}-${String(new Date(fecha + 'T12:00:00').getMonth() + 1).padStart(2, '0')}`,
     };
 
     if (preload?.esManual) {

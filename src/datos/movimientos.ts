@@ -83,6 +83,9 @@ export interface NuevoMovimiento {
   vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
   // F6.x descartar — marca que este mov fue creado DESDE un comprobante (vs vinculado rama 1)
   origenComprobanteId?: string;
+  // F6.9.11 — usados solo por la callable cargarMovimientoDesdeComprobante; crearMovimiento los ignora
+  fechaMs?: number;
+  mes?: string;
 }
 
 type ResultadoCreacion =
