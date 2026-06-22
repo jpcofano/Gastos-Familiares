@@ -149,7 +149,13 @@ function PropuestaCard({ comp, items, memberId, miembro }: PropuestaProps) {
 
   // Ramas 2 y 3: para el usuario el gesto es idéntico — alta pre-clasificada
   // payee del comprobante: factura → emisor (comercioRazonSocial); transferencia → destinatario (destinoNombre)
-  const descripcionCruda = d.comercioRazonSocial ?? d.destinoNombre ?? undefined;
+  // payee del comprobante: factura → emisor (comercioRazonSocial); transferencia/pago → destinatario (destinoNombre).
+  // Gateado por tipo, NO con ??: una billetera (Mercado Pago) llena comercioRazonSocial con su marca
+  // (truthy), lo que bloquearía el fallback. En pagos el payee es SIEMPRE el destinatario.
+  const esPagoDoc = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
+  const descripcionCruda = esPagoDoc
+    ? (d.destinoNombre   ?? d.comercioRazonSocial ?? undefined)
+    : (d.comercioRazonSocial ?? d.destinoNombre   ?? undefined);
   const sugerencia       = descripcionCruda ? clasificar(descripcionCruda) : null;
   const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
   const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
