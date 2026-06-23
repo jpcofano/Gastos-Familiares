@@ -74,10 +74,11 @@ export default function AppShell() {
         <main className="shell-content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/resumen" element={<Resumen />} />
-            <Route path="/config-esperados" element={<ConfigEsperados />} />
+            {esAdmin && <Route path="/resumen" element={<Resumen />} />}
+            {esAdmin && <Route path="/config-esperados" element={<ConfigEsperados />} />}
             <Route path="/comprobantes" element={<Comprobantes />} />
             <Route path="/tarjetas" element={<Navigate to="/comprobantes" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
       </div>
