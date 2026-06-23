@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import AltaMovimiento from './AltaMovimiento';
 import type { Movement } from '../types';
 import './Dashboard.css';
 
@@ -89,20 +88,12 @@ export default function Dashboard() {
   const { memberId, miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
 
-  const [mes,         setMes]         = useState(mesActual);
-  const [mostrarAlta, setMostrarAlta] = useState(false);
-  const [exito,       setExito]       = useState(false);
+  const [mes, setMes] = useState(mesActual);
 
   const { movimientos, cargando, error } = useMovimientosDelMes(
     mes,
     esAdmin ? undefined : memberId,
   );
-
-  const handleGuardado = () => {
-    setMostrarAlta(false);
-    setExito(true);
-    setTimeout(() => setExito(false), 3000);
-  };
 
   const visibles = movimientos
     .filter(m => !m.excluirDash)
@@ -125,7 +116,6 @@ export default function Dashboard() {
         <button className="dash-mes-btn" onClick={() => setMes(m => desplazarMes(m, +1))} aria-label="Mes siguiente">›</button>
       </div>
 
-      {exito && <p className="dash-estado dash-exito">Movimiento guardado.</p>}
       {cargando && <p className="dash-estado">Cargando…</p>}
       {error    && <p className="dash-estado dash-error">Error: {error}</p>}
 
@@ -220,24 +210,6 @@ export default function Dashboard() {
             </table>
           )}
         </>
-      )}
-
-      {/* Botón flotante "+" */}
-      <button
-        className="dash-fab"
-        onClick={() => setMostrarAlta(true)}
-        aria-label="Nuevo movimiento"
-      >
-        +
-      </button>
-
-      {mostrarAlta && (
-        <AltaMovimiento
-          memberId={memberId}
-          miembro={miembro}
-          onGuardado={handleGuardado}
-          onCancelar={() => setMostrarAlta(false)}
-        />
       )}
     </div>
   );

@@ -282,20 +282,29 @@
 .bnd-estado--ambiguo    { background: #fef3c7; color: #92400e; }
 .bnd-estado--error      { background: #ffe4e6; color: #be123c; }
 
-.cmp-alta-manual {
-  margin: 1rem 0;
-}
-.cmp-btn-manual {
-  background: none;
-  border: 1.5px dashed var(--color-border, #d1d5db);
-  border-radius: 8px;
-  color: var(--color-text-sec, #6b7280);
+/* F6.9.12 — FAB de alta manual, entrada única (movido desde Dashboard.css .dash-fab) */
+.cmp-fab {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 50%;
+  border: none;
+  background: #1e3a5f;
+  color: #fff;
+  font-size: 1.8rem;
+  line-height: 1;
   cursor: pointer;
-  font-size: 0.875rem;
-  padding: 0.6rem 1.2rem;
-  width: 100%;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  transition: background 0.15s, transform 0.1s;
 }
-.cmp-btn-manual:hover { border-color: var(--color-primary, #6366f1); color: var(--color-primary, #6366f1); }
+.cmp-fab:hover  { background: #2a5080; }
+.cmp-fab:active { transform: scale(0.94); }
 
 /* F6.9.6 — feedback de match */
 .cmp-propuesta-tipo {

@@ -43,30 +43,6 @@
 .dash-error { color: #c0392b; font-style: normal; }
 .dash-exito { color: #27ae60; font-style: normal; font-weight: 500; }
 
-/* Botón flotante para alta manual */
-.dash-fab {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  width: 3.2rem;
-  height: 3.2rem;
-  border-radius: 50%;
-  border: none;
-  background: #1e3a5f;
-  color: #fff;
-  font-size: 1.8rem;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-  transition: background 0.15s, transform 0.1s;
-}
-.dash-fab:hover  { background: #2a5080; }
-.dash-fab:active { transform: scale(0.94); }
-
 /* Totales */
 .dash-totales {
   display: flex;

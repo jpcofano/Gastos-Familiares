@@ -569,22 +569,16 @@ export default function Comprobantes() {
         </section>
       )}
 
-      {/* ── Alta manual ────────────────────────────────────────────────── */}
-      <div className="cmp-alta-manual">
-        {!mostrarAltaManual ? (
-          <button className="cmp-btn-manual" onClick={() => setMostrarAltaManual(true)}>
-            Cargar movimiento manual
-          </button>
-        ) : (
-          <AltaMovimiento
-            memberId={memberId}
-            miembro={miembro}
-            preload={{ esManual: true }}
-            onGuardado={() => setMostrarAltaManual(false)}
-            onCancelar={() => setMostrarAltaManual(false)}
-          />
-        )}
-      </div>
+      {/* ── Alta manual (overlay; se abre con el FAB +) ─────────────────── */}
+      {mostrarAltaManual && (
+        <AltaMovimiento
+          memberId={memberId}
+          miembro={miembro}
+          preload={{ esManual: true }}
+          onGuardado={() => setMostrarAltaManual(false)}
+          onCancelar={() => setMostrarAltaManual(false)}
+        />
+      )}
 
       {/* ── Lista ──────────────────────────────────────────────────────── */}
       <section className="cmp-lista">
@@ -608,6 +602,15 @@ export default function Comprobantes() {
 
       {/* ── Resúmenes de tarjeta (solo admin) ──────────────────────────── */}
       {esAdmin && <SeccionTarjetas />}
+
+      {/* ── FAB alta manual — entrada única, no gateada por rol ─────────── */}
+      <button
+        className="cmp-fab"
+        onClick={() => setMostrarAltaManual(true)}
+        aria-label="Nuevo movimiento manual"
+      >
+        +
+      </button>
     </div>
   );
 }
