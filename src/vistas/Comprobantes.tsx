@@ -1,616 +1,200 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmadoPagoPorFecha } from '../datos/comprobantes';
-import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada } from '../datos/entrantes';
-import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
-import { useComprobantes } from '../hooks/useComprobantes';
-import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
-import { useDiccionario } from '../contexto/DiccionarioContext';
-import { CONFIANZA_UMBRAL } from '../datos/clasificador';
-import AltaMovimiento from './AltaMovimiento';
+import { Icon } from '../design-system/Icon';
+import { Message, Button, Badge, Money, StepIndicator, FieldRow, RadioChip } from '../design-system/components';
+import { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar } from '../design-system/shell';
 import { SeccionTarjetas } from './ResumenesTarjeta';
-import type { Comprobante, Entrante, ExpectedItem, DatosExtraidos } from '../types';
 import './Comprobantes.css';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// F9.3 — Cargar, PR visual: maqueta con datos de EJEMPLO siguiendo CargaMobile.jsx
+// + los modales ComprobanteConfirm.jsx / ManualGasto.jsx del kit. NO toca Firestore
+// ni Storage ni Functions — el dropzone no sube nada real, los modales no llaman
+// subirEntrante/cargarMovimientoDesdeComprobante/crearMovimiento. Eso es la PR de
+// cableado siguiente (la lógica real ya existe en datos/entrantes.ts, datos/
+// comprobantes.ts y AltaMovimiento.tsx — queda desconectada de esta pantalla hasta
+// esa PR, no se borró). Tarjetas (SeccionTarjetas, real) sigue viviendo acá abajo,
+// admin-only, como antes de F9.3 — Carga sigue siendo la solapa unificada de
+// comprobantes + resúmenes de tarjeta (decisión F6.7 addendum 1, no se reabre).
 
-function fmtMonto(n: number | null | undefined, moneda: string): string {
-  if (n == null) return '—';
-  return moneda === 'USD'
-    ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+type EstadoEntrante = 'ok' | 'wait' | 'warn' | 'err';
 
-function BadgeEstado({ estado }: { estado: string }) {
+interface EntranteEjemplo { id: string; nombre: string; tipo: string; estado: EstadoEntrante; detalle: string; }
+
+const EXAMPLE_ENTRANTES: EntranteEjemplo[] = [
+  { id: 'e1', nombre: 'Edenor_factura_06.pdf',   tipo: 'Comprobante',    estado: 'wait', detalle: 'Extrayendo datos…' },
+  { id: 'e2', nombre: 'Resumen_Visa_junio.pdf',  tipo: 'Resumen tarjeta', estado: 'ok',   detalle: 'Conciliado · 14 consumos' },
+  { id: 'e3', nombre: 'Aysa_factura.pdf',        tipo: 'Comprobante',    estado: 'warn', detalle: 'Falta categoría' },
+];
+
+const ICON_POR_ESTADO: Record<EstadoEntrante, string> = { ok: 'check-check', wait: 'loader', warn: 'triangle-alert', err: 'circle-x' };
+const COLOR_POR_ESTADO: Record<EstadoEntrante, string> = { ok: 'var(--gf-ok-text)', wait: 'var(--gf-wait-text)', warn: 'var(--gf-warn-text)', err: 'var(--gf-err-text)' };
+
+// ── Modal: Confirmar comprobante ─────────────────────────────────────────────
+
+function ComprobanteConfirmModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [cat, setCat] = useState('Servicios');
+  const [persona, setPersona] = useState('Juan');
+  const [desc, setDesc] = useState('Edenor — factura luz');
+  const [confirmado, setConfirmado] = useState(false);
+
   return (
-    <span className={`cmp-estado-badge cmp-estado--${estado}`}>{estado}</span>
-  );
-}
+    <FullModal>
+      <ModalBar title="Confirmar comprobante" onClose={onClose} />
+      <Hero
+        eyebrow="Comprobante detectado"
+        amount={<Money value={38900} colored={false} />}
+        desc="EDENOR S.A."
+        tags={['Servicios', 'Vence 28/06', 'ARS']}
+      />
+      <Drawer>
+        <StepIndicator steps={['Subir', 'Revisar', 'Confirmar']} current={confirmado ? 2 : 1} />
 
-// F6.9.8 — etiqueta persistente de la razón del match en el card ya resuelto.
-// Lee propuestaMatch (sobrevive al estado vinculado: confirmarRama1/cargarMovimientoDesdeComprobante
-// solo tocan `estado`) para conservar el "por qué" después de resolver.
-function RazonVinculado({ pm }: { pm: Comprobante['propuestaMatch'] }) {
-  if (!pm) return null;
-  let texto: string;
-  let clase: string;
-  switch (pm.rama) {
-    case 0:
-      texto = 'Ya cargado';
-      clase = 'cmp-tipo--dedup';
-      break;
-    case 1:
-      texto = pm.origenReconciliacion ? 'Pagó una factura' : 'Vinculado a un movimiento';
-      clase = pm.origenReconciliacion ? 'cmp-tipo--reconc' : 'cmp-tipo--dedup';
-      break;
-    case 2:
-      texto = pm.esAdicional ? 'Pago adicional' : 'Cumplió un gasto esperado';
-      clase = 'cmp-tipo--nuevo';
-      break;
-    case 3:
-      texto = 'Cargado como nuevo';
-      clase = 'cmp-tipo--nuevo';
-      break;
-    default:
-      return null;
-  }
-  return <span className={`cmp-propuesta-tipo ${clase}`}>{texto}</span>;
-}
+        <SectionLabel>Datos extraídos</SectionLabel>
+        <FieldRow label="Descripción" value={desc} onChange={e => setDesc(e.target.value)} />
+        <FieldRow label="Comercio" value="EDENOR S.A." readOnly />
+        <FieldRow label="CUIT" value="30-65511620-2" readOnly />
+        <FieldRow label="Vencimiento" value="2026-06-28" readOnly last />
 
-// ── Resumen de datosExtraidos ─────────────────────────────────────────────────
+        <SectionLabel>Clasificación</SectionLabel>
+        <FieldRow label="Categoría" options={['Servicios', 'Vivienda', 'Supermercado', 'Transporte', 'Salud']} value={cat} onChange={e => setCat(e.target.value)} />
+        <FieldRow label="Persona" options={['Juan', 'María', 'Sofía']} value={persona} onChange={e => setPersona(e.target.value)} last />
 
-function DatosResumen({ d }: { d: DatosExtraidos }) {
-  return (
-    <div className="cmp-datos">
-      <span className="cmp-datos-tipo">{d.tipoDocumento}</span>
-      {d.comercioRazonSocial && <span>{d.comercioRazonSocial}</span>}
-      {d.montoTotal != null && <span className="cmp-datos-monto">{fmtMonto(d.montoTotal, d.moneda)}</span>}
-      {d.fecha && <span className="cmp-datos-fecha">{d.fecha}</span>}
-      {d.vencimientos && d.vencimientos.length > 1 && (
-        <span className="cmp-nota">
-          {d.vencimientos.length} vencimientos — 2º venc: {fmtMonto(d.vencimientos[1].monto, d.moneda)}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ── Propuesta por rama ────────────────────────────────────────────────────────
-
-interface PropuestaProps {
-  comp: Comprobante;
-  items: ExpectedItem[];
-  memberId: string;
-  miembro: import('../types').FamiliaMiembro;
-  esAdmin: boolean;
-}
-
-function PropuestaCard({ comp, items, memberId, miembro, esAdmin }: PropuestaProps) {
-  const pm = comp.propuestaMatch;
-  const d  = comp.datosExtraidos;
-  const { clasificar, cargando: cargandoDict } = useDiccionario();
-  const [confirmando,  setConfirmando]  = useState(false);
-  const [mostrarAlta,  setMostrarAlta]  = useState(false);
-  const [candidatoSel, setCandidatoSel] = useState<string>('');
-  const [errorLocal,   setErrorLocal]   = useState<string | null>(null);
-  const autoConfirmadoRef = useRef(false);
-
-  // Rama 1 candidato único: vincular automáticamente, sin acción del usuario
-  // Rama 1 (conciliación de obligaciones) es admin-only por decisión (F6.9.11) — se gatea acá.
-  useEffect(() => {
-    if (!esAdmin) return;
-    if (pm?.rama !== 1 || !pm.movimientoId) return;
-    if (autoConfirmadoRef.current) return;
-    autoConfirmadoRef.current = true;
-    setConfirmando(true);
-    confirmarRama1(comp, pm.movimientoId, pm.itemEsperadoId).then(res => {
-      setConfirmando(false);
-      if (!res.ok) setErrorLocal(res.error.message);
-      // si ok, onSnapshot actualiza el card a estado vinculado
-    });
-  // comp.id es estable para la vida de este card
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.id]);
-
-  if (!pm || !d) return null;
-
-  // Rama 0: dedup por hash — este archivo ya generó un movimiento, no hay nada nuevo
-  if (pm.rama === 0) {
-    const di = pm.dedupInfo;
-    return (
-      <div className="cmp-propuesta cmp-propuesta--0">
-        <span className="cmp-propuesta-tipo cmp-tipo--dedup">Ya cargado</span>
-        <span className="cmp-propuesta-label">
-          Este archivo ya había generado un movimiento — no se cargó de nuevo
-          {di?.mes   && ` · ${di.mes}`}
-          {di?.monto != null && ` · ${fmtMonto(di.monto, d.moneda ?? 'ARS')}`}
-        </span>
-      </div>
-    );
-  }
-
-  // Rama 1: movimiento ya existe — conciliación de obligaciones es admin-only (F6.9.11)
-  if (pm.rama === 1) {
-    if (!esAdmin) {
-      return (
-        <div className="cmp-propuesta cmp-propuesta--1">
-          <span className="cmp-propuesta-tipo cmp-tipo--reconc">Pagó una obligación</span>
-          <span className="cmp-propuesta-label">Coincide con una obligación — un admin la concilia</span>
+        <div style={{ margin: '16px 0' }}>
+          {confirmado
+            ? <Message kind="ok" title="Confirmado.">Movimiento registrado y conciliado con el esperado "Edenor — luz".</Message>
+            : <Message kind="wait" title="Match propuesto.">Coincide con el ítem esperado <strong>Edenor — luz</strong> de Junio.</Message>}
         </div>
-      );
-    }
+      </Drawer>
+      <CtaBar>
+        {confirmado
+          ? <Button variant="primary" size="cta" onClick={onDone}>Listo</Button>
+          : <>
+              <Button variant="green" size="cta" onClick={() => setConfirmado(true)}>Confirmar movimiento</Button>
+              <Button variant="secondary" size="cta" onClick={onClose}>Descartar</Button>
+            </>}
+      </CtaBar>
+    </FullModal>
+  );
+}
 
-    // Múltiples candidatos: elección real del usuario
-    if (!pm.movimientoId && pm.candidatos && pm.candidatos.length > 0) {
-      const movCands = pm.candidatos.filter(c => c.tipo === 'movimiento');
-      return (
-        <div className="cmp-propuesta cmp-propuesta--1">
-          <span className="cmp-propuesta-tipo cmp-tipo--reconc">Pagó una obligación</span>
-          <span className="cmp-propuesta-label">
-            Este pago salda una obligación abierta — elegí cuál movimiento
-          </span>
-          <div className="cmp-candidatos">
-            {movCands.map(c => (
-              <label key={c.id} className="cmp-candidato">
-                <input
-                  type="radio"
-                  name={`cand-${comp.id}`}
-                  value={c.id}
-                  checked={candidatoSel === c.id}
-                  onChange={() => setCandidatoSel(c.id)}
-                />
-                <span className="cmp-candidato-info">
-                  {c.descripcion ?? `${c.id.slice(0, 16)}…`}
-                  {c.monto != null && ` · ${fmtMonto(c.monto, c.moneda ?? 'ARS')}`}
-                  {c.fecha && ` · ${c.fecha}`}
-                </span>
-                {c.score != null && <span className="cmp-score">score {c.score}</span>}
-              </label>
-            ))}
+// ── Modal: Alta manual ────────────────────────────────────────────────────────
+
+function ManualGastoModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [tipo, setTipo] = useState<'Gasto' | 'Ingreso'>('Gasto');
+  const [moneda, setMoneda] = useState<'ARS' | 'USD'>('ARS');
+  const [monto, setMonto] = useState('12500');
+  const [cat, setCat] = useState('Supermercado');
+  const [pagado, setPagado] = useState(true);
+  const montoNum = Number(monto) || 0;
+
+  return (
+    <FullModal>
+      <ModalBar title="Nuevo movimiento" onClose={onClose} />
+      <Hero
+        eyebrow={tipo === 'Gasto' ? 'Gasto manual' : 'Ingreso manual'}
+        amount={<Money value={montoNum} currency={moneda} tipo={tipo} />}
+        desc={cat}
+        tags={[moneda, pagado ? 'Pagado' : 'A pagar']}
+      />
+      <Drawer>
+        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-strong)' }}>Tipo</span>
+            <RadioChip options={['Gasto', 'Ingreso']} value={tipo} onChange={v => setTipo(v as 'Gasto' | 'Ingreso')} name="tipo" />
           </div>
-          {errorLocal && <span className="cmp-error-local">{errorLocal}</span>}
-          <button
-            className="cmp-btn-confirmar"
-            disabled={!candidatoSel || confirmando}
-            onClick={async () => {
-              if (!candidatoSel) return;
-              setConfirmando(true);
-              setErrorLocal(null);
-              const res = await confirmarRama1(comp, candidatoSel, pm.itemEsperadoId);
-              setConfirmando(false);
-              if (!res.ok) setErrorLocal(res.error.message);
-            }}
-          >
-            {confirmando ? 'Confirmando…' : 'Confirmar selección'}
-          </button>
-        </div>
-      );
-    }
-
-    // Candidato único: auto-vinculando en background (ver useEffect arriba)
-    // En el flujo de comprobantes la rama 1 es SIEMPRE reconciliación por payee (origenReconciliacion).
-    return (
-      <div className="cmp-propuesta cmp-propuesta--1">
-        {errorLocal ? (
-          <span className="cmp-error-local">{errorLocal}</span>
-        ) : pm.origenReconciliacion ? (
-          <>
-            <span className="cmp-propuesta-tipo cmp-tipo--reconc">Pagó una factura</span>
-            <span className="cmp-propuesta-label">
-              {confirmando
-                ? 'Reconciliando con la obligación abierta…'
-                : 'Saldó una obligación abierta — no se creó un movimiento nuevo'}
-            </span>
-          </>
-        ) : (
-          <span className="cmp-propuesta-label">
-            {confirmando ? 'Vinculando…' : 'Vinculado a un movimiento existente'}
-          </span>
-        )}
-      </div>
-    );
-  }
-
-  // Ramas 2 y 3: para el usuario el gesto es idéntico — alta pre-clasificada
-  // payee del comprobante: factura → emisor (comercioRazonSocial); transferencia → destinatario (destinoNombre)
-  // payee del comprobante: factura → emisor (comercioRazonSocial); transferencia/pago → destinatario (destinoNombre).
-  // Gateado por tipo, NO con ??: una billetera (Mercado Pago) llena comercioRazonSocial con su marca
-  // (truthy), lo que bloquearía el fallback. En pagos el payee es SIEMPRE el destinatario.
-  const esPagoDoc = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
-  const descripcionCruda = esPagoDoc
-    ? (d.destinoNombre   ?? d.comercioRazonSocial ?? undefined)
-    : (d.comercioRazonSocial ?? d.destinoNombre   ?? undefined);
-  const sugerencia       = descripcionCruda ? clasificar(descripcionCruda) : null;
-  const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
-  const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
-
-  const esPago = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
-
-  const preloadBase = {
-    tipo:                'Gasto' as const,
-    fecha:               d.fecha         ?? undefined,
-    descripcion:         descripcionFinal,
-    descripcionOriginal: (descripcionCruda && descripcionFinal !== descripcionCruda) ? descripcionCruda : undefined,
-    moneda:              d.moneda,
-    monto:               d.montoTotal != null ? String(d.montoTotal) : undefined,
-    hashPdf:             comp.hashPdf,
-    refStoragePdf:       comp.refStoragePdf,
-    persona:             memberId,
-    categoria:           pm.categoriaPrellena    ?? sugerenciaValida?.categoria    ?? undefined,
-    subcategoria:        pm.subcategoriaPrellena ?? sugerenciaValida?.subcategoria ?? undefined,
-    etiqueta:            pm.etiquetaPrellena     ?? sugerenciaValida?.etiqueta     ?? undefined,
-    banco:               'Efectivo' as const,
-    confirmadoPago:      esPago ? confirmadoPagoPorFecha(d.fecha) : false,
-    // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
-    destinoCbu:          d.destinoCbu    ?? null,
-    destinoCuit:         d.destinoCuit   ?? null,
-    destinoAlias:        d.destinoAlias  ?? null,
-    destinoNombre:       d.destinoNombre ?? null,
-    vencimientos:        d.vencimientos  ?? null,
-    // F6.x descartar — stamp de procedencia para distinguir de rama 1
-    origenComprobanteId: comp.id,
-  };
-
-  const esperado = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
-
-  const preload = pm.rama === 2
-    ? {
-        ...preloadBase,
-        banco:          undefined,
-        categoria:      esperado?.categoria    ?? undefined,
-        subcategoria:   esperado?.subcategoria ?? undefined,
-        itemEsperadoId: pm.itemEsperadoId,
-      }
-    : preloadBase;
-
-  return (
-    <div className="cmp-propuesta cmp-propuesta--accion">
-      <span className="cmp-propuesta-tipo cmp-tipo--nuevo">
-        {pm.rama === 2
-          ? (pm.esAdicional ? 'Pago adicional de un gasto esperado' : 'Cumple un gasto esperado')
-          : 'Movimiento nuevo'}
-      </span>
-      {(pm.categoriaPrellena || sugerenciaValida) && <span className="cmp-preclasificado">Pre-clasificado</span>}
-      {!mostrarAlta && (
-        <button
-          className="cmp-btn-confirmar"
-          disabled={cargandoDict}
-          onClick={() => setMostrarAlta(true)}
-        >
-          {cargandoDict ? 'Cargando…' : 'Revisar y cargar'}
-        </button>
-      )}
-      {mostrarAlta && (
-        <AltaMovimiento
-          key={comp.id}
-          memberId={memberId}
-          miembro={miembro}
-          preload={preload}
-          onGuardarPayload={async (payload) => {
-            const res = await cargarMovimientoDesdeComprobante(comp.id, payload);
-            return { ok: res.ok, error: res.ok ? undefined : res.error };
-          }}
-          onGuardado={() => setMostrarAlta(false)}
-          onCancelar={() => setMostrarAlta(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Tarjeta de comprobante ────────────────────────────────────────────────────
-
-function ComprobanteCard({
-  comp, items, memberId, miembro, esAdmin,
-}: {
-  comp:     Comprobante;
-  items:    ExpectedItem[];
-  memberId: string;
-  miembro:  import('../types').FamiliaMiembro;
-  esAdmin:  boolean;
-}) {
-  const [descartando,   setDescartando]   = useState(false);
-  const [errDescartar,  setErrDescartar]  = useState<string | null>(null);
-  const [advertencia,   setAdvertencia]   = useState<string | null>(null);
-
-  async function handleDescartar() {
-    if (!confirm('¿Descartar este comprobante? Se borra el archivo y su movimiento si fue creado desde este comprobante.')) return;
-    setDescartando(true);
-    setErrDescartar(null);
-    const res = await descartarEntrada('comprobante', comp.id);
-    setDescartando(false);
-    if (!res.ok) { setErrDescartar(res.error.message); return; }
-    if (res.data.advertenciaDestino) {
-      setAdvertencia('Destino aprendido — revisá /destinos manualmente si querés limpiarlo.');
-    }
-  }
-
-  return (
-    <div className={`cmp-card cmp-card--${comp.estado}`}>
-      <div className="cmp-card-header">
-        <BadgeEstado estado={comp.estado} />
-        <span className="cmp-card-nombre">{comp.nombreArchivo}</span>
-        <span className="cmp-card-size">{(comp.tamano / 1024).toFixed(0)} KB</span>
-        {esAdmin && (
-          <button
-            className="cmp-btn-descartar"
-            onClick={handleDescartar}
-            disabled={descartando}
-            title="Descartar comprobante"
-          >
-            {descartando ? '…' : '✕'}
-          </button>
-        )}
-      </div>
-      {advertencia  && <p className="cmp-advertencia">{advertencia}</p>}
-      {errDescartar && <p className="cmp-error-detalle">{errDescartar}</p>}
-      {comp.datosExtraidos && <DatosResumen d={comp.datosExtraidos} />}
-      {comp.estado === 'error' && comp.errorExtraccion && (
-        <p className="cmp-error-detalle">{comp.errorExtraccion}</p>
-      )}
-      {comp.estado === 'extraido' && comp.propuestaMatch && (
-        <PropuestaCard comp={comp} items={items} memberId={memberId} miembro={miembro} esAdmin={esAdmin} />
-      )}
-      {comp.estado === 'extraido' && !comp.propuestaMatch && (
-        <p className="cmp-nota">Calculando match…</p>
-      )}
-      {comp.estado === 'vinculado' && comp.propuestaMatch && (
-        <div className="cmp-card-razon">
-          <RazonVinculado pm={comp.propuestaMatch} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Bandeja de entrada ────────────────────────────────────────────────────────
-
-function BadgeEntrante({ estado }: { estado: string }) {
-  return <span className={`cmp-estado-badge bnd-estado--${estado}`}>{estado}</span>;
-}
-
-function EntranteCard({
-  e,
-  esAdmin,
-}: {
-  e: Entrante;
-  esAdmin: boolean;
-}) {
-  const [resolviendo, setResolviendo] = useState(false);
-  const [errLocal,    setErrLocal]    = useState<string | null>(null);
-
-  async function resolver(tipo: 'comprobante' | 'resumen') {
-    setResolviendo(true);
-    setErrLocal(null);
-    const res = await resolverEntranteAmbiguo(e.hash, tipo);
-    setResolviendo(false);
-    if (!res.ok) setErrLocal(res.error.message);
-  }
-
-  const nombre = e.nombreArchivo ?? e.hash.slice(0, 16) + '…';
-  const kb     = e.tamano != null ? `${(e.tamano / 1024).toFixed(0)} KB` : '';
-
-  return (
-    <div className={`bnd-card bnd-card--${e.estado}`}>
-      <div className="bnd-card-header">
-        <BadgeEntrante estado={e.estado} />
-        <span className="bnd-nombre">{nombre}</span>
-        {kb && <span className="bnd-size">{kb}</span>}
-      </div>
-
-      {e.motivoDeteccion && (
-        <p className="bnd-motivo">{e.motivoDeteccion}</p>
-      )}
-
-      {e.estado === 'ruteado' && e.destino && (
-        <p className="bnd-destino">
-          → <span className="bnd-col">{e.destino.coleccion}</span>
-        </p>
-      )}
-
-      {e.estado === 'ambiguo' && esAdmin && (
-        <div className="bnd-resolver">
-          <span className="bnd-resolver-label">¿Qué es este archivo?</span>
-          <div className="bnd-resolver-btns">
-            <button
-              className="bnd-btn bnd-btn--comp"
-              disabled={resolviendo}
-              onClick={() => resolver('comprobante')}
-            >
-              Comprobante
-            </button>
-            <button
-              className="bnd-btn bnd-btn--res"
-              disabled={resolviendo}
-              onClick={() => resolver('resumen')}
-            >
-              Resumen tarjeta
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-strong)' }}>Moneda</span>
+            <RadioChip options={['ARS', 'USD']} value={moneda} onChange={v => setMoneda(v as 'ARS' | 'USD')} name="moneda" />
           </div>
-          {errLocal && <span className="cmp-error-local">{errLocal}</span>}
         </div>
-      )}
-    </div>
+
+        <SectionLabel>Detalle</SectionLabel>
+        <FieldRow label="Descripción" placeholder="Ej. Supermercado Coto" />
+        <FieldRow label="Monto" value={monto} onChange={e => setMonto(e.target.value.replace(/[^0-9]/g, ''))} placeholder="0" />
+        <FieldRow label="Fecha" value="2026-06-22" readOnly />
+        <FieldRow label="Categoría" options={['Supermercado', 'Vivienda', 'Servicios', 'Transporte', 'Salud', 'Ocio']} value={cat} onChange={e => setCat(e.target.value)} />
+        <FieldRow label="Persona" options={['Juan', 'María', 'Sofía']} value="María" onChange={() => {}} last />
+
+        <SectionLabel>Estado</SectionLabel>
+        <FieldRow label="¿Ya pagado?" last>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <span style={{ fontSize: 15, color: 'var(--color-text-sec)', fontWeight: 600 }}>{pagado ? 'Sí' : 'No'}</span>
+            <input type="checkbox" checked={pagado} onChange={e => setPagado(e.target.checked)} style={{ width: 20, height: 20, accentColor: 'var(--color-accent)', cursor: 'pointer' }} />
+          </label>
+        </FieldRow>
+        <div style={{ height: 12 }} />
+      </Drawer>
+      <CtaBar>
+        <Button variant="primary" size="cta" onClick={onDone}>Guardar movimiento</Button>
+      </CtaBar>
+    </FullModal>
   );
 }
 
 // ── Vista principal ───────────────────────────────────────────────────────────
 
-type ResultadoEnvio =
-  | { tipo: 'enviado';   nombre: string }
-  | { tipo: 'duplicado'; nombre: string }
-  | { tipo: 'error';     mensaje: string };
+function EntranteRow({ it, onClick }: { it: EntranteEjemplo; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+      background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-base)',
+    }}>
+      <span style={{ color: COLOR_POR_ESTADO[it.estado], flexShrink: 0, display: 'inline-flex' }}>
+        <Icon name={ICON_POR_ESTADO[it.estado]} size={20} />
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.nombre}</span>
+        <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-sec)' }}>{it.tipo} · {it.detalle}</span>
+      </span>
+      <Icon name="chevron-right" size={18} color="var(--gf-gray-300)" />
+    </button>
+  );
+}
 
 export default function Comprobantes() {
-  const { memberId, miembro } = useMiembroCtx();
+  const { miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
-
-  // Upload
-  const [archivo,   setArchivo]   = useState<File | null>(null);
-  const [subiendo,  setSubiendo]  = useState(false);
-  const [resultado, setResultado] = useState<ResultadoEnvio | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Bandeja
-  const [entrantes, setEntrantes] = useState<Entrante[]>([]);
-  useEffect(() => suscribirEntrantes(memberId, esAdmin, setEntrantes), [memberId, esAdmin]);
-
-  // Share-target (F6.6 → F6.7): redirige a entrantes con origen:'share_target'
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has('share')) return;
-    window.history.replaceState({}, '', window.location.pathname);
-    leerYBorrarArchivoCompartido().then(file => {
-      if (!file) return;
-      const TIPOS = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-      if (!TIPOS.includes(file.type)) {
-        setResultado({ tipo: 'error', mensaje: `Tipo no permitido: ${file.type}` });
-        return;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        setResultado({ tipo: 'error', mensaje: 'El archivo supera los 10 MB.' });
-        return;
-      }
-      setSubiendo(true);
-      setResultado(null);
-      subirEntrante(file, memberId, 'share_target')
-        .then(res => {
-          setSubiendo(false);
-          if (!res.ok)         setResultado({ tipo: 'error',     mensaje: res.error.message });
-          else if (res.duplicado) setResultado({ tipo: 'duplicado', nombre: res.entrante.nombreArchivo ?? file.name });
-          else                 setResultado({ tipo: 'enviado',   nombre: file.name });
-        })
-        .catch(err => {
-          setSubiendo(false);
-          setResultado({ tipo: 'error', mensaje: (err as Error).message });
-        });
-    }).catch(() => {});
-  }, [memberId]);
-
-  // Lista — onSnapshot
-  const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes(memberId, esAdmin);
-  const { items } = useItemsEsperados();
-  const [mostrarAltaManual, setMostrarAltaManual] = useState(false);
-
-  async function handleSubir() {
-    if (!archivo) return;
-    setSubiendo(true);
-    setResultado(null);
-    const res = await subirEntrante(archivo, memberId, 'app');
-    setSubiendo(false);
-    if (!res.ok) {
-      setResultado({ tipo: 'error', mensaje: res.error.message });
-    } else if (res.duplicado) {
-      setResultado({ tipo: 'duplicado', nombre: res.entrante.nombreArchivo ?? archivo.name });
-    } else {
-      setResultado({ tipo: 'enviado', nombre: archivo.name });
-      setArchivo(null);
-      if (inputRef.current) inputRef.current.value = '';
-    }
-  }
+  const [modal, setModal] = useState<'comprobante' | 'manual' | null>(null);
 
   return (
     <div className="cmp">
-      <h1 className="cmp-titulo">Carga</h1>
-
-      {/* ── Upload ─────────────────────────────────────────────────────── */}
-      <div className="cmp-subida">
-        <label className="cmp-label" htmlFor="cmp-file">
-          Seleccioná un archivo (PDF o imagen, máx. 10 MB)
-        </label>
-        <input
-          id="cmp-file"
-          ref={inputRef}
-          type="file"
-          accept="application/pdf,image/*"
-          className="cmp-input"
-          onChange={e => {
-            setArchivo(e.target.files?.[0] ?? null);
-            setResultado(null);
-          }}
-        />
-        {archivo && (
-          <p className="cmp-archivo-sel">
-            {archivo.name} — {(archivo.size / 1024).toFixed(0)} KB
-          </p>
-        )}
-        <button
-          className="cmp-btn"
-          onClick={handleSubir}
-          disabled={!archivo || subiendo}
-        >
-          {subiendo ? 'Subiendo…' : 'Subir'}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <button onClick={() => setModal('comprobante')} style={{
+          border: '2px dashed var(--gf-gray-300)', borderRadius: 'var(--radius-2xl)', background: '#fff',
+          padding: '30px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+          cursor: 'pointer', fontFamily: 'var(--font-base)', width: '100%',
+        }}>
+          <span style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--gf-emerald-50)', color: 'var(--color-accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="file-up" size={24} />
+          </span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text)' }}>Subir comprobante o resumen</span>
+          <span style={{ fontSize: 13, color: 'var(--color-text-sec)', textAlign: 'center' }}>PDF o foto. Extraemos monto, comercio y fecha automáticamente.</span>
+          <span style={{ marginTop: 4, display: 'inline-flex', gap: 8 }}>
+            <Badge tone="neutral">PDF</Badge><Badge tone="neutral">JPG</Badge><Badge tone="neutral">Compartir ↗</Badge>
+          </span>
         </button>
+
+        <Message kind="wait" title="1 procesando.">Edenor_factura_06.pdf — extrayendo datos.</Message>
+
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>Entrantes recientes</div>
+          <div style={{ background: '#fff', border: '1px solid var(--color-border-card)', borderRadius: 12, overflow: 'hidden' }}>
+            {EXAMPLE_ENTRANTES.map((it, idx) => (
+              <div key={it.id} style={{ borderBottom: idx < EXAMPLE_ENTRANTES.length - 1 ? '1px solid var(--gf-gray-100)' : 'none' }}>
+                <EntranteRow it={it} onClick={() => setModal('comprobante')} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <Button variant="secondary" size="cta" onClick={() => setModal('manual')}>Cargar manualmente</Button>
+        <div style={{ height: 4 }} />
+
+        {esAdmin && <SeccionTarjetas />}
       </div>
 
-      {resultado?.tipo === 'enviado' && (
-        <div className="cmp-resultado cmp-resultado--ok">
-          <strong>{resultado.nombre}</strong> en bandeja — será ruteado en breve.
-        </div>
-      )}
-      {resultado?.tipo === 'duplicado' && (
-        <div className="cmp-resultado cmp-resultado--dup">
-          <strong>{resultado.nombre}</strong> ya estaba cargado — no se procesa de nuevo (mismo archivo).
-        </div>
-      )}
-      {resultado?.tipo === 'error' && (
-        <div className="cmp-resultado cmp-resultado--err">
-          Error al subir: {resultado.mensaje}
-        </div>
-      )}
-
-      {/* ── Bandeja de entrada ─────────────────────────────────────────── */}
-      {entrantes.length > 0 && (
-        <section className="bnd-seccion">
-          <h2 className="cmp-lista-titulo">Bandeja de entrada</h2>
-          {entrantes.map(e => (
-            <EntranteCard key={e.hash} e={e} esAdmin={esAdmin} />
-          ))}
-        </section>
-      )}
-
-      {/* ── Alta manual (overlay; se abre con el FAB +) ─────────────────── */}
-      {mostrarAltaManual && (
-        <AltaMovimiento
-          memberId={memberId}
-          miembro={miembro}
-          preload={{ esManual: true }}
-          onGuardado={() => setMostrarAltaManual(false)}
-          onCancelar={() => setMostrarAltaManual(false)}
-        />
-      )}
-
-      {/* ── Lista ──────────────────────────────────────────────────────── */}
-      <section className="cmp-lista">
-        <h2 className="cmp-lista-titulo">Historial — Comprobantes y facturas</h2>
-        {cargandoLista && <p className="cmp-nota">Cargando…</p>}
-        {errorLista    && <p className="cmp-error-detalle">Error: {errorLista}</p>}
-        {!cargandoLista && comprobantes.length === 0 && (
-          <p className="cmp-nota">Sin comprobantes aún.</p>
-        )}
-        {comprobantes.map(comp => (
-          <ComprobanteCard
-            key={comp.id}
-            comp={comp}
-            items={items}
-            memberId={memberId}
-            miembro={miembro}
-            esAdmin={esAdmin}
-          />
-        ))}
-      </section>
-
-      {/* ── Resúmenes de tarjeta (solo admin) ──────────────────────────── */}
-      {esAdmin && <SeccionTarjetas />}
-
-      {/* ── FAB alta manual — entrada única, no gateada por rol ─────────── */}
-      <button
-        className="cmp-fab"
-        onClick={() => setMostrarAltaManual(true)}
-        aria-label="Nuevo movimiento manual"
-      >
-        +
-      </button>
+      {modal === 'comprobante' && <ComprobanteConfirmModal onClose={() => setModal(null)} onDone={() => setModal(null)} />}
+      {modal === 'manual' && <ManualGastoModal onClose={() => setModal(null)} onDone={() => setModal(null)} />}
     </div>
   );
 }

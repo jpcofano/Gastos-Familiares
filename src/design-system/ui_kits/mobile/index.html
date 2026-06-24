@@ -1,0 +1,120 @@
+<!-- @dsCard group="Mobile (legacy)" viewport="460x900" name="App móvil completa" subtitle="Inicio · Resumen · Cargar · Perfil con bottom-nav + flujos de captura" -->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gastos Familiares — móvil</title>
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { background: #0d1117; font-family: var(--font-base); color: var(--color-text); }
+  #app { min-height: 100%; }
+  .fab {
+    position: absolute; right: 16px; bottom: 80px; z-index: 5;
+    width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--color-accent); color: #fff; box-shadow: 0 8px 24px rgba(6,95,70,.45);
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: transform .1s;
+  }
+  .fab:active { transform: scale(.94); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="MobileShell.jsx"></script>
+<script type="text/babel" src="DashboardMobile.jsx"></script>
+<script type="text/babel" src="ResumenMobile.jsx"></script>
+<script type="text/babel" src="CargaMobile.jsx"></script>
+<script type="text/babel" src="TarjetasMobile.jsx"></script>
+<script type="text/babel" src="PerfilMobile.jsx"></script>
+<script type="text/babel" src="PerfilScreens.jsx"></script>
+<script type="text/babel" src="ComprobanteConfirm.jsx"></script>
+<script type="text/babel" src="ManualGasto.jsx"></script>
+
+<script type="text/babel">
+  const TITLES = {
+    inicio: { t: 'Hola, María', s: 'Familia Cofano' },
+    resumen: { t: 'Resumen', s: 'Gastos del mes' },
+    cargar: { t: 'Cargar', s: 'Comprobantes y resúmenes' },
+    perfil: { t: 'Tu Perfil', s: 'Cuenta y configuración' },
+    tarjetas: { t: 'Tarjetas', s: 'Resúmenes de tarjeta' },
+  };
+
+  const SUB_TITLES = {
+    miembros:   { t: 'Miembros', s: 'Quiénes integran la familia' },
+    esperados:  { t: 'Pagos esperados', s: 'Recurrentes del mes' },
+    categorias: { t: 'Categorías', s: 'Cómo se clasifican los gastos' },
+    medios:     { t: 'Medios de pago', s: 'Bancos, billeteras y efectivo' },
+    tc:         { t: 'Tipo de cambio', s: 'USD → ARS' },
+  };
+
+  function App() {
+    const {
+      Phone, AppBar, Screen, BottomNav, Icon,
+      DashboardMobile, ResumenMobile, CargaMobile, TarjetasMobile, PerfilMobile,
+      MiembrosMobile, EsperadosConfigMobile, CategoriasMobile, MediosPagoMobile, TipoCambioMobile,
+      ComprobanteConfirm, ManualGasto,
+    } = window;
+    const [tab, setTab] = React.useState('inicio');
+    const [sub, setSub] = React.useState(null); // perfil sub-screen
+    const [modal, setModal] = React.useState(null); // 'manual' | 'comprobante'
+    const [mes, setMes] = React.useState('2026-06');
+
+    const goTab = (t) => { setSub(null); setTab(t); };
+    const onNav = (dest) => { if (dest === 'tarjetas') { setSub(null); setTab('tarjetas'); } else setSub(dest); };
+
+    // Sub-screen takes over (reached from Perfil)
+    if (sub) {
+      const meta = SUB_TITLES[sub];
+      const map = { miembros: <MiembrosMobile />, esperados: <EsperadosConfigMobile />, categorias: <CategoriasMobile />, medios: <MediosPagoMobile />, tc: <TipoCambioMobile /> };
+      return (
+        <Phone>
+          <AppBar title={meta.t} sub={meta.s} onBack={() => setSub(null)} />
+          <Screen key={sub}>{map[sub]}</Screen>
+          <BottomNav active="perfil" onSelect={goTab} />
+        </Phone>
+      );
+    }
+
+    const view = tab === 'tarjetas' ? 'tarjetas' : tab;
+    const meta = TITLES[view];
+
+    let screen;
+    if (view === 'inicio') screen = <DashboardMobile mes={mes} setMes={setMes} />;
+    else if (view === 'resumen') screen = <ResumenMobile />;
+    else if (view === 'cargar') screen = <CargaMobile onAbrir={() => setModal('comprobante')} />;
+    else if (view === 'tarjetas') screen = <TarjetasMobile />;
+    else screen = <PerfilMobile onNav={onNav} />;
+
+    const headerRight = view === 'resumen'
+      ? <button onClick={() => setTab('tarjetas')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--gf-gray-100)', border: 'none', borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 600, color: 'var(--color-text-strong)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}><Icon name="credit-card" size={15} /> Tarjetas</button>
+      : null;
+
+    return (
+      <Phone>
+        <AppBar title={meta.t} sub={meta.s} onBack={view === 'tarjetas' ? () => setTab('resumen') : undefined} right={headerRight} />
+        <Screen key={view}>{screen}</Screen>
+        {!modal && (view === 'inicio' || view === 'resumen') && (
+          <button className="fab" onClick={() => setModal('manual')} aria-label="Nuevo movimiento">
+            <Icon name="plus" size={26} />
+          </button>
+        )}
+        <BottomNav active={tab === 'tarjetas' ? 'resumen' : tab} onSelect={goTab} />
+        {modal === 'comprobante' && <ComprobanteConfirm onClose={() => setModal(null)} onDone={() => { setModal(null); setTab('resumen'); }} />}
+        {modal === 'manual' && <ManualGasto onClose={() => setModal(null)} onDone={() => { setModal(null); setTab('inicio'); }} />}
+      </Phone>
+    );
+  }
+  ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+</script>
+</body>
+</html>

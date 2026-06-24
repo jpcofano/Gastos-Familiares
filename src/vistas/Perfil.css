@@ -1,7 +1,7 @@
-.dash {
+.perfil {
   max-width: var(--app-max, 900px);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }

@@ -23,65 +23,12 @@ body {
   font-weight: 700;
 }
 
-/* Layout autenticado: header fijo + contenido scrollable */
-.shell-layout {
+/* Layout autenticado — shell móvil F9.2: AppBar + Screen scrolleable + BottomNav fijo */
+.shell-phone {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
-}
-
-.shell-header {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0 1rem;
-  height: 3.5rem;
-  background: #1e3a5f;
-  color: #fff;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.shell-header-title {
-  font-weight: 700;
-  font-size: 1rem;
-}
-
-/* Nav */
-.shell-nav {
-  display: flex;
-  gap: 0.25rem;
-  flex: 1;
-  margin-left: 0.5rem;
-}
-
-.shell-nav-link {
-  color: rgba(255,255,255,0.75);
-  text-decoration: none;
-  font-size: 0.875rem;
-  padding: 0.3rem 0.7rem;
-  border-radius: 4px;
-  transition: background 0.15s, color 0.15s;
-}
-
-.shell-nav-link:hover { color: #fff; background: rgba(255,255,255,0.1); }
-
-.shell-nav-link--active { color: #fff; background: rgba(255,255,255,0.18); font-weight: 600; }
-
-.shell-header-user {
-  font-size: 0.9rem;
-  opacity: 0.85;
-}
-
-.shell-content {
-  flex: 1;
-  padding: 1.5rem 1rem;
-}
-
-.shell-placeholder {
-  color: #888;
-  font-style: italic;
+  background: var(--color-bg, #f5f5f5);
 }
 
 /* Botones */

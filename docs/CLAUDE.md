@@ -22,7 +22,15 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Fase 7 — Cutover y archivo del Sheet: pendiente.
 - Fase 9 — Rediseño visual sobre el design system (`src/design-system`): F9.0/F9.0b/F9.0c
   (doc-only: decisiones de diseño, auditoría de paridad legacy, auditoría app+plan de
-  cableado) cerrado. Resto de F9.x en curso.
+  cableado) cerrado. F9.1 (tokens.css importado globalmente) cerrado. F9.2 (shell móvil:
+  AppBar/Screen/BottomNav/Fab + Icon sobre lucide-react + scaffold de modal de captura +
+  los 14 componentes del DS portados a TSX) cerrado. F9.3 (pantallas, PRs visuales con
+  datos de ejemplo, ver sección de detalle más abajo): Dashboard, Resumen, Cargar (+
+  modales Confirmar comprobante/Alta manual), Perfil + 4 sub-pantallas — cerrado. Tarjetas
+  no es pantalla propia: vive dentro de Cargar (`SeccionTarjetas`, real, sin cambios).
+  **Pendiente: la PR de cableado de cada pantalla** (reemplazar datos de ejemplo por reales;
+  el detalle de qué hook falta en cada caso está en el changelog de cada pantalla, sección
+  "Sistema de diseño / UI" más abajo).
 
 ## Decisiones cerradas
 
@@ -332,6 +340,116 @@ F9.1 (tokens → app): `src/styles/tokens.css` (colors+typography+spacing+status
 importado globalmente en `src/main.tsx`. Variables `--gf-*` / `--color-*` / `--space-*` /
 `--radius-*` / `--shadow-*` disponibles en toda la app. Sin cambios de lógica ni de
 componentes todavía — solo el import global (F9.2 trae el shell, F9.3 las pantallas).
+
+F9.2 (shell móvil): `AppShell.tsx` migrado del header+nav desktop a `AppBar` + `Screen` +
+`BottomNav` fijo (`src/design-system/shell/`), siguiendo `ui_kits/mobile/MobileShell.jsx`.
+4 destinos (Inicio · Resumen [admin] · Cargar · Perfil) + FAB global en Inicio/Resumen que
+navega a `/comprobantes` (la carga real ya vive ahí desde F6.9.12; no se duplica lógica).
+`Icon` (`src/design-system/Icon.tsx`) envuelve `lucide-react` con mapa curado de imports
+nombrados — **no** usar el barrel `icons` de `lucide-react` (trae las ~1500 figuras del
+paquete entero, infló el bundle de 831KB a 1.65MB en el intento inicial); agregar cada
+ícono nuevo al mapa `ICONS` a mano. El hack DOM del mock (`window.lucide.createIcons()`
+sobre un `<i>`) no aplica acá — existe solo para el preview sin bundler del design system;
+en Vite usamos los componentes reales de `lucide-react`. Scaffold del modal full-screen de
+captura (`FullModal`/`ModalBar`/`Hero`/`Drawer`/`SectionLabel`/`CtaBar` en
+`shell/CaptureModal.tsx`) construido y listo, sin cablear todavía — lo consume F9.3
+(Confirmar comprobante / Alta manual). Pantalla `/perfil` nueva, mínima (nombre/rol/emails/
+salir + link a Pagos esperados para admin) — solo para que el tab del BottomNav tenga
+destino; el alcance completo de F8.0 (Personal + Configuración Familiar) llega en F9.3.
+`/config-esperados` sigue montada y admin-only, alcanzable desde Perfil (antes desde el nav
+superior, que F8.0 ya había decidido sacarla de ahí). Pendiente antes de F9.3: falta el
+bundle real de componentes del DS (`src/design-system/styles.css` + `_ds_bundle.js`:
+Button/Badge/Card/Money/Message/RadioChip/FieldRow/StepIndicator/MonthSelector) — solo se
+copió `ui_kits/mobile`, que son los mocks de pantalla, no la librería de componentes que
+esos mocks consumen.
+
+F9.2 addendum (componentes del DS portados): llegó `src/design-system/dist/` (bundle real:
+`_ds_bundle.js` compilado + `styles.css` + `tokens/*.css`). Mismo caso que Lucide: es JS
+compilado que muta `window.GastosFamiliaresDesignSystem_d81a5e` con `React.createElement`
+global, pensado para el preview sin bundler — no se carga tal cual. Los 14 componentes
+(Badge, Button, Card, Message, Money, StatusBadge, FieldRow, Input, MonthSelector,
+RadioChip, Select, PageKicker, QuickNav, StepIndicator) se portaron a TSX reales en
+`src/design-system/components/{core,forms,navigation}/` + barrel `components/index.ts`.
+`StatusBadge` tipa `state` como `EstadoChecklist`, que calza 1:1 con el `EstadoItem` de 9
+estados ya implementado en `Resumen.tsx` — pendiente unificar cuando F9.3 cablee esa
+pantalla. `dist/` (bundle + tokens de origen) NO se versiona — cae bajo la regla `dist/`
+existente en `.gitignore` (pensada para el build de Vite, pero matchea cualquier carpeta
+`dist` del árbol); queda solo en el filesystem local como referencia, ya cumplió su
+propósito (portar los componentes a TSX). **Bonus resuelto:** `dist/tokens/colors.css` trae la paleta de ingreso/gasto
+final ("paleta B", esmeralda+coral) — `src/styles/tokens.css` actualizado
+(`--gf-income #0c8f62` / `--gf-expense #d33b43`, antes #16a34a/#dc2626): cierra el pendiente
+de tonos verde/rojo que F9.0b había dejado abierto.
+
+F9.3 — Dashboard (Inicio), PR visual (1 de 2): `Dashboard.tsx` reescrito siguiendo
+`DashboardMobile.jsx` del kit — tabs Mensual/Anual, toggle ARS/USD (con "eq" secundario
+siempre visible, cumple el requisito transversal de F9.3), paridad con `60_Dash.gs`
+(balance/ingresos/gastos en eq, por categoría con donut, top subcategorías, evolución
+diaria, por descripción, histórico anual con salidas/ingresos por mes y mes-a-mes) — cierra
+los 3 gaps que F9.0b/F9.0c habían marcado (por categoría, por descripción, histórico).
+Datos de EJEMPLO hardcodeados (mismo shape que `ui_kits/mobile/data.jsx`,
+`M_DASH`/`M_ANUAL`) — sin tocar Firestore ni Functions, por diseño (regla transversal de
+F9.3: visual primero). Usa `Card` del DS portado; los gráficos (donut/barras) son divs con
+estilo inline, igual que el mock (el DS no tiene componentes de chart). CSS de la vista
+reducido a un único `.dash` contenedor — todo lo demás (totales/tabla/selector de mes
+viejos) quedó reemplazado por la estructura del mock. **Pendiente — PR 2 de 2 (cableado):**
+construir los hooks que hoy no existen (agregación por categoría/descripción, histórico
+mensual/anual — ver plan de F9.0c) y reemplazar `EXAMPLE_DASH`/`EXAMPLE_ANUAL` por datos
+reales; ese cableado no estaba listo al cerrar esta PR.
+
+F9.3 — Resumen, PR visual (1 de 2): `Resumen.tsx` reescrito siguiendo `ResumenMobile.jsx`
+del kit — toggle segmentado "Por día" / "Gastos Fijos". "Por día" es la tabla diaria por
+banco (paridad `50_ResumenMes.gs`) que F9.0b había marcado como el gap más grande: KPIs
+(neto $eq+USDeq, pesos disponibles, faltante USD), distribución de ingresos por persona,
+gastos agrupados por día con desglose por banco y fila "hoy". "Gastos Fijos" es el re-skin
+del checklist de esperados (mismos 9 estados — `StatusBadge` ya tipaba `EstadoChecklist`
+para esto desde el addendum de F9.2) con "Marcar pagado" como estado LOCAL de ejemplo (no
+llama a `confirmarPagoEsperado`/`desmarcarPago` reales — eso es la PR de cableado). Guard
+de admin (`Navigate` si no-admin) se mantiene igual que antes — eso es ruteo/seguridad, no
+"datos", no se tocó. Datos de ejemplo hardcodeados (mismo shape que `data.jsx`:
+`M_MOVS`/`M_ESPERADOS`/`M_BANCOS`/`M_MIEMBROS`). `Icon` ganó 4 entradas al mapa curado
+(`calendar`, `users-round`, `calendar-days`, `check`) para esta pantalla. CSS reducido a un
+único `.res` contenedor. **Pendiente — PR 2 de 2:** hook de agregación día×banco (no existe
+hoy — gap real, no solo de re-skin) + recablear el checklist a `useMovimientosDelMes`/
+`useItemsEsperados`/`estadoItem` reales (la lógica ya existe, hay que reconectarla a la
+nueva estructura visual) + las acciones reales de confirmar/deshacer pago.
+
+F9.3 — Cargar, PR visual: `Comprobantes.tsx` reescrito siguiendo `CargaMobile.jsx` +
+modales `ComprobanteConfirm.jsx`/`ManualGasto.jsx` del kit. Dropzone + mensaje "procesando"
++ lista de entrantes recientes + botón "Cargar manualmente", todo con datos de ejemplo —
+ningún disparador sube nada real. Los dos modales full-screen (scaffold de F9.2:
+`FullModal`/`Hero`/`Drawer`/`CtaBar`, ya cableado por primera vez acá) usan estado local:
+"Confirmar movimiento"/"Guardar movimiento" no llaman a ningún endpoint. Desviación menor
+del mock: el mock manda los tres disparadores (dropzone, lista, "cargar manualmente") al
+mismo modal de comprobante; acá el dropzone/lista abren Confirmar comprobante y "Cargar
+manualmente" abre Alta manual — separación más fiel a lo que cada uno hace en la app real.
+`Icon` ganó 6 entradas (`file-up`, `check-check`, `loader`, `triangle-alert`, `circle-x`,
+`chevron-right`). CSS reducido a `.cmp`. `SeccionTarjetas` (real, `ResumenesTarjeta.tsx`)
+sigue montada admin-only al pie de Cargar — Carga sigue siendo la solapa unificada de
+comprobantes + resúmenes de tarjeta (F6.7 addendum 1); Tarjetas NO se separó en una pantalla
+propia, corrección sobre un intento inicial de este PR que sí la había sacado. **Queda
+temporalmente desconectado (no borrado — lo reconecta la PR de cableado):**
+`AltaMovimiento.tsx` (todo el form real con dedup/TC/diccionario), `datos/entrantes.ts`,
+`datos/comprobantes.ts` — el dropzone/modales de esta PR son 100% visual/ejemplo, pero
+`SeccionTarjetas` sí sigue siendo real (no entra en esta lista).
+
+F9.3 — Perfil + sub-pantallas, PR visual: `Perfil.tsx` reescrito siguiendo `PerfilMobile.jsx`
+(brief F8.0) — identidad real (nombre/rol/email, ya lo era desde el placeholder de F9.2,
+no es dato de ejemplo) + grupo "Personal" (Mis datos/Notificaciones/Apariencia, sin destino
+todavía) + grupo "Configuración familiar" admin-only con contadores de EJEMPLO ("3 personas
+· 2 admin", etc. — no hay hooks de conteo). 4 sub-pantallas nuevas en
+`src/vistas/perfil/` (`Miembros.tsx`, `Categorias.tsx`, `MediosPago.tsx`, `TipoCambio.tsx`,
++ `shared.tsx` con `Avatar`/`AddBtn`), todas de solo-lectura con datos de ejemplo, rutas
+admin-only `/perfil/{miembros,categorias,medios-pago,tc}` con `onBack` a `/perfil`.
+**Dos decisiones explícitas, no "olvidos":** (1) "Pagos esperados" linkea al
+`ConfigEsperados.tsx` REAL (`/config-esperados`, CRUD ya funcionando) en vez de reescribirlo
+como mock de solo-lectura — decisión del usuario, evita gutear un admin tool que ya
+funciona para igualar un mock más pobre. (2) "Tarjetas" linkea a `/comprobantes` (no es
+sub-pantalla ni pantalla propia — vive en Cargar, ver corrección de la PR anterior).
+"Cerrar sesión" sigue real (`signOutUsuario`, ya lo era antes de F9.3 — no es dato
+Firestore). `Icon` ganó 6 entradas (`bell`, `palette`, `tags`, `wallet`, `repeat`,
+`log-out`). **Pendiente — PR de cableado:** hooks de conteo real para los `desc` de la
+lista, y las 4 sub-pantallas en sí (hoy de ejemplo) pasan a consumir `config/familia.*`
+vía las callables admin-only ya decididas en F8.0.
 
 - **Color** — marca/acción: esmeralda `--gf-emerald #065f46` (pressed `--gf-emerald-deep
   #054b38`, hairline/focus `--gf-emerald-line #0a7d5e`). Superficie oscura: ink

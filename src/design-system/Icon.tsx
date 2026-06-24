@@ -1,0 +1,56 @@
+import {
+  House, ListChecks, Upload, UserRound, ChevronLeft, X, Plus, CreditCard,
+  Calendar, UsersRound, CalendarDays, Check,
+  FileUp, CheckCheck, Loader, TriangleAlert, CircleX, ChevronRight,
+  Bell, Palette, Tags, Wallet, Repeat, LogOut,
+  type LucideProps,
+} from 'lucide-react';
+
+// Mapa curado — agregar acá cada ícono nuevo que se use (named imports,
+// tree-shakeable). NO importar el barrel `icons` de lucide-react: trae
+// las ~1500 figuras del paquete entero y dispara el bundle (831KB → 1.65MB
+// medido en F9.2 antes de este fix).
+const ICONS: Record<string, React.ComponentType<LucideProps>> = {
+  house: House,
+  'list-checks': ListChecks,
+  upload: Upload,
+  'user-round': UserRound,
+  'chevron-left': ChevronLeft,
+  x: X,
+  plus: Plus,
+  'credit-card': CreditCard,
+  calendar: Calendar,
+  'users-round': UsersRound,
+  'calendar-days': CalendarDays,
+  check: Check,
+  'file-up': FileUp,
+  'check-check': CheckCheck,
+  loader: Loader,
+  'triangle-alert': TriangleAlert,
+  'circle-x': CircleX,
+  'chevron-right': ChevronRight,
+  bell: Bell,
+  palette: Palette,
+  tags: Tags,
+  wallet: Wallet,
+  repeat: Repeat,
+  'log-out': LogOut,
+};
+
+interface IconProps {
+  name: string;
+  size?: number;
+  color?: string;
+  style?: React.CSSProperties;
+}
+
+// Wrapper sobre lucide-react: mismo API que el mock del design system
+// (<Icon name="house" size={20} />, nombres kebab-case) pero con los
+// componentes reales del paquete — no hace falta el hack DOM del mock
+// (window.lucide.createIcons() reemplazando un <i>), que existe ahí solo
+// porque ese preview corre sin bundler (CDN + babel-standalone).
+export function Icon({ name, size = 20, color, style }: IconProps) {
+  const Cmp = ICONS[name];
+  if (!Cmp) return null;
+  return <Cmp size={size} color={color ?? 'currentColor'} style={style} />;
+}
