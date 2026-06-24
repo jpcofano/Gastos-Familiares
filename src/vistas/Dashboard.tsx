@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Card } from '../design-system/components';
+import { Icon } from '../design-system/Icon';
 import './Dashboard.css';
 
 // F9.3 — Dashboard (Inicio), PR visual: maqueta con datos de EJEMPLO siguiendo
@@ -134,14 +135,19 @@ function curEq(usd: number, cur: Moneda, tc: number): string {
   return cur === 'USD' ? '$ ' + nfes(usd * tc) + ' eq' : 'USD ' + nfes(usd) + ' eq';
 }
 
-function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px' }}>{children}</div>;
+function Eyebrow({ icon, children }: { icon?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+      {icon && <Icon name={icon} size={13} color="var(--gf-gray-400)" />}
+      {children}
+    </div>
+  );
 }
 
-function Kpi({ eyebrow, value, sub, accent }: { eyebrow: React.ReactNode; value: React.ReactNode; sub?: React.ReactNode; accent?: string }) {
+function Kpi({ icon, eyebrow, value, sub, accent }: { icon?: string; eyebrow: React.ReactNode; value: React.ReactNode; sub?: React.ReactNode; accent?: string }) {
   return (
     <Card variant="flat" padding="var(--space-3)" style={{ flex: 1, minWidth: 0 }}>
-      <Eyebrow>{eyebrow}</Eyebrow>
+      <Eyebrow icon={icon}>{eyebrow}</Eyebrow>
       <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, color: accent ?? 'var(--color-text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
       {sub && <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{sub}</div>}
     </Card>
@@ -189,14 +195,14 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
 
       {/* KPI grid */}
       <div style={{ display: 'flex', gap: 10 }}>
-        <Kpi eyebrow="🧾 Movimientos" value={d.movimientos} sub="en el mes" />
-        <Kpi eyebrow="📊 Gasto promedio" value={curBig(d.gastoPromedioUsd, cur, tc)} sub={`${d.diasConGasto} días con gasto`} />
+        <Kpi icon="receipt" eyebrow="Movimientos" value={d.movimientos} sub="en el mes" />
+        <Kpi icon="bar-chart-3" eyebrow="Gasto promedio" value={curBig(d.gastoPromedioUsd, cur, tc)} sub={`${d.diasConGasto} días con gasto`} />
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
-        <Kpi eyebrow="🏷️ Categoría top" value={d.categoriaTop.nombre} sub={`${d.categoriaTop.pct}% del total`} />
+        <Kpi icon="tag" eyebrow="Categoría top" value={d.categoriaTop.nombre} sub={`${d.categoriaTop.pct}% del total`} />
       </div>
       <Card variant="flat" padding="var(--space-3)">
-        <Eyebrow>💸 Mov. más alto</Eyebrow>
+        <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
         <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
       </Card>

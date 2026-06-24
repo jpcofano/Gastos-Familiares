@@ -464,6 +464,11 @@ intactas, solo reubicadas debajo de la cara. De paso, `cmp-error-detalle`/
 `cmp-btn-descartar` (clases huérfanas desde que `Comprobantes.css` se redujo en la PR de
 Cargar) se reemplazan por clases propias de `ResumenesTarjeta.css`.
 
+F9.4 (íconos del Dashboard): los 4 emojis de KPI (🧾📊🏷️💸) reemplazados por
+`lucide-react` (`Receipt`, `BarChart3`, `Tag`, `TrendingUp`) vía el mapa curado de `Icon`.
+`Eyebrow`/`Kpi` en `Dashboard.tsx` ganan prop `icon?` opcional, renderizado antes del texto
+(`display:flex; gap:6px`, `size=13`, `--gf-gray-400`). Sin cambios de valores/layout/copy.
+
 - **Color** — marca/acción: esmeralda `--gf-emerald #065f46` (pressed `--gf-emerald-deep
   #054b38`, hairline/focus `--gf-emerald-line #0a7d5e`). Superficie oscura: ink
   `--gf-ink #111827` (hero de captura, botones neutros — primer paso del futuro tema

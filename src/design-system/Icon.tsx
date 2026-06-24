@@ -3,6 +3,7 @@ import {
   Calendar, UsersRound, CalendarDays, Check,
   FileUp, CheckCheck, Loader, TriangleAlert, CircleX, ChevronRight,
   Bell, Palette, Tags, Wallet, Repeat, LogOut,
+  Receipt, BarChart3, Tag, TrendingUp,
   type LucideProps,
 } from 'lucide-react';
 
@@ -35,6 +36,10 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   wallet: Wallet,
   repeat: Repeat,
   'log-out': LogOut,
+  receipt: Receipt,
+  'bar-chart-3': BarChart3,
+  tag: Tag,
+  'trending-up': TrendingUp,
 };
 
 interface IconProps {
