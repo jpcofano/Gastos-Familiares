@@ -469,6 +469,14 @@ F9.4 (íconos del Dashboard): los 4 emojis de KPI (🧾📊🏷️💸) reemplaz
 `Eyebrow`/`Kpi` en `Dashboard.tsx` ganan prop `icon?` opcional, renderizado antes del texto
 (`display:flex; gap:6px`, `size=13`, `--gf-gray-400`). Sin cambios de valores/layout/copy.
 
+F9.5 (logos de medios de pago): `BankLogo({ id, nombre, color, size=34, radius=9 })` nuevo
+en `src/design-system/components/core/BankLogo.tsx` — intenta `/assets/medios/{id}.svg`,
+con `onError` cae a un chip de color + inicial (mismo tratamiento que ya existía a mano en
+Miembros/MediosPago). `public/assets/medios/` creada (vacía salvo un `README.md` con la
+convención de nombres — los SVG oficiales se suben después). Usado en Perfil → Medios de
+pago. **No** aplicado al punto de color de 7px de "gastos por día" en Resumen — ahí es un
+indicador compacto, no un slot de logo; forzarlo rompería ese layout denso.
+
 F9.6 (selector de período contextual del Dashboard): el `<select>` y el título del header
 ahora dependen del toggle Mensual/Anual — Mensual lista meses (estado `mes`, ya existía) y
 Anual lista años (`anio`, nuevo, default `EXAMPLE_ANUAL.anio`); título `mesLabel` vs.

@@ -1,4 +1,5 @@
 export { Badge } from './core/Badge';
+export { BankLogo } from './core/BankLogo';
 export { Button } from './core/Button';
 export { Card } from './core/Card';
 export { Message } from './core/Message';

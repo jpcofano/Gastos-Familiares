@@ -1,5 +1,5 @@
 import { Icon } from '../../design-system/Icon';
-import { Card } from '../../design-system/components';
+import { Card, BankLogo } from '../../design-system/components';
 import { AddBtn } from './shared';
 
 // F9.3 — Perfil/Medios de pago, PR visual: maqueta con datos de EJEMPLO
@@ -24,7 +24,7 @@ export default function MediosPago() {
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {EXAMPLE_MEDIOS.map((b, i) => (
             <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 10px', borderBottom: i < EXAMPLE_MEDIOS.length - 1 ? '1px solid var(--gf-gray-100)' : 'none' }}>
-              <span style={{ width: 34, height: 34, borderRadius: 9, background: b.color, color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 13, fontWeight: 700 }}>{b.nombre.charAt(0)}</span>
+              <BankLogo id={b.id} nombre={b.nombre} color={b.color} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 15, fontWeight: 600 }}>{b.nombre}</div>
                 <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>{b.tipo}</div>
