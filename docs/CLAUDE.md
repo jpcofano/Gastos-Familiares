@@ -469,6 +469,11 @@ F9.4 (íconos del Dashboard): los 4 emojis de KPI (🧾📊🏷️💸) reemplaz
 `Eyebrow`/`Kpi` en `Dashboard.tsx` ganan prop `icon?` opcional, renderizado antes del texto
 (`display:flex; gap:6px`, `size=13`, `--gf-gray-400`). Sin cambios de valores/layout/copy.
 
+F9.6 (selector de período contextual del Dashboard): el `<select>` y el título del header
+ahora dependen del toggle Mensual/Anual — Mensual lista meses (estado `mes`, ya existía) y
+Anual lista años (`anio`, nuevo, default `EXAMPLE_ANUAL.anio`); título `mesLabel` vs.
+`Año {anio}`. Los pills ARS/USD siguen recalculando en ambos modos sin cambios.
+
 - **Color** — marca/acción: esmeralda `--gf-emerald #065f46` (pressed `--gf-emerald-deep
   #054b38`, hairline/focus `--gf-emerald-line #0a7d5e`). Superficie oscura: ink
   `--gf-ink #111827` (hero de captura, botones neutros — primer paso del futuro tema

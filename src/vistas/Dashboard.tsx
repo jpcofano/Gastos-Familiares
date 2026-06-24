@@ -467,9 +467,11 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
 
 const MESES_DISPONIBLES = ['2026-06', '2026-05', '2026-04'];
 const MESES_LABEL: Record<string, string> = { '2026-06': 'Junio 2026', '2026-05': 'Mayo 2026', '2026-04': 'Abril 2026' };
+const ANIOS_DISPONIBLES = [2026, 2025, 2024];
 
 export default function Dashboard() {
   const [mes, setMes] = useState('2026-06');
+  const [anio, setAnio] = useState(EXAMPLE_ANUAL.anio);
   const [sec, setSec] = useState<'mensual' | 'anual'>('mensual');
   const [cur, setCur] = useState<Moneda>('USD');
 
@@ -500,7 +502,9 @@ export default function Dashboard() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <Eyebrow>Vista general</Eyebrow>
-            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 1 }}>{EXAMPLE_DASH.mesLabel}</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 1 }}>
+              {sec === 'mensual' ? EXAMPLE_DASH.mesLabel : `Año ${anio}`}
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3 }}>
             {(['ARS', 'USD'] as const).map(curPill)}
@@ -509,12 +513,21 @@ export default function Dashboard() {
         <div style={{ display: 'flex', gap: 4, background: 'var(--gf-gray-200)', borderRadius: 14, padding: 4 }}>
           {tab('mensual', 'Mensual')}{tab('anual', 'Anual')}
         </div>
-        <select value={mes} onChange={e => setMes(e.target.value)} style={{
-          width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontFamily: 'var(--font-base)', fontSize: 15, fontWeight: 600,
-          color: 'var(--color-text)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 10, cursor: 'pointer',
-        }}>
-          {MESES_DISPONIBLES.map(m => <option key={m} value={m}>{MESES_LABEL[m]}</option>)}
-        </select>
+        {sec === 'mensual' ? (
+          <select value={mes} onChange={e => setMes(e.target.value)} style={{
+            width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontFamily: 'var(--font-base)', fontSize: 15, fontWeight: 600,
+            color: 'var(--color-text)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 10, cursor: 'pointer',
+          }}>
+            {MESES_DISPONIBLES.map(m => <option key={m} value={m}>{MESES_LABEL[m]}</option>)}
+          </select>
+        ) : (
+          <select value={anio} onChange={e => setAnio(Number(e.target.value))} style={{
+            width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontFamily: 'var(--font-base)', fontSize: 15, fontWeight: 600,
+            color: 'var(--color-text)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 10, cursor: 'pointer',
+          }}>
+            {ANIOS_DISPONIBLES.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        )}
       </div>
 
       {sec === 'mensual'
