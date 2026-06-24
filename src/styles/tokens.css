@@ -1,0 +1,196 @@
+/* ============================================================
+   Gastos Familiares — tokens consolidados (para la app React)
+   Generado desde el design system. Copiá este archivo a
+   src/styles/tokens.css y enlazalo globalmente (import en main).
+   Reúne colors + typography + spacing + status en un solo :root.
+   ============================================================ */
+
+/* ─── tokens/colors.css ─── */
+:root {
+  /* ── Brand: emerald + ink ──────────────────────────────── */
+  --gf-emerald:      #065f46;  /* brand / confirm action        */
+  --gf-emerald-deep: #054b38;  /* emerald pressed               */
+  --gf-emerald-line: #0a7d5e;  /* emerald hairline / focus      */
+  --gf-emerald-50:   #ecfdf5;  /* emerald tint (ok surface)     */
+  --gf-emerald-100:  #d1fae5;
+
+  --gf-ink:          #111827;  /* dark surface: hero, dark btn  */
+  --gf-ink-soft:     #1f2937;  /* ink hover / hero gradient end */
+  --gf-ink-700:      #374151;
+
+  /* heritage — the React-era header color (deprecated, do not use) */
+  --gf-navy:        #1e3a5f;
+
+  /* ── Info accent (blue) — links, wait, info badges ─────── */
+  --gf-blue-700:    #1d4ed8;
+  --gf-blue-600:    #2563eb;   /* info action                  */
+  --gf-blue-500:    #3b82f6;
+  --gf-blue-100:    #dbeafe;
+  --gf-blue-50:     #eff6ff;
+
+  /* ── Money semantics (palette "B" — esmeralda + coral, F9.0b resuelto) ── */
+  --gf-income:      #0c8f62;   /* ingreso (+) — emerald family, brand-coherent */
+  --gf-income-700:  #0a7350;
+  --gf-income-50:   #ecfdf5;
+  --gf-expense:     #d33b43;   /* gasto (−) — coral algo más profundo          */
+  --gf-expense-700: #b42d34;
+  --gf-expense-50:  #fef2f2;
+
+  /* ── Neutrals (gray ramp) ──────────────────────────────── */
+  --gf-gray-900:    #111827;   /* primary text                 */
+  --gf-gray-800:    #1a1a1a;
+  --gf-gray-700:    #374151;   /* strong secondary text        */
+  --gf-gray-500:    #6b7280;   /* muted text                   */
+  --gf-gray-400:    #9ca3af;   /* placeholder / faint          */
+  --gf-gray-300:    #d1d5db;   /* input border                 */
+  --gf-gray-200:    #e5e7eb;   /* default border               */
+  --gf-gray-150:    #e0e0e0;   /* card border                  */
+  --gf-gray-100:    #f3f4f6;   /* hover fill                   */
+  --gf-gray-50:     #f9fafb;   /* muted surface                */
+  --gf-bg:          #f5f5f5;   /* app background               */
+  --gf-white:       #ffffff;
+
+  /* ── Status: messages ──────────────────────────────────── */
+  --gf-ok-bg:   #ecfdf5; --gf-ok-line:   #a7f3d0; --gf-ok-text:   #065f46;
+  --gf-err-bg:  #fef2f2; --gf-err-line:  #fecaca; --gf-err-text:  #991b1b;
+  --gf-warn-bg: #fffbeb; --gf-warn-line: #fde68a; --gf-warn-text: #92400e;
+  --gf-wait-bg: #eff6ff; --gf-wait-line: #bfdbfe; --gf-wait-text: #1e40af;
+
+  /* ============================================================
+     Semantic aliases — what product code references.
+     These mirror the --color-* fallbacks used across the app.
+     ============================================================ */
+  --color-bg:            var(--gf-bg);
+  --color-surface:       var(--gf-white);
+  --color-surface-muted: var(--gf-gray-50);
+  --color-border:        var(--gf-gray-200);
+  --color-border-card:   var(--gf-gray-150);
+  --color-hover:         var(--gf-gray-100);
+
+  --color-text:          var(--gf-gray-900);
+  --color-text-sec:      var(--gf-gray-500);
+  --color-text-strong:   var(--gf-gray-700);
+  --color-text-faint:    var(--gf-gray-400);
+
+  /* Brand surface = ink (the dark hero / dark buttons). */
+  --color-brand:         var(--gf-ink);
+  --color-brand-hover:   var(--gf-ink-soft);
+
+  /* Primary action = emerald. Recommendation (see README): reserve
+     emerald for confirm/positive and use --color-ink-action (ink) for
+     neutral primary actions, so the UI isn't "all green". */
+  --color-primary:       var(--gf-emerald);
+  --color-primary-dark:  var(--gf-emerald-deep);
+  --color-primary-light: var(--gf-emerald-50);
+  --color-focus-ring:    rgba(6, 95, 70, 0.20);
+  --color-ink-action:    var(--gf-ink);     /* neutral primary (dark) */
+
+  --color-accent:        var(--gf-emerald);
+  --color-info:          var(--gf-blue-600);
+
+  --color-income:        var(--gf-income);
+  --color-expense:       var(--gf-expense);
+
+  --color-danger:        var(--gf-expense);
+  --color-danger-light:  var(--gf-expense-50);
+  --color-warn-bg:       var(--gf-warn-bg);
+  --color-warn-border:   #fbbf24;
+  --color-warn-text:     var(--gf-warn-text);
+}
+
+/* ─── tokens/typography.css ─── */
+:root {
+  /* ── Families ──────────────────────────────────────────── */
+  /* System UI stack only — no webfonts. -apple-system / BlinkMacSystemFont
+     resolve to SF Pro on Apple platforms, Segoe UI on Windows, Roboto on
+     Android. The OS native UI face gives the app a fast, native feel. */
+  --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+               Roboto, Arial, sans-serif;
+  --font-num:  var(--font-base);   /* numbers use the base face + tabular-nums */
+
+  /* ── Sizes (rem-based, 16px root) ──────────────────────── */
+  --text-2xs:  0.6875rem;  /* 11px — labels, badges            */
+  --text-xs:   0.75rem;    /* 12px — captions, sub             */
+  --text-sm:   0.8125rem;  /* 13px — card sub, hints           */
+  --text-base: 0.875rem;   /* 14px — body / tables             */
+  --text-md:   0.9375rem;  /* 15px — form values               */
+  --text-lg:   1.0625rem;  /* 17px — section / panel titles    */
+  --text-xl:   1.25rem;    /* 20px — page h1                   */
+  --text-2xl:  1.75rem;    /* 28px — sign-in / hero            */
+  --text-3xl:  2.5rem;     /* 40px — hero amount               */
+
+  /* ── Weights ───────────────────────────────────────────── */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-heavy:    800;
+  --weight-black:    900;   /* hero amounts only                */
+
+  /* ── Line heights ──────────────────────────────────────── */
+  --leading-tight:  1.1;
+  --leading-snug:   1.3;
+  --leading-normal: 1.45;
+  --leading-relaxed:1.6;
+
+  /* ── Letter spacing (uppercase eyebrows / labels) ──────── */
+  --tracking-label: 0.04em;
+  --tracking-wide:  0.08em;
+}
+
+/* ─── tokens/spacing.css ─── */
+:root {
+  /* ── Spacing scale (4px base) ──────────────────────────── */
+  --space-1:  0.25rem;   /*  4px */
+  --space-2:  0.5rem;    /*  8px */
+  --space-3:  0.75rem;   /* 12px */
+  --space-4:  1rem;      /* 16px */
+  --space-5:  1.25rem;   /* 20px */
+  --space-6:  1.5rem;    /* 24px */
+  --space-8:  2rem;      /* 32px */
+  --space-10: 2.5rem;    /* 40px */
+
+  /* ── Radius ────────────────────────────────────────────── */
+  --radius-xs:   4px;    /* badges                            */
+  --radius-sm:   8px;    /* buttons, inputs                   */
+  --radius-md:   12px;   /* chips, small cards                */
+  --radius-lg:   16px;   /* panels                            */
+  --radius-card: 18px;   /* the standard card                 */
+  --radius-xl:   22px;   /* bottom-sheet / modal              */
+  --radius-2xl:  24px;   /* drop zones                        */
+  --radius-pill: 999px;  /* kickers, tags                     */
+
+  /* ── Borders ───────────────────────────────────────────── */
+  --border-hairline: 1px solid var(--color-border);
+  --border-card:     1px solid var(--color-border-card);
+  --border-accent:   3px;   /* checklist left-accent width    */
+
+  /* ── Shadows (soft, low-contrast) ──────────────────────── */
+  --shadow-sm:    0 1px 3px rgba(17, 24, 39, 0.06);
+  --shadow-soft:  0 1px 2px rgba(17, 24, 39, 0.04), 0 6px 20px rgba(17, 24, 39, 0.06);
+  --shadow-pop:   0 2px 4px rgba(17, 24, 39, 0.05), 0 12px 32px rgba(17, 24, 39, 0.10);
+  --shadow-card:  0 6px 18px rgba(17, 24, 39, 0.12);
+  --shadow-sheet: 0 -4px 24px rgba(0, 0, 0, 0.18);
+  --shadow-modal: 0 40px 100px rgba(0, 0, 0, 0.6);
+  --focus-ring:   0 0 0 3px var(--color-focus-ring);
+
+  /* ── Layout ────────────────────────────────────────────── */
+  --app-max:      900px;   /* desktop content column           */
+  --sheet-max:    480px;   /* mobile drawer / modal width       */
+  --header-h:     3.5rem;  /* app header height                 */
+  --transition:   0.15s ease;   /* @kind other */
+}
+
+/* ─── tokens/status.css ─── */
+:root {
+  /* state            row tint        left accent     badge bg / badge text */
+  --st-pagado-bg:        #f0fdf4;  --st-pagado-line:        #16a34a;  --st-pagado-badge-bg:        #dcfce7;  --st-pagado-badge-tx:        #15803d;
+  --st-por-confirmar-bg: #f0f9ff;  --st-por-confirmar-line: #0284c7;  --st-por-confirmar-badge-bg: #e0f2fe;  --st-por-confirmar-badge-tx: #0369a1;
+  --st-parcial-bg:       #fffbeb;  --st-parcial-line:       #d97706;  --st-parcial-badge-bg:       #fef3c7;  --st-parcial-badge-tx:       #b45309;
+  --st-automatico-bg:    #eff6ff;  --st-automatico-line:    #3b82f6;  --st-automatico-badge-bg:    #dbeafe;  --st-automatico-badge-tx:    #1d4ed8;
+  --st-pendiente-bg:     #fafafa;  --st-pendiente-line:     #d1d5db;  --st-pendiente-badge-bg:     #f3f4f6;  --st-pendiente-badge-tx:     #6b7280;
+  --st-vencido-bg:       #fff7ed;  --st-vencido-line:       #ea580c;  --st-vencido-badge-bg:       #fed7aa;  --st-vencido-badge-tx:       #c2410c;
+  --st-programado-bg:    #f8fafc;  --st-programado-line:    #cbd5e1;  --st-programado-badge-bg:    #f1f5f9;  --st-programado-badge-tx:    #64748b;
+  --st-no-registrado-bg: #fff1f2;  --st-no-registrado-line: #f43f5e;  --st-no-registrado-badge-bg: #ffe4e6;  --st-no-registrado-badge-tx: #be123c;
+}
+

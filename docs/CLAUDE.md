@@ -328,6 +328,11 @@ Fuente: `src/design-system/ui_kits/mobile` (paquete del DS, copiado al repo; ver
 `README.md` ahí dentro). App MODERNA 2026, no copia visual de la legacy — paridad de
 *funcionalidad*, no de estética (ver "Decisiones cerradas").
 
+F9.1 (tokens → app): `src/styles/tokens.css` (colors+typography+spacing+status del DS)
+importado globalmente en `src/main.tsx`. Variables `--gf-*` / `--color-*` / `--space-*` /
+`--radius-*` / `--shadow-*` disponibles en toda la app. Sin cambios de lógica ni de
+componentes todavía — solo el import global (F9.2 trae el shell, F9.3 las pantallas).
+
 - **Color** — marca/acción: esmeralda `--gf-emerald #065f46` (pressed `--gf-emerald-deep
   #054b38`, hairline/focus `--gf-emerald-line #0a7d5e`). Superficie oscura: ink
   `--gf-ink #111827` (hero de captura, botones neutros — primer paso del futuro tema
