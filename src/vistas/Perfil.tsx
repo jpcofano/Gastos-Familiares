@@ -12,8 +12,9 @@ import './Perfil.css';
 // ("3 personas · 2 admin", etc.) sí son de ejemplo — no hay hooks de conteo
 // todavía. "Pagos esperados" linkea al ConfigEsperados real (CRUD ya
 // funcionando, no se reescribe para igualar un mock de solo-lectura — decisión
-// explícita, ver docs/CLAUDE.md). "Tarjetas" linkea a /comprobantes: Tarjetas
-// vive dentro de Cargar (SeccionTarjetas), no es pantalla propia.
+// explícita, ver docs/CLAUDE.md). "Tarjetas" (F9.7) linkea a /perfil/tarjetas:
+// config del catálogo de tarjetas físicas — distinto de SeccionTarjetas
+// (resúmenes, sigue en Cargar) y del visor /tarjetas (solo lectura).
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -73,7 +74,7 @@ export default function Perfil() {
           <Item icon="list-checks" title="Pagos esperados" desc="9 ítems recurrentes" onClick={() => navigate('/config-esperados')} />
           <Item icon="tags" title="Categorías" desc="8 categorías" onClick={() => navigate('/perfil/categorias')} />
           <Item icon="wallet" title="Medios de pago" desc="5 · bancos, billeteras, efectivo" onClick={() => navigate('/perfil/medios-pago')} />
-          <Item icon="credit-card" title="Tarjetas" desc="vive en Cargar" onClick={() => navigate('/comprobantes')} />
+          <Item icon="credit-card" title="Tarjetas" desc="4 tarjetas vinculadas" onClick={() => navigate('/perfil/tarjetas')} />
           <Item icon="repeat" title="Tipo de cambio" desc="Manual · $ 1.180 / USD" onClick={() => navigate('/perfil/tc')} last />
         </Group>
       )}

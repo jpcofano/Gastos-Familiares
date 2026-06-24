@@ -1,0 +1,12 @@
+.tv {
+  max-width: var(--app-max, 900px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tv-titulo { font-size: 1.25rem; font-weight: 700; margin: 0; }
+.tv-sub    { font-size: 0.85rem; color: var(--color-text-sec, #6b7280); margin: 0; }
+.tv-estado { color: var(--color-text-sec, #6b7280); font-style: italic; }
+.tv-lista  { display: flex; flex-direction: column; gap: 0.6rem; }

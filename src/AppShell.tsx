@@ -15,6 +15,9 @@ import Miembros from './vistas/perfil/Miembros';
 import Categorias from './vistas/perfil/Categorias';
 import MediosPago from './vistas/perfil/MediosPago';
 import TipoCambio from './vistas/perfil/TipoCambio';
+import TarjetasConfig from './vistas/perfil/Tarjetas';
+import TarjetasViewer from './vistas/TarjetasViewer';
+import { Icon } from './design-system/Icon';
 
 const NAV_ITEMS: BottomNavItem[] = [
   { to: '/',            label: 'Inicio',  icon: 'house',       end: true },
@@ -28,6 +31,7 @@ const TITULOS_PERFIL_SUB: Record<string, string> = {
   '/perfil/categorias':  'Categorías',
   '/perfil/medios-pago': 'Medios de pago',
   '/perfil/tc':          'Tipo de cambio',
+  '/perfil/tarjetas':    'Tarjetas',
 };
 
 function tituloDeRuta(pathname: string, nombre: string): { title: string; sub?: string } {
@@ -35,6 +39,7 @@ function tituloDeRuta(pathname: string, nombre: string): { title: string; sub?: 
   if (pathname === '/resumen')          return { title: 'Resumen', sub: 'Gastos del mes' };
   if (pathname === '/perfil')           return { title: 'Tu Perfil', sub: 'Cuenta y configuración' };
   if (pathname === '/config-esperados') return { title: 'Pagos esperados' };
+  if (pathname === '/tarjetas')         return { title: 'Tarjetas', sub: 'Resúmenes (solo lectura)' };
   if (TITULOS_PERFIL_SUB[pathname])     return { title: TITULOS_PERFIL_SUB[pathname] };
   return { title: `Hola, ${nombre}`, sub: 'Gastos Familiares' };
 }
@@ -90,14 +95,23 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
   const { title, sub } = tituloDeRuta(location.pathname, nombre);
   const muestraFab = location.pathname === '/' || location.pathname === '/resumen';
   const vuelveAPerfil = location.pathname === '/config-esperados' || Boolean(TITULOS_PERFIL_SUB[location.pathname]);
+  const onBack = vuelveAPerfil
+    ? () => navigate('/perfil')
+    : location.pathname === '/tarjetas' ? () => navigate('/resumen') : undefined;
+  const right = location.pathname === '/resumen' && esAdmin
+    ? (
+      <button
+        onClick={() => navigate('/tarjetas')}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--gf-gray-100)', border: 'none', borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 600, color: 'var(--color-text-strong)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+      >
+        <Icon name="credit-card" size={15} /> Tarjetas
+      </button>
+    )
+    : undefined;
 
   return (
     <div className="shell-phone">
-      <AppBar
-        title={title}
-        sub={sub}
-        onBack={vuelveAPerfil ? () => navigate('/perfil') : undefined}
-      />
+      <AppBar title={title} sub={sub} onBack={onBack} right={right} />
       <Screen>
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -109,7 +123,8 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
           {esAdmin && <Route path="/perfil/categorias" element={<Categorias />} />}
           {esAdmin && <Route path="/perfil/medios-pago" element={<MediosPago />} />}
           {esAdmin && <Route path="/perfil/tc" element={<TipoCambio />} />}
-          <Route path="/tarjetas" element={<Navigate to="/comprobantes" replace />} />
+          {esAdmin && <Route path="/perfil/tarjetas" element={<TarjetasConfig />} />}
+          <Route path="/tarjetas" element={<TarjetasViewer />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Screen>

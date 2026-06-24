@@ -482,6 +482,27 @@ ahora dependen del toggle Mensual/Anual — Mensual lista meses (estado `mes`, y
 Anual lista años (`anio`, nuevo, default `EXAMPLE_ANUAL.anio`); título `mesLabel` vs.
 `Año {anio}`. Los pills ARS/USD siguen recalculando en ambos modos sin cambios.
 
+F9.7 (separar Tarjetas: visor vs. config, spec final — corrige un primer intento de esta
+misma fase que había gateado el visor a admin y mostrado campos equivocados en la config):
+"Tarjetas" cubre tres cosas distintas. (1) **SeccionTarjetas** (upload/preview/confirmar/
+asignar/descartar resúmenes) sigue intacta dentro de Cargar, sin tocar — eso ya se había
+corregido antes en F9.3 y no se reabre. (2) **`/tarjetas` nuevo** (`TarjetasViewer.tsx`):
+visor de SOLO LECTURA de resúmenes reales (misma `TarjetaFace`, sin acciones) — **lo ven
+TODOS los roles** (la ruta no gatea por `esAdmin`); se llega solo desde un botón "Tarjetas"
+en el header de Resumen (admin-only en los hechos, porque Resumen lo es), `onBack` →
+`/resumen`. (3) **`/perfil/tarjetas` nuevo** (`perfil/Tarjetas.tsx`, admin-only): config del
+catálogo de tarjetas físicas — banco/red/término + **cierre/vencimiento como día del mes**
+(`cierreDia`/`venceDia`, no fechas — campos nuevos, no existen aún en
+`config/familia.tarjetas` real) + titular, chevron por fila, "Agregar tarjeta", nota al pie
+"Los resúmenes se ven en Resumen › Tarjetas". El ítem "Tarjetas" de Perfil pasa de linkear a
+Cargar a linkear acá; ya NO se accede al visor desde Perfil. Datos de EJEMPLO en ambas
+pantallas nuevas — alta/edición real (`cierreDia`/`venceDia` incluidos) vía callable
+admin-only es la PR de cableado (F8.0). Refactor de paso: la cara de tarjeta (banco/red/
+últimos4/cierre/vencimiento + footer total/estado) se extrajo a `src/vistas/TarjetaFace.tsx`
+(+ `TarjetaFace.css`, con las clases `.rt-card*`/`.rt-badge*` movidas desde
+`ResumenesTarjeta.css`) para que `SeccionTarjetas` y `TarjetasViewer` comparten el mismo
+componente — `ResumenCard` ahora solo aporta las acciones (vía `children`).
+
 - **Color** — marca/acción: esmeralda `--gf-emerald #065f46` (pressed `--gf-emerald-deep
   #054b38`, hairline/focus `--gf-emerald-line #0a7d5e`). Superficie oscura: ink
   `--gf-ink #111827` (hero de captura, botones neutros — primer paso del futuro tema
