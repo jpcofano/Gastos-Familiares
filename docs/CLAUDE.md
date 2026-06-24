@@ -451,6 +451,19 @@ Firestore). `Icon` ganó 6 entradas (`bell`, `palette`, `tags`, `wallet`, `repea
 lista, y las 4 sub-pantallas en sí (hoy de ejemplo) pasan a consumir `config/familia.*`
 vía las callables admin-only ya decididas en F8.0.
 
+F9.3 — corrección (Tarjetas, cara real): la PR de Cargar había dejado `SeccionTarjetas`
+(`ResumenesTarjeta.tsx`) montada SIN re-skinear — visual desktop viejo, sin la cara de
+tarjeta de `TarjetasMobile.jsx` (banco/red/últimos4 + cierre/vencimiento) que el usuario
+señaló que faltaba. Corregido con DATOS REALES (no ejemplo, a diferencia del resto de
+F9.3): `ResumenCard` ahora muestra la cara ink-gradient con últimos4 (de
+`config.tarjetas[].ultimos4`, por `tarjetaCodigo`) + `fechaCierre`/`fechaVencimiento` del
+resumen real, y un footer blanco con total + `BadgeEstado` (las 5 fases propias de
+`CardStatement`, sin relación con `EstadoChecklist` del DS). Todas las acciones reales
+(descartar, asignar tarjeta si `requiere_tarjeta`, revisar/preview, confirmado) siguen
+intactas, solo reubicadas debajo de la cara. De paso, `cmp-error-detalle`/
+`cmp-btn-descartar` (clases huérfanas desde que `Comprobantes.css` se redujo en la PR de
+Cargar) se reemplazan por clases propias de `ResumenesTarjeta.css`.
+
 - **Color** — marca/acción: esmeralda `--gf-emerald #065f46` (pressed `--gf-emerald-deep
   #054b38`, hairline/focus `--gf-emerald-line #0a7d5e`). Superficie oscura: ink
   `--gf-ink #111827` (hero de captura, botones neutros — primer paso del futuro tema

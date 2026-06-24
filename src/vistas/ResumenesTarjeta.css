@@ -91,17 +91,78 @@
 .rt-lista { display: flex; flex-direction: column; gap: 0.6rem; }
 
 .rt-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 7px;
-  padding: 0.75rem 1rem;
+  border-radius: var(--radius-lg, 16px);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
 }
-.rt-card-top {
+
+/* Cara de la tarjeta — F9.3, paridad visual con TarjetasMobile.jsx */
+.rt-card-face {
+  position: relative;
+  background: linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%);
+  padding: 14px 16px;
+  color: #fff;
+}
+.rt-card-descartar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(255,255,255,.12);
+  border: none;
+  color: #fff;
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rt-card-descartar:hover { background: rgba(255,255,255,.22); }
+.rt-card-face-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.4rem;
+  margin-bottom: 16px;
+  padding-right: 26px;
 }
-.rt-card-nombre { font-weight: 600; font-size: 0.9rem; }
+.rt-card-banco { font-size: 0.9rem; font-weight: 700; }
+.rt-card-red   { font-size: 0.75rem; font-weight: 600; color: var(--gf-emerald-100); }
+.rt-card-numero {
+  font-size: 0.9rem;
+  letter-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 14px;
+  color: #e5e7eb;
+}
+.rt-card-fechas {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: rgba(255,255,255,.6);
+}
+.rt-card-fechas strong { color: #fff; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* Footer blanco — total + estado */
+.rt-card-footer {
+  background: #fff;
+  padding: 0.6rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #f0f0f0;
+}
+.rt-card-totales { display: flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap; }
+.rt-card-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 0.2rem;
+}
+
 .rt-card-body {
   display: flex;
   flex-wrap: wrap;
@@ -109,6 +170,7 @@
   align-items: center;
   font-size: 0.85rem;
   color: #374151;
+  padding: 0.5rem 1rem 0.75rem;
 }
 .rt-card-periodo { color: #6b7280; }
 .rt-card-monto   { font-weight: 600; }
