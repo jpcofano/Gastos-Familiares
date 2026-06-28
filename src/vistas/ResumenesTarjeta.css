@@ -182,7 +182,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rt-cuota { font-size: 0.7rem; color: #6b7280; margin-left: 0.25rem; }
+.rt-cuota {
+  display: inline-block; font-size: 0.68rem; font-weight: 700; color: #1e40af; background: #dbeafe;
+  border-radius: 999px; padding: 1px 7px; margin-left: 0.35rem; white-space: nowrap;
+}
 .rt-col-monto { text-align: right; white-space: nowrap; font-weight: 600; }
 .rt-col-incl  { text-align: center; }
 

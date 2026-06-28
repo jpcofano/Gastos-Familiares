@@ -5,8 +5,20 @@ import { crearMovimiento, existeNumeroComprobante } from '../datos/movimientos';
 import { tcParaFecha } from '../datos/tcDiario';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
+import { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar } from '../design-system/shell';
+import { FieldRow, RadioChip, Button, Money } from '../design-system/components';
 import type { FamiliaConfig, FamiliaMiembro } from '../types';
-import './AltaMovimiento.css';
+
+// F9.34 — re-skin mobile (FullModal/Hero/Drawer/CtaBar, kit ManualGasto.jsx).
+// Solo presentación: el form, la validación, crearMovimiento/tcParaFecha/
+// clasificador/memberId de abajo quedan intactos — ver F9.26 (restauración
+// real de este componente) para la lógica.
+
+const selectStyle: React.CSSProperties = {
+  fontSize: 16, fontWeight: 600, border: 'none', outline: 'none', background: 'transparent',
+  textAlign: 'right', width: '100%', fontFamily: 'var(--font-base)', cursor: 'pointer',
+  WebkitAppearance: 'none', appearance: 'none',
+};
 
 interface Preload {
   tipo?: 'Gasto' | 'Ingreso';
@@ -149,8 +161,8 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   }, [fecha, moneda]);
 
   const subcatsFiltradas = subcats.filter(s => s.categoriaPadre === categoria);
-  const categoriasDisp   = config ? [...config.categorias].sort() : [];
-  const bancosDisp       = config ? config.bancos : [];
+  const categoriasDisp   = config ? config.categorias.filter(c => c.activo).map(c => c.nombre).sort() : [];
+  const bancosDisp       = config ? config.bancos.map(b => b.nombre) : [];
   const miembrosActivos  = config
     ? Object.entries(config.miembros)
         .filter(([, m]) => m.activo)
@@ -230,246 +242,167 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
 
   if (cargandoCatalogos) {
     return (
-      <div className="alta-overlay">
-        <div className="alta-panel">
-          <p className="alta-estado">Cargando catálogos…</p>
+      <FullModal>
+        <ModalBar title="Nuevo movimiento" onClose={onCancelar} />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+          Cargando catálogos…
         </div>
-      </div>
+      </FullModal>
     );
   }
 
+  const montoNum = Number(monto.replace(',', '.')) || 0;
+  const tags = [moneda, ...(banco ? [banco] : []), incluirResumenMes ? 'En resumen' : null].filter((t): t is string => Boolean(t));
+
   return (
-    <div className="alta-overlay" role="dialog" aria-modal="true" aria-label="Nuevo movimiento">
-      <div className="alta-panel">
-        <div className="alta-header">
-          <span className="alta-titulo">Nuevo movimiento</span>
-          <button className="alta-cerrar" onClick={onCancelar} aria-label="Cerrar">✕</button>
-        </div>
-
-        <form className="alta-form" onSubmit={handleSubmit}>
-
-          <div className="alta-campo">
-            <label htmlFor="alta-fecha">Fecha</label>
+    <FullModal>
+      <ModalBar title={preload?.esManual ? 'Alta manual' : 'Nuevo movimiento'} onClose={onCancelar} />
+      <Hero
+        eyebrow={tipo === 'Gasto' ? 'Gasto manual' : 'Ingreso manual'}
+        amount={<Money value={montoNum} currency={moneda} tipo={tipo} />}
+        desc={descripcion || categoria || undefined}
+        tags={tags}
+      />
+      <form onSubmit={handleSubmit} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Drawer>
+          <FieldRow label="Fecha" last={false}>
             <input
               id="alta-fecha"
               type="date"
               value={fecha}
               onChange={e => setFecha(e.target.value)}
               required
+              style={selectStyle}
             />
+          </FieldRow>
+
+          <div style={{ padding: '14px 0', borderBottom: '1px solid var(--gf-gray-100)' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-strong)', display: 'block', marginBottom: 8 }}>Tipo</span>
+            <RadioChip options={['Gasto', 'Ingreso']} value={tipo} onChange={v => setTipo(v as 'Gasto' | 'Ingreso')} name="tipo" />
           </div>
 
-          <div className="alta-campo">
-            <label>Tipo</label>
-            <div className="alta-radio-opciones">
-              {(['Gasto', 'Ingreso'] as const).map(t => (
-                <label key={t} className={`alta-radio${tipo === t ? ' seleccionado' : ''}`}>
-                  <input
-                    type="radio"
-                    name="tipo"
-                    value={t}
-                    checked={tipo === t}
-                    onChange={() => setTipo(t)}
-                  />
-                  {t}
-                </label>
-              ))}
-            </div>
-          </div>
+          <FieldRow
+            label="Descripción"
+            value={descripcion}
+            onChange={e => setDescripcion(e.target.value)}
+            placeholder="¿En qué?"
+            required
+          />
 
-          <div className="alta-campo">
-            <label htmlFor="alta-desc">Descripción</label>
+          <FieldRow label="Monto" required>
             <input
-              id="alta-desc"
+              id="alta-monto"
               type="text"
-              value={descripcion}
-              onChange={e => setDescripcion(e.target.value)}
-              placeholder="¿En qué?"
+              inputMode="decimal"
+              value={monto}
+              onChange={e => setMonto(e.target.value)}
+              placeholder="0.00"
               required
+              style={selectStyle}
             />
-          </div>
+          </FieldRow>
 
-          <div className="alta-campo alta-fila-dos">
-            <div>
-              <label htmlFor="alta-monto">Monto</label>
-              <input
-                id="alta-monto"
-                type="text"
-                inputMode="decimal"
-                value={monto}
-                onChange={e => setMonto(e.target.value)}
-                placeholder="0.00"
-                required
-              />
-            </div>
-            <div>
-              <label htmlFor="alta-moneda">Moneda</label>
-              <select
-                id="alta-moneda"
-                value={moneda}
-                onChange={e => setMoneda(e.target.value as 'ARS' | 'USD')}
-              >
+          <FieldRow label="Moneda">
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <select id="alta-moneda" value={moneda} onChange={e => setMoneda(e.target.value as 'ARS' | 'USD')} style={selectStyle}>
                 <option value="ARS">ARS</option>
                 <option value="USD">USD</option>
               </select>
               {moneda === 'USD' && (
-                <span className="alta-tc-hint">
-                  {tcCargando
-                    ? 'Buscando TC…'
-                    : tcUsdArs !== null
-                      ? `TC $${tcUsdArs.toLocaleString('es-AR')}`
-                      : 'Sin TC — se guardará null'}
+                <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>
+                  {tcCargando ? 'Buscando TC…' : tcUsdArs !== null ? `TC $${tcUsdArs.toLocaleString('es-AR')}` : 'Sin TC — se guardará null'}
                 </span>
               )}
             </div>
-          </div>
+          </FieldRow>
 
-          <div className="alta-campo">
-            <label htmlFor="alta-cat">
-              Categoría <span className="alta-req">*</span>
-            </label>
-            <select
-              id="alta-cat"
-              value={categoria}
-              onChange={e => setCategoria(e.target.value)}
-              required
-            >
+          <FieldRow label="Categoría" required>
+            <select id="alta-cat" value={categoria} onChange={e => setCategoria(e.target.value)} required style={selectStyle}>
               <option value="">— elegir —</option>
-              {categoriasDisp.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
+              {categoriasDisp.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-          </div>
+          </FieldRow>
 
-          <div className="alta-campo">
-            <label htmlFor="alta-subcat">
-              Subcategoría <span className="alta-req">*</span>
-            </label>
-            <select
-              id="alta-subcat"
-              value={subcategoria}
-              onChange={e => setSubcategoria(e.target.value)}
-              required
-              disabled={!categoria}
-            >
+          <FieldRow label="Subcategoría" required>
+            <select id="alta-subcat" value={subcategoria} onChange={e => setSubcategoria(e.target.value)} required disabled={!categoria} style={selectStyle}>
               <option value="">— elegir —</option>
-              {subcatsFiltradas.map(s => (
-                <option key={s.id} value={s.valor}>{s.valor}</option>
-              ))}
+              {subcatsFiltradas.map(s => <option key={s.id} value={s.valor}>{s.valor}</option>)}
             </select>
-          </div>
+          </FieldRow>
 
-          <div className="alta-campo">
-            <label htmlFor="alta-etiq">
-              Etiqueta <span className="alta-opc">(opcional)</span>
-            </label>
-            <select
-              id="alta-etiq"
-              value={etiqueta}
-              onChange={e => setEtiqueta(e.target.value)}
-            >
+          <FieldRow label="Etiqueta">
+            <select id="alta-etiq" value={etiqueta} onChange={e => setEtiqueta(e.target.value)} style={selectStyle}>
               <option value="">— ninguna —</option>
-              {etiquetas.map(et => (
-                <option key={et.id} value={et.valor}>{et.valor}</option>
-              ))}
+              {etiquetas.map(et => <option key={et.id} value={et.valor}>{et.valor}</option>)}
             </select>
-          </div>
+          </FieldRow>
 
-          <div className="alta-campo">
-            <label htmlFor="alta-banco">
-              Banco <span className="alta-opc">(opcional)</span>
-            </label>
-            <select
-              id="alta-banco"
-              value={banco}
-              onChange={e => setBanco(e.target.value)}
-            >
+          <FieldRow label="Banco">
+            <select id="alta-banco" value={banco} onChange={e => setBanco(e.target.value)} style={selectStyle}>
               <option value="">— ninguno —</option>
-              {bancosDisp.map(b => (
-                <option key={b} value={b}>{b}</option>
-              ))}
+              {bancosDisp.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
-          </div>
+          </FieldRow>
 
           {esAdmin ? (
-            <div className="alta-campo">
-              <label htmlFor="alta-persona">Persona</label>
-              <select
-                id="alta-persona"
-                value={persona}
-                onChange={e => setPersona(e.target.value)}
-              >
-                {miembrosActivos.map(m => (
-                  <option key={m.id} value={m.id}>{m.nombre}</option>
-                ))}
+            <FieldRow label="Persona">
+              <select id="alta-persona" value={persona} onChange={e => setPersona(e.target.value)} style={selectStyle}>
+                {miembrosActivos.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
               </select>
-            </div>
+            </FieldRow>
           ) : (
-            <div className="alta-campo">
-              <label>Persona</label>
-              <input type="text" value={miembro.nombre} readOnly className="alta-readonly" />
-            </div>
+            <FieldRow label="Persona" value={miembro.nombre} readOnly />
           )}
 
-          <div className="alta-campo alta-toggle-fila">
-            <label htmlFor="alta-incluir">Incluir en resumen del mes</label>
-            <input
-              id="alta-incluir"
-              type="checkbox"
-              checked={incluirResumenMes}
-              onChange={e => setIncluirResumenMes(e.target.checked)}
-            />
-          </div>
+          <SectionLabel>Estado</SectionLabel>
+          <FieldRow label="Incluir en resumen del mes" last>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <span style={{ fontSize: 15, color: 'var(--color-text-sec)', fontWeight: 600 }}>{incluirResumenMes ? 'Sí' : 'No'}</span>
+              <input
+                id="alta-incluir"
+                type="checkbox"
+                checked={incluirResumenMes}
+                onChange={e => setIncluirResumenMes(e.target.checked)}
+                style={{ width: 20, height: 20, accentColor: 'var(--color-accent)', cursor: 'pointer' }}
+              />
+            </label>
+          </FieldRow>
+          <div style={{ height: 12 }} />
+        </Drawer>
 
-          {errorMsg && <p className="alta-error" role="alert">{errorMsg}</p>}
+        <CtaBar>
+          {errorMsg && <p style={{ color: 'var(--gf-err-text)', fontSize: 13, margin: 0 }} role="alert">{errorMsg}</p>}
 
-          {dupWarning && (
-            <div className="alta-dup-aviso" role="alert">
-              <p>Ya hay un movimiento con este número. ¿Cargar igual?</p>
-              <div className="alta-dup-acciones">
-                <button
-                  type="button"
-                  className="alta-btn-sec"
-                  onClick={() => setDupWarning(false)}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  className="alta-btn-pri"
-                  disabled={guardando}
-                  onClick={() => {
-                    if (pendingPayload.current) ejecutarGuardar(pendingPayload.current);
-                  }}
-                >
-                  {guardando ? 'Guardando…' : 'Cargar igual'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!dupWarning && (
-            <div className="alta-acciones">
-              <button
-                type="button"
-                className="alta-btn-sec"
-                onClick={onCancelar}
-                disabled={guardando}
-              >
+          {dupWarning ? (
+            <>
+              <p style={{ fontSize: 13, color: 'var(--color-text-sec)', margin: 0 }} role="alert">
+                Ya hay un movimiento con este número. ¿Cargar igual?
+              </p>
+              <Button type="button" variant="secondary" size="cta" onClick={() => setDupWarning(false)}>
                 Cancelar
-              </button>
-              <button
-                type="submit"
-                className="alta-btn-pri"
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="cta"
                 disabled={guardando}
+                onClick={() => { if (pendingPayload.current) ejecutarGuardar(pendingPayload.current); }}
               >
+                {guardando ? 'Guardando…' : 'Cargar igual'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button type="submit" variant="primary" size="cta" disabled={guardando}>
                 {guardando ? 'Guardando…' : 'Guardar'}
-              </button>
-            </div>
+              </Button>
+              <Button type="button" variant="secondary" size="cta" onClick={onCancelar} disabled={guardando}>
+                Cancelar
+              </Button>
+            </>
           )}
-
-        </form>
-      </div>
-    </div>
+        </CtaBar>
+      </form>
+    </FullModal>
   );
 }

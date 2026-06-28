@@ -1,13 +1,13 @@
 import { getDoc, doc, type DocumentData } from 'firebase/firestore';
 import { db } from './firebase';
-import type { FamiliaConfig, FamiliaMiembro } from './types';
+import type { CategoriaItem, FamiliaConfig, FamiliaMiembro, MedioPago } from './types';
 
 // Primera conversión Timestamp→Date del proyecto. El patrón se repite en F4.
 export function docAFamiliaConfig(data: DocumentData): FamiliaConfig {
   return {
     miembros:      data.miembros as Record<string, FamiliaMiembro>,
-    categorias:    data.categorias as string[],
-    bancos:        data.bancos as string[],
+    categorias:    data.categorias as CategoriaItem[],   // F9.38 — string[] → CategoriaItem[]
+    bancos:        data.bancos as MedioPago[],   // F9.36 — string[] → MedioPago[]
     tarjetas:      data.tarjetas,
     actualizadoEn: data.actualizadoEn?.toDate() ?? new Date(0),
   };

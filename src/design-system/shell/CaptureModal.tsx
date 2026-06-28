@@ -54,7 +54,7 @@ export function Hero({ eyebrow, amount, desc, tags = [] }: HeroProps) {
 
 export function Drawer({ children }: { children: ReactNode }) {
   return (
-    <div style={{ background: '#fff', borderRadius: '24px 24px 0 0', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ background: 'var(--color-surface)', borderRadius: '24px 24px 0 0', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ width: 36, height: 4, background: 'var(--gf-gray-200)', borderRadius: 2, margin: '12px auto 0', flexShrink: 0 }} />
       <div style={{ flex: 1, overflowY: 'auto', padding: '12px 24px 0' }}>{children}</div>
     </div>
@@ -67,7 +67,7 @@ export function SectionLabel({ children }: { children: ReactNode }) {
 
 export function CtaBar({ children }: { children: ReactNode }) {
   return (
-    <div style={{ flexShrink: 0, background: '#fff', padding: '12px 24px 16px', borderTop: '1px solid rgba(0,0,0,.06)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ flexShrink: 0, background: 'var(--color-surface)', padding: '12px 24px 16px', borderTop: '1px solid var(--color-border-card)', display: 'flex', flexDirection: 'column', gap: 8 }}>
       {children}
     </div>
   );

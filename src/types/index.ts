@@ -218,10 +218,33 @@ export interface Entrante {
   actualizadoEn: Date;
 }
 
+// F9.36 — config/familia.bancos pasa de string[] a MedioPago[] (editable desde
+// Perfil › Medios de pago). id estable independiente del nombre (permite
+// renombrar sin romper aliasDe ni los movimientos históricos, que guardan el
+// nombre en `movimientos.banco`, no el id).
+export interface MedioPago {
+  id: string;
+  nombre: string;
+  color: string;          // hex #RRGGBB
+  tipo: 'Banco' | 'Billetera' | 'Efectivo';
+  dominio?: string;        // para el logo vía Brandfetch (BankLogo, F9.20)
+  aliasDe?: string;        // id de otro medio: este se agrupa/etiqueta como ese (F9.23)
+  oculto?: boolean;        // no aparece como fila propia en Medios de pago
+}
+
+// F9.38 — categoria gana id estable (antes string[] plano): renombrar ya no
+// huerfana movimientos/diccionario/subcategorias, la callable cascada el
+// cambio de nombre server-side (ver guardarTaxonomia en functions).
+export interface CategoriaItem {
+  id: string;
+  nombre: string;
+  activo: boolean;
+}
+
 export interface FamiliaConfig {
   miembros: Record<string, FamiliaMiembro>;
-  categorias: string[];
-  bancos: string[];
+  categorias: CategoriaItem[];
+  bancos: MedioPago[];
   tarjetas: Array<{
     codigo: string;
     banco: string;
@@ -230,6 +253,12 @@ export interface FamiliaConfig {
     cuentaDebito: string;
     numeroCuenta?: string;
     ultimos4?: string[];   // últimos 4 dígitos de cada tarjeta física del cuente (titular + adicionales)
+    // F9.35 — opcionales: no hay fuente legacy, se cargan a mano cuando se conozcan
+    // (no inventar valores). Sin cierreDia/venceDia no se rompe nada: cada CardStatement
+    // ya trae su propia fechaCierre/fechaVencimiento extraída del PDF (F6.5).
+    cierreDia?: number;     // día del mes de cierre del resumen (1-31)
+    venceDia?: number;      // día del mes de vencimiento del pago (1-31)
+    tipoTarjeta?: 'credito' | 'debito';
   }>;
   // Unidades funcionales del titular — para extracción correcta en liquidaciones de expensas
   unidades?: Array<{ uf: string; alias?: string; etiqueta?: string }>;

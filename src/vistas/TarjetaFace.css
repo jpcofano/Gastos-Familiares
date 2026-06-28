@@ -38,7 +38,10 @@
   padding-right: 26px;
 }
 .rt-card-banco { font-size: 0.9rem; font-weight: 700; }
-.rt-card-red   { font-size: 0.75rem; font-weight: 600; color: var(--gf-emerald-100); }
+.rt-card-red   {
+  font-size: 0.7rem; font-weight: 700; color: #fff; background: rgba(255,255,255,.16);
+  border-radius: 999px; padding: 3px 9px; white-space: nowrap;
+}
 .rt-card-numero {
   font-size: 0.9rem;
   letter-spacing: 2px;
@@ -54,26 +57,39 @@
 }
 .rt-card-fechas strong { color: #fff; font-weight: 500; font-variant-numeric: tabular-nums; }
 
-/* Footer blanco — total + estado */
+/* Footer — total + estado */
 .rt-card-footer {
-  background: #fff;
+  background: var(--color-surface);
   padding: 0.6rem 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--gf-gray-100);
 }
 .rt-card-totales { display: flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap; }
 .rt-card-eyebrow {
   font-size: 0.68rem;
   font-weight: 700;
-  color: #9ca3af;
+  color: var(--gf-gray-400);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-right: 0.2rem;
 }
-.rt-card-periodo { color: #6b7280; }
-.rt-card-monto   { font-weight: 600; }
+.rt-card-periodo { color: var(--color-text-sec); }
+.rt-card-monto   { font-weight: 600; color: var(--color-text); }
+
+/* F9.13/F9.21 — "N consumos · M en cuotas" + deuda futura en cuotas */
+.rt-card-cuotas {
+  background: var(--color-surface);
+  padding: 0 1rem 0.6rem;
+  font-size: 0.72rem;
+  color: var(--gf-gray-400);
+}
+.rt-card-deuda-futura {
+  color: var(--gf-out);
+  font-weight: 600;
+  margin-top: 2px;
+}
 
 /* ── Badges estado ───────────────────────────────────────────────────────────── */
 .rt-badge {

@@ -10,3 +10,77 @@
 .tv-sub    { font-size: 0.85rem; color: var(--color-text-sec, #6b7280); margin: 0; }
 .tv-estado { color: var(--color-text-sec, #6b7280); font-style: italic; }
 .tv-lista  { display: flex; flex-direction: column; gap: 0.6rem; }
+
+/* F9.22 — selector de período (chips) + aviso de mes pasado */
+.tv-periodos { display: flex; gap: 6px; flex-wrap: wrap; }
+.tv-chip {
+  font-family: var(--font-base); font-size: 0.78rem; font-weight: 600;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  background: var(--color-surface); border: 1px solid var(--color-border-card);
+  color: var(--color-text-sec);
+}
+.tv-chip--on { background: var(--color-primary-light); border-color: var(--gf-emerald); color: var(--color-primary-dark); }
+.tv-chip-curso { font-weight: 700; }
+
+.tv-aviso-pasado {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--gf-warn-bg); border: 1px solid var(--gf-warn-line); color: var(--gf-warn-text);
+  border-radius: 10px; padding: 9px 12px; font-size: 0.82rem; font-weight: 600;
+}
+.tv-aviso-pasado button {
+  font-family: var(--font-base); font-size: 0.78rem; font-weight: 700;
+  background: none; border: none; color: var(--gf-warn-text); text-decoration: underline;
+  cursor: pointer; padding: 0; flex-shrink: 0;
+}
+
+/* F9.21 — detalle del resumen (back interno, no toca el bottom-nav) */
+.tv-detalle { display: flex; flex-direction: column; gap: 14px; }
+
+.tv-volver {
+  display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: var(--font-base); font-size: 0.85rem; font-weight: 600;
+  color: var(--color-text-sec);
+}
+.tv-volver:hover { color: var(--color-text); }
+
+.tv-split {
+  display: flex; border-radius: var(--radius-lg, 16px); overflow: hidden;
+  background: var(--color-surface); border: 1px solid var(--color-border-card);
+}
+.tv-split-item {
+  flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.tv-split-item--right { border-left: 1px solid var(--gf-gray-100); }
+.tv-split-label {
+  font-size: 0.68rem; font-weight: 700; color: var(--gf-gray-400);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.tv-split-monto { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tv-split-monto--out { color: var(--gf-out); }
+
+.tv-consumos {
+  display: flex; flex-direction: column;
+  background: var(--color-surface); border: 1px solid var(--color-border-card);
+  border-radius: var(--radius-lg, 16px); overflow: hidden;
+}
+.tv-consumo-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  padding: 11px 14px; border-bottom: 1px solid var(--gf-gray-100);
+}
+.tv-consumo-row:last-child { border-bottom: none; }
+.tv-consumo-izq { min-width: 0; flex: 1; }
+.tv-consumo-comercio {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 0.9rem; font-weight: 600; color: var(--color-text);
+}
+.tv-consumo-sub { font-size: 0.78rem; color: var(--color-text-sec); margin-top: 2px; }
+.tv-badge-cuota {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 0.68rem; font-weight: 700; color: var(--gf-out);
+  border: 1px solid var(--gf-out); border-radius: 999px; padding: 1px 7px;
+  white-space: nowrap;
+}
+.tv-consumo-der { text-align: right; flex-shrink: 0; }
+.tv-consumo-monto { font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text); }
+.tv-consumo-plan { font-size: 0.74rem; color: var(--gf-gray-400); margin-top: 2px; font-variant-numeric: tabular-nums; }

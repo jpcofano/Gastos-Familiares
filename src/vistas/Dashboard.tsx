@@ -1,138 +1,29 @@
 import { useState } from 'react';
-import { Card } from '../design-system/components';
+import { Card, Sheet, Message, type SheetOption } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
+import { fmtMoney } from '../datos/money';
+import { useMiembroCtx } from '../contexto/MiembroContext';
+import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
+import { useMovimientosDelAnio } from '../hooks/useMovimientosDelAnio';
+import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
+import { agregarMensual, agregarAnual, mesAnterior, type DashMensual, type DashAnual } from '../datos/agregados';
 import './Dashboard.css';
 
-// F9.3 — Dashboard (Inicio), PR visual: maqueta con datos de EJEMPLO siguiendo
-// DashboardMobile.jsx del UI kit (paridad legacy 60_Dash.gs: neto/ingresos/gastos
-// en eq, gastos por categoría, por descripción, histórico mensual/anual). NO toca
-// Firestore ni Functions — el cableado a datos reales es una PR aparte (gaps ya
-// identificados en F9.0c: agregación por categoría/descripción e histórico no
-// existen todavía como hooks).
+// F9.26 — Dashboard cableado a datos reales (movimientos + config/familia),
+// agregados on-read vía datos/agregados.ts (ver docs/F9.25_auditoria_agregados.md
+// — ningún número se persiste). Reemplaza el mock de F9.3.
 
 type Moneda = 'ARS' | 'USD';
 
-interface CategoriaSlice { nombre: string; color: string; pct: number; count: number; usd: number; }
-interface SubcategoriaSlice { nombre: string; color: string; valor: number; pct: number; }
-interface DescripcionSlice { desc: string; usd: number; count: number; }
-
-interface DashMensual {
-  tc: number;
-  mesLabel: string;
-  balanceUsd: number; balancePositivo: boolean;
-  ingresosUsd: number; salidasUsd: number;
-  movimientos: number;
-  gastoPromedioUsd: number; diasConGasto: number;
-  promedioDiarioUsd: number;
-  finDeSemanaPct: number; top3Pct: number;
-  bancoDominante: string;
-  vsMesAnteriorPct: number; vsMesLabel: string; lecturaRapida: string;
-  categoriaTop: { nombre: string; pct: number };
-  movMasAlto: { usd: number; desc: string };
-  picoDia: { fecha: string; dow: string; usd: number; diaNum: number };
-  categorias: CategoriaSlice[];
-  subcategorias: SubcategoriaSlice[];
-  diaria: number[];
-  porDescripcion: DescripcionSlice[];
-}
-
-interface AnualCategoria { nombre: string; color: string; usd: number; }
-interface MesAMes { mes: string; usd: number; delta: number | null; }
-
-interface DashAnual {
-  anio: number;
-  balanceUsd: number; ingresosUsd: number; salidasUsd: number;
-  promedioMensualUsd: number; mesMasAlto: string; mesMasBajo: string; tendenciaPct: number;
-  mesesConDatos: number; comparacionInteranualPct: number; mejorMesAhorro: string;
-  meses: string[];
-  salidasPorMes: number[];
-  ingresosPorMes: number[];
-  categorias: AnualCategoria[];
-  mesAMes: MesAMes[];
-}
-
-// ── Datos de ejemplo (mismo shape/valores que ui_kits/mobile/data.jsx) ───────
-
-const EXAMPLE_DASH: DashMensual = {
-  tc: 1485,
-  mesLabel: 'Junio 2026',
-  balanceUsd: 1526, balancePositivo: true,
-  ingresosUsd: 4086, salidasUsd: 2560,
-  movimientos: 34,
-  gastoPromedioUsd: 75, diasConGasto: 14,
-  promedioDiarioUsd: 183,
-  finDeSemanaPct: 1, top3Pct: 92,
-  bancoDominante: 'Efectivo',
-  vsMesAnteriorPct: -45, vsMesLabel: 'Mayo 2026', lecturaRapida: 'Bajó el gasto',
-  categoriaTop: { nombre: 'Educación y chicos', pct: 65 },
-  movMasAlto: { usd: 871, desc: 'Escuela Philips (ITPA SA) — Federico · Arancel + Taller + Transporte' },
-  picoDia: { fecha: '10/06', dow: 'mié', usd: 1563, diaNum: 10 },
-  categorias: [
-    { nombre: 'Educación y chicos',      color: '#4f8ef7', pct: 65, count: 9, usd: 1693 },
-    { nombre: 'Casa',                    color: '#2bb673', pct: 21, count: 7, usd: 537 },
-    { nombre: 'Personal',                color: '#f5a623', pct: 5,  count: 6, usd: 132 },
-    { nombre: 'Salud',                   color: '#8b5cf6', pct: 3,  count: 2, usd: 87 },
-    { nombre: 'Alimentación cotidiana',  color: '#ef5350', pct: 2,  count: 7, usd: 60 },
-    { nombre: 'Impuestos y finanzas',    color: '#06b6d4', pct: 2,  count: 3, usd: 51 },
-    { nombre: 'Otros',                   color: '#f97316', pct: 2,  count: 2, usd: 48 },
-  ],
-  subcategorias: [
-    { nombre: 'Colegio Federico',       color: '#4f8ef7', valor: 871, pct: 34 },
-    { nombre: 'Colegio Sofi',           color: '#2bb673', valor: 564, pct: 22 },
-    { nombre: 'Expensas',               color: '#f5a623', valor: 267, pct: 10 },
-    { nombre: 'Colegio Fede',           color: '#8b5cf6', valor: 152, pct: 6 },
-    { nombre: 'Internet y teléfono',    color: '#ef5350', valor: 99,  pct: 4 },
-  ],
-  diaria: [40, 0, 55, 0, 70, 30, 0, 0, 45, 1563, 0, 60, 0, 210, 35, 180, 0, 0, 50, 0, 25, 0, 90, 0, 0, 40, 0, 0, 30, 20],
-  porDescripcion: [
-    { desc: 'Escuela Philips — Federico', usd: 871, count: 3 },
-    { desc: 'Colegio Sofi — cuota',       usd: 564, count: 2 },
-    { desc: 'Expensas edificio',          usd: 267, count: 1 },
-    { desc: 'Internet y teléfono',        usd: 99,  count: 1 },
-    { desc: 'Supermercado',               usd: 84,  count: 5 },
-  ],
-};
-
-const EXAMPLE_ANUAL: DashAnual = {
-  anio: 2026,
-  balanceUsd: 3875, ingresosUsd: 27426, salidasUsd: 23551,
-  promedioMensualUsd: 2044, mesMasAlto: 'Mar', mesMasBajo: 'Jul', tendenciaPct: 18,
-  mesesConDatos: 6, comparacionInteranualPct: 117, mejorMesAhorro: 'Ene',
-  meses: ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'],
-  salidasPorMes:   [1800, 2100, 3200, 2600, 2400, 2560, 1200, 1900, 2000, 2300, 2100, 1391],
-  ingresosPorMes:  [3100, 2400, 2800, 2600, 2500, 4086, 1400, 2000, 2100, 2300, 2200, 1936],
-  categorias: [
-    { nombre: 'Educación y chicos',     color: '#4f8ef7', usd: 6925 },
-    { nombre: 'Alimentación cotidiana', color: '#ef5350', usd: 4248 },
-    { nombre: 'Casa',                   color: '#2bb673', usd: 4200 },
-    { nombre: 'Auto',                   color: '#8b5cf6', usd: 1418 },
-    { nombre: 'Salidas',                color: '#f5a623', usd: 1287 },
-    { nombre: 'Vacaciones y viajes',    color: '#06b6d4', usd: 1267 },
-    { nombre: 'Personal',               color: '#ec4899', usd: 1075 },
-    { nombre: 'Otros',                  color: '#f97316', usd: 763 },
-    { nombre: 'Salud',                  color: '#14b8a6', usd: 548 },
-    { nombre: 'Indumentaria',           color: '#a855f7', usd: 412 },
-    { nombre: 'Impuestos y finanzas',   color: '#0284c7', usd: 173 },
-    { nombre: 'Transporte general',     color: '#84cc16', usd: 151 },
-  ],
-  mesAMes: [
-    { mes: 'Ene', usd: 1261, delta: null },
-    { mes: 'Feb', usd: 2783, delta: 121 },
-    { mes: 'Mar', usd: 7329, delta: 163 },
-    { mes: 'Abr', usd: 1486, delta: -80 },
-    { mes: 'May', usd: 2408, delta: 62 },
-    { mes: 'Jun', usd: 2560, delta: 6 },
-  ],
-};
-
-// ── Helpers de moneda (montos base en USD; toggle ARS/USD + "eq" secundario) ──
+// ── Helpers de moneda (montos base en USD; toggle ARS/USD) — delegan en el
+// helper único fmtMoney (F9.8), sin TC propio ni sufijo "eq" ─────────────────
 
 function nfes(n: number): string { return Math.round(n).toLocaleString('es-AR'); }
 function curBig(usd: number, cur: Moneda, tc: number): string {
-  return cur === 'USD' ? 'USD ' + nfes(usd) : '$ ' + nfes(usd * tc);
+  return fmtMoney(usd, { from: 'USD', to: cur, tc });
 }
 function curEq(usd: number, cur: Moneda, tc: number): string {
-  return cur === 'USD' ? '$ ' + nfes(usd * tc) + ' eq' : 'USD ' + nfes(usd) + ' eq';
+  return fmtMoney(usd, { from: 'USD', to: cur === 'USD' ? 'ARS' : 'USD', tc });
 }
 
 function Eyebrow({ icon, children }: { icon?: string; children: React.ReactNode }) {
@@ -158,13 +49,15 @@ function Kpi({ icon, eyebrow, value, sub, accent }: { icon?: string; eyebrow: Re
 
 function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
   const tc = d.tc;
-  const donut = (() => {
-    let acc = 0;
-    const stops = d.categorias.map(c => { const from = acc; acc += c.pct; return `${c.color} ${from}% ${acc}%`; });
-    if (acc < 100) stops.push(`var(--gf-gray-200) ${acc}% 100%`);
-    return `conic-gradient(${stops.join(', ')})`;
-  })();
-  const maxDia = Math.max(...d.diaria);
+  const [compartirInfo, setCompartirInfo] = useState(false);
+  // F9.16 — top 6 + "Otras" (agrupa el resto), misma lista para la barra apilada y el ranking
+  const catTop6 = d.categorias.slice(0, 6);
+  const catResto = d.categorias.slice(6);
+  const catOtras = catResto.length > 0
+    ? { nombre: 'Otras', color: 'var(--gf-gray-300)', pct: catResto.reduce((s, c) => s + c.pct, 0), count: catResto.reduce((s, c) => s + c.count, 0), usd: catResto.reduce((s, c) => s + c.usd, 0) }
+    : null;
+  const catLista = catOtras ? [...catTop6, catOtras] : catTop6;
+  const maxDia = Math.max(...d.diaria, 1);
   const chartH = 120;
 
   return (
@@ -181,7 +74,7 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
 
       {/* Ingresos / Salidas */}
       <div style={{ display: 'flex', gap: 10 }}>
-        {[{ e: 'Ingresos', v: d.ingresosUsd, c: 'var(--gf-income)' }, { e: 'Salidas', v: d.salidasUsd, c: '#f5a623' }].map(x => (
+        {[{ e: 'Ingresos', v: d.ingresosUsd, c: 'var(--gf-income)' }, { e: 'Salidas', v: d.salidasUsd, c: 'var(--gf-out)' }].map(x => (
           <Card key={x.e} variant="flat" padding="0" style={{ flex: 1, overflow: 'hidden', textAlign: 'center' }}>
             <div style={{ height: 4, background: x.c }} />
             <div style={{ padding: '12px 10px' }}>
@@ -193,14 +86,20 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
         ))}
       </div>
 
-      {/* KPI grid */}
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Kpi icon="receipt" eyebrow="Movimientos" value={d.movimientos} sub="en el mes" />
-        <Kpi icon="bar-chart-3" eyebrow="Gasto promedio" value={curBig(d.gastoPromedioUsd, cur, tc)} sub={`${d.diasConGasto} días con gasto`} />
-      </div>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <Kpi icon="tag" eyebrow="Categoría top" value={d.categoriaTop.nombre} sub={`${d.categoriaTop.pct}% del total`} />
-      </div>
+      {/* Tira secundaria compacta (F9.10): Movimientos / Gasto prom. / Cat. top en una sola card */}
+      <Card variant="flat" padding="0" style={{ display: 'flex' }}>
+        {[
+          { eyebrow: 'Movimientos', value: d.movimientos, sub: 'en el mes' },
+          { eyebrow: 'Gasto prom.', value: curBig(d.gastoPromedioUsd, cur, tc), sub: `${d.diasConGasto} días` },
+          { eyebrow: 'Cat. top', value: d.categoriaTop.nombre, sub: `${d.categoriaTop.pct}% del total` },
+        ].map((x, i) => (
+          <div key={x.eyebrow} style={{ flex: 1, minWidth: 0, padding: '10px 8px', textAlign: 'center', borderLeft: i > 0 ? '1px solid var(--gf-gray-100)' : 'none' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.eyebrow}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 3, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.value}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--color-text-sec)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.sub}</div>
+          </div>
+        ))}
+      </Card>
       <Card variant="flat" padding="var(--space-3)">
         <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
         <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
@@ -211,22 +110,13 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
       <Card padding="var(--space-4)">
         <div style={{ fontSize: 16, fontWeight: 800 }}>Por categoría</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>este mes</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
-          <div style={{ position: 'relative', width: 104, height: 104, flexShrink: 0, borderRadius: '50%', background: donut }}>
-            <div style={{ position: 'absolute', inset: 18, background: 'var(--color-surface)', borderRadius: '50%' }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {d.categorias.map(c => (
-              <div key={c.nombre} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
-                <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--color-text-strong)' }}>{c.nombre}</span>
-                <span style={{ fontWeight: 700, color: 'var(--color-text-sec)' }}>{c.pct}%</span>
-              </div>
-            ))}
-          </div>
+        <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', marginBottom: 14 }}>
+          {catLista.map(c => (
+            <div key={c.nombre} style={{ width: `${c.pct}%`, background: c.color }} title={`${c.nombre} · ${c.pct}%`} />
+          ))}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 11, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 12 }}>
-          {d.categorias.slice(0, 5).map(c => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+          {catLista.map(c => (
             <div key={c.nombre}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
@@ -265,8 +155,8 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
         <div style={{ fontSize: 16, fontWeight: 800 }}>Evolución diaria</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>· pico {d.picoDia.fecha} · {d.picoDia.dow}</div>
         <div style={{ position: 'relative', height: chartH, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
-          <div style={{ position: 'absolute', left: 0, right: 0, bottom: `${(d.promedioDiarioUsd / maxDia) * chartH}px`, borderTop: '1.5px dashed #f5a623', zIndex: 1 }}>
-            <span style={{ position: 'absolute', top: -14, left: 0, fontSize: 9, color: '#f5a623', fontWeight: 600 }}>promedio diario</span>
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: `${(d.promedioDiarioUsd / maxDia) * chartH}px`, borderTop: '1.5px dashed var(--gf-out)', zIndex: 1 }}>
+            <span style={{ position: 'absolute', top: -14, left: 0, fontSize: 9, color: 'var(--gf-out)', fontWeight: 600 }}>promedio diario</span>
           </div>
           {d.diaria.map((v, i) => {
             const peak = (i + 1) === d.picoDia.diaNum;
@@ -315,6 +205,21 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
           ))}
         </div>
       </Card>
+
+      {/* F9.14 — placeholder, mecanismo a definir */}
+      <button onClick={() => setCompartirInfo(true)} style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', boxSizing: 'border-box',
+        padding: '12px 16px', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border)', cursor: 'pointer',
+        fontFamily: 'var(--font-base)', fontSize: 14, fontWeight: 700, color: 'var(--color-text)', background: 'var(--color-surface)',
+      }}>
+        <Icon name="share-2" size={16} color="var(--color-text-sec)" />
+        Compartir informe
+      </button>
+      {compartirInfo && (
+        <Message kind="wait" title="Próximamente.">
+          Compartir el informe mensual está en definición (PDF, email o link). Por ahora es un placeholder visual.
+        </Message>
+      )}
       <div style={{ height: 4 }} />
     </div>
   );
@@ -323,16 +228,11 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
 // ── Anual (histórico) ─────────────────────────────────────────────────────────
 
 function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda }) {
-  const maxSal = Math.max(...a.salidasPorMes);
-  const maxIS = Math.max(...a.ingresosPorMes, ...a.salidasPorMes);
+  const maxSal = Math.max(...a.salidasPorMes, 1);
+  const maxIS = Math.max(...a.ingresosPorMes, ...a.salidasPorMes, 1);
   const totalCat = a.categorias.reduce((s, c) => s + c.usd, 0);
-  const maxCat = a.categorias[0].usd;
-  const maxMM = Math.max(...a.mesAMes.map(m => m.usd));
-  const donut = (() => {
-    let acc = 0;
-    const st = a.categorias.map(c => { const p = (c.usd / totalCat) * 100; const f = acc; acc += p; return `${c.color} ${f}% ${acc}%`; });
-    return `conic-gradient(${st.join(', ')})`;
-  })();
+  const maxCat = a.categorias[0]?.usd ?? 1;
+  const maxMM = Math.max(...a.mesAMes.map(m => m.usd), 1);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -345,7 +245,7 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
 
       {/* Ingresos / Salidas */}
       <div style={{ display: 'flex', gap: 10 }}>
-        {[{ e: 'Ingresos', v: a.ingresosUsd, c: 'var(--gf-income)' }, { e: 'Salidas', v: a.salidasUsd, c: '#f5a623' }].map(x => (
+        {[{ e: 'Ingresos', v: a.ingresosUsd, c: 'var(--gf-income)' }, { e: 'Salidas', v: a.salidasUsd, c: 'var(--gf-out)' }].map(x => (
           <Card key={x.e} variant="flat" padding="0" style={{ flex: 1, overflow: 'hidden', textAlign: 'center' }}>
             <div style={{ height: 4, background: x.c }} />
             <div style={{ padding: '12px 10px' }}>
@@ -361,7 +261,7 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
       <Card padding="var(--space-4)">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>Salidas por mes</div>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--gf-expense)', background: 'var(--gf-expense-50)', borderRadius: 999, padding: '3px 9px' }}>tendencia +{a.tendenciaPct}%</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--gf-expense)', background: 'var(--gf-expense-50)', borderRadius: 999, padding: '3px 9px' }}>tendencia {a.tendenciaPct > 0 ? '+' : ''}{a.tendenciaPct}%</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 110, marginTop: 14 }}>
           {a.salidasPorMes.map((v, i) => (
@@ -380,26 +280,19 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
 
       {/* Por categoría */}
       <Card padding="var(--space-4)">
-        <div style={{ fontSize: 16, fontWeight: 800 }}>Por categoría</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>del año</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
-          <div style={{ position: 'relative', width: 104, height: 104, flexShrink: 0, borderRadius: '50%', background: donut }}>
-            <div style={{ position: 'absolute', inset: 18, background: 'var(--color-surface)', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 9, color: 'var(--gf-gray-400)' }}>total</span>
-              <span style={{ fontSize: 12, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{cur === 'USD' ? 'U$S ' + nfes(totalCat) : '$' + nfes(totalCat * tc / 1000) + 'k'}</span>
-            </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800 }}>Por categoría</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>del año</div>
           </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {a.categorias.slice(0, 6).map(c => (
-              <div key={c.nombre} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
-                <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--color-text-strong)' }}>{c.nombre}</span>
-                <span style={{ fontWeight: 700, color: 'var(--color-text-sec)' }}>{Math.round((c.usd / totalCat) * 100)}%</span>
-              </div>
-            ))}
-          </div>
+          <span style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{cur === 'USD' ? 'U$S ' + nfes(totalCat) : '$' + nfes(totalCat * tc / 1000) + 'k'}</span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 12 }}>
+        <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', margin: '14px 0' }}>
+          {a.categorias.map(c => (
+            <div key={c.nombre} style={{ width: `${(c.usd / totalCat) * 100}%`, background: c.color }} title={`${c.nombre} · ${Math.round((c.usd / totalCat) * 100)}%`} />
+          ))}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {a.categorias.map(c => (
             <div key={c.nombre}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 3 }}>
@@ -420,14 +313,14 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
         <div style={{ fontSize: 16, fontWeight: 800 }}>Ingresos y salidas por mes</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 11, color: 'var(--color-text-sec)', margin: '6px 0 12px' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--gf-income)' }} />Ingresos</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: '#f5a623' }} />Salidas</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--gf-out)' }} />Salidas</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 104 }}>
           {a.meses.map((m, i) => (
             <div key={m} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 88, width: '100%', justifyContent: 'center' }}>
                 <div style={{ width: '42%', height: `${Math.max((a.ingresosPorMes[i] / maxIS) * 88, 2)}px`, background: 'var(--gf-income)', borderRadius: '2px 2px 0 0' }} />
-                <div style={{ width: '42%', height: `${Math.max((a.salidasPorMes[i] / maxIS) * 88, 2)}px`, background: '#f5a623', borderRadius: '2px 2px 0 0' }} />
+                <div style={{ width: '42%', height: `${Math.max((a.salidasPorMes[i] / maxIS) * 88, 2)}px`, background: 'var(--gf-out)', borderRadius: '2px 2px 0 0' }} />
               </div>
               <div style={{ fontSize: 8.5, color: 'var(--gf-gray-400)' }}>{m.charAt(0)}</div>
             </div>
@@ -435,7 +328,7 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
           <Kpi eyebrow="Meses con datos" value={a.mesesConDatos} />
-          <Kpi eyebrow="Comp. interanual" value={`${a.comparacionInteranualPct}%`} />
+          <Kpi eyebrow="Comp. interanual" value={a.comparacionInteranualPct == null ? '—' : `${a.comparacionInteranualPct}%`} />
           <Kpi eyebrow="Mejor mes ahorro" value={a.mejorMesAhorro} />
         </div>
       </Card>
@@ -465,15 +358,58 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
 
 // ── Vista principal ───────────────────────────────────────────────────────────
 
-const MESES_DISPONIBLES = ['2026-06', '2026-05', '2026-04'];
-const MESES_LABEL: Record<string, string> = { '2026-06': 'Junio 2026', '2026-05': 'Mayo 2026', '2026-04': 'Abril 2026' };
-const ANIOS_DISPONIBLES = [2026, 2025, 2024];
+function mesActual(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+const MESES_LARGO = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+function mesesDisponibles(n = 12): { value: string; label: string }[] {
+  const hoy = new Date();
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return { value, label: `${MESES_LARGO[d.getMonth()]} ${d.getFullYear()}` };
+  });
+}
+
+function aniosDisponibles(n = 4): number[] {
+  const actual = new Date().getFullYear();
+  return Array.from({ length: n }, (_, i) => actual - i);
+}
 
 export default function Dashboard() {
-  const [mes, setMes] = useState('2026-06');
-  const [anio, setAnio] = useState(EXAMPLE_ANUAL.anio);
+  const { memberId, miembro } = useMiembroCtx();
+  const esAdmin = miembro.rol === 'admin';
+  const persona = esAdmin ? undefined : memberId;
+
+  const [mes, setMes] = useState(mesActual);
+  const [anio, setAnio] = useState(() => new Date().getFullYear());
   const [sec, setSec] = useState<'mensual' | 'anual'>('mensual');
   const [cur, setCur] = useState<Moneda>('USD');
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  const { config } = useFamiliaConfig();
+  const { movimientos: movsMes,     cargando: cargandoMes }    = useMovimientosDelMes(mes, persona);
+  const { movimientos: movsMesPrev, cargando: cargandoMesPrev } = useMovimientosDelMes(mesAnterior(mes), persona);
+  const { movimientos: movsAnio,     cargando: cargandoAnio }    = useMovimientosDelAnio(anio, persona);
+  const { movimientos: movsAnioPrev, cargando: cargandoAnioPrev } = useMovimientosDelAnio(anio - 1, persona);
+
+  const cargandoSec = sec === 'mensual' ? (cargandoMes || cargandoMesPrev) : (cargandoAnio || cargandoAnioPrev);
+
+  const dashMensual = agregarMensual(movsMes, mes, config, movsMesPrev);
+  const dashAnual = agregarAnual(movsAnio, anio, movsAnioPrev);
+  const tcAnual = [...movsAnio].filter(m => m.tcUsdArs).sort((a, b) => b.fecha.getTime() - a.fecha.getTime())[0]?.tcUsdArs ?? dashMensual.tc;
+
+  const periodosMes = mesesDisponibles();
+  const periodosAnio = aniosDisponibles();
+  const periodoLabel = sec === 'mensual' ? (periodosMes.find(p => p.value === mes)?.label ?? mes) : String(anio);
+  const periodoOptions: SheetOption[] = sec === 'mensual'
+    ? periodosMes.map(p => ({ value: p.value, label: p.label }))
+    : periodosAnio.map(a => ({ value: a, label: String(a) }));
+  const periodoValue: string | number = sec === 'mensual' ? mes : anio;
+  const onPeriodoPick = (v: string | number) => { if (sec === 'mensual') setMes(String(v)); else setAnio(Number(v)); };
 
   const curPill = (id: Moneda) => {
     const on = cur === id;
@@ -498,14 +434,16 @@ export default function Dashboard() {
 
   return (
     <div className="dash">
-      <div style={{ background: 'var(--gf-gray-100)', borderRadius: 'var(--radius-card)', padding: '14px 14px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ background: 'var(--gf-gray-100)', borderRadius: 'var(--radius-card)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <Eyebrow>Vista general</Eyebrow>
-            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 1 }}>
-              {sec === 'mensual' ? EXAMPLE_DASH.mesLabel : `Año ${anio}`}
-            </div>
-          </div>
+          <button onClick={() => setSheetOpen(true)} style={{
+            display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 7px 12px', borderRadius: 999, border: 'none',
+            cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 15, fontWeight: 800,
+            color: 'var(--color-text)', background: 'var(--color-surface)', boxShadow: 'var(--shadow-soft)',
+          }}>
+            {periodoLabel}
+            <Icon name="chevron-down" size={15} color="var(--gf-gray-400)" />
+          </button>
           <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3 }}>
             {(['ARS', 'USD'] as const).map(curPill)}
           </div>
@@ -513,26 +451,28 @@ export default function Dashboard() {
         <div style={{ display: 'flex', gap: 4, background: 'var(--gf-gray-200)', borderRadius: 14, padding: 4 }}>
           {tab('mensual', 'Mensual')}{tab('anual', 'Anual')}
         </div>
-        {sec === 'mensual' ? (
-          <select value={mes} onChange={e => setMes(e.target.value)} style={{
-            width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontFamily: 'var(--font-base)', fontSize: 15, fontWeight: 600,
-            color: 'var(--color-text)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 10, cursor: 'pointer',
-          }}>
-            {MESES_DISPONIBLES.map(m => <option key={m} value={m}>{MESES_LABEL[m]}</option>)}
-          </select>
-        ) : (
-          <select value={anio} onChange={e => setAnio(Number(e.target.value))} style={{
-            width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontFamily: 'var(--font-base)', fontSize: 15, fontWeight: 600,
-            color: 'var(--color-text)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 10, cursor: 'pointer',
-          }}>
-            {ANIOS_DISPONIBLES.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-        )}
       </div>
 
-      {sec === 'mensual'
-        ? <DashboardMensual d={EXAMPLE_DASH} cur={cur} />
-        : <DashboardAnual a={EXAMPLE_ANUAL} tc={EXAMPLE_DASH.tc} cur={cur} />}
+      <Sheet
+        open={sheetOpen}
+        onClose={() => setSheetOpen(false)}
+        title={sec === 'mensual' ? 'Elegir mes' : 'Elegir año'}
+        options={periodoOptions}
+        value={periodoValue}
+        onPick={onPeriodoPick}
+      />
+
+      {cargandoSec ? (
+        <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Cargando…</p>
+      ) : sec === 'mensual' ? (
+        dashMensual.movimientos === 0
+          ? <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Sin movimientos en {periodoLabel}.</p>
+          : <DashboardMensual d={dashMensual} cur={cur} />
+      ) : (
+        dashAnual.mesesConDatos === 0
+          ? <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Sin movimientos en {anio}.</p>
+          : <DashboardAnual a={dashAnual} tc={tcAnual} cur={cur} />
+      )}
     </div>
   );
 }

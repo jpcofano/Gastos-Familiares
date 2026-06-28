@@ -113,7 +113,7 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
   }
 
   const miembros = Object.entries(config.miembros).filter(([, m]) => m.activo);
-  const cats     = config.categorias ?? [];
+  const cats     = (config.categorias ?? []).filter(c => c.activo).map(c => c.nombre);
   const incluidas = lineas.filter(l => l.incluir).length;
   const sinPersona = lineas.some(
     l => l.incluir && l.tipoLinea === 'consumo' && !l.personaConfirmada,
@@ -207,7 +207,7 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
                   <td className="rt-col-desc" title={linea.descripcionRaw}>
                     {linea.descripcionRaw || '—'}
                     {linea.cuotaTotal > 1 && (
-                      <span className="rt-cuota"> {linea.cuotaActual}/{linea.cuotaTotal}</span>
+                      <span className="rt-cuota">Cuota {linea.cuotaActual}/{linea.cuotaTotal}</span>
                     )}
                   </td>
                   <td>

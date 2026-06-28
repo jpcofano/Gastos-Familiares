@@ -32,3 +32,29 @@ export async function cargarEtiquetas(): Promise<EtiquetaItem[]> {
     valor: d.data().valor as string,
   }));
 }
+
+// F9.38 — variantes "admin" sin el filtro activo==true: las usa Perfil ›
+// Categorías para poder mostrar/reactivar nodos desactivados. Los consumidores
+// normales (AltaMovimiento, ConfigEsperados, clasificador) siguen usando las
+// de arriba — no se les cambia el comportamiento.
+export interface SubcategoriaAdminItem extends SubcategoriaItem { activo: boolean }
+export interface EtiquetaAdminItem extends EtiquetaItem { activo: boolean }
+
+export async function cargarSubcategoriasAdmin(): Promise<SubcategoriaAdminItem[]> {
+  const snap = await getDocs(collection(db, 'subcategorias'));
+  return snap.docs.map(d => ({
+    id: d.id,
+    categoriaPadre: d.data().categoriaPadre ?? null,
+    valor: d.data().valor as string,
+    activo: d.data().activo as boolean,
+  }));
+}
+
+export async function cargarEtiquetasAdmin(): Promise<EtiquetaAdminItem[]> {
+  const snap = await getDocs(collection(db, 'etiquetas'));
+  return snap.docs.map(d => ({
+    id: d.id,
+    valor: d.data().valor as string,
+    activo: d.data().activo as boolean,
+  }));
+}

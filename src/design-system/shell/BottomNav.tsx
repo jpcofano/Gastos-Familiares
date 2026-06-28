@@ -15,7 +15,7 @@ interface BottomNavProps {
 export function BottomNav({ items }: BottomNavProps) {
   return (
     <div style={{
-      flex: '0 0 auto', height: 64, background: '#fff', borderTop: '1px solid var(--gf-gray-150)',
+      flex: '0 0 auto', height: 64, background: 'var(--color-surface)', borderTop: '1px solid var(--gf-gray-150)',
       display: 'flex', alignItems: 'stretch', position: 'relative', zIndex: 2,
     }}>
       {items.map(n => (

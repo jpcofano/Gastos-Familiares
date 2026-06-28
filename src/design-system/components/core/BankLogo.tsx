@@ -4,18 +4,28 @@ interface BankLogoProps {
   id: string;
   nombre: string;
   color: string;
+  dominio?: string;
   size?: number;
   radius?: number;
 }
 
-// BankLogo — logo cuadrado de un medio de pago (banco/billetera/efectivo).
-// Intenta /assets/medios/{id}.svg; si no existe (404 → onError) cae a un
-// chip de color con la inicial del nombre. F9.5 — no dibujar logos de marca
-// a mano; los SVG oficiales se suben después a public/assets/medios/.
-export function BankLogo({ id, nombre, color, size = 34, radius = 9 }: BankLogoProps) {
-  const [error, setError] = useState(false);
+const BRANDFETCH_CLIENT_ID = import.meta.env.VITE_BRANDFETCH_CLIENT_ID as string | undefined;
 
-  if (error) {
+type Stage = 'brandfetch' | 'local' | 'mono';
+
+function stageInicial(dominio?: string): Stage {
+  if (!dominio) return 'mono';
+  return BRANDFETCH_CLIENT_ID ? 'brandfetch' : 'local';
+}
+
+// BankLogo — logo cuadrado de un medio de pago (banco/billetera). F9.20:
+// con dominio, intenta Brandfetch CDN → archivo local /assets/medios/{id}.svg
+// → monograma de color. Sin dominio (o sin Client ID) salta directo al
+// fallback que corresponda — evita el ícono roto de un medio sin logo.
+export function BankLogo({ id, nombre, color, dominio, size = 34, radius = 9 }: BankLogoProps) {
+  const [stage, setStage] = useState<Stage>(() => stageInicial(dominio));
+
+  if (stage === 'mono') {
     return (
       <span style={{
         width: size, height: size, borderRadius: radius, background: color, color: '#fff',
@@ -27,11 +37,15 @@ export function BankLogo({ id, nombre, color, size = 34, radius = 9 }: BankLogoP
     );
   }
 
+  const src = stage === 'brandfetch'
+    ? `https://cdn.brandfetch.io/domain/${dominio}/w/120/h/120?c=${BRANDFETCH_CLIENT_ID}`
+    : `/assets/medios/${id}.svg`;
+
   return (
     <img
-      src={`/assets/medios/${id}.svg`}
+      src={src}
       alt={nombre}
-      onError={() => setError(true)}
+      onError={() => setStage(stage === 'brandfetch' ? 'local' : 'mono')}
       style={{
         width: size, height: size, borderRadius: radius, objectFit: 'contain',
         background: '#fff', border: '1px solid var(--gf-gray-150)', flexShrink: 0,

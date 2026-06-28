@@ -7,12 +7,13 @@ interface MoneyProps extends HTMLAttributes<HTMLSpanElement> {
   colored?: boolean;
   signed?: boolean;
   size?: string;
+  decimals?: number;
 }
 
-function formatAmount(value: number | string | null | undefined, currency: 'ARS' | 'USD'): string {
+function formatAmount(value: number | string | null | undefined, currency: 'ARS' | 'USD', decimals: number): string {
   const n = Number(value) || 0;
   const symbol = currency === 'USD' ? 'U$S' : '$';
-  const body = Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const body = Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   return `${symbol} ${body}`;
 }
 
@@ -26,6 +27,7 @@ export function Money({
   colored = true,
   signed = true,
   size,
+  decimals = 2,
   style,
   ...rest
 }: MoneyProps) {
@@ -46,7 +48,7 @@ export function Money({
       }}
       {...rest}
     >
-      {sign}{formatAmount(value, currency)}
+      {sign}{formatAmount(value, currency, decimals)}
     </span>
   );
 }

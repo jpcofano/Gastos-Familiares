@@ -143,5 +143,114 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
       : `missing=${missingEmails.join(',')} bad=${badDocs.map(d => d.id).join(',')} extra=${extraDocs.map(d => d.id).join(',')}`,
   });
 
+  // F9.31 — gate de verificación pre-migración: checks adicionales.
+
+  // persona = memberId en el 100% de los movimientos (F9.24). Lista los no resueltos.
+  const famData = fam.exists ? fam.data()! : null;
+  const memberIds = new Set(Object.keys(famData?.miembros ?? {}));
+  const personaInvalida = allMovs.filter(d => d.persona != null && !memberIds.has(d.persona as string));
+  results.push({
+    name: 'persona == memberId (100%)',
+    ok: personaInvalida.length === 0,
+    detail: personaInvalida.length === 0
+      ? `OK (${allMovs.length} docs)`
+      : `${personaInvalida.length} con persona no resuelta: ${[...new Set(personaInvalida.map(d => d.persona))].slice(0, 5).join(', ')} — correr scripts/seed/backfillPersonaMemberId.ts`,
+  });
+
+  // banco: valores válidos (los 4 canónicos del modelo real, ver scripts/seed/transformers/config.ts)
+  const BANCOS_VALIDOS = new Set(['BBVA', 'Galicia', 'Personal Pay', 'Efectivo']);
+  const bancoInvalido = allMovs.filter(d => d.banco != null && !BANCOS_VALIDOS.has(d.banco as string));
+  results.push({
+    name: 'banco en set canónico',
+    ok: bancoInvalido.length === 0,
+    detail: bancoInvalido.length === 0
+      ? `OK (Efectivo cuenta aparte, se alias a Mercado Pago solo en display — F9.23)`
+      : `${bancoInvalido.length} con banco fuera del set: ${[...new Set(bancoInvalido.map(d => d.banco))].slice(0, 5).join(', ')}`,
+  });
+
+  // taxonomía: categoria del movimiento debe estar en config/familia.categorias (o null)
+  // F9.38 — categorias pasó de string[] a {id,nombre,activo}[]; valida contra el nombre.
+  const categoriasValidas = new Set((famData?.categorias ?? []).map((c: { nombre: string }) => c.nombre));
+  const catInvalida = allMovs.filter(d => d.categoria != null && !categoriasValidas.has(d.categoria as string));
+  results.push({
+    name: 'categoria en taxonomía conocida',
+    ok: catInvalida.length === 0,
+    detail: catInvalida.length === 0
+      ? 'OK'
+      : `${catInvalida.length} con categoría desconocida: ${[...new Set(catInvalida.map(d => d.categoria))].slice(0, 5).join(', ')}`,
+  });
+
+  // resumenesTarjeta: cuotaActual <= cuotaTotal en todas las líneas (F9.21)
+  const resumenesSnap = await db.collection('resumenesTarjeta').get();
+  const cuotasInconsistentes: string[] = [];
+  for (const doc of resumenesSnap.docs) {
+    const lineas = (doc.data().movimientosParseados ?? []) as Array<{ cuotaActual?: number; cuotaTotal?: number; seq?: number }>;
+    for (const l of lineas) {
+      if (l.cuotaTotal != null && l.cuotaActual != null && l.cuotaActual > l.cuotaTotal) {
+        cuotasInconsistentes.push(`${doc.id}#${l.seq}`);
+      }
+    }
+  }
+  results.push({
+    name: 'cuotaActual <= cuotaTotal',
+    ok: cuotasInconsistentes.length === 0,
+    detail: cuotasInconsistentes.length === 0
+      ? `OK (${resumenesSnap.size} resúmenes)`
+      : `${cuotasInconsistentes.length} líneas inconsistentes: ${cuotasInconsistentes.slice(0, 5).join(', ')}`,
+  });
+
+  // resumenesTarjeta: cuadre ARS/USD (Σ líneas ≈ total PDF, tolerancia $1 / U$S1 — mismo criterio que confirmarResumenTarjeta)
+  const resumenesDescuadrados: string[] = [];
+  for (const doc of resumenesSnap.docs) {
+    const r = doc.data();
+    const lineas = (r.movimientosParseados ?? []) as Array<{ tipoLinea: string; moneda: string; monto: number; incluir?: boolean }>;
+    const ajustes = (r.ajustesConsolidado ?? []) as Array<{ montoARS: number; montoUSD: number }>;
+    const sumar = (moneda: string) => lineas
+      .filter(l => l.incluir !== false)
+      .reduce((s, l) => {
+        if (l.moneda !== moneda) return s;
+        const signo = l.tipoLinea === 'reverso' || l.tipoLinea === 'bonificacion' || l.tipoLinea === 'reintegro_percepcion' ? -1 : 1;
+        return s + signo * l.monto;
+      }, 0) + ajustes.reduce((s, a) => s + (moneda === 'ARS' ? a.montoARS : a.montoUSD), 0);
+    const totalARS = Number(r.totalARS ?? 0);
+    const totalUSD = Number(r.totalUSD ?? 0);
+    const diffARS = Math.abs(sumar('ARS') - totalARS);
+    const diffUSD = Math.abs(sumar('USD') - totalUSD);
+    if ((totalARS > 0 && diffARS > 1) || (totalUSD > 0 && diffUSD > 1)) {
+      resumenesDescuadrados.push(`${doc.id} (difARS=${diffARS.toFixed(2)} difUSD=${diffUSD.toFixed(2)})`);
+    }
+  }
+  results.push({
+    name: 'resumenesTarjeta cuadre (±1)',
+    ok: resumenesDescuadrados.length === 0,
+    detail: resumenesDescuadrados.length === 0
+      ? `OK (${resumenesSnap.size} resúmenes)`
+      : `${resumenesDescuadrados.length} descuadrados: ${resumenesDescuadrados.slice(0, 5).join(', ')}`,
+  });
+
+  // tcDiario: valores en rango razonable (sanity, no exacto — el MEP real varía)
+  const tcSnap = await db.collection('tcDiario').get();
+  const tcFueraDeRango = tcSnap.docs.filter(d => {
+    const v = Number(d.data().tcUsdArs);
+    return !Number.isFinite(v) || v < 500 || v > 5000;
+  });
+  results.push({
+    name: 'tcDiario en rango razonable (500-5000)',
+    ok: tcFueraDeRango.length === 0,
+    detail: tcFueraDeRango.length === 0
+      ? `OK (${tcSnap.size} docs)`
+      : `${tcFueraDeRango.length} fuera de rango: ${tcFueraDeRango.slice(0, 5).map(d => d.id).join(', ')}`,
+  });
+
+  // usuarios: distribución de roles esperada (2 admin + 2 dependiente)
+  const miembrosVals = Object.values(famData?.miembros ?? {}) as Array<{ rol?: string; activo?: boolean }>;
+  const admins = miembrosVals.filter(m => m.activo && m.rol === 'admin').length;
+  const dependientes = miembrosVals.filter(m => m.activo && m.rol === 'dependiente').length;
+  results.push({
+    name: 'roles: 2 admin + 2 dependiente',
+    ok: admins === 2 && dependientes === 2,
+    detail: `admin=${admins} dependiente=${dependientes}`,
+  });
+
   return results;
 }

@@ -47,6 +47,21 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - Etiquetas tecnicas (JuanARS, etc.) se convierten a persona + moneda en seed.
 - Router: React Router (react-router-dom), se instala al inicio de F4.
   Rutas montadas en shell-content; header fijo queda fuera del router.
+- F9.38 — `config/familia.categorias` pasa de `string[]` a `CategoriaItem[]`
+  ({id, nombre, activo}), igual que ya tenían subcategorias/etiquetas. Los
+  `movimientos` (y el diccionario) SIGUEN guardando el LABEL (string), no el
+  id — no se migra ese campo. El id es solo la identidad estable que usa la
+  UI de Perfil › Categorías para trackear una fila a través de un rename; la
+  callable `guardarTaxonomia` cascada el label viejo→nuevo en movimientos +
+  diccionario (+ subcategorias.categoriaPadre si renombra una categoría) en
+  la misma operación, en batches de 450 docs. Borrado: un nodo con uso
+  documentado (movimientos o, para categoría, subcategorías) solo se puede
+  desactivar (`activo:false`); el borrado duro exige conteo de uso en cero.
+- F9.39 — Perfil › Tipo de cambio gana escritura (antes solo lectura): la callable
+  `actualizarTCManual` (admin-only) hace upsert en el MISMO `tcDiario/{YYYY-MM-DD}` que
+  escribe el cron F9.30 (`actualizarTCDiario`), con `origen:'manual'` — no hay colección
+  paralela. `tcParaFecha` no cambia. Pisa con confirm() si ya hay un valor para esa fecha;
+  el cron del día siguiente vuelve a poner el automático sin intervención.
 - Resumenes se pagan al vencimiento. No hay flujo de revision por estados;
   pendiente_revision del legacy es vestigial y no se porta.
 - ResumenMes es vista calculada en vivo, no se materializa.

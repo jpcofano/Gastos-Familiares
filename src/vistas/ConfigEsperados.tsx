@@ -158,7 +158,7 @@ function FormItemEsperado({
   }, [categoria]);
 
   const subcatsFiltradas = subcats.filter(s => s.categoriaPadre === categoria);
-  const categoriasDisp   = [...config.categorias].sort();
+  const categoriasDisp   = config.categorias.filter(c => c.activo).map(c => c.nombre).sort();
   const miembrosActivos  = Object.entries(config.miembros)
     .filter(([, m]) => m.activo)
     .map(([id, m]) => ({ id, nombre: m.nombre }));
@@ -403,7 +403,7 @@ function FormItemEsperado({
               <label>Banco (opcional)</label>
               <select value={banco} onChange={e => setBanco(e.target.value)}>
                 <option value="">— ninguno —</option>
-                {config.bancos.map(b => <option key={b} value={b}>{b}</option>)}
+                {config.bancos.map(b => <option key={b.id} value={b.nombre}>{b.nombre}</option>)}
               </select>
             </div>
             <div className="cfg-campo">
@@ -533,7 +533,7 @@ function ConfigEsperadosAdmin() {
           subcats={subcats}
           etiquetas={etiquetas}
           config={config}
-          onGuardado={() => { setCreando(false); setEditando(null); reload(); }}
+          onGuardado={() => { setCreando(false); setEditando(null); }}
           onCancelar={() => { setCreando(false); setEditando(null); }}
         />
       )}

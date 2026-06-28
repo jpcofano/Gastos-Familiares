@@ -28,13 +28,20 @@
   --gf-blue-100:    #dbeafe;
   --gf-blue-50:     #eff6ff;
 
-  /* ── Money semantics (palette "B" — esmeralda + coral, F9.0b resuelto) ── */
-  --gf-income:      #0c8f62;   /* ingreso (+) — emerald family, brand-coherent */
-  --gf-income-700:  #0a7350;
+  /* ── Money semantics (palette "Editorial", F9.16: esmeralda profundo +
+     ámbar, sobrio, alineado al rumbo ink/esmeralda 2026) ── */
+  --gf-income:      #047857;   /* ingreso (+) — emerald family, brand-coherent */
+  --gf-income-700:  #065f46;
   --gf-income-50:   #ecfdf5;
   --gf-expense:     #d33b43;   /* gasto (−) — coral algo más profundo          */
   --gf-expense-700: #b42d34;
   --gf-expense-50:  #fef2f2;
+
+  /* "Salidas" (outflow) en gráficos — distinto del rojo de gasto negativo.
+     No es lo mismo "salió plata" (neutral/expected) que "gasto" (− balance). */
+  --gf-out:         #d97706;
+  --gf-out-700:     #b45309;
+  --gf-out-50:      #fffbeb;
 
   /* ── Neutrals (gray ramp) ──────────────────────────────── */
   --gf-gray-900:    #111827;   /* primary text                 */
@@ -96,6 +103,82 @@
   --color-warn-bg:       var(--gf-warn-bg);
   --color-warn-border:   #fbbf24;
   --color-warn-text:     var(--gf-warn-text);
+}
+
+/* ─── F9.19 — tema oscuro ───────────────────────────────────
+   Remapea aliases semánticos + rampa de grises + tintes claros a
+   equivalentes oscuros. Los componentes no cambian: todos ya
+   consumen --color-* / --gf-gray-* / --gf-*-50 / --st-*, así que
+   alcanza con remapear los tokens acá. Activado seteando
+   data-theme="dark" en <html> (ver datos/theme.ts). ─────────── */
+[data-theme="dark"] {
+  /* Rampa de grises invertida (mismo nombre, luminancia opuesta) */
+  --gf-gray-900: #f3f4f6;  /* primary text                 */
+  --gf-gray-800: #e8e8ea;
+  --gf-gray-700: #cbd5e1;  /* strong secondary text        */
+  --gf-gray-500: #94a3b8;  /* muted text                   */
+  --gf-gray-400: #6b7280;  /* placeholder / faint          */
+  --gf-gray-300: #3a4350;  /* input border                 */
+  --gf-gray-200: #2a313b;  /* default border                */
+  --gf-gray-150: #262c34;  /* card border                  */
+  --gf-gray-100: #1f242c;  /* hover fill                   */
+  --gf-gray-50:  #1c2128;  /* muted surface                */
+  --gf-bg:       #0b0f14;  /* app background               */
+  --gf-white:    #161b22;  /* "surface" — ya no es blanco puro */
+
+  /* Tintes claros → versiones oscuras muteadas (mismo hue, baja luminancia) */
+  --gf-emerald-50:  #0d2620;
+  --gf-emerald-100: #123a2e;
+  --gf-income-50:   #0d2620;
+  --gf-expense-50:  #2a1416;
+  --gf-out-50:      #2b1d0a;
+  --gf-blue-50:     #0f1f33;
+  --gf-blue-100:    #15294a;
+
+  /* Status: messages — tintes profundos para no encandilar */
+  --gf-ok-bg:   #0d2620; --gf-ok-line:   #1e6b4f; --gf-ok-text:   #6ee7b7;
+  --gf-err-bg:  #2a1416; --gf-err-line:  #7f2530; --gf-err-text:  #fca5a5;
+  --gf-warn-bg: #2b1d0a; --gf-warn-line: #8a5a12; --gf-warn-text: #fcd34d;
+  --gf-wait-bg: #0f1f33; --gf-wait-line: #2856a3; --gf-wait-text: #93c5fd;
+
+  /* Status: checklist de esperados (filas + badges) */
+  --st-pagado-bg:        #0d2620;  --st-pagado-line:        #22c55e;  --st-pagado-badge-bg:        #123a2e;  --st-pagado-badge-tx:        #6ee7b7;
+  --st-por-confirmar-bg: #0f1f33;  --st-por-confirmar-line: #38bdf8;  --st-por-confirmar-badge-bg: #15294a;  --st-por-confirmar-badge-tx: #7dd3fc;
+  --st-parcial-bg:       #2b1d0a;  --st-parcial-line:       #f59e0b;  --st-parcial-badge-bg:       #3a2a0c;  --st-parcial-badge-tx:       #fcd34d;
+  --st-automatico-bg:    #0f1f33;  --st-automatico-line:    #60a5fa;  --st-automatico-badge-bg:    #15294a;  --st-automatico-badge-tx:    #93c5fd;
+  --st-pendiente-bg:     #1c2128;  --st-pendiente-line:     #4b5563;  --st-pendiente-badge-bg:     #262c34;  --st-pendiente-badge-tx:     #9ca3af;
+  --st-vencido-bg:       #2e1a0a;  --st-vencido-line:       #f97316;  --st-vencido-badge-bg:       #3d220c;  --st-vencido-badge-tx:       #fdba74;
+  --st-programado-bg:    #1c2128;  --st-programado-line:    #64748b;  --st-programado-badge-bg:    #262c34;  --st-programado-badge-tx:    #cbd5e1;
+  --st-no-registrado-bg: #2e1015;  --st-no-registrado-line: #f43f5e;  --st-no-registrado-badge-bg: #3d1620;  --st-no-registrado-badge-tx: #fda4af;
+
+  /* Aliases semánticos */
+  --color-bg:            var(--gf-bg);
+  --color-surface:       var(--gf-white);
+  --color-surface-muted: var(--gf-gray-50);
+  --color-border:        var(--gf-gray-200);
+  --color-border-card:   var(--gf-gray-150);
+  --color-hover:         var(--gf-gray-100);
+
+  --color-text:          var(--gf-gray-900);
+  --color-text-sec:      var(--gf-gray-500);
+  --color-text-strong:   var(--gf-gray-700);
+  --color-text-faint:    var(--gf-gray-400);
+
+  /* El hero ink ya es oscuro — en dark se nota por un hairline propio,
+     ver Dashboard/Resumen (boxShadow + ya no se confunde con el fondo). */
+  --color-brand:         var(--gf-ink);
+  --color-brand-hover:   var(--gf-ink-soft);
+
+  --color-primary-light: var(--gf-emerald-50);
+  --color-focus-ring:    rgba(10, 125, 94, 0.35);
+
+  --color-danger-light:  var(--gf-expense-50);
+  --color-warn-bg:       var(--gf-warn-bg);
+  --color-warn-text:     var(--gf-warn-text);
+
+  --shadow-soft:  0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
+  --shadow-sm:    0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-card:  0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 /* ─── tokens/typography.css ─── */

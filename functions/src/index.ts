@@ -1,9 +1,10 @@
 import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions }   from 'firebase-functions/v2';
 import { defineSecret }       from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp, type Firestore, type Query } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -1534,5 +1535,585 @@ export const cargarMovimientoDesdeComprobante = onCall(
 
     console.log(`[cargarMovimientoDesdeComprobante] ${compId} → ${movRef.id} (por ${email})`);
     return { movimientoId: movRef.id };
+  },
+);
+
+// F9.30 — refresco diario del dólar MEP en tcDiario. Replica el trigger legacy
+// (40_TC_Dolar.gs, 09:00) que el rebuild nunca portó: hoy tcParaFecha solo LEE
+// tcDiario (poblado por seed), sin refresco → el TC queda estático. Fuente:
+// dolarapi.com (pública, sin secrets), campo `venta` del dólar bolsa/MEP —
+// mismo criterio que gf_fetchMEP_Bolsa_ del legacy.
+export const actualizarTCDiario = onSchedule(
+  {
+    schedule: '0 9 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+  },
+  async () => {
+    let venta: number;
+    try {
+      const res = await fetch('https://dolarapi.com/v1/dolares/bolsa');
+      if (!res.ok) throw new Error(`dolarapi respondió HTTP ${res.status}`);
+      const data = (await res.json()) as { venta?: unknown };
+      venta = Number(data.venta);
+      if (!Number.isFinite(venta) || venta <= 0) throw new Error(`venta inválida: ${JSON.stringify(data.venta)}`);
+    } catch (e) {
+      // Tolerancia a fallo: NO escribir basura. El último TC válido sigue
+      // disponible (tcParaFecha cae al más reciente anterior); reintenta sola
+      // al día siguiente.
+      console.error('[actualizarTCDiario] fetch/parseo falló, no se escribe nada:', e);
+      return;
+    }
+
+    const fechaHoy = hoyArgentinaISO();
+    // set + merge (no create): upsert idempotente — re-correr el mismo día pisa el mismo doc.
+    await db.collection('tcDiario').doc(fechaHoy).set(
+      {
+        tcUsdArs: venta,
+        actualizadoEn: FieldValue.serverTimestamp(),
+        origen: 'dolarapi-bolsa',
+      },
+      { merge: true },
+    );
+
+    console.log(`[actualizarTCDiario] ${fechaHoy} → tcUsdArs=${venta}`);
+  },
+);
+
+// F9.36 — primer callable de "configs editables" (Etapa A, antes de migrar).
+// config/familia tiene write:false en Rules para el cliente (ver docs/CLAUDE.md →
+// Decisiones cerradas) — toda escritura pasa por Admin SDK vía callable, nunca
+// directo del cliente. Reemplaza el array completo (full-replace, no merge por id)
+// porque el cliente ya manda el array completo con altas/bajas/ediciones resueltas.
+export const actualizarMediosPago = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { medios } = (request.data ?? {}) as { medios?: unknown };
+    if (!Array.isArray(medios) || medios.length === 0) {
+      throw new HttpsError('invalid-argument', 'medios debe ser un array no vacío');
+    }
+
+    const TIPOS = ['Banco', 'Billetera', 'Efectivo'];
+    const lista = medios as Array<Record<string, unknown>>;
+    const idsTodos = new Set(lista.map(m => m.id));
+    const idsVistos = new Set<string>();
+    for (const m of lista) {
+      if (typeof m.id !== 'string' || !m.id) throw new HttpsError('invalid-argument', 'Cada medio necesita id');
+      if (idsVistos.has(m.id)) throw new HttpsError('invalid-argument', `id duplicado: ${m.id}`);
+      idsVistos.add(m.id);
+      if (typeof m.nombre !== 'string' || !m.nombre) throw new HttpsError('invalid-argument', `medio ${m.id}: nombre requerido`);
+      if (typeof m.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(m.color)) throw new HttpsError('invalid-argument', `medio ${m.id}: color debe ser hex #RRGGBB`);
+      if (!TIPOS.includes(m.tipo as string)) throw new HttpsError('invalid-argument', `medio ${m.id}: tipo inválido`);
+      if (m.dominio != null && typeof m.dominio !== 'string') throw new HttpsError('invalid-argument', `medio ${m.id}: dominio debe ser string`);
+      // F9.23 — invariante Efectivo: alias cosmético de Mercado Pago, no se puede
+      // "des-aliasar" desde esta UI. Se fuerza server-side, no se confía en el cliente.
+      if (m.nombre === 'Efectivo') {
+        if (typeof m.aliasDe !== 'string' || !m.aliasDe || !idsTodos.has(m.aliasDe)) {
+          throw new HttpsError('invalid-argument', 'Efectivo debe tener aliasDe apuntando a un medio existente');
+        }
+        m.oculto = true;
+      }
+    }
+
+    await db.collection('config').doc('familia').update({
+      bancos: medios,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+
+    console.log(`[actualizarMediosPago] ${medios.length} medios actualizados (por ${email})`);
+    return { ok: true };
+  },
+);
+
+// F9.39 — respaldo manual de /tcDiario (complementa el cron F9.30). Mismo
+// doc/shape que escribe actualizarTCDiario (set merge, origen distingue la
+// fuente) — una sola colección de verdad, tcParaFecha no cambia. Admin-only:
+// pisar el TC de un día afecta los montos derivados de toda la familia.
+export const actualizarTCManual = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { fecha, tcUsdArs } = (request.data ?? {}) as { fecha?: unknown; tcUsdArs?: unknown };
+    const fechaStr = typeof fecha === 'string' && fecha ? fecha : hoyArgentinaISO();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaStr)) {
+      throw new HttpsError('invalid-argument', 'fecha debe ser YYYY-MM-DD');
+    }
+    if (typeof tcUsdArs !== 'number' || !Number.isFinite(tcUsdArs) || tcUsdArs <= 0) {
+      throw new HttpsError('invalid-argument', 'tcUsdArs debe ser un número positivo');
+    }
+
+    await db.collection('tcDiario').doc(fechaStr).set(
+      {
+        tcUsdArs,
+        actualizadoEn: FieldValue.serverTimestamp(),
+        origen: 'manual',
+      },
+      { merge: true },
+    );
+
+    console.log(`[actualizarTCManual] ${fechaStr} → tcUsdArs=${tcUsdArs} (por ${email})`);
+    return { ok: true };
+  },
+);
+
+// F9.36 — "Mis datos": cualquier miembro autenticado edita SU PROPIO nombre
+// visible (no admin-only, a diferencia de actualizarMediosPago — un dependiente
+// edita lo suyo). Email no es editable acá: es la identidad de login, atada a
+// /autorizados; cambiarla es un flujo de seguridad aparte, no de esta fase.
+export const actualizarMiPerfil = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists) throw new HttpsError('permission-denied', 'No autorizado');
+    const memberId = autSnap.data()?.memberId as string | undefined;
+    if (!memberId) throw new HttpsError('permission-denied', 'Sin memberId');
+
+    const { nombre } = (request.data ?? {}) as { nombre?: unknown };
+    if (typeof nombre !== 'string' || nombre.trim().length === 0 || nombre.length > 60) {
+      throw new HttpsError('invalid-argument', 'nombre inválido (1-60 caracteres)');
+    }
+
+    const famRef  = db.collection('config').doc('familia');
+    const famSnap = await famRef.get();
+    if (!famSnap.exists || !famSnap.data()?.miembros?.[memberId]) {
+      throw new HttpsError('not-found', 'Miembro no encontrado en config/familia');
+    }
+
+    await famRef.update({
+      [`miembros.${memberId}.nombre`]: nombre.trim(),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+
+    console.log(`[actualizarMiPerfil] ${memberId} → nombre="${nombre.trim()}" (por ${email})`);
+    return { ok: true };
+  },
+);
+
+// F9.37 — CRUD de Miembros (admin-only, sensible: toca roles/permisos).
+// Invariante crítico (ver docs/CLAUDE.md → Decisiones cerradas): alta/edición
+// de email o rol escribe miembros[] Y /autorizados/{email} en la MISMA
+// transacción. Desincronizarlos rompe el login (la whitelist lee de ambos) o
+// reabre escalada de privilegios. Por eso esto vive en una sola callable, no
+// en un update suelto del cliente.
+//
+// "Desactivar" NO borra el id (movimientos.persona lo referencia para siempre)
+// y NO alcanza con activo:false: esMiembro()/esAdmin() en Rules solo miran
+// /autorizados (memberId != null), sin chequear `activo`. Por eso desactivar
+// borra los docs /autorizados de ese miembro — eso es lo que de verdad corta
+// el acceso. Reactivar los recrea.
+
+function slugMemberId(nombre: string, existentes: Set<string>): string {
+  const base = nombre
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '')
+    .trim() || 'miembro';
+  if (!existentes.has(base)) return base;
+  let i = 2;
+  while (existentes.has(`${base}${i}`)) i++;
+  return `${base}${i}`;
+}
+
+function validarEmails(emails: unknown): string[] {
+  if (!Array.isArray(emails) || emails.length === 0) {
+    throw new HttpsError('invalid-argument', 'Al menos un email es requerido');
+  }
+  const limpios = emails.map(e => String(e).trim().toLowerCase());
+  for (const e of limpios) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+      throw new HttpsError('invalid-argument', `Email inválido: ${e}`);
+    }
+  }
+  return [...new Set(limpios)];
+}
+
+export const guardarMiembro = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const callerEmail = request.auth.token.email?.toLowerCase();
+    if (!callerEmail) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const callerAutSnap = await db.collection('autorizados').doc(callerEmail).get();
+    if (!callerAutSnap.exists || callerAutSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { accion } = (request.data ?? {}) as { accion?: string };
+    const famRef  = db.collection('config').doc('familia');
+    const famSnap = await famRef.get();
+    if (!famSnap.exists) throw new HttpsError('not-found', 'config/familia no existe');
+    const miembros = (famSnap.data()?.miembros ?? {}) as Record<string, { nombre: string; emails: string[]; rol: string; activo: boolean; alias?: string[] }>;
+
+    if (accion === 'crear') {
+      const { nombre, emails, rol } = (request.data ?? {}) as { nombre?: unknown; emails?: unknown; rol?: unknown };
+      if (typeof nombre !== 'string' || nombre.trim().length === 0 || nombre.length > 60) {
+        throw new HttpsError('invalid-argument', 'nombre inválido (1-60 caracteres)');
+      }
+      if (rol !== 'admin' && rol !== 'dependiente') throw new HttpsError('invalid-argument', 'rol inválido');
+      const emailsLimpios = validarEmails(emails);
+
+      // Ningún email puede estar ya tomado por otro miembro
+      for (const e of emailsLimpios) {
+        const existente = await db.collection('autorizados').doc(e).get();
+        if (existente.exists) throw new HttpsError('already-exists', `Email ya en uso: ${e}`);
+      }
+
+      const memberId = slugMemberId(nombre.trim(), new Set(Object.keys(miembros)));
+      const batch = db.batch();
+      batch.update(famRef, {
+        [`miembros.${memberId}`]: { nombre: nombre.trim(), emails: emailsLimpios, rol, activo: true, alias: [] },
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      for (const e of emailsLimpios) {
+        batch.set(db.collection('autorizados').doc(e), { memberId, rol });
+      }
+      await batch.commit();
+
+      console.log(`[guardarMiembro] crear ${memberId} (${emailsLimpios.join(',')}) por ${callerEmail}`);
+      return { ok: true, memberId };
+    }
+
+    const { memberId } = (request.data ?? {}) as { memberId?: unknown };
+    if (typeof memberId !== 'string' || !miembros[memberId]) {
+      throw new HttpsError('not-found', 'Miembro no encontrado');
+    }
+    const actual = miembros[memberId];
+
+    if (accion === 'editar') {
+      const { nombre, emails, rol } = (request.data ?? {}) as { nombre?: unknown; emails?: unknown; rol?: unknown };
+      if (typeof nombre !== 'string' || nombre.trim().length === 0 || nombre.length > 60) {
+        throw new HttpsError('invalid-argument', 'nombre inválido (1-60 caracteres)');
+      }
+      if (rol !== 'admin' && rol !== 'dependiente') throw new HttpsError('invalid-argument', 'rol inválido');
+      const emailsNuevos = validarEmails(emails);
+
+      // Emails nuevos (no eran de este miembro) no pueden estar tomados por otro
+      const emailsViejos = new Set(actual.emails);
+      for (const e of emailsNuevos) {
+        if (emailsViejos.has(e)) continue;
+        const existente = await db.collection('autorizados').doc(e).get();
+        if (existente.exists) throw new HttpsError('already-exists', `Email ya en uso: ${e}`);
+      }
+
+      // Si es el único admin activo, no puede dejar de ser admin
+      if (actual.rol === 'admin' && rol !== 'admin') {
+        const otrosAdmins = Object.entries(miembros).filter(([id, m]) => id !== memberId && m.activo && m.rol === 'admin');
+        if (otrosAdmins.length === 0) throw new HttpsError('failed-precondition', 'Tiene que quedar al menos un admin activo');
+      }
+
+      const batch = db.batch();
+      batch.update(famRef, {
+        [`miembros.${memberId}.nombre`]: nombre.trim(),
+        [`miembros.${memberId}.emails`]: emailsNuevos,
+        [`miembros.${memberId}.rol`]: rol,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      for (const eViejo of actual.emails) {
+        if (!emailsNuevos.includes(eViejo)) batch.delete(db.collection('autorizados').doc(eViejo));
+      }
+      if (actual.activo) {
+        for (const eNuevo of emailsNuevos) {
+          batch.set(db.collection('autorizados').doc(eNuevo), { memberId, rol });
+        }
+      }
+      await batch.commit();
+
+      console.log(`[guardarMiembro] editar ${memberId} por ${callerEmail}`);
+      return { ok: true };
+    }
+
+    if (accion === 'desactivar') {
+      if (actual.rol === 'admin') {
+        const otrosAdmins = Object.entries(miembros).filter(([id, m]) => id !== memberId && m.activo && m.rol === 'admin');
+        if (otrosAdmins.length === 0) throw new HttpsError('failed-precondition', 'Tiene que quedar al menos un admin activo');
+      }
+      const batch = db.batch();
+      batch.update(famRef, {
+        [`miembros.${memberId}.activo`]: false,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      for (const e of actual.emails) batch.delete(db.collection('autorizados').doc(e));
+      await batch.commit();
+
+      console.log(`[guardarMiembro] desactivar ${memberId} por ${callerEmail}`);
+      return { ok: true };
+    }
+
+    if (accion === 'reactivar') {
+      // Ningún email puede haber sido tomado por otro miembro mientras estaba inactivo
+      for (const e of actual.emails) {
+        const existente = await db.collection('autorizados').doc(e).get();
+        if (existente.exists && existente.data()?.memberId !== memberId) {
+          throw new HttpsError('already-exists', `Email ya en uso por otro miembro: ${e}`);
+        }
+      }
+      const batch = db.batch();
+      batch.update(famRef, {
+        [`miembros.${memberId}.activo`]: true,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      for (const e of actual.emails) batch.set(db.collection('autorizados').doc(e), { memberId, rol: actual.rol });
+      await batch.commit();
+
+      console.log(`[guardarMiembro] reactivar ${memberId} por ${callerEmail}`);
+      return { ok: true };
+    }
+
+    throw new HttpsError('invalid-argument', `accion desconocida: ${String(accion)}`);
+  },
+);
+
+// F9.38 — CRUD de Categorías/Subcategorías/Etiquetas (admin-only; taxonomía
+// usada por TODO: movimientos, Dashboard, clasificador, esperados — ver
+// docs/CLAUDE.md). Modelo: movimientos y diccionario SIGUEN guardando el
+// LABEL (string), no un id — igual que hoy. Categorías gana id estable
+// (antes string[] plano) para que la UI trackee una fila a través de un
+// rename sin depender del texto; subcategorias/etiquetas ya tenían id propio.
+// Renombrar (cualquiera de los 3 niveles) cascada el label viejo→nuevo en
+// movimientos + diccionario (+ subcategorias.categoriaPadre si renombra una
+// categoría) en la MISMA función, en batches de 450 (límite Firestore 500
+// writes/batch). Política de borrado (la recomendada por el doc F9.38): un
+// nodo con uso documentado solo se DESACTIVA (activo:false, ya filtrado por
+// los queries de catalogos.ts); el borrado duro solo procede con conteo de
+// uso en cero — evita dejar movimientos colgados sin construir un flujo de
+// reasignación aparte.
+
+async function actualizarEnLotes(query: Query, campos: Record<string, unknown>): Promise<number> {
+  const snap = await query.get();
+  for (let i = 0; i < snap.docs.length; i += 450) {
+    const batch = db.batch();
+    for (const doc of snap.docs.slice(i, i + 450)) batch.update(doc.ref, campos);
+    await batch.commit();
+  }
+  return snap.docs.length;
+}
+
+async function contarUso(query: Query): Promise<number> {
+  const agg = await query.count().get();
+  return agg.data().count;
+}
+
+function nuevoIdTaxonomia(prefijo: string): string {
+  return `${prefijo}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4).toString(36)}`;
+}
+
+function validarValorTaxonomia(valor: unknown, etiqueta: string): string {
+  if (typeof valor !== 'string' || valor.trim().length === 0 || valor.length > 60) {
+    throw new HttpsError('invalid-argument', `${etiqueta} inválido (1-60 caracteres)`);
+  }
+  return valor.trim();
+}
+
+async function guardarCategoria(accion: string, data: unknown, email: string) {
+  const famRef  = db.collection('config').doc('familia');
+  const famSnap = await famRef.get();
+  if (!famSnap.exists) throw new HttpsError('not-found', 'config/familia no existe');
+  const categorias = (famSnap.data()?.categorias ?? []) as Array<{ id: string; nombre: string; activo: boolean }>;
+
+  if (accion === 'crear') {
+    const nombreLimpio = validarValorTaxonomia((data as { nombre?: unknown })?.nombre, 'nombre');
+    if (categorias.some(c => c.nombre === nombreLimpio)) {
+      throw new HttpsError('already-exists', `Ya existe una categoría "${nombreLimpio}"`);
+    }
+    const id = nuevoIdTaxonomia('cat');
+    await famRef.update({
+      categorias: [...categorias, { id, nombre: nombreLimpio, activo: true }],
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+    console.log(`[guardarTaxonomia] categoria crear ${id} "${nombreLimpio}" por ${email}`);
+    return { ok: true, id };
+  }
+
+  const { id } = (data ?? {}) as { id?: unknown };
+  const idx = categorias.findIndex(c => c.id === id);
+  if (typeof id !== 'string' || idx === -1) throw new HttpsError('not-found', 'Categoría no encontrada');
+  const actual = categorias[idx];
+
+  if (accion === 'editar') {
+    const nombreNuevo = validarValorTaxonomia((data as { nombre?: unknown })?.nombre, 'nombre');
+    if (categorias.some((c, i) => i !== idx && c.nombre === nombreNuevo)) {
+      throw new HttpsError('already-exists', `Ya existe una categoría "${nombreNuevo}"`);
+    }
+    const nombreViejo = actual.nombre;
+    const nuevas = categorias.slice();
+    nuevas[idx] = { ...actual, nombre: nombreNuevo };
+    await famRef.update({ categorias: nuevas, actualizadoEn: FieldValue.serverTimestamp() });
+    if (nombreNuevo !== nombreViejo) {
+      const nMovs = await actualizarEnLotes(db.collection('movimientos').where('categoria', '==', nombreViejo), { categoria: nombreNuevo });
+      const nSub  = await actualizarEnLotes(db.collection('subcategorias').where('categoriaPadre', '==', nombreViejo), { categoriaPadre: nombreNuevo });
+      const nDic  = await actualizarEnLotes(db.collection('diccionario').where('categoria', '==', nombreViejo), { categoria: nombreNuevo });
+      console.log(`[guardarTaxonomia] categoria editar ${id} "${nombreViejo}"→"${nombreNuevo}" (movs:${nMovs} subcat:${nSub} dict:${nDic}) por ${email}`);
+    }
+    return { ok: true };
+  }
+
+  if (accion === 'desactivar' || accion === 'reactivar') {
+    const nuevas = categorias.slice();
+    nuevas[idx] = { ...actual, activo: accion === 'reactivar' };
+    await famRef.update({ categorias: nuevas, actualizadoEn: FieldValue.serverTimestamp() });
+    console.log(`[guardarTaxonomia] categoria ${accion} ${id} por ${email}`);
+    return { ok: true };
+  }
+
+  // eliminar
+  const usoMovs = await contarUso(db.collection('movimientos').where('categoria', '==', actual.nombre));
+  if (usoMovs > 0) {
+    throw new HttpsError('failed-precondition', `No se puede borrar: ${usoMovs} movimiento(s) usan "${actual.nombre}". Desactivala en su lugar.`);
+  }
+  const usoSub = await contarUso(db.collection('subcategorias').where('categoriaPadre', '==', actual.nombre));
+  if (usoSub > 0) {
+    throw new HttpsError('failed-precondition', `No se puede borrar: tiene ${usoSub} subcategoría(s). Borralas primero.`);
+  }
+  await famRef.update({
+    categorias: categorias.filter((_, i) => i !== idx),
+    actualizadoEn: FieldValue.serverTimestamp(),
+  });
+  console.log(`[guardarTaxonomia] categoria eliminar ${id} "${actual.nombre}" por ${email}`);
+  return { ok: true };
+}
+
+async function guardarSubcategoria(accion: string, data: unknown, email: string) {
+  const subRef = db.collection('subcategorias');
+
+  if (accion === 'crear') {
+    const { categoriaPadre } = (data ?? {}) as { categoriaPadre?: unknown };
+    if (typeof categoriaPadre !== 'string' || !categoriaPadre) throw new HttpsError('invalid-argument', 'categoriaPadre requerida');
+    const valorLimpio = validarValorTaxonomia((data as { valor?: unknown })?.valor, 'valor');
+    const dupSnap = await subRef.where('categoriaPadre', '==', categoriaPadre).where('valor', '==', valorLimpio).limit(1).get();
+    if (!dupSnap.empty) throw new HttpsError('already-exists', `Ya existe "${valorLimpio}" en esa categoría`);
+    const id = nuevoIdTaxonomia('subcat');
+    await subRef.doc(id).set({ id, categoriaPadre, valor: valorLimpio, activo: true });
+    console.log(`[guardarTaxonomia] subcategoria crear ${id} "${categoriaPadre}/${valorLimpio}" por ${email}`);
+    return { ok: true, id };
+  }
+
+  const { id } = (data ?? {}) as { id?: unknown };
+  if (typeof id !== 'string') throw new HttpsError('invalid-argument', 'id requerido');
+  const docRef = subRef.doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Subcategoría no encontrada');
+  const actual = snap.data() as { categoriaPadre: string; valor: string; activo: boolean };
+
+  if (accion === 'editar') {
+    const valorNuevo = validarValorTaxonomia((data as { valor?: unknown })?.valor, 'valor');
+    if (valorNuevo !== actual.valor) {
+      const dupSnap = await subRef.where('categoriaPadre', '==', actual.categoriaPadre).where('valor', '==', valorNuevo).limit(1).get();
+      if (!dupSnap.empty) throw new HttpsError('already-exists', `Ya existe "${valorNuevo}" en esa categoría`);
+      await docRef.update({ valor: valorNuevo });
+      const nMovs = await actualizarEnLotes(
+        db.collection('movimientos').where('categoria', '==', actual.categoriaPadre).where('subcategoria', '==', actual.valor),
+        { subcategoria: valorNuevo },
+      );
+      const nDic = await actualizarEnLotes(
+        db.collection('diccionario').where('categoria', '==', actual.categoriaPadre).where('subcategoria', '==', actual.valor),
+        { subcategoria: valorNuevo },
+      );
+      console.log(`[guardarTaxonomia] subcategoria editar ${id} "${actual.valor}"→"${valorNuevo}" (movs:${nMovs} dict:${nDic}) por ${email}`);
+    }
+    return { ok: true };
+  }
+
+  if (accion === 'desactivar' || accion === 'reactivar') {
+    await docRef.update({ activo: accion === 'reactivar' });
+    console.log(`[guardarTaxonomia] subcategoria ${accion} ${id} por ${email}`);
+    return { ok: true };
+  }
+
+  // eliminar
+  const uso = await contarUso(
+    db.collection('movimientos').where('categoria', '==', actual.categoriaPadre).where('subcategoria', '==', actual.valor),
+  );
+  if (uso > 0) throw new HttpsError('failed-precondition', `No se puede borrar: ${uso} movimiento(s) usan "${actual.valor}". Desactivala en su lugar.`);
+  await docRef.delete();
+  console.log(`[guardarTaxonomia] subcategoria eliminar ${id} "${actual.valor}" por ${email}`);
+  return { ok: true };
+}
+
+async function guardarEtiqueta(accion: string, data: unknown, email: string) {
+  const etqRef = db.collection('etiquetas');
+
+  if (accion === 'crear') {
+    const valorLimpio = validarValorTaxonomia((data as { valor?: unknown })?.valor, 'valor');
+    const dupSnap = await etqRef.where('valor', '==', valorLimpio).limit(1).get();
+    if (!dupSnap.empty) throw new HttpsError('already-exists', `Ya existe la etiqueta "${valorLimpio}"`);
+    const id = nuevoIdTaxonomia('etiq');
+    await etqRef.doc(id).set({ id, valor: valorLimpio, activo: true });
+    console.log(`[guardarTaxonomia] etiqueta crear ${id} "${valorLimpio}" por ${email}`);
+    return { ok: true, id };
+  }
+
+  const { id } = (data ?? {}) as { id?: unknown };
+  if (typeof id !== 'string') throw new HttpsError('invalid-argument', 'id requerido');
+  const docRef = etqRef.doc(id);
+  const snap = await docRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Etiqueta no encontrada');
+  const actual = snap.data() as { valor: string; activo: boolean };
+
+  if (accion === 'editar') {
+    const valorNuevo = validarValorTaxonomia((data as { valor?: unknown })?.valor, 'valor');
+    if (valorNuevo !== actual.valor) {
+      const dupSnap = await etqRef.where('valor', '==', valorNuevo).limit(1).get();
+      if (!dupSnap.empty) throw new HttpsError('already-exists', `Ya existe la etiqueta "${valorNuevo}"`);
+      await docRef.update({ valor: valorNuevo });
+      const nMovs = await actualizarEnLotes(db.collection('movimientos').where('etiqueta', '==', actual.valor), { etiqueta: valorNuevo });
+      const nDic  = await actualizarEnLotes(db.collection('diccionario').where('etiqueta', '==', actual.valor), { etiqueta: valorNuevo });
+      console.log(`[guardarTaxonomia] etiqueta editar ${id} "${actual.valor}"→"${valorNuevo}" (movs:${nMovs} dict:${nDic}) por ${email}`);
+    }
+    return { ok: true };
+  }
+
+  if (accion === 'desactivar' || accion === 'reactivar') {
+    await docRef.update({ activo: accion === 'reactivar' });
+    console.log(`[guardarTaxonomia] etiqueta ${accion} ${id} por ${email}`);
+    return { ok: true };
+  }
+
+  // eliminar
+  const uso = await contarUso(db.collection('movimientos').where('etiqueta', '==', actual.valor));
+  if (uso > 0) throw new HttpsError('failed-precondition', `No se puede borrar: ${uso} movimiento(s) usan "${actual.valor}". Desactivala en su lugar.`);
+  await docRef.delete();
+  console.log(`[guardarTaxonomia] etiqueta eliminar ${id} "${actual.valor}" por ${email}`);
+  return { ok: true };
+}
+
+export const guardarTaxonomia = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { nivel, accion } = (request.data ?? {}) as { nivel?: string; accion?: string };
+    if (!['categoria', 'subcategoria', 'etiqueta'].includes(nivel ?? '')) {
+      throw new HttpsError('invalid-argument', 'nivel inválido');
+    }
+    if (!['crear', 'editar', 'desactivar', 'reactivar', 'eliminar'].includes(accion ?? '')) {
+      throw new HttpsError('invalid-argument', 'accion inválida');
+    }
+
+    if (nivel === 'categoria')    return guardarCategoria(accion!, request.data, email);
+    if (nivel === 'subcategoria') return guardarSubcategoria(accion!, request.data, email);
+    return guardarEtiqueta(accion!, request.data, email);
   },
 );

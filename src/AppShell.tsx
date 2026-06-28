@@ -5,12 +5,13 @@ import { useMiembro } from './hooks/useMiembro';
 import { MiembroContext } from './contexto/MiembroContext';
 import { ItemsEsperadosProvider } from './contexto/ItemsEsperadosContext';
 import { DiccionarioProvider }    from './contexto/DiccionarioContext';
-import { AppBar, Screen, BottomNav, Fab, type BottomNavItem } from './design-system/shell';
+import { AppBar, Screen, BottomNav, type BottomNavItem } from './design-system/shell';
 import Dashboard from './vistas/Dashboard';
 import Resumen from './vistas/Resumen';
 import ConfigEsperados from './vistas/ConfigEsperados';
 import Comprobantes from './vistas/Comprobantes';
 import Perfil from './vistas/Perfil';
+import MisDatos from './vistas/perfil/MisDatos';
 import Miembros from './vistas/perfil/Miembros';
 import Categorias from './vistas/perfil/Categorias';
 import MediosPago from './vistas/perfil/MediosPago';
@@ -27,6 +28,7 @@ const NAV_ITEMS: BottomNavItem[] = [
 ];
 
 const TITULOS_PERFIL_SUB: Record<string, string> = {
+  '/perfil/mis-datos':   'Mis datos',
   '/perfil/miembros':    'Miembros',
   '/perfil/categorias':  'Categorías',
   '/perfil/medios-pago': 'Medios de pago',
@@ -93,7 +95,6 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
   const location = useLocation();
   const navigate = useNavigate();
   const { title, sub } = tituloDeRuta(location.pathname, nombre);
-  const muestraFab = location.pathname === '/' || location.pathname === '/resumen';
   const vuelveAPerfil = location.pathname === '/config-esperados' || Boolean(TITULOS_PERFIL_SUB[location.pathname]);
   const onBack = vuelveAPerfil
     ? () => navigate('/perfil')
@@ -119,6 +120,7 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
           {esAdmin && <Route path="/config-esperados" element={<ConfigEsperados />} />}
           <Route path="/comprobantes" element={<Comprobantes />} />
           <Route path="/perfil" element={<Perfil />} />
+          <Route path="/perfil/mis-datos" element={<MisDatos />} />
           {esAdmin && <Route path="/perfil/miembros" element={<Miembros />} />}
           {esAdmin && <Route path="/perfil/categorias" element={<Categorias />} />}
           {esAdmin && <Route path="/perfil/medios-pago" element={<MediosPago />} />}
@@ -128,7 +130,6 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Screen>
-      {muestraFab && <Fab onClick={() => navigate('/comprobantes')} />}
       <BottomNav items={navItems} />
     </div>
   );

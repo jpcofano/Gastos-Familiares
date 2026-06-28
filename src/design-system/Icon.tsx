@@ -1,9 +1,9 @@
 import {
   House, ListChecks, Upload, UserRound, ChevronLeft, X, Plus, CreditCard,
   Calendar, UsersRound, CalendarDays, Check,
-  FileUp, CheckCheck, Loader, TriangleAlert, CircleX, ChevronRight,
+  FileUp, CheckCheck, Loader, TriangleAlert, CircleX, ChevronRight, ChevronDown,
   Bell, Palette, Tags, Wallet, Repeat, LogOut,
-  Receipt, BarChart3, Tag, TrendingUp,
+  Receipt, BarChart3, Tag, TrendingUp, Share2, AlertCircle, Moon, Sun, Layers,
   type LucideProps,
 } from 'lucide-react';
 
@@ -30,6 +30,7 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   'triangle-alert': TriangleAlert,
   'circle-x': CircleX,
   'chevron-right': ChevronRight,
+  'chevron-down': ChevronDown,
   bell: Bell,
   palette: Palette,
   tags: Tags,
@@ -40,6 +41,11 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   'bar-chart-3': BarChart3,
   tag: Tag,
   'trending-up': TrendingUp,
+  'share-2': Share2,
+  'alert-circle': AlertCircle,
+  moon: Moon,
+  sun: Sun,
+  layers: Layers,
 };
 
 interface IconProps {

@@ -1,7 +1,7 @@
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { SheetData } from '../readExcel';
 import { writeBatch } from '../utils/firestore';
-import { ALIAS_PERSONA, buildItemId } from './expectedItems';
+import { normPersona, buildItemId } from './expectedItems';
 
 const TECNICA_RE = /^(Juan|Mar[ií]a)(ARS|USD)$|^(Galicia|Frances|BBVA)\s+(Visa|Master)(ARS|USD)$/i;
 
@@ -128,7 +128,13 @@ export async function seedMovements(db: Firestore, data: SheetData, dryRun: bool
           return cod;
         })(),
         tarjeta: r.Tarjeta ?? null,
-        persona: r.Persona ?? null,
+        // F9.24 — normPersona() resuelve alias cortos (Fede→Federico, Sofi→Sofía)
+        // al mismo string que usa config/familia.miembros como memberId. Antes
+        // se escribía r.Persona crudo — ALIAS_PERSONA estaba importado pero
+        // nunca aplicado acá, dejando persona inconsistente para esas dos
+        // personas. Ver scripts/seed/backfillPersonaMemberId.ts para los docs
+        // ya seedeados con el valor viejo.
+        persona: normPersona(r.Persona) || null,
         creadoPor: r.Usuario ?? 'Sistema',
         pagado: r.Pagado === true,
         excluirDash: r.ExcluirDash === true,

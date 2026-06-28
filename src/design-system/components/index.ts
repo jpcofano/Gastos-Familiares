@@ -12,4 +12,5 @@ export { RadioChip } from './forms/RadioChip';
 export { Select } from './forms/Select';
 export { PageKicker } from './navigation/PageKicker';
 export { QuickNav, type QuickNavItem } from './navigation/QuickNav';
+export { Sheet, type SheetOption } from './navigation/Sheet';
 export { StepIndicator } from './navigation/StepIndicator';

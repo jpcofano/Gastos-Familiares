@@ -4,6 +4,9 @@ import { BrowserRouter } from 'react-router-dom';
 import './styles/tokens.css';
 import './firebase';
 import App from './App';
+import { applyInitialTheme } from './datos/theme';
+
+applyInitialTheme();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(console.error);
