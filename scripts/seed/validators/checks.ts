@@ -240,10 +240,18 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
   });
 
   // resumenesTarjeta: cuadre ARS/USD (Σ líneas ≈ total PDF, tolerancia $1 / U$S1 — mismo criterio que confirmarResumenTarjeta)
+  // F9.42 — resúmenes con 0 líneas (sin detalle en Tarjetas_Movimientos, ej.
+  // BBVA-VISA-SIG_1414251) se SALTEAN del cuadre (no hay nada contra qué
+  // cuadrar) en vez de FAIL — la planilla no tiene los consumos de ese resumen.
   const resumenesDescuadrados: string[] = [];
+  const resumenesSinLineas: string[] = [];
   for (const doc of resumenesSnap.docs) {
     const r = doc.data();
     const lineas = (r.movimientosParseados ?? []) as Array<{ tipoLinea: string; moneda: string; monto: number; incluir?: boolean }>;
+    if (lineas.length === 0) {
+      resumenesSinLineas.push(doc.id);
+      continue;
+    }
     const ajustes = (r.ajustesConsolidado ?? []) as Array<{ montoARS: number; montoUSD: number }>;
     const sumar = (moneda: string) => lineas
       .filter(l => l.incluir !== false)
@@ -264,7 +272,7 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
     name: 'resumenesTarjeta cuadre (±1)',
     ok: resumenesDescuadrados.length === 0,
     detail: resumenesDescuadrados.length === 0
-      ? `OK (${resumenesSnap.size} resúmenes)`
+      ? `OK (${resumenesSnap.size - resumenesSinLineas.length} cuadrados${resumenesSinLineas.length ? `, WARN skip 0-líneas: ${resumenesSinLineas.join(', ')}` : ''})`
       : `${resumenesDescuadrados.length} descuadrados: ${resumenesDescuadrados.slice(0, 5).join(', ')}`,
   });
 
