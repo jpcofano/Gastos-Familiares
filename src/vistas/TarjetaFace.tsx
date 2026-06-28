@@ -54,6 +54,16 @@ export function calcularSplitCuotas(resumen: CardStatement): SplitCuotas {
       deudaFutura[l.moneda] = (deudaFutura[l.moneda] ?? 0) + l.monto * (l.cuotaTotal - l.cuotaActual);
     }
   }
+  // F9.40 — fix: resúmenes legacy/seed (`movimientosParseados: []`, solo el
+  // total agregado del PDF en totalARS/totalUSD, sin líneas) dejaban esteMes
+  // vacío → el footer caía al fallback de `periodo` en vez de mostrar plata.
+  // Sin líneas, "a pagar este mes" = el total del resumen (no hay de dónde
+  // más sacarlo); con líneas, sigue ganando la suma de consumo/cuota (más
+  // preciso: ya excluye impuestos/reintegros que sí entran en totalARS/USD).
+  if (lineas.length === 0) {
+    if (resumen.totalARS > 0) esteMes.ARS = resumen.totalARS;
+    if (resumen.totalUSD > 0) esteMes.USD = resumen.totalUSD;
+  }
   return { lineas, nConsumos: lineas.length, nEnCuotas: lineas.filter(l => l.cuotaTotal > 1).length, esteMes, deudaFutura };
 }
 

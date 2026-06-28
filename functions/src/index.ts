@@ -2117,3 +2117,130 @@ export const guardarTaxonomia = onCall(
     return guardarEtiqueta(accion!, request.data, email);
   },
 );
+
+// F9.41 — CRUD de Tarjetas (catálogo físico, admin-only) — cierra el bloque de
+// 6 configs editables (F9.36–F9.41, hallazgo de paridad F9.32). Habilita la
+// edición de cierreDia/venceDia/tipoTarjeta que F9.35 había dejado solo-lectura
+// a propósito (para no romper la consistencia "ninguna config edita", ya
+// resuelta). Mismo patrón admin-only que actualizarMediosPago/guardarTaxonomia
+// — config/familia sigue write:false para el cliente.
+// Coherencia: débito no genera resúmenes en cuotas (F9.35 solo lo logueaba con
+// console.warn) — acá se VALIDA: si se pone/deja tipoTarjeta:'debito' y ya hay
+// líneas en cuotas de esa tarjeta en resumenesTarjeta, se bloquea.
+function slugTarjeta(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+async function tieneLineasEnCuotas(tarjetaCodigo: string): Promise<number> {
+  const snap = await db.collection('resumenesTarjeta').where('tarjetaCodigo', '==', tarjetaCodigo).get();
+  let n = 0;
+  for (const doc of snap.docs) {
+    const lineas = (doc.data().movimientosParseados ?? []) as Array<{ tipoLinea: string; cuotaTotal: number }>;
+    n += lineas.filter(l => (l.tipoLinea === 'consumo' || l.tipoLinea === 'cuota') && l.cuotaTotal > 1).length;
+  }
+  return n;
+}
+
+function validarCamposTarjeta(data: Record<string, unknown>): {
+  banco: string; tipo: string; titular: string; cuentaDebito: string;
+  numeroCuenta?: string; ultimos4?: string[]; cierreDia?: number; venceDia?: number;
+  tipoTarjeta?: 'credito' | 'debito';
+} {
+  const { banco, tipo, titular, cuentaDebito, numeroCuenta, ultimos4, cierreDia, venceDia, tipoTarjeta } = data;
+  for (const [campo, valor] of [['banco', banco], ['tipo', tipo], ['titular', titular], ['cuentaDebito', cuentaDebito]] as const) {
+    if (typeof valor !== 'string' || valor.trim().length === 0 || valor.length > 80) {
+      throw new HttpsError('invalid-argument', `${campo} inválido (1-80 caracteres)`);
+    }
+  }
+  if (numeroCuenta != null && (typeof numeroCuenta !== 'string' || numeroCuenta.length > 40)) {
+    throw new HttpsError('invalid-argument', 'numeroCuenta inválido');
+  }
+  if (ultimos4 != null) {
+    if (!Array.isArray(ultimos4) || ultimos4.some(u => typeof u !== 'string' || !/^\d{4}$/.test(u))) {
+      throw new HttpsError('invalid-argument', 'ultimos4 debe ser un array de strings de 4 dígitos');
+    }
+  }
+  for (const [campo, valor] of [['cierreDia', cierreDia], ['venceDia', venceDia]] as const) {
+    if (valor != null && (typeof valor !== 'number' || !Number.isInteger(valor) || valor < 1 || valor > 31)) {
+      throw new HttpsError('invalid-argument', `${campo} debe ser un día entre 1 y 31`);
+    }
+  }
+  if (tipoTarjeta != null && tipoTarjeta !== 'credito' && tipoTarjeta !== 'debito') {
+    throw new HttpsError('invalid-argument', 'tipoTarjeta debe ser "credito" o "debito"');
+  }
+  return {
+    banco: (banco as string).trim(), tipo: (tipo as string).trim(), titular: (titular as string).trim(),
+    cuentaDebito: (cuentaDebito as string).trim(),
+    numeroCuenta: numeroCuenta as string | undefined,
+    ultimos4: ultimos4 as string[] | undefined,
+    cierreDia: cierreDia as number | undefined,
+    venceDia: venceDia as number | undefined,
+    tipoTarjeta: tipoTarjeta as 'credito' | 'debito' | undefined,
+  };
+}
+
+export const guardarTarjeta = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { accion } = (request.data ?? {}) as { accion?: string };
+    const famRef  = db.collection('config').doc('familia');
+    const famSnap = await famRef.get();
+    if (!famSnap.exists) throw new HttpsError('not-found', 'config/familia no existe');
+    const tarjetas = (famSnap.data()?.tarjetas ?? []) as Array<Record<string, unknown> & { codigo: string }>;
+
+    if (accion === 'crear') {
+      const campos = validarCamposTarjeta((request.data ?? {}) as Record<string, unknown>);
+      const base = slugTarjeta(`${campos.banco}-${campos.tipo}`) || 'TARJETA';
+      const codigosExistentes = new Set(tarjetas.map(t => t.codigo));
+      let codigo = base;
+      let i = 2;
+      while (codigosExistentes.has(codigo)) codigo = `${base}-${i++}`;
+
+      await famRef.update({
+        tarjetas: [...tarjetas, { codigo, ...campos }],
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      console.log(`[guardarTarjeta] crear ${codigo} por ${email}`);
+      return { ok: true, codigo };
+    }
+
+    const { codigo } = (request.data ?? {}) as { codigo?: unknown };
+    const idx = tarjetas.findIndex(t => t.codigo === codigo);
+    if (typeof codigo !== 'string' || idx === -1) throw new HttpsError('not-found', 'Tarjeta no encontrada');
+
+    if (accion === 'editar') {
+      const campos = validarCamposTarjeta((request.data ?? {}) as Record<string, unknown>);
+      if (campos.tipoTarjeta === 'debito') {
+        const nCuotas = await tieneLineasEnCuotas(codigo);
+        if (nCuotas > 0) {
+          throw new HttpsError('failed-precondition', `No se puede marcar como débito: tiene ${nCuotas} línea(s) en cuotas en resúmenes ya cargados (débito no genera cuotas).`);
+        }
+      }
+      const nuevas = tarjetas.slice();
+      nuevas[idx] = { codigo, ...campos };
+      await famRef.update({ tarjetas: nuevas, actualizadoEn: FieldValue.serverTimestamp() });
+      console.log(`[guardarTarjeta] editar ${codigo} por ${email}`);
+      return { ok: true };
+    }
+
+    // eliminar
+    const usoResumenes = await db.collection('resumenesTarjeta').where('tarjetaCodigo', '==', codigo).count().get();
+    if (usoResumenes.data().count > 0) {
+      throw new HttpsError('failed-precondition', `No se puede borrar: ${usoResumenes.data().count} resumen(es) usan esta tarjeta.`);
+    }
+    await famRef.update({
+      tarjetas: tarjetas.filter((_, i) => i !== idx),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+    console.log(`[guardarTarjeta] eliminar ${codigo} por ${email}`);
+    return { ok: true };
+  },
+);

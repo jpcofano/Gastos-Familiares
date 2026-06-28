@@ -114,3 +114,25 @@ export const editarEtiqueta     = (id: string, valor: string) => llamarTaxonomia
 export const desactivarEtiqueta = (id: string)                => llamarTaxonomia({ nivel: 'etiqueta', accion: 'desactivar', id });
 export const reactivarEtiqueta  = (id: string)                => llamarTaxonomia({ nivel: 'etiqueta', accion: 'reactivar', id });
 export const eliminarEtiqueta   = (id: string)                => llamarTaxonomia({ nivel: 'etiqueta', accion: 'eliminar', id });
+
+// F9.41 — CRUD de Tarjetas (catálogo físico). Cierra el bloque de 6 configs
+// editables (F9.36–F9.41). Mismo patrón de callable única + acción.
+export interface CamposTarjeta {
+  banco: string; tipo: string; titular: string; cuentaDebito: string;
+  numeroCuenta?: string; ultimos4?: string[]; cierreDia?: number; venceDia?: number;
+  tipoTarjeta?: 'credito' | 'debito';
+}
+
+async function llamarTarjeta(payload: Record<string, unknown>): Promise<Resultado<{ codigo?: string }>> {
+  try {
+    const fn = httpsCallable(functions, 'guardarTarjeta');
+    const res = await fn(payload);
+    return { ok: true, data: res.data as { codigo?: string } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+export const crearTarjeta    = (campos: CamposTarjeta)               => llamarTarjeta({ accion: 'crear', ...campos });
+export const editarTarjeta   = (codigo: string, campos: CamposTarjeta) => llamarTarjeta({ accion: 'editar', codigo, ...campos });
+export const eliminarTarjeta = (codigo: string)                      => llamarTarjeta({ accion: 'eliminar', codigo });

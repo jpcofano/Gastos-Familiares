@@ -96,6 +96,15 @@ export interface DashAnual {
 
 // ── Mensual ─────────────────────────────────────────────────────────────────
 
+// F9.40 — contrato de scope (ver docs/CLAUDE.md "Dashboard = devengado ·
+// Resumen = caja"): Dashboard es DEVENGADO — imputa el gasto a cuándo se hizo
+// el consumo y EXCLUYE los pagos de tarjeta consolidados (`excluirDash`).
+// Resumen (PorDiaSeccion en Resumen.tsx) es CAJA — toma lo efectivamente
+// pagado en el mes, filtrando por `incluirResumenMes` en vez de `excluirDash`.
+// Ambos scopes NO reconcilian entre sí por diseño — no son la misma plata
+// medida dos veces, son dos preguntas distintas ("¿qué consumí?" vs "¿qué
+// pagué?"). El validador del seed (F9.40) los chequea por separado, nunca uno
+// contra el otro.
 export function agregarMensual(
   movs: Movement[],
   mes: string,

@@ -241,25 +241,27 @@ export interface CategoriaItem {
   activo: boolean;
 }
 
+export interface TarjetaItem {
+  codigo: string;
+  banco: string;
+  tipo: string;
+  titular: string;
+  cuentaDebito: string;
+  numeroCuenta?: string;
+  ultimos4?: string[];   // últimos 4 dígitos de cada tarjeta física del cuente (titular + adicionales)
+  // F9.35 — opcionales: no hay fuente legacy, se cargan a mano cuando se conozcan
+  // (no inventar valores). Sin cierreDia/venceDia no se rompe nada: cada CardStatement
+  // ya trae su propia fechaCierre/fechaVencimiento extraída del PDF (F6.5).
+  cierreDia?: number;     // día del mes de cierre del resumen (1-31)
+  venceDia?: number;      // día del mes de vencimiento del pago (1-31)
+  tipoTarjeta?: 'credito' | 'debito';
+}
+
 export interface FamiliaConfig {
   miembros: Record<string, FamiliaMiembro>;
   categorias: CategoriaItem[];
   bancos: MedioPago[];
-  tarjetas: Array<{
-    codigo: string;
-    banco: string;
-    tipo: string;
-    titular: string;
-    cuentaDebito: string;
-    numeroCuenta?: string;
-    ultimos4?: string[];   // últimos 4 dígitos de cada tarjeta física del cuente (titular + adicionales)
-    // F9.35 — opcionales: no hay fuente legacy, se cargan a mano cuando se conozcan
-    // (no inventar valores). Sin cierreDia/venceDia no se rompe nada: cada CardStatement
-    // ya trae su propia fechaCierre/fechaVencimiento extraída del PDF (F6.5).
-    cierreDia?: number;     // día del mes de cierre del resumen (1-31)
-    venceDia?: number;      // día del mes de vencimiento del pago (1-31)
-    tipoTarjeta?: 'credito' | 'debito';
-  }>;
+  tarjetas: TarjetaItem[];
   // Unidades funcionales del titular — para extracción correcta en liquidaciones de expensas
   unidades?: Array<{ uf: string; alias?: string; etiqueta?: string }>;
   actualizadoEn: Date;

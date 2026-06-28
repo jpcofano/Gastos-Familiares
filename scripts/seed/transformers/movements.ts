@@ -10,9 +10,13 @@ function mesYYYYMM(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 
-interface TCMap { [iso: string]: number; }
+export interface TCMap { [iso: string]: number; }
 
-function buildTCMap(tcRows: any[]): TCMap {
+// exportado: lo reusa el validador F9.40 para recalcular ARS-eq del lado Excel
+// con el mismo criterio "TC por fecha, fallback al más reciente anterior" que
+// usa el seed real — sin eso, comparar ARS-eq Firestore vs Excel para
+// movimientos en USD daría falsos negativos.
+export function buildTCMap(tcRows: any[]): TCMap {
   const map: TCMap = {};
   for (const r of tcRows) {
     if (r.Fecha && r.TC_USDARS) map[isoDate(r.Fecha as Date)] = Number(r.TC_USDARS);
@@ -28,7 +32,7 @@ function buildResumenTCMap(tarjetasResumen: any[]): Map<string, string> {
   return map;
 }
 
-function tcForDate(map: TCMap, fecha: Date): number | null {
+export function tcForDate(map: TCMap, fecha: Date): number | null {
   const target = isoDate(fecha);
   if (map[target]) return map[target];
   const sortedDates = Object.keys(map).sort();

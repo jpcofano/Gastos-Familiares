@@ -1,5 +1,6 @@
 import { Firestore } from 'firebase-admin/firestore';
 import { SheetData } from '../readExcel';
+import { buildTCMap, tcForDate } from '../transformers/movements';
 
 interface Result { name: string; ok: boolean; detail: string; }
 
@@ -41,6 +42,45 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
     name: 'gastos ARS 2026-05',
     ok: Math.abs(sumFs - sumXls) < 0.01,
     detail: `firestore=${sumFs.toFixed(2)} excel=${sumXls.toFixed(2)}`,
+  });
+
+  // F9.40 — contrato de scopes: Dashboard (devengado) y Resumen (caja) NO
+  // reconcilian entre sí por diseño (ver docs/CLAUDE.md, "Dashboard = devengado
+  // · Resumen = caja"). En vez de un assert cruzado Dashboard==Resumen (sería
+  // falso), dos asserts INDEPENDIENTES Firestore-vs-Excel, uno por scope —
+  // cualquier desvío de cada agregación salta solo. ARS-eq con TC por fecha
+  // (mismo tcForDate que usa el seed real, no un TC único).
+  const tcMap = buildTCMap(data.tcDiario);
+  const arsEqExcel = (r: any): number =>
+    r.Moneda === 'USD' ? (r.Monto ?? 0) * (tcForDate(tcMap, r.Fecha as Date) ?? 0) : (r.Monto ?? 0);
+  const arsEqFs = (r: any): number =>
+    r.moneda === 'USD' ? (r.monto ?? 0) * (r.tcUsdArs ?? 0) : (r.monto ?? 0);
+  const PERIODO_REF = '2026-05';
+
+  const dashFs = seedMovs
+    .filter(r => r.mes === PERIODO_REF && r.tipo === 'Gasto' && r.excluirDash !== true)
+    .reduce((s, r) => s + arsEqFs(r), 0);
+  const dashXls = data.historico
+    .filter(r => r.Fecha && (r.Fecha as Date).toISOString().startsWith(PERIODO_REF))
+    .filter(r => r.Tipo === 'Gasto' && r.ExcluirDash !== true)
+    .reduce((s, r) => s + arsEqExcel(r), 0);
+  results.push({
+    name: `Dashboard (devengado) gasto ${PERIODO_REF}`,
+    ok: Math.abs(dashFs - dashXls) < 1,
+    detail: `firestore=${dashFs.toFixed(2)} excel=${dashXls.toFixed(2)} (ARS-eq, scope ExcluirDash!=1)`,
+  });
+
+  const cajaFs = seedMovs
+    .filter(r => r.mes === PERIODO_REF && r.tipo === 'Gasto' && r.incluirResumenMes === true)
+    .reduce((s, r) => s + arsEqFs(r), 0);
+  const cajaXls = data.historico
+    .filter(r => r.Fecha && (r.Fecha as Date).toISOString().startsWith(PERIODO_REF))
+    .filter(r => r.Tipo === 'Gasto' && (r.FlagResumenMes === true || r.Subtipo === 'TarjetaPago'))
+    .reduce((s, r) => s + arsEqExcel(r), 0);
+  results.push({
+    name: `Resumen (caja) gasto ${PERIODO_REF}`,
+    ok: Math.abs(cajaFs - cajaXls) < 1,
+    detail: `firestore=${cajaFs.toFixed(2)} excel=${cajaXls.toFixed(2)} (ARS-eq, scope FlagResumenMes==1 ∨ TarjetaPago)`,
   });
 
   const dict = await db.collection('diccionario').count().get();

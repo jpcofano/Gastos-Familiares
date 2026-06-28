@@ -62,6 +62,23 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   escribe el cron F9.30 (`actualizarTCDiario`), con `origen:'manual'` — no hay colección
   paralela. `tcParaFecha` no cambia. Pisa con confirm() si ya hay un valor para esa fecha;
   el cron del día siguiente vuelve a poner el automático sin intervención.
+- **Dashboard = devengado · Resumen = caja (F9.40, NO reconcilian por diseño).**
+  Dashboard imputa el gasto a cuándo se hizo el consumo y excluye los pagos de tarjeta
+  consolidados — filtro `excluirDash != true` (`ExcluirDash` en el Excel histórico).
+  Resumen (sección "Por día") toma lo efectivamente pagado en el mes, incluyendo el pago
+  del resumen de tarjeta — filtro `incluirResumenMes == true` (`FlagResumenMes` en el
+  Excel; `TarjetaPago` lo fuerza a `true` aunque el Excel no lo tenga marcado).
+  `fecha`/`mes` coinciden siempre en el seed — la diferencia entre ambos scopes NUNCA es
+  por el campo de mes, es por diseño. No intentar cuadrar un scope contra el otro: son
+  agregaciones distintas a propósito (ver `src/datos/agregados.ts` y `Resumen.tsx`,
+  comentario "contrato de scope"). El validador del seed (`scripts/seed/validators/
+  checks.ts`) los chequea cada uno contra el Excel por separado, nunca uno contra el otro.
+- F9.41 — Perfil › Tarjetas gana escritura (cierra el bloque de 6 configs editables F9.36–
+  F9.41, hallazgo de paridad F9.32): `cierreDia`/`venceDia`/`tipoTarjeta` (F9.35, antes
+  solo-lectura a propósito) más alta/baja del catálogo, vía la callable `guardarTarjeta`
+  (admin-only, mismo patrón). Baja bloqueada si hay `resumenesTarjeta` con ese
+  `tarjetaCodigo`. Marcar `tipoTarjeta:'debito'` se bloquea si la tarjeta ya tiene líneas en
+  cuotas cargadas (débito no genera cuotas — antes solo un `console.warn` en `TarjetaFace`).
 - Resumenes se pagan al vencimiento. No hay flujo de revision por estados;
   pendiente_revision del legacy es vestigial y no se porta.
 - ResumenMes es vista calculada en vivo, no se materializa.
