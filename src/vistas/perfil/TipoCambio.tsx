@@ -36,11 +36,15 @@ export default function TipoCambio() {
   const [valor, setValor] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
 
   function recargar() {
     setCargando(true);
-    cargarTCReciente(10).then(h => { setHist(h); setCargando(false); });
+    setErrorCarga(null);
+    cargarTCReciente(10)
+      .then(h => { setHist(h); setCargando(false); })
+      .catch(err => { setErrorCarga(err instanceof Error ? err.message : String(err)); setCargando(false); });
   }
 
   useEffect(recargar, []);
@@ -73,6 +77,8 @@ export default function TipoCambio() {
       <Card variant="highlight" eyebrow="TC USD → ARS (último MEP)">
         {cargando ? (
           <span style={{ fontSize: 14, color: 'var(--color-text-sec)' }}>Cargando…</span>
+        ) : errorCarga ? (
+          <span style={{ fontSize: 14, color: 'var(--gf-err-text)' }}>Error al cargar: {errorCarga}</span>
         ) : !actual ? (
           <span style={{ fontSize: 14, color: 'var(--color-text-sec)' }}>Sin datos de /tcDiario todavía.</span>
         ) : (

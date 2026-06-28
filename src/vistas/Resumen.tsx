@@ -13,6 +13,8 @@ import { colorHash } from '../datos/agregados';
 import type { Movement, ExpectedItem, FamiliaConfig } from '../types';
 import './Resumen.css';
 
+type Moneda = 'ARS' | 'USD';
+
 // F9.26 — Resumen cableado a datos reales. "Por día" = caja del mes
 // (incluirResumenMes=true, paridad legacy 50_ResumenMes.gs). "Gastos Fijos" =
 // checklist real de itemsEsperados — la lógica de match/estado es la que ya
@@ -56,7 +58,8 @@ function nombrePersona(memberId: string | null, config: FamiliaConfig | null): s
 
 interface Kpis {
   ingArsEq: number; gasArsEq: number; netArsEq: number;
-  netUsdEq: number; pesosDisp: number; faltanteUsd: number;
+  ingUsdEq: number; gasUsdEq: number; netUsdEq: number;
+  pesosDisp: number; faltanteUsd: number; tc: number;
 }
 
 function calcularKpis(movs: Movement[]): Kpis {
@@ -72,8 +75,8 @@ function calcularKpis(movs: Movement[]): Kpis {
   const ingUsdEq = ingUsd + (tc ? ingArs / tc : 0), gasUsdEq = gasUsd + (tc ? gasArs / tc : 0);
   return {
     ingArsEq, gasArsEq, netArsEq: ingArsEq - gasArsEq,
-    netUsdEq: ingUsdEq - gasUsdEq,
-    pesosDisp: ingArs, faltanteUsd: tc ? (ingArs - gasArs) / tc : 0,
+    ingUsdEq, gasUsdEq, netUsdEq: ingUsdEq - gasUsdEq,
+    pesosDisp: ingArs, faltanteUsd: tc ? (ingArs - gasArs) / tc : 0, tc,
   };
 }
 
@@ -181,7 +184,28 @@ const ACCIONABLE: EstadoChecklist[] = ['pendiente', 'vencido', 'no_registrado', 
 
 // ── KPI block (compartido entre secciones) ───────────────────────────────────
 
-function KpiCards({ c }: { c: Kpis }) {
+function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
+  const netBig = cur === 'ARS' ? c.netArsEq : c.netUsdEq;
+  const netSmall = cur === 'ARS' ? c.netUsdEq : c.netArsEq;
+  const fmtBig = cur === 'ARS' ? fmtArs : fmtUsdEq;
+  const fmtSmall = cur === 'ARS' ? fmtUsdEq : fmtArs;
+  const ingBig = cur === 'ARS' ? c.ingArsEq : c.ingUsdEq;
+  const gasBig = cur === 'ARS' ? c.gasArsEq : c.gasUsdEq;
+  // Disponible (ARS) y Resultado (USD) son magnitudes distintas, no equivalentes entre sí
+  // (no hay conversión válida una a la otra) — "invertir" en USD reordena cuál va primero,
+  // no convierte cifras.
+  const cardDisponible = (
+    <Card eyebrow="Disponible (ARS)" style={{ flex: 1 }}>
+      <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(c.pesosDisp)}</span>
+    </Card>
+  );
+  const cardResultado = (
+    <Card eyebrow="Resultado (USD)" style={{ flex: 1 }}>
+      <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: c.faltanteUsd >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
+        {fmtUsdEq(c.faltanteUsd)}
+      </span>
+    </Card>
+  );
   return (
     <>
       {/* F9.17 — "Neto del mes" como card ink, rima con el hero de Balance del Dashboard */}
@@ -189,26 +213,19 @@ function KpiCards({ c }: { c: Kpis }) {
         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'rgba(255,255,255,.6)', marginBottom: 8 }}>Neto del mes</div>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
           <span style={{ fontSize: 28, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.5px', color: '#fff' }}>
-            {c.netArsEq >= 0 ? '+' : '−'}{fmtArs(Math.abs(c.netArsEq))}
+            {netBig >= 0 ? '+' : '−'}{fmtBig(Math.abs(netBig))}
           </span>
           <span style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,.7)', fontVariantNumeric: 'tabular-nums' }}>
-            {fmtUsdEq(Math.abs(c.netUsdEq))}
+            {fmtSmall(Math.abs(netSmall))}
           </span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'rgba(255,255,255,.7)', marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,.15)' }}>
-          <span>Ingresos {fmtArs(c.ingArsEq)}</span>
-          <span>Gastos {fmtArs(c.gasArsEq)}</span>
+          <span>Ingresos {fmtBig(ingBig)}</span>
+          <span>Gastos {fmtBig(gasBig)}</span>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
-        <Card eyebrow="Disponible (ARS)" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(c.pesosDisp)}</span>
-        </Card>
-        <Card eyebrow="Resultado (USD)" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: c.faltanteUsd >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
-            {fmtUsdEq(c.faltanteUsd)}
-          </span>
-        </Card>
+        {cur === 'ARS' ? <>{cardDisponible}{cardResultado}</> : <>{cardResultado}{cardDisponible}</>}
       </div>
     </>
   );
@@ -216,7 +233,7 @@ function KpiCards({ c }: { c: Kpis }) {
 
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config }: { movs: Movement[]; porRevisar: number; config: FamiliaConfig | null }) {
+function PorDiaSeccion({ movs, porRevisar, config, cur }: { movs: Movement[]; porRevisar: number; config: FamiliaConfig | null; cur: Moneda }) {
   const cajaMov = movs.filter(m => m.incluirResumenMes);
   const c = calcularKpis(cajaMov);
   const dias = porDia(cajaMov, config?.bancos);
@@ -225,10 +242,13 @@ function PorDiaSeccion({ movs, porRevisar, config }: { movs: Movement[]; porRevi
   const hoy = new Date();
   const movsHoy = cajaMov.filter(m => m.tipo === 'Gasto' && m.fecha.toDateString() === hoy.toDateString());
   const totalHoy = movsHoy.reduce((s, m) => s + arsEq(m), 0);
+  // ARS: como está hoy (ARS principal, USD chico). USD: invertido (USD principal, ARS chico).
+  const fmtBig = (ars: number) => cur === 'ARS' ? fmtArs(ars) : fmtMoney(ars, { from: 'ARS', to: 'USD' });
+  const fmtSmall = (ars: number) => cur === 'ARS' ? fmtMoney(ars, { from: 'ARS', to: 'USD' }) : fmtArs(ars);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <KpiCards c={c} />
+      <KpiCards c={c} cur={cur} />
 
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       <Card variant="flat" padding="var(--space-3)" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -261,8 +281,8 @@ function PorDiaSeccion({ movs, porRevisar, config }: { movs: Movement[]; porRevi
                     <span style={{ width: 9, height: 9, borderRadius: 999, background: col }} />
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-strong)' }}>{nombre}</span>
                   </div>
-                  <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(v)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(v, { from: 'ARS', to: 'USD' })}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(v)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(v)}</div>
                 </div>
               );
             })}
@@ -275,7 +295,7 @@ function PorDiaSeccion({ movs, porRevisar, config }: { movs: Movement[]; porRevi
           <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
             <Icon name="calendar-days" size={13} color="var(--gf-gray-400)" /> Gastos por día
           </span>
-          <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Total mes <strong style={{ color: 'var(--color-text)' }}>{fmtArs(totalMesEq)}</strong></span>
+          <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Total mes <strong style={{ color: 'var(--color-text)' }}>{fmtBig(totalMesEq)}</strong></span>
         </div>
         {dias.length === 0 ? (
           <p style={{ fontSize: 13, color: 'var(--color-text-sec)', margin: '0 4px' }}>Sin gastos de caja este mes.</p>
@@ -295,13 +315,13 @@ function PorDiaSeccion({ movs, porRevisar, config }: { movs: Movement[]; porRevi
                       {banks.map(([b, v]) => (
                         <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-strong)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '3px 8px' }}>
                           <span style={{ width: 7, height: 7, borderRadius: 999, background: colorMedio(b, config?.bancos) ?? colorHash(b) }} />
-                          {b} · {fmtArs(v)}
+                          {b} · {fmtBig(v)}
                         </span>
                       ))}
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(d.eqArs)}</div>
-                      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(d.eqArs, { from: 'ARS', to: 'USD' })}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(d.eqArs)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(d.eqArs)}</div>
                     </div>
                   </div>
                   {isHoy && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gf-emerald)', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: 6 }}>Hoy</div>}
@@ -411,6 +431,7 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMes
 function ResumenVisual() {
   const [sec, setSec] = useState<'dia' | 'fijos'>('dia');
   const [mes, setMes] = useState(mesActual);
+  const [cur, setCur] = useState<Moneda>('ARS');
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const tabs: { id: 'dia' | 'fijos'; label: string }[] = [{ id: 'dia', label: 'Por día' }, { id: 'fijos', label: 'Gastos Fijos' }];
 
@@ -437,6 +458,23 @@ function ResumenVisual() {
         <button onClick={() => setMes(m => desplazarMes(m, 1))} aria-label="Mes siguiente" style={{ width: 30, height: 30, borderRadius: 999, border: 'none', background: 'var(--gf-gray-100)', cursor: 'pointer', fontSize: 16 }}>›</button>
       </div>
 
+      {sec === 'dia' && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3 }}>
+            {(['ARS', 'USD'] as const).map(id => {
+              const on = cur === id;
+              return (
+                <button key={id} onClick={() => setCur(id)} style={{
+                  padding: '5px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)',
+                  fontSize: 12, fontWeight: 700, background: on ? 'var(--color-surface)' : 'transparent',
+                  color: on ? 'var(--color-text)' : 'var(--color-text-sec)', boxShadow: on ? 'var(--shadow-sm)' : 'none', transition: '.15s',
+                }}>{id === 'ARS' ? '$ ARS' : 'USD'}</button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 4, background: 'var(--gf-gray-100)', borderRadius: 999, padding: 4 }}>
         {tabs.map(t => {
           const on = sec === t.id;
@@ -459,7 +497,7 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} />
+        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} />
       ) : (
         <GastosFijosSeccion
           checklist={checklist}

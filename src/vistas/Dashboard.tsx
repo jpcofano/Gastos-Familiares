@@ -140,10 +140,12 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
           {d.subcategorias.map(s => (
             <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ width: 96, flexShrink: 0, fontSize: 12.5, color: 'var(--color-text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{s.nombre}</span>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <div style={{ height: 22, borderRadius: 5, background: s.color, width: `${s.pct * 2.6}%`, minWidth: 8 }} />
-                <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{s.valor}</span>
-                <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>{s.pct}%</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0, width: 116, justifyContent: 'flex-end' }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{curBig(s.valor, cur, tc)}</span>
+                  <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right' }}>{s.pct}%</span>
+                </div>
               </div>
             </div>
           ))}
@@ -228,6 +230,7 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
 // ── Anual (histórico) ─────────────────────────────────────────────────────────
 
 function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda }) {
+  const [openCat, setOpenCat] = useState<string | null>(null);
   const maxSal = Math.max(...a.salidasPorMes, 1);
   const maxIS = Math.max(...a.ingresosPorMes, ...a.salidasPorMes, 1);
   const totalCat = a.categorias.reduce((s, c) => s + c.usd, 0);
@@ -293,18 +296,40 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
           ))}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {a.categorias.map(c => (
-            <div key={c.nombre}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 3 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
-                <span style={{ fontWeight: 600 }}>{c.nombre}</span>
-                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+          {a.categorias.map(c => {
+            const open = openCat === c.nombre;
+            return (
+              <div key={c.nombre}>
+                <div
+                  onClick={() => setOpenCat(open ? null : c.nombre)}
+                  role="button" tabIndex={0}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 3, cursor: 'pointer' }}
+                >
+                  <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                  <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+                  <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />
+                </div>
+                <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${(c.usd / maxCat) * 100}%`, background: c.color, borderRadius: 3, opacity: 0.85 }} />
+                </div>
+                {open && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7, margin: '8px 0 2px 17px' }}>
+                    {c.subcategorias.map(s => (
+                      <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 84, flexShrink: 0, fontSize: 11.5, color: 'var(--color-text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.nombre}</span>
+                        <div style={{ flex: 1, height: 5, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${s.pct}%`, background: c.color, opacity: 0.6, borderRadius: 3 }} />
+                        </div>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc)}</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{s.pct}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${(c.usd / maxCat) * 100}%`, background: c.color, borderRadius: 3, opacity: 0.85 }} />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
 

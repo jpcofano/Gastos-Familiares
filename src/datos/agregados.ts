@@ -79,7 +79,8 @@ export interface DashMensual {
   porDescripcion: DescripcionSlice[];
 }
 
-export interface AnualCategoria { nombre: string; color: string; usd: number; }
+export interface AnualSubcategoria { nombre: string; usd: number; pct: number; }
+export interface AnualCategoria { nombre: string; color: string; usd: number; subcategorias: AnualSubcategoria[]; }
 export interface MesAMes { mes: string; usd: number; delta: number | null; }
 
 export interface DashAnual {
@@ -264,12 +265,22 @@ export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: M
   }
 
   const catMap = new Map<string, number>();
+  const subMap = new Map<string, Map<string, number>>();
   for (const m of gastos) {
     const cat = m.categoria ?? 'Sin categoría';
     catMap.set(cat, (catMap.get(cat) ?? 0) + usdEq(m));
+    const sub = m.subcategoria ?? 'Sin subcategoría';
+    if (!subMap.has(cat)) subMap.set(cat, new Map());
+    const subs = subMap.get(cat)!;
+    subs.set(sub, (subs.get(sub) ?? 0) + usdEq(m));
   }
   const categorias: AnualCategoria[] = [...catMap.entries()]
-    .map(([nombre, usd]) => ({ nombre, color: colorCategoria(nombre), usd }))
+    .map(([nombre, usd]) => {
+      const subs = [...(subMap.get(nombre) ?? new Map()).entries()]
+        .map(([snombre, susd]) => ({ nombre: snombre, usd: susd, pct: usd > 0 ? Math.round((susd / usd) * 100) : 0 }))
+        .sort((a, b) => b.usd - a.usd);
+      return { nombre, color: colorCategoria(nombre), usd, subcategorias: subs };
+    })
     .sort((a, b) => b.usd - a.usd);
 
   const mesAMes: MesAMes[] = mesesConDatosIdx.map((i, idx) => {
