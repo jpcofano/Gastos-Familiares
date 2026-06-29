@@ -605,7 +605,7 @@ async function aprenderDestino(data: FirebaseFirestore.DocumentData): Promise<vo
 }
 
 export const aprenderMovimientoCreado = onDocumentCreated(
-  { document: 'movimientos/{id}', memory: '128MiB' },
+  { document: 'movimientos/{id}', memory: '256MiB' },
   async event => {
     const data = event.data?.data();
     if (data?.seedImport) return;
@@ -619,7 +619,7 @@ export const aprenderMovimientoCreado = onDocumentCreated(
 );
 
 export const aprenderMovimientoActualizado = onDocumentUpdated(
-  { document: 'movimientos/{id}', memory: '128MiB' },
+  { document: 'movimientos/{id}', memory: '256MiB' },
   async event => {
     const before = event.data?.before.data();
     const after  = event.data?.after.data();
