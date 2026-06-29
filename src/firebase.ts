@@ -7,11 +7,20 @@ import {
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
+// F9.48 — projectId/storageBucket vivían hardcodeados al id viejo (sin
+// fallback de env, a diferencia del resto de estos campos) — un build de
+// producción (fuera del emulador, donde el id no importa porque
+// singleProjectMode lo resuelve por .firebaserc) apuntaba a un proyecto que
+// no existe. Variables de .env.production (consola Firebase del proyecto
+// gastos-familiares-e6415 → Configuración → Apps → Web app):
+// VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN, VITE_FIREBASE_PROJECT_ID,
+// VITE_FIREBASE_STORAGE_BUCKET, VITE_FIREBASE_APP_ID,
+// VITE_FIREBASE_MESSAGING_SENDER_ID.
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN         ?? 'gastos-familiares.firebaseapp.com',
-  projectId:         'gastos-familiares',
-  storageBucket:     'gastos-familiares.appspot.com',
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN         ?? 'gastos-familiares-e6415.firebaseapp.com',
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID          ?? 'gastos-familiares-e6415',
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET      ?? 'gastos-familiares-e6415.appspot.com',
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '',
   appId:             import.meta.env.VITE_FIREBASE_APP_ID              ?? '',
 };

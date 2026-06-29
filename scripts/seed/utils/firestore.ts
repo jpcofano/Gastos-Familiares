@@ -6,7 +6,7 @@ export function getDb(target: 'emulator' | 'production'): Firestore {
 
   if (target === 'emulator') {
     process.env.FIRESTORE_EMULATOR_HOST = 'localhost:8080';
-    initializeApp({ projectId: 'gastos-familiares' });
+    initializeApp({ projectId: 'gastos-familiares-e6415' });
   } else {
     const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
                  || './secrets/serviceAccountKey.json';

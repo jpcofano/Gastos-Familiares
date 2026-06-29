@@ -2,7 +2,7 @@ import { Firestore } from 'firebase-admin/firestore';
 import { SheetData } from '../readExcel';
 import { writeBatch } from '../utils/firestore';
 
-export async function seedNormalizationRules(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedNormalizationRules(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> reglasNormalizacion');
 
   const docs = data.diccionarioNorm
@@ -18,7 +18,8 @@ export async function seedNormalizationRules(db: Firestore, data: SheetData, dry
     }));
 
   console.log(`   ${docs.length} reglas activas`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'reglasNormalizacion', docs);
   console.log('   OK\n');
+  return docs.length;
 }

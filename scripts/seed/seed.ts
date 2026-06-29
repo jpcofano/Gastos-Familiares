@@ -17,12 +17,14 @@ interface Flags {
   target: 'emulator' | 'production';
   dryRun: boolean;
   excelPath: string;
+  forceConfig: boolean;
 }
 
 function parseFlags(): Flags {
   const args = process.argv.slice(2);
   const target = args.includes('--target=production') ? 'production' : 'emulator';
   const dryRun = args.includes('--dry-run');
+  const forceConfig = args.includes('--force-config');
   const excelArg = args.find(a => a.startsWith('--excel='));
   const excelPath = excelArg
     ? excelArg.split('=')[1]
@@ -33,7 +35,7 @@ function parseFlags(): Flags {
     console.error('       Esto previene correr el seed contra prod por accidente.');
     process.exit(1);
   }
-  return { target, dryRun, excelPath };
+  return { target, dryRun, excelPath, forceConfig };
 }
 
 async function main() {
@@ -45,7 +47,7 @@ async function main() {
   inyectarEmailsDependientes(data);
   const db = getDb(flags.target);
 
-  await seedConfig(db, data, flags.dryRun);
+  await seedConfig(db, data, flags.dryRun, flags.target, flags.forceConfig);
   await seedSubcategorias(db, data, flags.dryRun);
   await seedEtiquetas(db, data, flags.dryRun);
   await seedNormalizationRules(db, data, flags.dryRun);

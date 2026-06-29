@@ -10,6 +10,7 @@
     "rules": "storage.rules"
   },
   "hosting": {
+    "site": "gastos-familiares-jmsf",
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [{ "source": "**", "destination": "/index.html" }],

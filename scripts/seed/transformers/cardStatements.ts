@@ -52,7 +52,7 @@ function buildMovimientosParseados(tarjetasMovimientos: any[]): Map<string, Movi
   return result;
 }
 
-export async function seedCardStatements(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedCardStatements(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> resumenesTarjeta');
 
   const movimientosPorResumen = buildMovimientosParseados(data.tarjetasMovimientos);
@@ -92,7 +92,8 @@ export async function seedCardStatements(db: Firestore, data: SheetData, dryRun:
     });
 
   console.log(`   ${docs.length} resumenes (${sinLineas} sin líneas en Tarjetas_Movimientos)`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'resumenesTarjeta', docs);
   console.log('   OK\n');
+  return docs.length;
 }

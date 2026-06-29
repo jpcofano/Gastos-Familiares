@@ -8,6 +8,7 @@
     "seed:prod": "tsx scripts/seed/seed.ts --target=production",
     "seed:dry": "tsx scripts/seed/seed.ts --target=emulator --dry-run",
     "validate": "tsx scripts/seed/validators/runValidations.ts",
+    "migrate:preflight": "tsx scripts/seed/preflight.ts",
     "backfill:persona": "tsx scripts/seed/backfillPersonaMemberId.ts --target=emulator",
     "backfill:persona:apply": "tsx scripts/seed/backfillPersonaMemberId.ts --target=emulator --apply",
     "emulators": "firebase emulators:start --only auth,firestore --import=./emulator-data --export-on-exit",

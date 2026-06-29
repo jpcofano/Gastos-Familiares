@@ -70,6 +70,15 @@ export default function AppShell() {
     );
   }
 
+  if (estado === 'emailNoVerificado') {
+    return (
+      <div className="shell-center">
+        <p>Verificá tu email con Google para entrar a <strong>{firebaseUser?.email}</strong>.</p>
+        <button className="btn-secondary" onClick={() => signOutUsuario()}>Salir</button>
+      </div>
+    );
+  }
+
   if (estado === 'noAutorizado') {
     return (
       <div className="shell-center">

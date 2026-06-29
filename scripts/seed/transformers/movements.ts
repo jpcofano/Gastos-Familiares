@@ -62,7 +62,7 @@ function buildOblMap(gastosEsperados: any[]): Map<string, string> {
   return map;
 }
 
-export async function seedMovements(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedMovements(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> movimientos');
 
   const tcMap        = buildTCMap(data.tcDiario);
@@ -167,7 +167,8 @@ export async function seedMovements(db: Firestore, data: SheetData, dryRun: bool
   console.log(`   ${resumenOverride} TarjetaPago con incluirResumenMes forzado (A.2)`);
   console.log(`   ${oblBackfill} itemEsperadoId backfills OBL- (A.3)`);
   console.log(`   ${tcCodigoBackfill} TarjetaPago con tarjetaCodigo backfill (F4.2.1)`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'movimientos', docs);
   console.log('   OK\n');
+  return docs.length;
 }

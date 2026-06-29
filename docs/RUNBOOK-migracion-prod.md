@@ -1,0 +1,141 @@
+# Runbook — Migración a producción (Etapa B)
+
+> Estos pasos los corre el **usuario**, no Code. Code (F9.47) deja el repo seguro para esto:
+> project id correcto, guardrail anti-clobber de `config/familia`, y el script de preflight.
+> Nada de esto importa datos a prod por sí solo — el import real es el paso 6.
+
+Proyecto real de Firebase: **`gastos-familiares-e6415`** (ya configurado en `.firebaserc`
+y en el emulador — antes apuntaban al id viejo `gastos-familiares`, que no existe).
+
+## 0. Preflight local (emulador)
+
+```bash
+npm run seed
+npm run validate
+```
+Debe dar **21/21** en el validador. Si algo falla, resolverlo antes de seguir — no avanzar
+con el emulador roto.
+
+## 1. Service account
+
+Bajar de la consola de Firebase (proyecto `gastos-familiares-e6415`):
+`⚙ Configuración del proyecto → Cuentas de servicio → Generar nueva clave privada`.
+
+Guardarlo en `./secrets/serviceAccountKey.json`. **Nunca a git** — ya está en `.gitignore`
+(`secrets/*.json`, `secrets/serviceAccountKey*.json`, `**/serviceAccountKey*.json`).
+
+## 2. Deploy de índices PRIMERO
+
+```bash
+firebase deploy --only firestore:indexes
+```
+Los índices compuestos tardan minutos en construir. **No seguir** al paso 5 (preflight prod)
+hasta que la consola de Firebase (Firestore → Índices) muestre todos en estado **Habilitado**
+(no "Compilando").
+
+## 3. Deploy de Rules
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+## 4. Deploy de Functions
+
+```bash
+cd functions && npm install && cd ..
+firebase deploy --only functions
+```
+Incluye el cron de TC (F9.30), todas las callables admin (F9.36–41, F9.46) y el Canal B de
+Calendar (F9.45/F9.46) — para Calendar, los 3 secrets (`GOOGLE_OAUTH_CLIENT_ID/SECRET/
+REFRESH_TOKEN`) deben estar cargados en Secret Manager antes de este deploy.
+
+## 5. Preflight de producción
+
+```bash
+npm run migrate:preflight -- --target=production
+```
+Debe imprimir **LISTO PARA IMPORT LIMPIO** (todas las colecciones en 0) antes de seguir. Si
+dice que prod **no está vacío**, parar y revisar por qué — no continuar a ciegas.
+
+## 6. Import a producción
+
+```bash
+npm run seed -- --target=production --i-am-sure
+```
+Idempotente (doc id determinístico, `set()` por id) — re-correrlo no duplica. **Excepción:**
+`config/familia` queda protegida una vez que existe en prod (no se pisa salvo
+`--force-config` explícito — ver nota al final).
+
+## 7. Backfill de persona
+
+```bash
+tsx scripts/seed/backfillPersonaMemberId.ts --target=production
+```
+Dry-run primero. Si reporta candidatos > 0:
+```bash
+tsx scripts/seed/backfillPersonaMemberId.ts --target=production --apply --i-am-sure
+```
+
+## 8. Cuadre post-import
+
+```bash
+npm run validate -- --target=production
+```
+Debe dar **22/22** contra prod (incluye el check de reconciliación `autorizados ↔
+config/familia.miembros` de F9.48 — detecta drift si el CRUD de Miembros editó algo después
+del import sin que `/autorizados` haya quedado en el mismo estado).
+
+## 9. Build de prod + variables de entorno (F9.48)
+
+Antes de desplegar Hosting, crear `.env.production` (NO se sube a git) con los valores de
+**Firebase Console → Configuración del proyecto → Tus apps → Web app**, proyecto
+`gastos-familiares-e6415`:
+```
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=gastos-familiares-e6415.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=gastos-familiares-e6415
+VITE_FIREBASE_STORAGE_BUCKET=gastos-familiares-e6415.appspot.com
+VITE_FIREBASE_APP_ID=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+```
+`src/firebase.ts` ya tiene `gastos-familiares-e6415` como fallback si falta alguna var, pero
+no reemplaza tener las reales de la consola (API key real, etc.).
+
+```bash
+npm run build
+firebase deploy --only hosting
+```
+
+## 10. Auth real en dispositivo (F9.48) — checklist
+
+Con la app de prod abierta (no el emulador), verificar:
+- Los **4 miembros** loguean con Google y ven su rol correcto: **admin** (Juan, María) ve
+  Resumen + Tarjetas + el CRUD de Perfil; **dependiente** (Federico, Sofía) NO ve Resumen ni
+  las sub-pantallas de configuración.
+- Los **2 emails de María** (personal + Accenture) resuelven ambos a María, sin warning de
+  "matchea más de un miembro".
+- Un email **fuera de la familia** cae en "no pertenece a la familia" (botón Salir), sin leer
+  ningún dato.
+- Una cuenta con **email sin verificar** (si hay alguna para probar) cae en el mensaje de
+  "Verificá tu email", no en pantalla en blanco ni permission-denied silencioso.
+
+## 11. Sign-off
+
+- Confirmar F9.31/F9.32 (cuadre de resúmenes de tarjeta y contrato de scopes devengado/caja)
+  contra los datos reales de prod.
+- Abrir la app apuntando a prod (no al emulador) y verificar que lee sin errores de permisos
+  ni de índices faltantes (Dashboard, Resumen, Cargar, Perfil).
+- Checklist de auth real (paso 10) completo.
+
+## Notas
+
+- **`--force-config`** solo se usa si se quiere repisar `config/familia` en prod a propósito
+  (ej. volver a un estado conocido del Excel después de ediciones manuales que se quieren
+  descartar). Sin el flag, un re-import deja `config/familia` intacto si ya existe.
+- Las Rules ya cubren las queries reales (`firestore.indexes.json` tiene los índices
+  compuestos que necesitan); por eso el orden del runbook pone índices **antes** de que la
+  app lea — sin eso, las primeras queries reales fallarían con "index not found".
+- El seed es de Admin SDK (saltea Rules) — el preflight (paso 5) y el validate (paso 8) usan
+  la misma vía, también Admin SDK, solo lectura.
+- Etapa B cierra con el sign-off del paso 11. Después, Etapa C = PWA (manifest, SW, share
+  target, install). Ver `docs/plan-maestro-firestore-pwa.md`.

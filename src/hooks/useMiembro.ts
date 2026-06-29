@@ -4,7 +4,7 @@ import { useFirebaseUser } from './useFirebaseUser';
 import { cargarFamiliaConfig, resolverMiembro } from '../familia';
 import type { FamiliaMiembro } from '../types';
 
-type Estado = 'cargando' | 'noAutenticado' | 'noAutorizado' | 'autenticado';
+type Estado = 'cargando' | 'noAutenticado' | 'emailNoVerificado' | 'noAutorizado' | 'autenticado';
 
 export interface UseMiembroResult {
   estado: Estado;
@@ -24,6 +24,16 @@ export function useMiembro(): UseMiembroResult {
 
     if (!user) {
       setEstado('noAutenticado');
+      setMemberId(null);
+      setMiembro(null);
+      return;
+    }
+
+    // F9.48 — las Rules exigen email_verified == true; resolverlo igual y
+    // dejar pasar al cliente termina en "entré pero no veo nada" (permission-
+    // denied silencioso). Cortar acá con un estado y mensaje propios.
+    if (!user.emailVerified) {
+      setEstado('emailNoVerificado');
       setMemberId(null);
       setMiembro(null);
       return;

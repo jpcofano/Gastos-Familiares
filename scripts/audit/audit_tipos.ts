@@ -9,7 +9,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 process.env.FIRESTORE_EMULATOR_HOST = 'localhost:8080';
 
 if (getApps().length === 0) {
-  initializeApp({ projectId: 'gastos-familiares' });
+  initializeApp({ projectId: 'gastos-familiares-e6415' });
 }
 const db = getFirestore();
 db.settings({ ignoreUndefinedProperties: true });

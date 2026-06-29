@@ -3,7 +3,7 @@ import { SheetData } from '../readExcel';
 import { sha256Hex } from '../utils/hash';
 import { writeBatch } from '../utils/firestore';
 
-export async function seedSubcategorias(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedSubcategorias(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> subcategorias');
 
   const docs = data.diccionario
@@ -16,7 +16,8 @@ export async function seedSubcategorias(db: Firestore, data: SheetData, dryRun: 
     }));
 
   console.log(`   ${docs.length} subcategorias`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'subcategorias', docs);
   console.log('   OK\n');
+  return docs.length;
 }

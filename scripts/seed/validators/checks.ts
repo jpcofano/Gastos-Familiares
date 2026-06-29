@@ -183,6 +183,50 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
       : `missing=${missingEmails.join(',')} bad=${badDocs.map(d => d.id).join(',')} extra=${extraDocs.map(d => d.id).join(',')}`,
   });
 
+  // F9.48 — reconciliación config/familia.miembros ↔ /autorizados: estas dos
+  // fuentes pueden driftar porque los CRUD admin (F9.36/F9.37) las editan
+  // directo, sin pasar por el seed. A diferencia del check "autorizados
+  // integridad" de arriba (que compara contra el Excel estático, fijo desde
+  // el import), este compara contra el config/familia LIVE — es el que
+  // detecta drift después de ediciones reales (altas/bajas de miembro,
+  // cambios de email o de rol desde Perfil › Miembros).
+  const famDataRecon = fam.exists ? fam.data()! : null;
+  const miembrosRecord = (famDataRecon?.miembros ?? {}) as Record<string, { emails?: string[]; rol?: string; activo?: boolean }>;
+  const reconMissing: string[] = [];
+  const reconBadMemberId: string[] = [];
+  const reconBadRol: string[] = [];
+  const emailsDeMiembros = new Set<string>();
+
+  for (const [memberId, m] of Object.entries(miembrosRecord)) {
+    for (const emailRaw of m.emails ?? []) {
+      const email = emailRaw.trim().toLowerCase();
+      emailsDeMiembros.add(email);
+      const autDoc = authMap.get(email);
+      if (!autDoc) {
+        // activo:false sin /autorizados es lo esperado (F9.37 — desactivar
+        // borra el doc, eso es lo que corta el acceso). Solo FAIL si activo:true.
+        if (m.activo) reconMissing.push(`${email} (${memberId})`);
+        continue;
+      }
+      if (autDoc.memberId !== memberId) reconBadMemberId.push(`${email}: autorizados.memberId=${autDoc.memberId} != ${memberId}`);
+      if (autDoc.rol !== m.rol) reconBadRol.push(`${email}: autorizados.rol=${autDoc.rol} != ${m.rol}`);
+    }
+  }
+  const reconExtra = [...authMap.keys()].filter(email => !emailsDeMiembros.has(email));
+  const reconOk = reconMissing.length === 0 && reconBadMemberId.length === 0 && reconBadRol.length === 0 && reconExtra.length === 0;
+  results.push({
+    name: 'autorizados ↔ config/familia.miembros (reconciliación)',
+    ok: reconOk,
+    detail: reconOk
+      ? `OK (${emailsDeMiembros.size} emails de miembros activos cubiertos, incl. multi-email)`
+      : [
+          reconMissing.length ? `faltan en /autorizados: ${reconMissing.join(', ')}` : '',
+          reconBadMemberId.length ? `memberId distinto: ${reconBadMemberId.join(', ')}` : '',
+          reconBadRol.length ? `rol distinto: ${reconBadRol.join(', ')}` : '',
+          reconExtra.length ? `/autorizados sin miembro: ${reconExtra.join(', ')}` : '',
+        ].filter(Boolean).join(' · '),
+  });
+
   // F9.31 — gate de verificación pre-migración: checks adicionales.
 
   // persona = memberId en el 100% de los movimientos (F9.24). Lista los no resueltos.

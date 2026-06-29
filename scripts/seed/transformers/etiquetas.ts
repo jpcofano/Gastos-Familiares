@@ -5,7 +5,7 @@ import { writeBatch } from '../utils/firestore';
 
 const TECNICA_RE = /^(Juan|Mar[ií]a)(ARS|USD)$|^(Galicia|Frances|BBVA)\s+(Visa|Master)(ARS|USD)$/i;
 
-export async function seedEtiquetas(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedEtiquetas(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> etiquetas');
 
   const todasLasEtiq = data.diccionario.filter(r => r.Tipo === 'Etiqueta' && r.Valor);
@@ -20,7 +20,8 @@ export async function seedEtiquetas(db: Firestore, data: SheetData, dryRun: bool
 
   console.log(`   ${docs.length} etiquetas funcionales`);
   console.log(`   ${tecnicas.length} tecnicas descartadas (se convierten en dict)`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'etiquetas', docs);
   console.log('   OK\n');
+  return docs.length;
 }

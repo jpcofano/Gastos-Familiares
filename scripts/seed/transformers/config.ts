@@ -82,7 +82,10 @@ const ALIAS_MAP: Record<string, string[]> = {
   ],
 };
 
-export async function seedConfig(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedConfig(
+  db: Firestore, data: SheetData, dryRun: boolean,
+  target: 'emulator' | 'production', forceConfig: boolean,
+): Promise<number> {
   console.log('-> config/familia');
 
   const porPersona = new Map<string, { emails: string[]; rol: string; activo: boolean }>();
@@ -111,11 +114,29 @@ export async function seedConfig(db: Firestore, data: SheetData, dryRun: boolean
     bancos: BANCOS,
     tarjetas: TARJETAS,
     unidades: UNIDADES,
+    // F9.43 — mail de calendario del legacy (Config!B4), canal opt-in de
+    // recordatorios de vencimiento. null si la hoja Config no existe o B4
+    // no es un email — no se inventa el dato.
+    calendarEmail: data.calendarEmail,
     actualizadoEn: FieldValue.serverTimestamp(),
   };
 
   console.log(`   Miembros: ${Object.keys(miembros).join(', ')}`);
-  if (dryRun) return;
+  if (dryRun) return 1;
+
+  // F9.47 — guardrail anti-clobber: config/familia es el doc que editan las
+  // callables admin (F9.36–41: medios, miembros, categorías, tarjetas, TC…).
+  // Re-correr el seed contra prod después de esas ediciones NO debe pisarlas
+  // sin que el usuario lo pida explícitamente con --force-config.
+  if (target === 'production' && !forceConfig) {
+    const existente = await db.collection('config').doc('familia').get();
+    if (existente.exists) {
+      console.log('   SKIP config/familia (ya existe en prod — usá --force-config para sobrescribir)\n');
+      return 0;
+    }
+  }
+
   await db.collection('config').doc('familia').set(familia);
   console.log('   OK\n');
+  return 1;
 }

@@ -2,7 +2,7 @@ import { Firestore } from 'firebase-admin/firestore';
 import { SheetData } from '../readExcel';
 import { writeBatch } from '../utils/firestore';
 
-export async function seedAutorizados(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedAutorizados(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> autorizados');
 
   const docs: { id: string; memberId: string; rol: 'admin' | 'dependiente' }[] = [];
@@ -25,7 +25,8 @@ export async function seedAutorizados(db: Firestore, data: SheetData, dryRun: bo
   }
 
   console.log(`   ${docs.length} autorizados: ${docs.map(d => d.id).join(', ')}`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'autorizados', docs);
   console.log('   OK\n');
+  return docs.length;
 }

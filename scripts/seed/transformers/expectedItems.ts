@@ -102,7 +102,7 @@ function buildItem(r: any, tipo: 'Gasto' | 'Ingreso') {
   };
 }
 
-export async function seedExpectedItems(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedExpectedItems(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> itemsEsperados');
   const gastos   = data.gastosEsperados.map(r => buildItem(r, 'Gasto'));
   const ingresos = data.ingresosEsperados.map(r => buildItem(r, 'Ingreso'));
@@ -111,7 +111,8 @@ export async function seedExpectedItems(db: Firestore, data: SheetData, dryRun: 
   const conMatchTexto = docs.filter(d => d.matchTexto).length;
   console.log(`   ${gastos.length} gastos + ${ingresos.length} ingresos = ${docs.length} items`);
   console.log(`   ${conTarjeta} con tarjetaCodigo, ${conMatchTexto} con matchTexto`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'itemsEsperados', docs);
   console.log('   OK\n');
+  return docs.length;
 }

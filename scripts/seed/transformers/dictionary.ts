@@ -25,7 +25,7 @@ function parseEtiquetaTecnica(etiqOrig: string | null): Parsed {
   return { personaDefault: persona, monedaDefault: moneda, etiquetaNueva: null };
 }
 
-export async function seedDictionary(db: Firestore, data: SheetData, dryRun: boolean) {
+export async function seedDictionary(db: Firestore, data: SheetData, dryRun: boolean): Promise<number> {
   console.log('-> diccionario');
 
   const rules: NormRule[] = data.diccionarioNorm
@@ -100,7 +100,8 @@ export async function seedDictionary(db: Firestore, data: SheetData, dryRun: boo
   console.log(`   ${docs.length} entradas finales`);
   console.log(`   ${candidates.length - docs.length} consolidadas por hash (suma UsoCount)`);
   console.log(`   ${convertidos} con etiqueta tecnica convertida a persona+moneda`);
-  if (dryRun) return;
+  if (dryRun) return docs.length;
   await writeBatch(db, 'diccionario', docs);
   console.log('   OK\n');
+  return docs.length;
 }
