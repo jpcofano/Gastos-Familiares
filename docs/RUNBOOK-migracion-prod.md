@@ -127,6 +127,22 @@ Con la app de prod abierta (no el emulador), verificar:
   ni de índices faltantes (Dashboard, Resumen, Cargar, Perfil).
 - Checklist de auth real (paso 10) completo.
 
+## 12. PWA (Etapa C, F9.49) — instalación + share-target
+
+Previo a este paso, una vez, local: `npm install -D sharp && node scripts/gen-pwa-icons.mjs`
+(genera `public/icons/icon-192.png`, `icon-512.png`, `icon-maskable-512.png` y
+`apple-touch-icon.png` desde los SVG fuente — no hay rasterizador de imágenes en el entorno
+de Code, por eso es un paso manual de una sola vez).
+
+Con la app de prod (no el emulador) y los PNG generados:
+- **Android/Chrome**: Lighthouse → PWA → "Installable" en verde. Instalar la app; una vez
+  instalada, compartir un PDF desde otra app (ej. Drive/Gmail) debe ofrecer "Gastos" en el
+  share sheet — al compartir, abre la app en `/comprobantes?share=1` con el archivo
+  precargado (vía `sw.js` + IndexedDB, ya codeados).
+- **iOS/Safari**: "Compartir → Agregar a inicio" usa el ícono nuevo (no el genérico) y abre en
+  modo standalone. iOS no soporta Web Share Target (limitación de la plataforma) — el picker
+  in-app de Comprobantes sigue siendo el camino ahí, es el fallback esperado, no un bug.
+
 ## Notas
 
 - **`--force-config`** solo se usa si se quiere repisar `config/familia` en prod a propósito

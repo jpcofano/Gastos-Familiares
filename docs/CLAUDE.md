@@ -135,8 +135,10 @@ Estas mejoras quedan registradas pero no se implementan en F2:
 - F0/F6: COOP/COEP headers en `firebase.json` (ya estan), TTL en `/temp/` de Storage,
   Cloud Scheduler para backup diario, tests de Security Rules con
   `@firebase/rules-unit-testing` antes de las Rules mismas.
-- Antes de produccion: exportar `public/icons/icon.svg` a PNG 192x192 y 512x512.
-  SVG funciona en Chrome 98+ para instalabilidad local; PNG requerido para stores e iOS.
+- F9.49 — cerrado el manifest + share_target (ver sección PWA más abajo). Queda un paso
+  manual de una sola vez antes de producción: `npm install -D sharp && node
+  scripts/gen-pwa-icons.mjs` (genera los PNG reales desde los SVG fuente — no hay
+  rasterizador de imágenes en el entorno de Code).
 - Pre-F7: `npm run dups` + limpieza de planilla.
 - F6: comprobantes con prompt endurecido (CUIT vs numero, pseudo-numero).
   Spec completa: docs/flujos_incompletos_spec.md.

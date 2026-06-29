@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable: fondo a sangre completa (el SO recorta con su propia máscara) y el
+       glifo dentro del safe zone del 80% (círculo de radio 204.8 centrado) para que
+       no lo corte una máscara circular/squircle. -->
+  <rect width="512" height="512" fill="#1e3a5f"/>
+  <text x="256" y="304" font-family="system-ui,sans-serif" font-size="160" font-weight="700"
+        text-anchor="middle" fill="#ffffff">GF</text>
+</svg>
