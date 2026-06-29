@@ -151,6 +151,12 @@ Con la app de prod (no el emulador) y los PNG generados:
 - **iOS/Safari**: "Compartir → Agregar a inicio" usa el ícono nuevo (no el genérico) y abre en
   modo standalone. iOS no soporta Web Share Target (limitación de la plataforma) — el picker
   in-app de Comprobantes sigue siendo el camino ahí, es el fallback esperado, no un bug.
+- **Open Graph (F9.52)**: tras el deploy, abrir
+  `https://gastos-familiares-jmsf.web.app/og-image.png` directo en el navegador (confirma que
+  Hosting la sirve). Pegar el link de la app en WhatsApp (o un debugger de OG) debe mostrar
+  tarjeta con imagen + "Gastos Familiares" + "Control de gastos de la familia", no el link
+  pelado. WhatsApp cachea el preview por URL — si se probó antes de que la imagen estuviera
+  publicada, forzar recache agregando `?v=2` una vez al link compartido.
 
 ## Notas
 
