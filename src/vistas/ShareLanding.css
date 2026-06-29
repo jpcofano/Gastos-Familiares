@@ -1,0 +1,25 @@
+/* F9.51 — animaciones del landing de share-target (porteadas del kit
+   ui_kits/mobile/ShareLanding.jsx, que las asume globales desde su demo
+   shell). No existen en ningún otro CSS del repo — viven acá porque
+   ShareLanding es el único consumidor real. */
+
+@keyframes gfRiseIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes gfRing {
+  0%   { transform: scale(0.85); opacity: .6; }
+  70%  { transform: scale(1.15); opacity: 0; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+
+@keyframes gfScan {
+  0%   { transform: translateY(-10px); }
+  50%  { transform: translateY(100px); }
+  100% { transform: translateY(-10px); }
+}
+
+@keyframes gfSpin {
+  to { transform: rotate(360deg); }
+}

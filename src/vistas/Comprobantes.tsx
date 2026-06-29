@@ -4,6 +4,7 @@ import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmadoPagoPorFech
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
+import { useResumenesTarjeta } from '../hooks/useResumenesTarjeta';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
@@ -12,7 +13,9 @@ import { Card, Badge, Message, Button } from '../design-system/components';
 import { Fab } from '../design-system/shell';
 import AltaMovimiento from './AltaMovimiento';
 import { SeccionTarjetas } from './ResumenesTarjeta';
-import type { Comprobante, Entrante, ExpectedItem, DatosExtraidos } from '../types';
+import { calcularSplitCuotas } from './TarjetaFace';
+import ShareLanding, { type FacturaLanding, type ResumenLanding, type BadgeFactura } from './ShareLanding';
+import type { Comprobante, Entrante, ExpectedItem, DatosExtraidos, PropuestaMatch, CardStatement } from '../types';
 import './Comprobantes.css';
 
 // F9.34 — re-skin mobile (kit CargaMobile.jsx) sobre la lógica real restaurada
@@ -85,9 +88,12 @@ interface PropuestaProps {
   memberId: string;
   miembro: import('../types').FamiliaMiembro;
   esAdmin: boolean;
+  // F9.51 — el landing de share-target salta directo a "Revisar y cargar"
+  // cuando la propuesta es rama 2/3, sin que el usuario tenga que tocarlo.
+  autoAbrir?: boolean;
 }
 
-function PropuestaCard({ comp, items, memberId, miembro, esAdmin }: PropuestaProps) {
+function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
   const { clasificar, cargando: cargandoDict } = useDiccionario();
@@ -96,6 +102,13 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin }: PropuestaPro
   const [candidatoSel, setCandidatoSel] = useState<string>('');
   const [errorLocal,   setErrorLocal]   = useState<string | null>(null);
   const autoConfirmadoRef = useRef(false);
+  const autoAbiertoRef = useRef(false);
+
+  useEffect(() => {
+    if (!autoAbrir || autoAbiertoRef.current) return;
+    autoAbiertoRef.current = true;
+    setMostrarAlta(true);
+  }, [autoAbrir]);
 
   // Rama 1 candidato único: vincular automáticamente, sin acción del usuario
   // Rama 1 (conciliación de obligaciones) es admin-only por decisión (F6.9.11) — se gatea acá.
@@ -288,13 +301,14 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin }: PropuestaPro
 // ── Tarjeta de comprobante ────────────────────────────────────────────────────
 
 function ComprobanteCard({
-  comp, items, memberId, miembro, esAdmin,
+  comp, items, memberId, miembro, esAdmin, autoAbrir,
 }: {
   comp:     Comprobante;
   items:    ExpectedItem[];
   memberId: string;
   miembro:  import('../types').FamiliaMiembro;
   esAdmin:  boolean;
+  autoAbrir?: boolean;
 }) {
   const [descartando,   setDescartando]   = useState(false);
   const [errDescartar,  setErrDescartar]  = useState<string | null>(null);
@@ -336,7 +350,7 @@ function ComprobanteCard({
         <p style={{ fontSize: 12, color: 'var(--gf-err-text)', marginTop: 6 }}>{comp.errorExtraccion}</p>
       )}
       {comp.estado === 'extraido' && comp.propuestaMatch && (
-        <PropuestaCard comp={comp} items={items} memberId={memberId} miembro={miembro} esAdmin={esAdmin} />
+        <PropuestaCard comp={comp} items={items} memberId={memberId} miembro={miembro} esAdmin={esAdmin} autoAbrir={autoAbrir} />
       )}
       {comp.estado === 'extraido' && !comp.propuestaMatch && (
         <p style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 6 }}>Calculando match…</p>
@@ -395,12 +409,111 @@ function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
   );
 }
 
+// ── ShareLanding (F9.51) — deriva fase/datos reales a partir de los mismos
+// listeners que ya alimentan la bandeja y el historial. No hay timers: cada
+// fase la dispara un dato real que llega por onSnapshot.
+// 0 recibido · 1 leyendo (subiendo / sin destino aún) · 2 clasificado (tipo
+// conocido, doc destino todavía no visible) · 3 extrayendo (doc visible, sin
+// resultado) · 4 listo.
+
+function fmtFechaIso(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+function construirBadgeFactura(pm: PropuestaMatch, items: ExpectedItem[]): BadgeFactura {
+  switch (pm.rama) {
+    case 0:
+      return { titulo: 'Ya cargado', sub: 'Este archivo ya había generado un movimiento', match: false };
+    case 1:
+      return { titulo: 'Pagó una factura', sub: 'Se concilia con una obligación abierta', match: true };
+    case 2: {
+      const item = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
+      const nombre = item
+        ? ([item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || 'gasto esperado')
+        : 'gasto esperado';
+      return pm.esAdicional
+        ? { titulo: 'Pago adicional', sub: `Suma a ${nombre}`, match: true }
+        : { titulo: 'Gasto esperado', sub: `Coincide con ${nombre}`, match: true };
+    }
+    default:
+      return { titulo: 'Movimiento nuevo', sub: 'Se agrega como gasto del mes', match: false };
+  }
+}
+
+function construirResumenLanding(resumen: CardStatement): ResumenLanding {
+  const split = calcularSplitCuotas(resumen);
+  const MONEDAS = ['ARS', 'USD'] as const;
+  return {
+    consumos:   split.nConsumos,
+    enCuotas:   split.nEnCuotas,
+    totales:    [{ moneda: 'ARS' as const, monto: resumen.totalARS }, { moneda: 'USD' as const, monto: resumen.totalUSD }].filter(t => t.monto > 0),
+    esteMes:    MONEDAS.filter(m => split.esteMes[m]).map(m => ({ moneda: m, monto: split.esteMes[m]! })),
+    deudaFutura: MONEDAS.filter(m => split.deudaFutura[m]).map(m => ({ moneda: m, monto: split.deudaFutura[m]! })),
+  };
+}
+
+interface FaseCompartido {
+  fase: number; // 0-4
+  tipo: 'factura' | 'resumen' | null;
+  error: string | null;
+  comp?: Comprobante;
+  resumen?: CardStatement;
+}
+
+function calcularFaseCompartido(
+  hash: string | null,
+  entrantes: Entrante[],
+  comprobantes: Comprobante[],
+  resumenes: CardStatement[],
+): FaseCompartido {
+  if (!hash) return { fase: 0, tipo: null, error: null };
+  const entrante = entrantes.find(e => e.hash === hash);
+  if (entrante?.estado === 'error') {
+    return { fase: 1, tipo: null, error: entrante.motivoDeteccion ?? 'No pudimos procesar el archivo.' };
+  }
+  const destino = entrante?.destino;
+  if (!destino) return { fase: 1, tipo: null, error: null };
+
+  const tipo: 'factura' | 'resumen' = destino.coleccion === 'comprobantes' ? 'factura' : 'resumen';
+
+  if (tipo === 'factura') {
+    const comp = comprobantes.find(c => c.id === destino.id);
+    if (!comp) return { fase: 2, tipo, error: null };
+    if (comp.estado === 'error') {
+      return { fase: 3, tipo, error: comp.errorExtraccion ?? 'No pudimos extraer los datos del comprobante.', comp };
+    }
+    if (!comp.datosExtraidos || !comp.propuestaMatch) return { fase: 3, tipo, error: null, comp };
+    return { fase: 4, tipo, error: null, comp };
+  }
+
+  const resumen = resumenes.find(r => r.id === destino.id);
+  if (!resumen) return { fase: 2, tipo, error: null };
+  if (resumen.estado === 'error') {
+    return { fase: 3, tipo, error: resumen.errorExtraccion ?? 'No pudimos extraer el resumen.', resumen };
+  }
+  if (resumen.estado === 'requiere_tarjeta') {
+    return { fase: 3, tipo, error: 'Hace falta asignar la tarjeta — completalo en Tarjetas, abajo.', resumen };
+  }
+  if (resumen.estado === 'subido') return { fase: 3, tipo, error: null, resumen };
+  return { fase: 4, tipo, error: null, resumen }; // parseado | confirmado
+}
+
 // ── Vista principal ───────────────────────────────────────────────────────────
 
 type ResultadoEnvio =
   | { tipo: 'enviado';   nombre: string }
   | { tipo: 'duplicado'; nombre: string }
   | { tipo: 'error';     mensaje: string };
+
+interface ArchivoCompartido {
+  hash: string | null;
+  nombreArchivo: string;
+  tamano: number;
+  errorSubida: string | null;
+}
 
 export default function Comprobantes() {
   const { memberId, miembro } = useMiembroCtx();
@@ -416,13 +529,25 @@ export default function Comprobantes() {
   const [entrantes, setEntrantes] = useState<Entrante[]>([]);
   useEffect(() => suscribirEntrantes(memberId, esAdmin, setEntrantes), [memberId, esAdmin]);
 
-  // Share-target (F6.6 → F6.7): redirige a entrantes con origen:'share_target'
+  // Lista — onSnapshot
+  const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes(memberId, esAdmin);
+  const { resumenes } = useResumenesTarjeta();
+  const { items } = useItemsEsperados();
+  const [mostrarAltaManual, setMostrarAltaManual] = useState(false);
+
+  // ── ShareLanding (F9.51) — cubre el arranque en frío cuando llega por
+  // Web Share Target. Se monta apenas IDB devuelve el File; sus fases las
+  // dispara el progreso real (subida → router → extracción), no timers.
+  const [compartido, setCompartido] = useState<ArchivoCompartido | null>(null);
+  const [autoAbrirCompId, setAutoAbrirCompId] = useState<string | null>(null);
+  const [abrirResumenId,  setAbrirResumenId]  = useState<string | null>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (!params.has('share')) return;
     window.history.replaceState({}, '', window.location.pathname);
     leerYBorrarArchivoCompartido().then(file => {
-      if (!file) return;
+      if (!file) return; // refresh sin archivo en IDB → Comprobantes normal, sin romper
       const TIPOS = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
       if (!TIPOS.includes(file.type)) {
         setResultado({ tipo: 'error', mensaje: `Tipo no permitido: ${file.type}` });
@@ -432,26 +557,41 @@ export default function Comprobantes() {
         setResultado({ tipo: 'error', mensaje: 'El archivo supera los 10 MB.' });
         return;
       }
-      setSubiendo(true);
-      setResultado(null);
+      setCompartido({ hash: null, nombreArchivo: file.name, tamano: file.size, errorSubida: null });
       subirEntrante(file, memberId, 'share_target')
         .then(res => {
-          setSubiendo(false);
-          if (!res.ok)         setResultado({ tipo: 'error',     mensaje: res.error.message });
-          else if (res.duplicado) setResultado({ tipo: 'duplicado', nombre: res.entrante.nombreArchivo ?? file.name });
-          else                 setResultado({ tipo: 'enviado',   nombre: file.name });
+          if (!res.ok) { setCompartido(c => c && { ...c, errorSubida: res.error.message }); return; }
+          setCompartido(c => c && { ...c, hash: res.entrante.hash });
         })
-        .catch(err => {
-          setSubiendo(false);
-          setResultado({ tipo: 'error', mensaje: (err as Error).message });
-        });
+        .catch(err => setCompartido(c => c && { ...c, errorSubida: (err as Error).message }));
     }).catch(() => {});
   }, [memberId]);
 
-  // Lista — onSnapshot
-  const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes(memberId, esAdmin);
-  const { items } = useItemsEsperados();
-  const [mostrarAltaManual, setMostrarAltaManual] = useState(false);
+  const faseCompartido = calcularFaseCompartido(compartido?.hash ?? null, entrantes, comprobantes, resumenes);
+
+  // Entrante ambiguo: el landing no puede decidir por el usuario (es admin-only,
+  // ver EntranteCard) — se cierra solo y la bandeja de abajo queda para resolverlo.
+  useEffect(() => {
+    if (!compartido?.hash) return;
+    const entrante = entrantes.find(e => e.hash === compartido.hash);
+    if (entrante?.estado === 'ambiguo') setCompartido(null);
+  }, [compartido?.hash, entrantes]);
+
+  const facturaLanding: FacturaLanding | undefined =
+    faseCompartido.tipo === 'factura' && faseCompartido.comp?.datosExtraidos && faseCompartido.comp.propuestaMatch
+      ? {
+          monto:    faseCompartido.comp.datosExtraidos.montoTotal,
+          moneda:   faseCompartido.comp.datosExtraidos.moneda,
+          comercio: faseCompartido.comp.datosExtraidos.comercioRazonSocial,
+          vence:    fmtFechaIso(faseCompartido.comp.datosExtraidos.vencimientos?.[0]?.fecha ?? faseCompartido.comp.datosExtraidos.fecha),
+          badge:    construirBadgeFactura(faseCompartido.comp.propuestaMatch, items),
+        }
+      : undefined;
+
+  const resumenLanding: ResumenLanding | undefined =
+    faseCompartido.tipo === 'resumen' && faseCompartido.resumen && faseCompartido.fase >= 4
+      ? construirResumenLanding(faseCompartido.resumen)
+      : undefined;
 
   async function handleSubir() {
     if (!archivo) return;
@@ -543,13 +683,26 @@ export default function Comprobantes() {
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {comprobantes.map(comp => (
-              <ComprobanteCard key={comp.id} comp={comp} items={items} memberId={memberId} miembro={miembro} esAdmin={esAdmin} />
+              <ComprobanteCard
+                key={comp.id}
+                comp={comp}
+                items={items}
+                memberId={memberId}
+                miembro={miembro}
+                esAdmin={esAdmin}
+                autoAbrir={autoAbrirCompId === comp.id}
+              />
             ))}
           </div>
         </div>
 
         {/* ── Resúmenes de tarjeta (solo admin) ──────────────────────────── */}
-        {esAdmin && <SeccionTarjetas />}
+        {esAdmin && (
+          <SeccionTarjetas
+            abrirPreview={abrirResumenId}
+            onPreviewAbierto={() => setAbrirResumenId(null)}
+          />
+        )}
 
         <div style={{ height: 4 }} />
       </div>
@@ -567,6 +720,30 @@ export default function Comprobantes() {
 
       {/* F9.22/F9.26 — el FAB vive solo en Cargar y abre Alta Manual */}
       <Fab onClick={() => setMostrarAltaManual(true)} />
+
+      {/* ── ShareLanding (F9.51) — cubre el arranque cuando llega por share-target ── */}
+      {compartido && (
+        <ShareLanding
+          nombreArchivo={compartido.nombreArchivo}
+          tamano={compartido.tamano}
+          fase={faseCompartido.fase}
+          tipo={faseCompartido.tipo}
+          factura={facturaLanding}
+          resumen={resumenLanding}
+          error={compartido.errorSubida ?? faseCompartido.error}
+          onClose={() => setCompartido(null)}
+          onCargarManual={() => { setCompartido(null); setMostrarAltaManual(true); }}
+          onReady={() => {
+            if (faseCompartido.tipo === 'factura' && faseCompartido.comp) {
+              const rama = faseCompartido.comp.propuestaMatch?.rama;
+              if (rama === 2 || rama === 3) setAutoAbrirCompId(faseCompartido.comp.id);
+            } else if (faseCompartido.tipo === 'resumen' && faseCompartido.resumen?.estado === 'parseado') {
+              setAbrirResumenId(faseCompartido.resumen.id);
+            }
+            setCompartido(null);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -139,6 +139,15 @@ Con la app de prod (no el emulador) y los PNG generados:
   instalada, compartir un PDF desde otra app (ej. Drive/Gmail) debe ofrecer "Gastos" en el
   share sheet — al compartir, abre la app en `/comprobantes?share=1` con el archivo
   precargado (vía `sw.js` + IndexedDB, ya codeados).
+- **ShareLanding (F9.51)**: al compartir, el landing in-app (pantalla ink full-screen) debe
+  cubrir el arranque y avanzar con datos reales — recibido → leyendo → tipo clasificado
+  (badge "Comprobante"/"Resumen de tarjeta") → extrayendo → listo. Compartir una **factura**:
+  termina mostrando monto/comercio/vence + badge de match (esperado/nuevo) y encadena solo al
+  confirm (`AltaMovimiento` ya abierto). Compartir un **resumen de tarjeta**: termina con
+  total/consumos/cuotas + split este-mes/deuda-futura y encadena al preview de
+  `SeccionTarjetas` ya abierto. Cancelar (✕) debe dejar Comprobantes utilizable y limpiar
+  `?share=1` de la URL. Forzar un error de extracción (ej. PDF corrupto) debe caer a un
+  estado de error con botón "Cargar manual", sin spinner colgado.
 - **iOS/Safari**: "Compartir → Agregar a inicio" usa el ícono nuevo (no el genérico) y abre en
   modo standalone. iOS no soporta Web Share Target (limitación de la plataforma) — el picker
   in-app de Comprobantes sigue siendo el camino ahí, es el fallback esperado, no un bug.

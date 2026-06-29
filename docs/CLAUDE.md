@@ -79,6 +79,28 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   (admin-only, mismo patrón). Baja bloqueada si hay `resumenesTarjeta` con ese
   `tarjetaCodigo`. Marcar `tipoTarjeta:'debito'` se bloquea si la tarjeta ya tiene líneas en
   cuotas cargadas (débito no genera cuotas — antes solo un `console.warn` en `TarjetaFace`).
+- F9.51 — `ShareLanding` (`src/vistas/ShareLanding.tsx`) cubre el arranque en frío de
+  Comprobantes cuando llega por Web Share Target (F9.49): se monta sobre `?share=1` en
+  cuanto `leerYBorrarArchivoCompartido()` devuelve el File, antes de tocar Storage/Functions.
+  Sus 5 fases (recibido·leyendo·clasificado·extrayendo·listo) NO usan timers — las deriva
+  `calcularFaseCompartido()` en `Comprobantes.tsx` en vivo a partir de los mismos listeners
+  que ya alimentan la bandeja/historial (`entrantes`, `comprobantes`, `useResumenesTarjeta`),
+  matcheando por hash (id compartido entre `entrantes`/`comprobantes`/`resumenesTarjeta`).
+  Al llegar a "listo" encadena al confirm real ya existente — nunca crea uno nuevo: factura
+  con rama 2/3 (`itemEsperadoId` o nueva) auto-abre el `AltaMovimiento` ya montado en
+  `PropuestaCard` (prop `autoAbrir`, una sola vez via ref-guard); rama 0/1 (dedup/
+  reconciliación) no necesita acción, el landing solo se cierra. Resumen de tarjeta en
+  `estado:'parseado'` auto-abre el preview de `SeccionTarjetas` (nuevo prop
+  `abrirPreview`/`onPreviewAbierto`, consumido una vez). El split este-mes/deuda-futura
+  reusa `calcularSplitCuotas()` de `TarjetaFace.tsx` (F9.21) — no se reimplementa. Entrante
+  `estado:'ambiguo'` (admin-only para resolver) cierra el landing solo, sin bloquear; error
+  de extracción o `requiere_tarjeta` caen a un estado de error con botón "Cargar manual" (abre
+  alta manual vacía), sin spinner colgado. Refrescar `?share=1` sin File en IDB no monta nada
+  (cae a Comprobantes normal) — la URL ya se limpia con `history.replaceState` apenas se
+  detecta el share, antes de leer IDB, así un refresh no re-dispara. Layout/copy porteados
+  literal de `ui_kits/mobile/ShareLanding.jsx`; las 4 animaciones CSS que el kit asume
+  globales (`gfRiseIn`/`gfRing`/`gfScan`/`gfSpin`) no existían en el repo — se definieron en
+  `ShareLanding.css`, único consumidor.
 - Resumenes se pagan al vencimiento. No hay flujo de revision por estados;
   pendiente_revision del legacy es vestigial y no se porta.
 - ResumenMes es vista calculada en vivo, no se materializa.

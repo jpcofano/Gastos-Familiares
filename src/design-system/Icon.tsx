@@ -4,6 +4,7 @@ import {
   FileUp, CheckCheck, Loader, TriangleAlert, CircleX, ChevronRight, ChevronDown,
   Bell, Palette, Tags, Wallet, Repeat, LogOut,
   Receipt, BarChart3, Tag, TrendingUp, Share2, AlertCircle, Moon, Sun, Layers,
+  Store, FileText, GitCompare, List, CalendarCheck, Clock,
   type LucideProps,
 } from 'lucide-react';
 
@@ -46,6 +47,12 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   moon: Moon,
   sun: Sun,
   layers: Layers,
+  store: Store,
+  'file-text': FileText,
+  'git-compare': GitCompare,
+  list: List,
+  'calendar-check': CalendarCheck,
+  clock: Clock,
 };
 
 interface IconProps {

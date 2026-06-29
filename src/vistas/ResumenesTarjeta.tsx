@@ -371,7 +371,14 @@ function ResumenCard({
 
 // ── Sección de tarjetas (embebible en la vista única de carga) ────────────────
 
-export function SeccionTarjetas() {
+interface SeccionTarjetasProps {
+  // F9.51 — el landing de share-target abre el preview del resumen recién
+  // parseado sin que el usuario tenga que buscarlo en la lista.
+  abrirPreview?: string | null;
+  onPreviewAbierto?: () => void;
+}
+
+export function SeccionTarjetas({ abrirPreview, onPreviewAbierto }: SeccionTarjetasProps = {}) {
   const { memberId } = useMiembroCtx();
 
   const [config,   setConfig]   = useState<FamiliaConfig | null>(null);
@@ -391,6 +398,14 @@ export function SeccionTarjetas() {
   }, []);
 
   useEffect(() => suscribirResumenesTarjeta(setResumenes), []);
+
+  useEffect(() => {
+    if (!abrirPreview) return;
+    setPreviewId(abrirPreview);
+    onPreviewAbierto?.();
+  // onPreviewAbierto es estable por render del padre; solo nos importa abrirPreview
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abrirPreview]);
 
   if (cargando) return <p className="rt-cargando">Cargando…</p>;
 
