@@ -3,19 +3,30 @@ const { Money: Mny, StepIndicator: Steps, FieldRow: FR, Message: Msg, Button: B,
   window.GastosFamiliaresDesignSystem_d81a5e;
 
 function ComprobanteConfirm({ onClose, onDone }) {
-  const { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar } = window;
+  const { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar, Icon } = window;
   const [cat, setCat] = React.useState('Servicios');
   const [persona, setPersona] = React.useState('Juan');
   const [desc, setDesc] = React.useState('Edenor — factura luz');
   const [confirmado, setConfirmado] = React.useState(false);
+
+  // Badge de destino (viene del splash de recepción): match con esperado o movimiento nuevo.
+  const destino = (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: '#d1fae5', borderRadius: 999, padding: '7px 14px', fontSize: 13, fontWeight: 600 }}>
+      <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--color-accent)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Icon name="git-compare" size={13} />
+      </span>
+      Gasto esperado · <strong style={{ color: '#fff' }}>Edenor — luz</strong>
+    </span>
+  );
 
   return (
     <FullModal>
       <ModalBar title="Confirmar comprobante" onClose={onClose} />
       <Hero
         eyebrow="Comprobante detectado"
-        amount={<Mny value={38900} colored={false} />}
+        amount={<Mny value={38900} colored={false} decimals={0} />}
         desc="EDENOR S.A."
+        badge={destino}
         tags={['Servicios', 'Vence 28/06', 'ARS']}
       />
       <Drawer>

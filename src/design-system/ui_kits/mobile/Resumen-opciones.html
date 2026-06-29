@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="design_doc_mode" content="canvas" />
+<title>Resumen — opciones de color y forma</title>
+<link rel="stylesheet" href="../../styles.css" />
+<style>
+  body { margin: 0; font-family: var(--font-base); background: #0d1117; color: var(--color-text); }
+  .frame-label { font-size: 13px; font-weight: 700; color: #c9d1d9; margin-bottom: 10px; letter-spacing: .2px; }
+  .frame-note { font-size: 11.5px; font-weight: 400; color: #8b949e; margin-top: 2px; line-height: 1.4; display:block; max-width: 384px; }
+  .phone {
+    width: 384px; background: var(--color-bg); border-radius: 28px; padding: 18px 16px 22px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.4); box-sizing: border-box;
+    --gf-income: #047857; --gf-out: #d97706; /* Editorial */
+  }
+  .seg { display: flex; gap: 4px; background: var(--gf-gray-100); border-radius: 999px; padding: 4px; margin-bottom: 14px; }
+  .seg b { flex: 1; text-align: center; padding: 8px; border-radius: 999px; font-size: 13px; background: var(--color-surface); box-shadow: var(--shadow-sm); }
+  .seg span { flex: 1; text-align: center; padding: 8px; font-size: 13px; color: var(--color-text-sec); font-weight: 500; }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; gap: 10px; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  .eyebrow { font-size: 11px; font-weight: 700; color: var(--gf-gray-400); text-transform: uppercase; letter-spacing: .5px; }
+  .big { font-size: 27px; font-weight: 800; letter-spacing: -.5px; }
+  .sectionlbl { display:flex; align-items:center; gap:6px; font-size: 11px; font-weight: 700; color: var(--gf-gray-400); text-transform: uppercase; letter-spacing: .5px; margin: 2px 2px 0; }
+  .amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--gf-gray-400); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .ico { width:13px; height:13px; flex-shrink:0; opacity:.7; }
+  .daynum { width: 40px; flex-shrink: 0; text-align: center; }
+  .daynum .n { font-size: 19px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .daynum .d { font-size: 10px; color: var(--gf-gray-400); text-transform: uppercase; }
+  .chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+  .bchip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--color-text-strong); border-radius: 999px; padding: 3px 8px; }
+  .bdot { width: 7px; height: 7px; border-radius: 999px; }
+
+  /* ============ A · Limpio (mono-acento) ============ */
+  .A .card { background: var(--color-surface); border: 1px solid var(--gf-gray-150); border-radius: 16px; padding: 14px; }
+  .A .neto .big { color: var(--gf-income); }
+  .A .divider { border-top: 1px solid var(--gf-gray-100); margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; font-size: 13px; color: var(--color-text-sec); }
+  .A .pend { display:flex; align-items:center; gap:10px; background: var(--color-surface); border: 1px solid var(--gf-gray-150); border-radius: 14px; padding: 11px 13px; }
+  .A .pendbadge { margin-left:auto; min-width:22px; height:22px; border-radius:999px; background: var(--gf-out); color:#fff; font-size:12px; font-weight:700; display:grid; place-items:center; padding:0 6px; }
+  .A .dist { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; font-size: 12px; font-weight: 700; }
+  .A .dot { width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; }
+  .A .dayrow { display: flex; align-items: center; gap: 11px; background: var(--color-surface); border: 1px solid var(--gf-gray-150); border-radius: 14px; padding: 11px 13px; }
+  .A .bchip { background: var(--gf-gray-100); }
+
+  /* ============ B · Contraste (hero ink) ============ */
+  .B .card { background: var(--color-surface); border: 1px solid var(--gf-gray-150); border-radius: 16px; padding: 14px; }
+  .B .hero { background: linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%); border: none; color: #fff; text-align: center; padding: 20px 16px; }
+  .B .hero .eyebrow { color: rgba(255,255,255,.55); }
+  .B .hero .big { color: #fff; margin: 6px 0 2px; }
+  .B .hero .sub { color: #9ca3af; font-size: 13px; }
+  .B .pend { display:flex; align-items:center; gap:10px; background: var(--gf-ink); color:#fff; border-radius: 14px; padding: 11px 13px; }
+  .B .pendbadge { margin-left:auto; min-width:22px; height:22px; border-radius:999px; background: var(--gf-out); color:#fff; font-size:12px; font-weight:700; display:grid; place-items:center; padding:0 6px; }
+  .B .accentbar { height: 4px; border-radius: 4px 4px 0 0; margin: -14px -14px 12px; }
+  .B .dayrow { display: flex; align-items: center; gap: 11px; background: var(--color-surface); border: 1px solid var(--gf-gray-150); border-radius: 14px; padding: 11px 13px; }
+  .B .bchip { background: var(--gf-gray-100); }
+
+  /* ============ C · Tonal (una familia) ============ */
+  .C .card { background: var(--color-surface); border-radius: 16px; padding: 14px; box-shadow: var(--shadow-soft); }
+  .C .neto { background: var(--gf-emerald-50); }
+  .C .neto .big { color: var(--gf-income); }
+  .C .divider { border-top: 1px solid #c9e6d9; margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; font-size: 13px; color: var(--color-text-sec); }
+  .C .pend { display:flex; align-items:center; gap:10px; background:#fdf6ec; border-radius: 14px; padding: 11px 13px; color:#92500e; }
+  .C .pendbadge { margin-left:auto; min-width:22px; height:22px; border-radius:999px; background: var(--gf-out); color:#fff; font-size:12px; font-weight:700; display:grid; place-items:center; padding:0 6px; }
+  .C .dist { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; font-size: 12px; font-weight: 700; }
+  .C .dot { width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; }
+  .C .dayrow { display: flex; align-items: center; gap: 11px; background: var(--color-surface); box-shadow: var(--shadow-soft); border-radius: 14px; padding: 11px 13px; }
+  .C .bchip { background: var(--gf-gray-100); }
+</style>
+</head>
+<body>
+
+<!-- ============================ OPCIÓN A ============================ -->
+<div style="position:absolute; left:40px; top:36px; width:384px;">
+  <div class="frame-label">A · Limpio <span class="frame-note">— sin fondos de color: solo el número del Neto lleva acento. Una sola forma (cards con borde fino, 16px). Pendientes con badge de cantidad. Premium y silencioso.</span></div>
+  <div class="phone A">
+    <div class="seg"><b>Por día</b><span>Gastos Fijos</span></div>
+    <div class="stack">
+      <div class="card neto">
+        <span class="eyebrow">Neto del mes</span>
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:4px;">
+          <span class="big tnum">+$ 2.120.750</span>
+          <span class="tnum" style="font-size:15px; font-weight:600; color:var(--color-text-sec);">U$S 1.459</span>
+        </div>
+        <div class="divider"><span>Ingresos $ 2.797.500</span><span>Gastos $ 676.750</span></div>
+      </div>
+      <div class="row">
+        <div class="card" style="flex:1;"><div class="eyebrow">Disponible (ARS)</div><div class="amt" style="font-size:19px; margin-top:5px;">$ 980.000</div></div>
+        <div class="card" style="flex:1;"><div class="eyebrow">Resultado (USD)</div><div class="amt tnum" style="font-size:19px; margin-top:5px; color:var(--gf-income);">U$S 209</div></div>
+      </div>
+      <div class="pend"><span style="font-size:13px; font-weight:600;">Revisar pendientes del mes</span><span class="pendbadge">1</span></div>
+      <div class="card" style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:11px; font-weight:700; color:var(--gf-gray-400); text-transform:uppercase; letter-spacing:.5px;">Hoy · mié 25</span>
+        <span style="font-size:13px; color:var(--color-text-sec); margin-left:auto;">Sin movimientos</span>
+      </div>
+      <div class="sectionlbl">Distribución de ingresos</div>
+      <div class="row">
+        <div class="card" style="flex:1;"><div class="dist"><span class="dot" style="background:#475569;"></span>Juan</div><div class="amt" style="font-size:17px;">$ 1.817.500</div><div class="muted">U$S 1.250</div></div>
+        <div class="card" style="flex:1;"><div class="dist"><span class="dot" style="background:var(--gf-income);"></span>María</div><div class="amt" style="font-size:17px;">$ 980.000</div><div class="muted">U$S 674</div></div>
+      </div>
+      <div class="sectionlbl"><span>Gastos por día</span><span style="margin-left:auto; font-weight:600; color:var(--color-text-sec); text-transform:none; letter-spacing:0;">Total mes $ 676.750</span></div>
+      <div class="dayrow"><div class="daynum"><div class="n">3</div><div class="d">mié</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#5b2d8e;"></span>Personal Pay · $ 134.200</span><span class="bchip"><span class="bdot" style="background:#072146;"></span>BBVA · $ 38.900</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 173.100</div><div class="muted">U$S 119</div></div></div>
+      <div class="dayrow"><div class="daynum"><div class="n">4</div><div class="d">jue</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#072146;"></span>BBVA · $ 89.450</span><span class="bchip"><span class="bdot" style="background:#ff7300;"></span>Galicia · $ 52.300</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 141.750</div><div class="muted">U$S 97</div></div></div>
+      <div class="dayrow"><div class="daynum"><div class="n">6</div><div class="d">sáb</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#5b2d8e;"></span>Personal Pay · $ 21.500</span><span class="bchip"><span class="bdot" style="background:#16a34a;"></span>Efectivo · $ 24.600</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 46.100</div><div class="muted">U$S 32</div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ OPCIÓN B ============================ -->
+<div style="position:absolute; left:480px; top:36px; width:384px;">
+  <div class="frame-label">B · Contraste <span class="frame-note">— el Neto va en card ink oscura (ata con el Balance del Dashboard). Pendientes en banner ink con badge. Jerarquía fuerte, formas decididas.</span></div>
+  <div class="phone B">
+    <div class="seg"><b>Por día</b><span>Gastos Fijos</span></div>
+    <div class="stack">
+      <div class="card hero">
+        <div class="eyebrow">Neto del mes</div>
+        <div class="big tnum">+$ 2.120.750</div>
+        <div class="sub tnum">U$S 1.459 · Ingresos $ 2.797.500 · Gastos $ 676.750</div>
+      </div>
+      <div class="row">
+        <div class="card" style="flex:1;"><div class="eyebrow">Disponible (ARS)</div><div class="amt" style="font-size:19px; margin-top:5px;">$ 980.000</div></div>
+        <div class="card" style="flex:1;"><div class="eyebrow">Resultado (USD)</div><div class="amt tnum" style="font-size:19px; margin-top:5px; color:var(--gf-income);">U$S 209</div></div>
+      </div>
+      <div class="pend"><span style="font-size:13px; font-weight:600;">Revisar pendientes del mes</span><span class="pendbadge">1</span></div>
+      <div class="card" style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:11px; font-weight:700; color:var(--gf-gray-400); text-transform:uppercase; letter-spacing:.5px;">Hoy · mié 25</span>
+        <span style="font-size:13px; color:var(--color-text-sec); margin-left:auto;">Sin movimientos</span>
+      </div>
+      <div class="sectionlbl">Distribución de ingresos</div>
+      <div class="row">
+        <div class="card" style="flex:1; overflow:hidden; padding-top:14px;"><div class="accentbar" style="background:#475569;"></div><div style="font-size:12px; font-weight:700;">Juan</div><div class="amt" style="font-size:17px; margin-top:3px;">$ 1.817.500</div><div class="muted">U$S 1.250</div></div>
+        <div class="card" style="flex:1; overflow:hidden; padding-top:14px;"><div class="accentbar" style="background:var(--gf-income);"></div><div style="font-size:12px; font-weight:700;">María</div><div class="amt" style="font-size:17px; margin-top:3px;">$ 980.000</div><div class="muted">U$S 674</div></div>
+      </div>
+      <div class="sectionlbl"><span>Gastos por día</span><span style="margin-left:auto; font-weight:600; color:var(--color-text-sec); text-transform:none; letter-spacing:0;">Total mes $ 676.750</span></div>
+      <div class="dayrow"><div class="daynum"><div class="n">3</div><div class="d">mié</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#5b2d8e;"></span>Personal Pay · $ 134.200</span><span class="bchip"><span class="bdot" style="background:#072146;"></span>BBVA · $ 38.900</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 173.100</div><div class="muted">U$S 119</div></div></div>
+      <div class="dayrow"><div class="daynum"><div class="n">4</div><div class="d">jue</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#072146;"></span>BBVA · $ 89.450</span><span class="bchip"><span class="bdot" style="background:#ff7300;"></span>Galicia · $ 52.300</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 141.750</div><div class="muted">U$S 97</div></div></div>
+      <div class="dayrow"><div class="daynum"><div class="n">6</div><div class="d">sáb</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#5b2d8e;"></span>Personal Pay · $ 21.500</span><span class="bchip"><span class="bdot" style="background:#16a34a;"></span>Efectivo · $ 24.600</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 46.100</div><div class="muted">U$S 32</div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ OPCIÓN C ============================ -->
+<div style="position:absolute; left:920px; top:36px; width:384px;">
+  <div class="frame-label">C · Tonal <span class="frame-note">— tintes suaves de UNA familia (esmeralda = ok, ámbar = atención). Sin azul. Pendientes en banner ámbar con badge. Cálido y coherente, cercano a lo actual.</span></div>
+  <div class="phone C">
+    <div class="seg"><b>Por día</b><span>Gastos Fijos</span></div>
+    <div class="stack">
+      <div class="card neto">
+        <div class="eyebrow">Neto del mes</div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline; margin-top:4px;">
+          <span class="big tnum">+$ 2.120.750</span>
+          <span class="tnum" style="font-size:15px; font-weight:600; color:var(--color-text-sec);">U$S 1.459</span>
+        </div>
+        <div class="divider"><span>Ingresos $ 2.797.500</span><span>Gastos $ 676.750</span></div>
+      </div>
+      <div class="row">
+        <div class="card" style="flex:1;"><div class="eyebrow">Disponible (ARS)</div><div class="amt" style="font-size:19px; margin-top:5px;">$ 980.000</div></div>
+        <div class="card" style="flex:1;"><div class="eyebrow">Resultado (USD)</div><div class="amt tnum" style="font-size:19px; margin-top:5px; color:var(--gf-income);">U$S 209</div></div>
+      </div>
+      <div class="pend"><span style="font-size:13px; font-weight:600;">Revisar pendientes del mes</span><span class="pendbadge">1</span></div>
+      <div class="card" style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:11px; font-weight:700; color:var(--gf-gray-400); text-transform:uppercase; letter-spacing:.5px;">Hoy · mié 25</span>
+        <span style="font-size:13px; color:var(--color-text-sec); margin-left:auto;">Sin movimientos</span>
+      </div>
+      <div class="sectionlbl">Distribución de ingresos</div>
+      <div class="row">
+        <div class="card" style="flex:1; background:var(--gf-gray-50);"><div class="dist"><span class="dot" style="background:#475569;"></span>Juan</div><div class="amt" style="font-size:17px;">$ 1.817.500</div><div class="muted">U$S 1.250</div></div>
+        <div class="card" style="flex:1; background:var(--gf-gray-50);"><div class="dist"><span class="dot" style="background:var(--gf-income);"></span>María</div><div class="amt" style="font-size:17px;">$ 980.000</div><div class="muted">U$S 674</div></div>
+      </div>
+      <div class="sectionlbl"><span>Gastos por día</span><span style="margin-left:auto; font-weight:600; color:var(--color-text-sec); text-transform:none; letter-spacing:0;">Total mes $ 676.750</span></div>
+      <div class="dayrow"><div class="daynum"><div class="n">3</div><div class="d">mié</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#5b2d8e;"></span>Personal Pay · $ 134.200</span><span class="bchip"><span class="bdot" style="background:#072146;"></span>BBVA · $ 38.900</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 173.100</div><div class="muted">U$S 119</div></div></div>
+      <div class="dayrow"><div class="daynum"><div class="n">4</div><div class="d">jue</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#072146;"></span>BBVA · $ 89.450</span><span class="bchip"><span class="bdot" style="background:#ff7300;"></span>Galicia · $ 52.300</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 141.750</div><div class="muted">U$S 97</div></div></div>
+      <div class="dayrow"><div class="daynum"><div class="n">6</div><div class="d">sáb</div></div><div class="chips"><span class="bchip"><span class="bdot" style="background:#5b2d8e;"></span>Personal Pay · $ 21.500</span><span class="bchip"><span class="bdot" style="background:#16a34a;"></span>Efectivo · $ 24.600</span></div><div style="text-align:right;"><div class="amt" style="font-size:14px;">$ 46.100</div><div class="muted">U$S 32</div></div></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

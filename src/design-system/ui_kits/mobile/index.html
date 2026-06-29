@@ -27,9 +27,15 @@
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+<script>
+  /* Brandfetch Logo API (gratis): registrate en brandfetch.com/developers,
+     copiá tu Client ID y pegalo acá. Sin esto, los medios usan el monograma. */
+  window.BRANDFETCH_CLIENT_ID = '1idDEHYBi7zAzQv9-MQ';
+</script>
 <script src="../../_ds_bundle.js"></script>
 
 <script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="money.jsx"></script>
 <script type="text/babel" src="MobileShell.jsx"></script>
 <script type="text/babel" src="DashboardMobile.jsx"></script>
 <script type="text/babel" src="ResumenMobile.jsx"></script>
@@ -38,7 +44,9 @@
 <script type="text/babel" src="PerfilMobile.jsx"></script>
 <script type="text/babel" src="PerfilScreens.jsx"></script>
 <script type="text/babel" src="ComprobanteConfirm.jsx"></script>
+<script type="text/babel" src="ShareLanding.jsx"></script>
 <script type="text/babel" src="ManualGasto.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
 
 <script type="text/babel">
   const TITLES = {
@@ -53,32 +61,55 @@
     miembros:   { t: 'Miembros', s: 'Quiénes integran la familia' },
     esperados:  { t: 'Pagos esperados', s: 'Recurrentes del mes' },
     categorias: { t: 'Categorías', s: 'Cómo se clasifican los gastos' },
-    medios:     { t: 'Medios de pago', s: 'Bancos, billeteras y efectivo' },
+    medios:     { t: 'Medios de pago', s: 'Bancos y billeteras' },
+    'tarjetas-cfg': { t: 'Tarjetas', s: 'Tus tarjetas y sus ciclos' },
     tc:         { t: 'Tipo de cambio', s: 'USD → ARS' },
+    notificaciones: { t: 'Notificaciones', s: 'Vencimientos y recordatorios' },
   };
 
   function App() {
     const {
       Phone, AppBar, Screen, BottomNav, Icon,
       DashboardMobile, ResumenMobile, CargaMobile, TarjetasMobile, PerfilMobile,
-      MiembrosMobile, EsperadosConfigMobile, CategoriasMobile, MediosPagoMobile, TipoCambioMobile,
-      ComprobanteConfirm, ManualGasto,
+      MiembrosMobile, EsperadosConfigMobile, CategoriasMobile, MediosPagoMobile, TarjetasConfigMobile, TipoCambioMobile, NotificacionesMobile,
+      ComprobanteConfirm, ManualGasto, ShareLanding,
     } = window;
     const [tab, setTab] = React.useState('inicio');
     const [sub, setSub] = React.useState(null); // perfil sub-screen
-    const [modal, setModal] = React.useState(null); // 'manual' | 'comprobante'
+    const [modal, setModal] = React.useState(null); // 'manual' | 'comprobante' | 'share'
+    const [shareTipo, setShareTipo] = React.useState('factura'); // factura | resumen
+    // Demo: el botón "Simular compartir" del panel de Tweaks dispara este evento,
+    // imitando el Web Share Target (compartir un PDF a la PWA desde el SO).
+    React.useEffect(() => {
+      const h = (e) => { setShareTipo((e.detail && e.detail.tipo) || 'factura'); setModal('share'); };
+      window.addEventListener('gf-share-demo', h);
+      return () => window.removeEventListener('gf-share-demo', h);
+    }, []);
     const [mes, setMes] = React.useState('2026-06');
+    const [theme, setTheme] = React.useState(() => localStorage.getItem('gf-theme') || 'light');
+    React.useEffect(() => {
+      document.documentElement.setAttribute('data-theme', theme);
+      try { localStorage.setItem('gf-theme', theme); } catch (e) {}
+    }, [theme]);
+    const themeBtn = (
+      <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Cambiar tema" style={{
+        width: 34, height: 34, borderRadius: 999, border: 'none', background: 'var(--gf-gray-100)',
+        color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0,
+      }}>
+        <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
+      </button>
+    );
 
     const goTab = (t) => { setSub(null); setTab(t); };
-    const onNav = (dest) => { if (dest === 'tarjetas') { setSub(null); setTab('tarjetas'); } else setSub(dest); };
+    const onNav = (dest) => { setSub(dest); };
 
     // Sub-screen takes over (reached from Perfil)
     if (sub) {
       const meta = SUB_TITLES[sub];
-      const map = { miembros: <MiembrosMobile />, esperados: <EsperadosConfigMobile />, categorias: <CategoriasMobile />, medios: <MediosPagoMobile />, tc: <TipoCambioMobile /> };
+      const map = { miembros: <MiembrosMobile />, esperados: <EsperadosConfigMobile />, categorias: <CategoriasMobile />, medios: <MediosPagoMobile />, 'tarjetas-cfg': <TarjetasConfigMobile />, tc: <TipoCambioMobile />, notificaciones: <NotificacionesMobile /> };
       return (
         <Phone>
-          <AppBar title={meta.t} sub={meta.s} onBack={() => setSub(null)} />
+          <AppBar title={meta.t} sub={meta.s} onBack={() => setSub(null)} right={themeBtn} />
           <Screen key={sub}>{map[sub]}</Screen>
           <BottomNav active="perfil" onSelect={goTab} />
         </Phone>
@@ -101,9 +132,9 @@
 
     return (
       <Phone>
-        <AppBar title={meta.t} sub={meta.s} onBack={view === 'tarjetas' ? () => setTab('resumen') : undefined} right={headerRight} />
+        <AppBar title={meta.t} sub={meta.s} onBack={view === 'tarjetas' ? () => setTab('resumen') : undefined} right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{headerRight}{themeBtn}</div>} />
         <Screen key={view}>{screen}</Screen>
-        {!modal && (view === 'inicio' || view === 'resumen') && (
+        {!modal && view === 'cargar' && (
           <button className="fab" onClick={() => setModal('manual')} aria-label="Nuevo movimiento">
             <Icon name="plus" size={26} />
           </button>
@@ -111,10 +142,71 @@
         <BottomNav active={tab === 'tarjetas' ? 'resumen' : tab} onSelect={goTab} />
         {modal === 'comprobante' && <ComprobanteConfirm onClose={() => setModal(null)} onDone={() => { setModal(null); setTab('resumen'); }} />}
         {modal === 'manual' && <ManualGasto onClose={() => setModal(null)} onDone={() => { setModal(null); setTab('inicio'); }} />}
+        {modal === 'share' && <ShareLanding key={shareTipo} tipo={shareTipo} onClose={() => setModal(null)} onReady={() => { if (shareTipo === 'resumen') { setModal(null); setTab('tarjetas'); } else { setModal('comprobante'); } }} />}
       </Phone>
     );
   }
-  ReactDOM.createRoot(document.getElementById('app')).render(<App />);
+  const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+    "palette": [
+      "#047857",
+      "#d97706"
+    ],
+    "dark": false
+  }/*EDITMODE-END*/;
+
+  const PALETTES = [
+    { name: 'Marca', inc: '#0c8f62', out: '#f97316', note: 'La actual. Esmeralda del brand + naranja. Coherente con todo el sistema.' },
+    { name: 'Menta', inc: '#10b981', out: '#f97316', note: 'Verde menta más brillante. Fresca y moderna, pero menos "marca".' },
+    { name: 'Neón', inc: '#06b6d4', out: '#ec4899', note: 'Cian + magenta. Tech y vibrante; el cian se aleja del verde-finanzas.' },
+    { name: 'Clásica', inc: '#22c55e', out: '#ef4444', note: 'Verde + rojo, la convención universal ingreso/gasto. Directa, sin matices.' },
+    { name: 'Editorial', inc: '#047857', out: '#d97706', note: 'Esmeralda profundo + ámbar. Sobria y premium, alineada al rumbo ink/esmeralda.' },
+    { name: 'Tierra', inc: '#0d9488', out: '#c2410c', note: 'Teal + terracota. Cálida y calma; buena para una app de familia, sin estridencia.' },
+  ];
+
+  function Root() {
+    const { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakToggle, TweakButton } = window;
+    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+    React.useEffect(() => {
+      const [inc, out] = t.palette || TWEAK_DEFAULTS.palette;
+      const r = document.documentElement.style;
+      r.setProperty('--gf-income', inc);
+      r.setProperty('--gf-out', out);
+    }, [t.palette]);
+    return (
+      <React.Fragment>
+        <App />
+        <TweaksPanel>
+          <TweakSection label="Paleta ingresos / salidas" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {PALETTES.map((p) => {
+              const active = t.palette && t.palette[0] === p.inc && t.palette[1] === p.out;
+              return (
+                <button key={p.name} onClick={() => setTweak('palette', [p.inc, p.out])} style={{
+                  display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'stretch', textAlign: 'left',
+                  padding: '10px 11px', borderRadius: 10, cursor: 'pointer', width: '100%', fontFamily: 'var(--font-base)',
+                  background: active ? 'var(--gf-gray-100)' : 'var(--color-surface)',
+                  border: active ? '2px solid var(--color-text)' : '1px solid var(--color-border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ width: 18, height: 18, borderRadius: 5, background: p.inc, flexShrink: 0 }} />
+                    <span style={{ width: 18, height: 18, borderRadius: 5, background: p.out, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: 13, marginLeft: 3 }}>{p.name}</span>
+                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--gf-emerald, #065f46)' }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sec)' }}>{p.note}</span>
+                </button>
+              );
+            })}
+          </div>
+          <TweakSection label="Flujos · compartir a la app" />
+          <TweakButton label="Simular — comprobante / factura" onClick={() => window.dispatchEvent(new CustomEvent('gf-share-demo', { detail: { tipo: 'factura' } }))} />
+          <TweakButton label="Simular — resumen de tarjeta" onClick={() => window.dispatchEvent(new CustomEvent('gf-share-demo', { detail: { tipo: 'resumen' } }))} />
+        </TweaksPanel>
+      </React.Fragment>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('app')).render(<Root />);
 </script>
 </body>
 </html>

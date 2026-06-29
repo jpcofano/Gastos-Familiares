@@ -16,12 +16,19 @@ Resumen · Cargar · Perfil), a floating **+** for quick manual entry, and full-
 - **Resumen** — `ResumenMobile.jsx`. Totales (esperado / pendiente / al día) + el **checklist
   de pagos esperados**: cada ítem con tint + acento de 3px + `StatusBadge`, y "Registrar pago"
   en los accionables. Header → **Tarjetas**.
-- **Tarjetas** — `TarjetasMobile.jsx`. Resúmenes de tarjeta (cara ink + total + estado).
-  Sub-vista alcanzable desde Resumen.
+- **Tarjetas (visor)** — `TarjetasMobile.jsx`. Resúmenes de tarjeta (cara ink + total + estado),
+  **solo lectura**. Se llega desde **Resumen › Tarjetas**.
 - **Cargar** — `CargaMobile.jsx`. Dropzone + entrantes recientes (`M_ENTRANTES`) con estado
   ok/wait/warn. Cualquier item abre el flujo Comprobante.
 - **Perfil** — `PerfilMobile.jsx`. Card stack de la brief **F8.0**: tier *Personal* (todos) +
   *Configuración familiar* (admin). Apariencia marca el tema oscuro como "Pronto".
+
+## Sub-pantallas de config (Perfil, admin)
+`PerfilScreens.jsx`: **Miembros · Pagos esperados · Categorías · Medios de pago · Tarjetas ·
+Tipo de cambio**. **Tarjetas (config)** = `TarjetasConfigMobile` (`M_TARJETAS_CFG`): tus
+tarjetas y sus **ciclos de cierre/vencimiento** + titular + "Agregar tarjeta". Distinta del
+**visor** de resúmenes (que es solo lectura, vía Resumen). Logos de medios vía `BankLogo`
+(`assets/medios/<id>.svg`, fallback monograma).
 
 ## Capture modals (hero + drawer + CTA)
 - **Confirmar comprobante** — `ComprobanteConfirm.jsx`. `StepIndicator`, datos extraídos
