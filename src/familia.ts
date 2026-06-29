@@ -9,6 +9,8 @@ export function docAFamiliaConfig(data: DocumentData): FamiliaConfig {
     categorias:    data.categorias as CategoriaItem[],   // F9.38 — string[] → CategoriaItem[]
     bancos:        data.bancos as MedioPago[],   // F9.36 — string[] → MedioPago[]
     tarjetas:      data.tarjetas,
+    calendarEmail: data.calendarEmail ?? null,
+    calendarSync:  data.calendarSync === true,
     actualizadoEn: data.actualizadoEn?.toDate() ?? new Date(0),
   };
 }

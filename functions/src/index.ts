@@ -2244,3 +2244,6 @@ export const guardarTarjeta = onCall(
     return { ok: true };
   },
 );
+
+// F9.43/F9.45/F9.46 — Canal B: recordatorios de vencimiento en Google Calendar.
+export { sincronizarRecordatoriosCalendar, sincronizarCalendarAhora, setCalendarSync } from './calendarSync';

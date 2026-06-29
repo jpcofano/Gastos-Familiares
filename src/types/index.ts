@@ -264,5 +264,11 @@ export interface FamiliaConfig {
   tarjetas: TarjetaItem[];
   // Unidades funcionales del titular — para extracción correcta en liquidaciones de expensas
   unidades?: Array<{ uf: string; alias?: string; etiqueta?: string }>;
+  // F9.43 — mail de calendario del legacy (Config!B4 de la planilla), canal opt-in
+  // de recordatorios en Google Calendar. null si nunca se capturó.
+  calendarEmail?: string | null;
+  // F9.46 — switch global del Canal B (admin). default false hasta que el
+  // admin lo prenda. Reemplaza el gate por-ítem autoCalendario (F9.45).
+  calendarSync?: boolean;
   actualizadoEn: Date;
 }

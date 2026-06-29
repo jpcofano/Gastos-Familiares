@@ -10,6 +10,7 @@ import { signOutUsuario } from '../auth';
 import { Icon } from '../design-system/Icon';
 import { Badge, Button } from '../design-system/components';
 import { useTheme, type ThemeMode } from '../datos/theme';
+import { useRecordatorios, contarVencProximos } from './perfil/Notificaciones';
 import './Perfil.css';
 
 // F9.26 — Perfil, contadores cableados a datos reales: config/familia
@@ -85,6 +86,8 @@ export default function Perfil() {
   const { config } = useFamiliaConfig();
   const { items } = useItemsEsperados();
   const [tcActual, setTcActual] = useState<number | null>(null);
+  const { recordatorios } = useRecordatorios();
+  const vencProximos = contarVencProximos(recordatorios);
 
   useEffect(() => {
     if (esAdmin) cargarTCReciente(1).then(h => setTcActual(h[0]?.tcUsdArs ?? null));
@@ -98,6 +101,7 @@ export default function Perfil() {
   const descMedios = `${mediosVisibles(config?.bancos).length} · bancos y billeteras`;
   const descTarjetas = `${config?.tarjetas.length ?? 0} tarjeta${config?.tarjetas.length === 1 ? '' : 's'} vinculada${config?.tarjetas.length === 1 ? '' : 's'}`;
   const descTC = tcActual != null ? `$ ${tcActual.toLocaleString('es-AR')} / USD` : '—';
+  const descNotif = recordatorios.length === 0 ? 'Sin vencimientos próximos' : `${recordatorios.length} próximo${recordatorios.length === 1 ? '' : 's'}`;
 
   return (
     <div className="perfil">
@@ -114,7 +118,16 @@ export default function Perfil() {
 
       <Group title="Personal">
         <Item icon="user-round" title="Mis datos" desc="Nombre, email, rol" onClick={() => navigate('/perfil/mis-datos')} />
-        <Item icon="bell" title="Notificaciones" desc="Vencimientos y recordatorios" />
+        <Item
+          icon="bell" title="Notificaciones" desc={descNotif}
+          onClick={() => navigate('/perfil/notificaciones')}
+          right={vencProximos > 0 ? (
+            <>
+              <span style={{ minWidth: 20, height: 20, borderRadius: 999, background: 'var(--gf-out)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{vencProximos}</span>
+              <Icon name="chevron-right" size={18} color="var(--gf-gray-300)" />
+            </>
+          ) : undefined}
+        />
         <AparienciaRow theme={theme} onChange={setTheme} />
       </Group>
 

@@ -12,6 +12,7 @@ import ConfigEsperados from './vistas/ConfigEsperados';
 import Comprobantes from './vistas/Comprobantes';
 import Perfil from './vistas/Perfil';
 import MisDatos from './vistas/perfil/MisDatos';
+import Notificaciones from './vistas/perfil/Notificaciones';
 import Miembros from './vistas/perfil/Miembros';
 import Categorias from './vistas/perfil/Categorias';
 import MediosPago from './vistas/perfil/MediosPago';
@@ -28,7 +29,8 @@ const NAV_ITEMS: BottomNavItem[] = [
 ];
 
 const TITULOS_PERFIL_SUB: Record<string, string> = {
-  '/perfil/mis-datos':   'Mis datos',
+  '/perfil/mis-datos':     'Mis datos',
+  '/perfil/notificaciones': 'Notificaciones',
   '/perfil/miembros':    'Miembros',
   '/perfil/categorias':  'Categorías',
   '/perfil/medios-pago': 'Medios de pago',
@@ -121,6 +123,7 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
           <Route path="/comprobantes" element={<Comprobantes />} />
           <Route path="/perfil" element={<Perfil />} />
           <Route path="/perfil/mis-datos" element={<MisDatos />} />
+          <Route path="/perfil/notificaciones" element={<Notificaciones />} />
           {esAdmin && <Route path="/perfil/miembros" element={<Miembros />} />}
           {esAdmin && <Route path="/perfil/categorias" element={<Categorias />} />}
           {esAdmin && <Route path="/perfil/medios-pago" element={<MediosPago />} />}

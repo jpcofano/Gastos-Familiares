@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
@@ -10,6 +10,7 @@ import { Card, Money, StatusBadge, Badge, Button, type EstadoChecklist } from '.
 import { fmtMoney } from '../datos/money';
 import { medioCanonico, colorMedio } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
+import { calcularChecklist, cubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
 import type { Movement, ExpectedItem, FamiliaConfig } from '../types';
 import './Resumen.css';
 
@@ -105,82 +106,6 @@ function porPersonaIngreso(movs: Movement[]): [string, number][] {
   }
   return Object.entries(map).sort((a, b) => b[1] - a[1]);
 }
-
-// ── Checklist de esperados (lógica real, recuperada de git 0bc11e6) ─────────
-
-function movimientosDelItem(item: ExpectedItem, movs: Movement[]): Movement[] {
-  // Rama 0: vínculo directo por itemEsperadoId (manda sobre todo)
-  const directos = movs.filter(m => m.itemEsperadoId === item.id);
-  if (directos.length > 0) return directos;
-
-  // Rama 1: tarjeta por código — identidad fuerte, no categoria/subcategoria
-  if (item.tarjetaCodigo) {
-    return movs.filter(m => m.subtipo === 'TarjetaPago' && m.tarjetaCodigo === item.tarjetaCodigo && m.moneda === item.moneda);
-  }
-
-  // Rama 2: matchTexto manda (relaja cat/subcat) — o, sin matchTexto, clave cat+subcat
-  return movs.filter(m => {
-    if (m.tipo !== item.tipo) return false;
-    if (m.moneda !== item.moneda) return false;
-    if (item.matchTexto) {
-      const desc = (m.descripcion ?? '').toLowerCase();
-      const inc = item.matchTexto.incluye.some(t => desc.includes(t));
-      const exc = item.matchTexto.excluye.some(t => desc.includes(t));
-      return inc && !exc;
-    }
-    if (item.categoria !== null && m.categoria !== item.categoria) return false;
-    if (item.subcategoria !== null && m.subcategoria !== item.subcategoria) return false;
-    if (item.tipo === 'Ingreso' && item.persona !== null && m.persona !== item.persona) return false;
-    return true;
-  });
-}
-
-function aplicaEnMes(_item: ExpectedItem, _mes: string): boolean {
-  // TODO: periodicidades no mensuales necesitan mes-ancla (ver docs/CLAUDE.md). Placeholder: aplica siempre.
-  return true;
-}
-
-function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr: string, mes: string): EstadoChecklist {
-  if (!aplicaEnMes(item, mes)) return 'no_aplica';
-  if (matches.length > 0) {
-    if (mes < mesActualStr) return 'pagado';
-    const confirmados = matches.filter(m => m.confirmadoPago);
-    if (confirmados.length > 0) {
-      const montoConf = confirmados.reduce((s, m) => s + Math.abs(m.monto), 0);
-      if (item.montoEsperado != null && montoConf < item.montoEsperado * 0.99) return 'parcial';
-      return 'pagado';
-    }
-    return 'por_confirmar';
-  }
-  if (item.pagoAutomatico) return 'automatico';
-  if (mes > mesActualStr) return 'programado';
-  if (mes < mesActualStr) return 'no_registrado';
-  if (item.diaVencimiento && item.diaVencimiento < new Date().getDate()) return 'vencido';
-  return 'pendiente';
-}
-
-function cubierto(estado: EstadoChecklist): boolean { return estado === 'pagado' || estado === 'automatico'; }
-
-const ORDEN_ESTADO: Record<EstadoChecklist, number> = {
-  vencido: 0, pendiente: 1, por_confirmar: 2, parcial: 3,
-  no_registrado: 4, programado: 5, automatico: 6,
-  pagado: 7, no_aplica: 8,
-};
-
-interface CheckItem { item: ExpectedItem; matches: Movement[]; estado: EstadoChecklist; }
-
-function calcularChecklist(items: ExpectedItem[], movs: Movement[], mes: string): CheckItem[] {
-  const mesHoy = mesActual();
-  return items
-    .filter(i => i.activo)
-    .map(item => {
-      const matches = movimientosDelItem(item, movs);
-      return { item, matches, estado: estadoItem(item, matches, mesHoy, mes) };
-    })
-    .sort((a, b) => ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado]);
-}
-
-const ACCIONABLE: EstadoChecklist[] = ['pendiente', 'vencido', 'no_registrado', 'por_confirmar'];
 
 // ── KPI block (compartido entre secciones) ───────────────────────────────────
 
@@ -429,7 +354,9 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMes
 // ── Shell con toggle segmentado ───────────────────────────────────────────────
 
 function ResumenVisual() {
-  const [sec, setSec] = useState<'dia' | 'fijos'>('dia');
+  const location = useLocation();
+  const secInicial = (location.state as { sec?: 'dia' | 'fijos' } | null)?.sec ?? 'dia';
+  const [sec, setSec] = useState<'dia' | 'fijos'>(secInicial);
   const [mes, setMes] = useState(mesActual);
   const [cur, setCur] = useState<Moneda>('ARS');
   const [errorAccion, setErrorAccion] = useState<string | null>(null);

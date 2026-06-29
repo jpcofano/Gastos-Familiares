@@ -30,6 +30,17 @@ export async function actualizarTCManual(fecha: string, tcUsdArs: number): Promi
   }
 }
 
+// F9.46 — switch global del Canal B de notificaciones (Google Calendar).
+export async function setCalendarSync(activo: boolean): Promise<Resultado<void>> {
+  try {
+    const fn = httpsCallable(functions, 'setCalendarSync');
+    await fn({ activo });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
 export async function actualizarMiPerfil(nombre: string): Promise<Resultado<void>> {
   try {
     const fn = httpsCallable(functions, 'actualizarMiPerfil');

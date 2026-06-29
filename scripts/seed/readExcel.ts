@@ -11,6 +11,10 @@ export interface SheetData {
   diccionario:          any[];
   diccionarioNorm:      any[];
   usuarios:             any[];
+  // F9.43 — mail de calendario del legacy (Config!B4), usado para los eventos
+  // de vencimiento en Google Calendar. Celda suelta, no una hoja tabular —
+  // se lee directo por referencia de celda, no con sheet_to_json.
+  calendarEmail:        string | null;
 }
 
 export function readExcel(path: string): SheetData {
@@ -23,6 +27,12 @@ export function readExcel(path: string): SheetData {
     return XLSX.utils.sheet_to_json(ws, { defval: null });
   };
 
+  const configSheet = wb.Sheets['Config'];
+  const calendarEmailRaw = configSheet?.['B4']?.v;
+  const calendarEmail = typeof calendarEmailRaw === 'string' && calendarEmailRaw.includes('@')
+    ? calendarEmailRaw.trim().toLowerCase()
+    : null;
+
   const data: SheetData = {
     historico:            get('Historico'),
     tcDiario:             get('TC_Diario'),
@@ -34,12 +44,14 @@ export function readExcel(path: string): SheetData {
     diccionario:          get('Diccionario'),
     diccionarioNorm:      get('Diccionario_Normalizacion'),
     usuarios:             get('Usuarios'),
+    calendarEmail,
   };
 
   console.log(`   Historico: ${data.historico.length} filas`);
   console.log(`   TC_Diario: ${data.tcDiario.length} filas`);
   console.log(`   Tarjetas_Resumen: ${data.tarjetasResumen.length} filas`);
   console.log(`   Tarjetas_Movimientos: ${data.tarjetasMovimientos.length} filas`);
-  console.log(`   Diccionario_Aprendido: ${data.diccionarioAprendido.length} filas\n`);
+  console.log(`   Diccionario_Aprendido: ${data.diccionarioAprendido.length} filas`);
+  console.log(`   Config!B4 (calendarEmail): ${data.calendarEmail ?? '(vacío o no es un email)'}\n`);
   return data;
 }
