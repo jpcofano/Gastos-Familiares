@@ -5,7 +5,7 @@ import { useMiembro } from './hooks/useMiembro';
 import { MiembroContext } from './contexto/MiembroContext';
 import { ItemsEsperadosProvider } from './contexto/ItemsEsperadosContext';
 import { DiccionarioProvider }    from './contexto/DiccionarioContext';
-import { AppBar, Screen, BottomNav, type BottomNavItem } from './design-system/shell';
+import { AppBar, Screen, BottomNav, InstallBanner, type BottomNavItem } from './design-system/shell';
 import Dashboard from './vistas/Dashboard';
 import Resumen from './vistas/Resumen';
 import ConfigEsperados from './vistas/ConfigEsperados';
@@ -129,6 +129,7 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
     <div className="shell-phone">
       <AppBar title={title} sub={sub} onBack={onBack} right={right} />
       <Screen>
+        <InstallBanner />
         <Routes>
           <Route path="/" element={<Dashboard />} />
           {esAdmin && <Route path="/resumen" element={<Resumen />} />}
