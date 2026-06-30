@@ -150,6 +150,39 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.58 — Banner de instalación PWA in-app + fix warnings de manifest.
+  1. **Meta tag nueva:** `<meta name="mobile-web-app-capable" content="yes" />` agregada
+     en `index.html` junto a la versión `apple-mobile-web-app-capable` (iOS) — elimina el
+     warning de deprecated meta en Chrome DevTools.
+  2. **Screenshots en manifest:** `public/manifest.webmanifest` gana bloque `screenshots`
+     (narrow 1080×2280 + wide 1920×1080) para "Richer PWA Install UI" — elimina ese
+     warning de Application › Manifest. **Pendiente:** Juan debe copiar las capturas reales
+     a `public/screenshots/mobile-dashboard.png` y `public/screenshots/desktop-dashboard.png`.
+  3. **`src/hooks/useInstallPrompt.ts`** — hook nuevo que captura `beforeinstallprompt`,
+     trackea `appinstalled` y `display-mode: standalone` (ya instalada), y expone
+     `instalar()` / `descartar()`. Descarte persiste en `sessionStorage` (dura la sesión
+     del tab, no permanente).
+  4. **`src/design-system/shell/InstallBanner.tsx`** — banner `position:fixed`
+     `bottom:76px` (encima del BottomNav, misma lógica que Fab) con ícono `download`,
+     copy y botones "Instalar" / "×". Solo visible cuando `mostrarBanner=true` (el evento
+     dispara, no está instalada, no fue descartada).
+  5. Exportado en `shell/index.ts`; montado en `AppShell.tsx` dentro de `<Screen>` antes
+     de `<Routes>` — mismo stacking context que el resto del shell.
+- F9.57 — Dashboard Anual: meses futuros = proyección lineal (mínimos cuadrados)
+  de los meses transcurridos. `mesActualIdx` (0-indexed): mes en curso del año
+  mostrado para el año actual; 11 para años pasados completos. Meses 0..mesActualIdx
+  = reales (barras sólidas); > mesActualIdx = proyectados (barras fantasma: fondo
+  transparente + borde punteado del color de la serie, inicial del mes en gris claro).
+  Leyenda "Real / Proyección" en ambos gráficos cuando hay meses futuros.
+  `tendenciaPct`: pendiente mensual de la regresión lineal sobre los meses reales ÷
+  promedio real → nunca promedia contra ceros de meses futuros; badge muestra
+  "+N%/mes" (↑ rojo / ↓ verde). KPI "Proy. resto del año" (solo cuando hay meses
+  futuros): suma de las barras proyectadas. "Promedio mensual" y "Mes más alto/bajo"
+  calculados sobre meses reales (0..mesActualIdx), no solo meses con datos.
+  Cambios: `src/datos/agregados.ts` (interface DashAnual + helpers _linreg /
+  proyectarMeses + agregarAnual reescrito), `src/vistas/Dashboard.tsx`
+  (DashboardAnual: renderizado condicional real vs. proyectado en ambos gráficos).
+  Derivado puro, sin persistencia (F9.25).
 - F9.56 — Dos fixes en la pantalla Cargar.
   1. **Resúmenes de tarjeta colapsados:** `SeccionTarjetas` reemplaza las tarjetas
      completas (`TarjetaFace`) por `ResumenFila` — filas de ~50px, colapsadas por defecto,

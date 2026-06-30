@@ -385,11 +385,15 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
 
 function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda }) {
   const [openCat, setOpenCat] = useState<string | null>(null);
-  const maxSal = Math.max(...a.salidasPorMes, 1);
-  const maxIS = Math.max(...a.ingresosPorMes, ...a.salidasPorMes, 1);
+  const hayProyeccion = a.mesActualIdx < 11;
+  const maxSal = Math.max(...a.salidasPorMes, ...a.salidasProyeccion, 1);
+  const maxIS = Math.max(...a.ingresosPorMes, ...a.salidasPorMes, ...a.ingresosProyeccion, ...a.salidasProyeccion, 1);
   const totalCat = a.categorias.reduce((s, c) => s + c.usd, 0);
   const maxCat = a.categorias[0]?.usd ?? 1;
   const maxMM = Math.max(...a.mesAMes.map(m => m.usd), 1);
+  const tendenciaSube = a.tendenciaPct > 0;
+  const tendenciaColor = tendenciaSube ? 'var(--gf-expense)' : 'var(--gf-income)';
+  const tendenciaBg = tendenciaSube ? 'var(--gf-expense-50)' : 'var(--gf-income-50)';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -418,21 +422,44 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
       <Card padding="var(--space-4)">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>Salidas por mes</div>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--gf-expense)', background: 'var(--gf-expense-50)', borderRadius: 999, padding: '3px 9px' }}>tendencia {a.tendenciaPct > 0 ? '+' : ''}{a.tendenciaPct}%</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 700, color: tendenciaColor, background: tendenciaBg, borderRadius: 999, padding: '3px 9px' }}>
+            {tendenciaSube ? '↑' : '↓'} {a.tendenciaPct > 0 ? '+' : ''}{a.tendenciaPct}%/mes
+          </span>
         </div>
+        {hayProyeccion && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 11, color: 'var(--color-text-sec)', marginTop: 8 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: '#9cb3e8' }} />Real</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: 'transparent', border: '1.5px dashed #9cb3e8' }} />Proyección</span>
+          </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 110, marginTop: 14 }}>
-          {a.salidasPorMes.map((v, i) => (
-            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <div style={{ width: '100%', height: `${Math.max((v / maxSal) * 88, 3)}px`, background: a.meses[i] === a.mesMasAlto ? 'var(--color-accent)' : '#9cb3e8', borderRadius: '3px 3px 0 0' }} title={`${a.meses[i]}: USD ${v}`} />
-              <div style={{ fontSize: 8.5, color: 'var(--gf-gray-400)' }}>{a.meses[i].charAt(0)}</div>
-            </div>
-          ))}
+          {a.salidasPorMes.map((v, i) => {
+            const esFuturo = i > a.mesActualIdx;
+            const valor = esFuturo ? a.salidasProyeccion[i] : v;
+            const h = Math.max((valor / maxSal) * 88, 3);
+            return (
+              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={esFuturo ? {
+                  width: '100%', height: `${h}px`, background: 'transparent',
+                  border: '1.5px dashed #9cb3e8', borderBottom: 'none', opacity: 0.6, borderRadius: '3px 3px 0 0',
+                } : {
+                  width: '100%', height: `${h}px`, background: a.meses[i] === a.mesMasAlto ? 'var(--color-accent)' : '#9cb3e8', borderRadius: '3px 3px 0 0',
+                }} title={`${a.meses[i]}: USD ${Math.round(valor)}${esFuturo ? ' (proyectado)' : ''}`} />
+                <div style={{ fontSize: 8.5, color: esFuturo ? 'var(--gf-gray-300)' : 'var(--gf-gray-400)' }}>{a.meses[i].charAt(0)}</div>
+              </div>
+            );
+          })}
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
           <Kpi eyebrow="Promedio mensual" value={curBig(a.promedioMensualUsd, cur, tc)} />
           <Kpi eyebrow="Mes más alto" value={a.mesMasAlto} />
           <Kpi eyebrow="Mes más bajo" value={a.mesMasBajo} />
         </div>
+        {hayProyeccion && (
+          <div style={{ marginTop: 10 }}>
+            <Kpi eyebrow="Proy. resto del año" value={curBig(a.proyeccionRestoAnioUsd, cur, tc)} sub="estimado, según la tendencia" />
+          </div>
+        )}
       </Card>
 
       {/* Por categoría */}
@@ -490,20 +517,32 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
       {/* Ingresos y salidas por mes */}
       <Card padding="var(--space-4)">
         <div style={{ fontSize: 16, fontWeight: 800 }}>Ingresos y salidas por mes</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 11, color: 'var(--color-text-sec)', margin: '6px 0 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 11, color: 'var(--color-text-sec)', margin: '6px 0 12px', flexWrap: 'wrap' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--gf-income)' }} />Ingresos</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--gf-out)' }} />Salidas</span>
+          {hayProyeccion && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: 'transparent', border: '1.5px dashed var(--gf-gray-400)' }} />Proyección</span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 104 }}>
-          {a.meses.map((m, i) => (
-            <div key={m} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 88, width: '100%', justifyContent: 'center' }}>
-                <div style={{ width: '42%', height: `${Math.max((a.ingresosPorMes[i] / maxIS) * 88, 2)}px`, background: 'var(--gf-income)', borderRadius: '2px 2px 0 0' }} />
-                <div style={{ width: '42%', height: `${Math.max((a.salidasPorMes[i] / maxIS) * 88, 2)}px`, background: 'var(--gf-out)', borderRadius: '2px 2px 0 0' }} />
+          {a.meses.map((m, i) => {
+            const esFuturo = i > a.mesActualIdx;
+            const ingV = esFuturo ? a.ingresosProyeccion[i] : a.ingresosPorMes[i];
+            const salV = esFuturo ? a.salidasProyeccion[i] : a.salidasPorMes[i];
+            return (
+              <div key={m} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 88, width: '100%', justifyContent: 'center' }}>
+                  <div style={esFuturo
+                    ? { width: '42%', height: `${Math.max((ingV / maxIS) * 88, 2)}px`, background: 'transparent', border: '1.5px dashed var(--gf-income)', borderBottom: 'none', opacity: 0.6, borderRadius: '2px 2px 0 0' }
+                    : { width: '42%', height: `${Math.max((ingV / maxIS) * 88, 2)}px`, background: 'var(--gf-income)', borderRadius: '2px 2px 0 0' }} />
+                  <div style={esFuturo
+                    ? { width: '42%', height: `${Math.max((salV / maxIS) * 88, 2)}px`, background: 'transparent', border: '1.5px dashed var(--gf-out)', borderBottom: 'none', opacity: 0.6, borderRadius: '2px 2px 0 0' }
+                    : { width: '42%', height: `${Math.max((salV / maxIS) * 88, 2)}px`, background: 'var(--gf-out)', borderRadius: '2px 2px 0 0' }} />
+                </div>
+                <div style={{ fontSize: 8.5, color: esFuturo ? 'var(--gf-gray-300)' : 'var(--gf-gray-400)' }}>{m.charAt(0)}</div>
               </div>
-              <div style={{ fontSize: 8.5, color: 'var(--gf-gray-400)' }}>{m.charAt(0)}</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
           <Kpi eyebrow="Meses con datos" value={a.mesesConDatos} />

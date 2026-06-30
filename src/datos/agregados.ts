@@ -91,8 +91,38 @@ export interface DashAnual {
   meses: string[];
   salidasPorMes: number[];
   ingresosPorMes: number[];
+  // F9.57 — meses futuros del año en curso: proyección lineal de los meses transcurridos
+  // (ver _linreg más abajo). mesActualIdx: índice 0-based del último mes "real"
+  // (mes en curso para el año actual; 11 para años pasados completos).
+  mesActualIdx: number;
+  salidasProyeccion: number[];
+  ingresosProyeccion: number[];
+  proyeccionRestoAnioUsd: number;
   categorias: AnualCategoria[];
   mesAMes: MesAMes[];
+}
+
+// F9.57 — regresión lineal simple (mínimos cuadrados) sobre una serie, x = índice.
+function _linreg(ys: number[]): { slope: number; intercept: number } {
+  const n = ys.length;
+  if (n === 0) return { slope: 0, intercept: 0 };
+  if (n === 1) return { slope: 0, intercept: ys[0] };
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (let i = 0; i < n; i++) { sumX += i; sumY += ys[i]; sumXY += i * ys[i]; sumXX += i * i; }
+  const denom = n * sumXX - sumX * sumX;
+  const slope = denom !== 0 ? (n * sumXY - sumX * sumY) / denom : 0;
+  const intercept = (sumY - slope * sumX) / n;
+  return { slope, intercept };
+}
+
+// Proyecta los meses futuros (índices > mesActualIdx) extrapolando la recta ajustada
+// sobre los meses reales (0..mesActualIdx), con piso 0. Meses reales quedan en 0.
+function proyectarMeses(serie: number[], mesActualIdx: number): number[] {
+  const reales = serie.slice(0, mesActualIdx + 1);
+  const { slope, intercept } = _linreg(reales);
+  const proyeccion = new Array(12).fill(0);
+  for (let i = mesActualIdx + 1; i < 12; i++) proyeccion[i] = Math.max(0, intercept + slope * i);
+  return proyeccion;
 }
 
 // ── Mensual ─────────────────────────────────────────────────────────────────
@@ -239,20 +269,29 @@ export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: M
   const mesesConDatosIdx = [...new Set(visibles.map(m => Number(m.mes.split('-')[1]) - 1))].sort((a, b) => a - b);
   const mesesConDatos = mesesConDatosIdx.length;
 
-  const promedioMensualUsd = mesesConDatos > 0 ? salidasUsd / mesesConDatos : 0;
+  // F9.57 — mes actual = mes en curso del año mostrado (0-indexed); años pasados
+  // completos => 11 (los 12 meses son "reales"). Meses 0..mesActualIdx = reales;
+  // > mesActualIdx = futuros, proyectados por regresión lineal sobre los reales.
+  const hoy = new Date();
+  const mesActualIdx = anio < hoy.getFullYear() ? 11 : anio === hoy.getFullYear() ? hoy.getMonth() : -1;
 
-  let mesMasAltoIdx = mesesConDatosIdx[0] ?? 0, mesMasBajoIdx = mesesConDatosIdx[0] ?? 0;
-  for (const i of mesesConDatosIdx) {
+  const salidasReales = salidasPorMes.slice(0, mesActualIdx + 1);
+  const salidasProyeccion = proyectarMeses(salidasPorMes, mesActualIdx);
+  const ingresosProyeccion = proyectarMeses(ingresosPorMes, mesActualIdx);
+  const proyeccionRestoAnioUsd = salidasProyeccion.reduce((s, v) => s + v, 0);
+
+  const promedioMensualUsd = salidasReales.length > 0 ? salidasReales.reduce((s, v) => s + v, 0) / salidasReales.length : 0;
+
+  let mesMasAltoIdx = 0, mesMasBajoIdx = 0;
+  for (let i = 0; i <= mesActualIdx; i++) {
     if (salidasPorMes[i] > salidasPorMes[mesMasAltoIdx]) mesMasAltoIdx = i;
     if (salidasPorMes[i] < salidasPorMes[mesMasBajoIdx]) mesMasBajoIdx = i;
   }
 
-  // Tendencia: variación entre el primer y el último mes con datos del año
-  const primero = mesesConDatosIdx[0];
-  const ultimo = mesesConDatosIdx[mesesConDatosIdx.length - 1];
-  const tendenciaPct = (primero != null && ultimo != null && primero !== ultimo && salidasPorMes[primero] > 0)
-    ? Math.round(((salidasPorMes[ultimo] - salidasPorMes[primero]) / salidasPorMes[primero]) * 100)
-    : 0;
+  // Tendencia: pendiente mensual de la regresión sobre los meses reales ÷ su
+  // promedio — nunca promedia contra los ceros de los meses futuros.
+  const { slope: slopeSalidas } = _linreg(salidasReales);
+  const tendenciaPct = promedioMensualUsd > 0 ? Math.round((slopeSalidas / promedioMensualUsd) * 100) : 0;
 
   const salidasAnioAnteriorUsd = movsAnioAnterior.filter(m => !m.excluirDash && m.tipo === 'Gasto').reduce((s, m) => s + usdEq(m), 0);
   const comparacionInteranualPct = salidasAnioAnteriorUsd > 0
@@ -301,6 +340,7 @@ export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: M
     mejorMesAhorro: MESES_ES[mejorMesIdx],
     meses: MESES_ES,
     salidasPorMes, ingresosPorMes,
+    mesActualIdx, salidasProyeccion, ingresosProyeccion, proyeccionRestoAnioUsd,
     categorias,
     mesAMes,
   };
