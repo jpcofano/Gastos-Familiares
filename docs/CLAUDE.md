@@ -79,6 +79,92 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   (admin-only, mismo patrón). Baja bloqueada si hay `resumenesTarjeta` con ese
   `tarjetaCodigo`. Marcar `tipoTarjeta:'debito'` se bloquea si la tarjeta ya tiene líneas en
   cuotas cargadas (débito no genera cuotas — antes solo un `console.warn` en `TarjetaFace`).
+- F9.53 — Editar / eliminar movimientos (admin-only). Dos callables nuevas en `functions/src/index.ts`:
+  - `editarMovimiento({ id, cambios })` — recibe solo los campos que cambian. Invariantes servidor:
+    `persona` = memberId o null (familiar); `medio` normalizado vía `medioCanonicoBancos()` (alias→canónico);
+    `categoria` validada contra `config/familia.categorias` (activo, label); al cambiar categoría, `subcategoria`
+    se limpia si no se pasa nueva; `subcat` validada contra colección `subcategorias` de esa categoría;
+    `tcUsdArs` recomputado vía `tcParaFechaAdmin()` si cambia `fecha` o `moneda`; `mes` recomputado desde `fecha`;
+    `itemEsperadoId` se limpia si cambia persona, categoría o monto fuera de ±10% del original.
+    Escribe `actualizadoEn: FieldValue.serverTimestamp()`.
+  - `eliminarMovimiento({ id })` — guardrail: bloquea si `mov.resumenTarjetaId != null` OR `mov.excluirDash === true`
+    (forzaría descuadre en resumen de tarjeta). En caso contrario, borra el doc.
+  - `tcParaFechaAdmin()` — helper interno: busca `tcDiario/{YYYY-MM-DD}` exacto o el último anterior con
+    `orderBy(FieldPath.documentId(), 'desc').startAt(dateStr).limit(1)`.
+  - `medioCanonicoBancos()` — helper inline servidor, mismo concepto que `medioCanonico()` del cliente
+    (`src/datos/medios.ts`) pero recibe `bancos[]` directamente (no hay importaciones cross-env en Functions).
+  Flujo cliente:
+  - `src/datos/movimientos.ts`: `CambiosMovimiento` interface + `llamarEditarMovimiento()` + `llamarEliminarMovimiento()`.
+  - `src/vistas/EditarMovimiento.tsx`: FullModal (mismo patrón que AltaMovimiento). Carga subcats + config,
+    muestra todos los campos editables; solo envía los campos que cambiaron (diff). Aviso ámbar si viene de
+    resumen de tarjeta. Delete con confirmación inline.
+  - `src/vistas/perfil/BuscarMovimiento.tsx`: pantalla admin bajo `/perfil/buscar-movimiento`. Selector de período
+    (month-picker), campo de búsqueda textual (descripcion/categoria/subcat/banco/persona), chips de persona.
+    Lista onSnapshot (vía `useMovimientosDelMes`), tap en fila → abre `EditarMovimiento`.
+  - `src/AppShell.tsx`: ruta `/perfil/buscar-movimiento` (admin-only) + entrada en `TITULOS_PERFIL_SUB`.
+  - `src/vistas/Perfil.tsx`: ítem "Buscar / editar movimiento" (icono search) al final del grupo admin.
+  - `src/vistas/Resumen.tsx`: `PorDiaSeccion` acepta `esAdmin` + `onEditarMovimiento`; cards de día son
+    expandibles (toggle chevron) → muestra filas individuales de gastos del día → admin puede tappear → EditarMovimiento.
+  - `src/datos/agregados.ts`: `DashMensual.movMasAlto` suma campo `id: string | null`.
+  - `src/vistas/Dashboard.tsx`: card "Mov. más alto" es tappable para admin (pencil icon, navega a EditarMovimiento).
+  No hay agregados persistidos que recalcular (F9.25): los onSnapshot listeners ya propagan los cambios.
+- F9.54 — Pulido app viva: 5 fixes post-import detectados en prod.
+  1. **AppBar + BottomNav fijos:** `.shell-phone` usa `height: 100dvh; overflow: hidden` (no `min-height`);
+     `Screen` tiene `minHeight: 0` en el div exterior para evitar que el flex item expanda el contenedor y
+     empuje header/nav al hacer scroll. Sin estos dos cambios, todo el shell scrollea.
+  2. **TC sin error de índice:** `tcParaFecha()` en `src/datos/tcDiario.ts` reemplaza el
+     `where(documentId(), '<=', dateStr) + orderBy(documentId(), 'desc')` (requería índice compuesto sobre
+     `__name__`, que Firestore no auto-crea en combo filter+sort) por
+     `orderBy(documentId(), 'desc') + startAt(dateStr)`. Mismo resultado: primer doc con ID ≤ dateStr; cero
+     índice adicional. **El usuario debe correr `firebase deploy --only hosting` después del `npm run build`.**
+  3. **"Instalar app":** ítem en Perfil › sección Personal, visible a todos. Android/Chrome captura
+     `beforeinstallprompt` (guardado en `promptRef`) y llama `prompt()` al tap. iOS: muestra el instructivo
+     "Safari › Compartir → Agregar a inicio" como `desc` del ítem (sin tap). Oculto si ya instalado
+     (`display-mode: standalone`). Requiere el manifest servido (F9.49).
+  4. **Logos de medios:** `.env.production` ya tiene `VITE_BRANDFETCH_CLIENT_ID=1idDEHYBi7zAzQv9-MQ`.
+     `BankLogo` integrado en chips "Gastos por día" del Resumen (reemplaza puntito de color). Fallback:
+     local `/assets/medios/{id}.svg` → monograma. También en la card HOY: fila conciliada muestra
+     `BankLogo` del banco del movimiento que saldó el ítem.
+  5. **Card HOY en Resumen:** reemplaza el contador simple de movimientos de hoy. Ahora muestra los
+     `itemsEsperados` con `diaVencimiento === hoy.getDate()` para el mes actual — conciliado (check / BankLogo
+     del banco) o pendiente (reloj / "A pagar"). Sin ítems → "Nada que pagar hoy". Para meses distintos al
+     actual → "Ver mes actual para pagos de hoy". `PorDiaSeccion` recibe `checklist: CheckItem[]` y
+     `mes: string` como props nuevas desde `ResumenVisual`.
+- F9.55 — Dos mejoras: KPIs del Resumen y gráficos del Dashboard.
+  1. **KPIs Resumen:** Renombradas "Pesos disponibles" (antes "Disponible (ARS)") y "Falta
+     cubrir (USD)" (antes "Resultado (USD)"). La segunda cambia de semántica: ya no es
+     `(ingArs − gasArs) / tc` (flujo de caja) sino `(ΣesperadosArsEq − pesosDisp) / tc`
+     (brecha de cobertura frente a compromisos del mes). Rojo si > 0 (falta plata); verde
+     con texto "Cubierto" si ≤ 0. Ambas tarjetas tienen moneda fija y NO se invierten con
+     el toggle ARS/USD (que solo afecta la card "Neto del mes"). `PorDiaSeccion` computa
+     `esperadosArsEq` (Σ ítems del checklist, USD items × tc) y `faltaCubrirUsd` y los
+     pasa a `KpiCards`. Card HOY suma el total pendiente (ARS eq) en el header: "$ N a
+     pagar" si hay pendientes, "Todo pagado" si todos conciliados.
+  2. **Gráficos de categorías:** Nueva `src/datos/graficosPrefs.ts` con 9 paletas × 8
+     colores (`CHART_PALETTES`) y hook `usePaletaIdx()` que persiste en `localStorage`
+     (`gf-chart-paleta`). `DashboardMensual` recibe `paleta: string[]` y asigna colores
+     **por rango de gasto** (índice 0 = mayor gasto), no por hash del nombre. La card "Por
+     categoría" gana un selector segmentado (Lista / Dona / Treemap); el tipo persiste en
+     `gf-chart-tipo`. Dona: `conic-gradient` CSS con top-4 + "Otras"; aguja central
+     muestra el % del top-4. Treemap: binary-split recursivo (`tmLayout`), coordenadas en
+     espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
+     Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
+     accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.56 — Dos fixes en la pantalla Cargar.
+  1. **Resúmenes de tarjeta colapsados:** `SeccionTarjetas` reemplaza las tarjetas
+     completas (`TarjetaFace`) por `ResumenFila` — filas de ~50px, colapsadas por defecto,
+     que expanden inline al tocar. Colapsada: swatch tintado (brand-color por red) · banco ·
+     red · •••• ultimos4 · vence DD/MM · total este mes · badge de estado · chevron.
+     Expandida: `CaraTarjeta` reducida + split "Este mes" / "Deuda futura" + botón "Ver N
+     consumos →" (abre el preview existente). Ordenadas con `fechaVencimiento` descendente
+     (período en curso primero). Se muestran 4 por defecto; "Ver todo (N)" si hay más.
+     No se creó ruta ni componente nuevo: todo vive en `ResumenesTarjeta.tsx`.
+  2. **Bandeja de entrada condicional:** La bandeja en `Comprobantes.tsx` ya se ocultaba
+     cuando `entrantes.length === 0`, pero permanecía visible para entrantes `ruteados`
+     cuyo destino ya estaba confirmado (`comprobante.estado === 'vinculado'` o
+     `resumen.estado === 'confirmado'`). Ahora filtra `bandejaEntrantes` client-side:
+     muestra la bandeja solo si hay ≥ 1 ítem no-ruteado O cuyo destino no está aún
+     confirmado. `comprobantes` y `resumenes` ya estaban disponibles en el mismo componente.
 - F9.51 — `ShareLanding` (`src/vistas/ShareLanding.tsx`) cubre el arranque en frío de
   Comprobantes cuando llega por Web Share Target (F9.49): se monta sobre `?share=1` en
   cuanto `leerYBorrarArchivoCompartido()` devuelve el File, antes de tocar Storage/Functions.

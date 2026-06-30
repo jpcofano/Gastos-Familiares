@@ -14,7 +14,8 @@ import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig, resolverNombreMiembro } from '../familia';
 import type { CardStatement, MovimientoParseado, FamiliaConfig } from '../types';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
-import { TarjetaFace } from './TarjetaFace';
+import { Icon } from '../design-system/Icon';
+import { TarjetaFace, CaraTarjeta, BadgeEstadoResumen, calcularSplitCuotas, fmtMonto as fmtMontoFace } from './TarjetaFace';
 import './ResumenesTarjeta.css';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -369,6 +370,98 @@ function ResumenCard({
   );
 }
 
+// ── Fila colapsable de resumen (F9.56) ───────────────────────────────────────
+
+const MONEDAS_ORD = ['ARS', 'USD'] as const;
+
+// Mismo algoritmo que TarjetaFace, sin exportar para no crear dependencia circular
+function tintFila(red: string): string {
+  const r = red.toLowerCase();
+  if (r.includes('visa')) return '#1a1f71';
+  if (r.includes('mastercard')) return '#23252b';
+  return 'var(--gf-ink)';
+}
+
+// F9.56 — fila compacta (~48px) que se expande al tocar. Muestra:
+// swatch tintado · Banco · Red · •••• term · Vence · total este mes · badge · chevron.
+// Expandida: CaraTarjeta reducida + split este mes / deuda futura + "Ver N consumos →".
+function ResumenFila({ resumen, config, onVerPreview }: {
+  resumen: CardStatement;
+  config: FamiliaConfig | null;
+  onVerPreview: () => void;
+}) {
+  const [expandido, setExpandido] = useState(false);
+  const tarjetaCfg = config?.tarjetas.find(t => t.codigo === resumen.tarjetaCodigo);
+  const ultimos4   = tarjetaCfg?.ultimos4?.[0];
+  const red        = resumen.tarjeta || tarjetaCfg?.tipo || '';
+  const banco      = resumen.banco || tarjetaCfg?.banco || '—';
+  const tint       = tintFila(red);
+  const split      = calcularSplitCuotas(resumen);
+  const venceStr   = resumen.fechaVencimiento
+    ? resumen.fechaVencimiento.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+    : null;
+
+  return (
+    <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border-card)', borderRadius: 12, overflow: 'hidden' }}>
+      {/* Fila colapsada */}
+      <button
+        onClick={() => setExpandido(e => !e)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-base)', minHeight: 50 }}
+      >
+        <span style={{ width: 36, height: 36, borderRadius: 8, background: `linear-gradient(135deg, ${tint} 0%, var(--gf-ink) 100%)`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,.5)', letterSpacing: 1 }}>••••</span>
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {banco}{red ? ` · ${red}` : ''}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
+            •••• {ultimos4 ?? '----'}{venceStr ? ` · Vence ${venceStr}` : ''}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+            {MONEDAS_ORD.map(m => split.esteMes[m] ? fmtMontoFace(split.esteMes[m]!, m) : null).find(Boolean) ?? (resumen.periodo || '—')}
+          </div>
+          <BadgeEstadoResumen estado={resumen.estado} />
+        </div>
+        <Icon name={expandido ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />
+      </button>
+
+      {/* Sección expandida */}
+      {expandido && (
+        <div style={{ borderTop: '1px solid var(--gf-gray-100)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <CaraTarjeta resumen={resumen} config={config} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1, background: 'var(--gf-gray-100)', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>Este mes</div>
+              {MONEDAS_ORD.map(m => split.esteMes[m] ? (
+                <div key={m} style={{ fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtMontoFace(split.esteMes[m]!, m)}</div>
+              ) : null)}
+              {!split.esteMes.ARS && !split.esteMes.USD && <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>{resumen.periodo || '—'}</div>}
+            </div>
+            <div style={{ flex: 1, background: 'var(--gf-gray-100)', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>Deuda futura</div>
+              {MONEDAS_ORD.map(m => split.deudaFutura[m] ? (
+                <div key={m} style={{ fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtMontoFace(split.deudaFutura[m]!, m)}</div>
+              ) : null)}
+              {!split.deudaFutura.ARS && !split.deudaFutura.USD && <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>—</div>}
+            </div>
+          </div>
+          {split.nConsumos > 0 && (
+            <button
+              onClick={onVerPreview}
+              style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 13, fontWeight: 700, color: 'var(--color-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              Ver {split.nConsumos} consumo{split.nConsumos !== 1 ? 's' : ''} →
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Sección de tarjetas (embebible en la vista única de carga) ────────────────
 
 interface SeccionTarjetasProps {
@@ -378,6 +471,8 @@ interface SeccionTarjetasProps {
   onPreviewAbierto?: () => void;
 }
 
+const VISIBLES_DEFAULT = 4;
+
 export function SeccionTarjetas({ abrirPreview, onPreviewAbierto }: SeccionTarjetasProps = {}) {
   const { memberId } = useMiembroCtx();
 
@@ -386,6 +481,7 @@ export function SeccionTarjetas({ abrirPreview, onPreviewAbierto }: SeccionTarje
   const [cargando, setCargando] = useState(true);
   const [resumenes, setResumenes] = useState<CardStatement[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [mostrarTodos, setMostrarTodos] = useState(false);
 
   useEffect(() => {
     Promise.all([cargarFamiliaConfig(), cargarSubcategorias()])
@@ -426,17 +522,36 @@ export function SeccionTarjetas({ abrirPreview, onPreviewAbierto }: SeccionTarje
     );
   }
 
+  // F9.56 — período en curso primero (vencimiento más reciente/próximo arriba)
+  const resumenesSorted = [...resumenes].sort((a, b) => {
+    if (!a.fechaVencimiento) return 1;
+    if (!b.fechaVencimiento) return -1;
+    return b.fechaVencimiento.getTime() - a.fechaVencimiento.getTime();
+  });
+  const visibles = mostrarTodos ? resumenesSorted : resumenesSorted.slice(0, VISIBLES_DEFAULT);
+  const hayMas   = resumenesSorted.length > VISIBLES_DEFAULT;
+
   return (
     <section className="rt-seccion">
       <h2 className="rt-subtitulo">Historial — Resúmenes de tarjeta</h2>
       {resumenes.length === 0 ? (
         <p className="rt-vacio">No hay resúmenes cargados.</p>
       ) : (
-        <div className="rt-lista">
-          {resumenes.map(r => (
-            <ResumenCard key={r.id} resumen={r} config={config} onVerPreview={() => setPreviewId(r.id)} />
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {visibles.map(r => (
+              <ResumenFila key={r.id} resumen={r} config={config} onVerPreview={() => setPreviewId(r.id)} />
+            ))}
+          </div>
+          {hayMas && !mostrarTodos && (
+            <button
+              onClick={() => setMostrarTodos(true)}
+              style={{ width: '100%', marginTop: 8, background: 'none', border: '1px solid var(--color-border)', borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 700, color: 'var(--color-text-sec)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              Ver todo ({resumenesSorted.length})
+            </button>
+          )}
+        </>
       )}
     </section>
   );

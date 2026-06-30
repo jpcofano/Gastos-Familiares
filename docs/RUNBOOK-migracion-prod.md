@@ -127,6 +127,18 @@ Con la app de prod abierta (no el emulador), verificar:
   ni de índices faltantes (Dashboard, Resumen, Cargar, Perfil).
 - Checklist de auth real (paso 10) completo.
 
+### F9.53 — Verificación editar/eliminar (admin)
+
+- Perfil → Configuración familiar → "Buscar / editar movimiento" visible solo para admin.
+- BuscarMovimiento carga el mes actual, filtros de texto y persona funcionan.
+- Tap en una fila → EditarMovimiento con datos prellenados.
+- Guardar un cambio pequeño (descripción) → se cierra y el movimiento se actualizó (onSnapshot live).
+- Eliminar un movimiento manual (no de resumen de tarjeta) → se borra, la lista se actualiza.
+- Intentar eliminar un movimiento con `resumenTarjetaId` → la callable devuelve error y el modal muestra el mensaje.
+- Resumen → "Por día" → tap en una card de día → se expande mostrando filas individuales de gastos.
+- Tap en una fila de gasto (admin) → abre EditarMovimiento.
+- Dashboard → "Mov. más alto" → tappable para admin, abre EditarMovimiento con el movimiento correcto.
+
 ## 12. PWA (Etapa C, F9.49) — instalación + share-target
 
 Previo a este paso, una vez, local: `npm install -D sharp && node scripts/gen-pwa-icons.mjs`

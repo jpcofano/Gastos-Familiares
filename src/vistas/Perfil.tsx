@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
@@ -12,6 +12,12 @@ import { Badge, Button } from '../design-system/components';
 import { useTheme, type ThemeMode } from '../datos/theme';
 import { useRecordatorios, contarVencProximos } from './perfil/Notificaciones';
 import './Perfil.css';
+
+// F9.54 — Instalar app: BeforeInstallPromptEvent (Android Chrome) + instructivo iOS
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
 
 // F9.26 — Perfil, contadores cableados a datos reales: config/familia
 // (miembros/categorías/tarjetas), itemsEsperados (real-time), medios.ts
@@ -89,6 +95,31 @@ export default function Perfil() {
   const { recordatorios } = useRecordatorios();
   const vencProximos = contarVencProximos(recordatorios);
 
+  // F9.54 — Instalar app (PWA)
+  const promptRef = useRef<BeforeInstallPromptEvent | null>(null);
+  const [instalable, setInstalable] = useState(false);
+  const eaStandalone = window.matchMedia('(display-mode: standalone)').matches;
+  const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const mostrarInstalar = !eaStandalone && (instalable || esIOS);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      promptRef.current = e as BeforeInstallPromptEvent;
+      setInstalable(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstalar = async () => {
+    if (promptRef.current) {
+      await promptRef.current.prompt();
+      const { outcome } = await promptRef.current.userChoice;
+      if (outcome === 'accepted') { promptRef.current = null; setInstalable(false); }
+    }
+  };
+
   useEffect(() => {
     if (esAdmin) cargarTCReciente(1).then(h => setTcActual(h[0]?.tcUsdArs ?? null));
   }, [esAdmin]);
@@ -128,7 +159,16 @@ export default function Perfil() {
             </>
           ) : undefined}
         />
+        {mostrarInstalar && (
+          <Item
+            icon="download"
+            title="Instalar app"
+            desc={esIOS ? 'Safari › Compartir → Agregar a inicio' : 'Agregar Gastos al inicio del dispositivo'}
+            onClick={!esIOS ? handleInstalar : undefined}
+          />
+        )}
         <AparienciaRow theme={theme} onChange={setTheme} />
+        <Item icon="pie-chart" title="Gráficos" desc="Paleta de colores para gráficos de categorías" onClick={() => navigate('/perfil/graficos')} last />
       </Group>
 
       {esAdmin && (
@@ -138,7 +178,8 @@ export default function Perfil() {
           <Item icon="tags" title="Categorías" desc={descCategorias} onClick={() => navigate('/perfil/categorias')} />
           <Item icon="wallet" title="Medios de pago" desc={descMedios} onClick={() => navigate('/perfil/medios-pago')} />
           <Item icon="credit-card" title="Tarjetas" desc={descTarjetas} onClick={() => navigate('/perfil/tarjetas')} />
-          <Item icon="repeat" title="Tipo de cambio" desc={descTC} onClick={() => navigate('/perfil/tc')} last />
+          <Item icon="repeat" title="Tipo de cambio" desc={descTC} onClick={() => navigate('/perfil/tc')} />
+          <Item icon="search" title="Buscar / editar movimiento" desc="Corregir subcat, monto, persona…" onClick={() => navigate('/perfil/buscar-movimiento')} last />
         </Group>
       )}
 

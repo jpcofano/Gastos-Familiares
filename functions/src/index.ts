@@ -4,7 +4,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { setGlobalOptions }   from 'firebase-functions/v2';
 import { defineSecret }       from 'firebase-functions/params';
 import { initializeApp, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue, Timestamp, type Firestore, type Query } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue, Timestamp, FieldPath, type Firestore, type Query } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -2247,3 +2247,232 @@ export const guardarTarjeta = onCall(
 
 // F9.43/F9.45/F9.46 — Canal B: recordatorios de vencimiento en Google Calendar.
 export { sincronizarRecordatoriosCalendar, sincronizarCalendarAhora, setCalendarSync } from './calendarSync';
+
+// ── F9.53 — Editar / eliminar movimiento (admin-only) ────────────────────────
+
+// TC server-side: misma lógica que tcParaFecha en src/datos/tcDiario.ts pero
+// vía Admin SDK. Se llama solo cuando moneda o fecha cambian en un movimiento USD.
+async function tcParaFechaAdmin(fecha: Date): Promise<number | null> {
+  const dateStr = fecha.toISOString().slice(0, 10);
+  const exactSnap = await db.collection('tcDiario').doc(dateStr).get();
+  if (exactSnap.exists) return (exactSnap.data()!.tcUsdArs as number) ?? null;
+  const snap = await db.collection('tcDiario')
+    .orderBy(FieldPath.documentId(), 'desc')
+    .startAt(dateStr)
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  const hit = snap.docs[0];
+  return hit.id <= dateStr ? ((hit.data().tcUsdArs as number) ?? null) : null;
+}
+
+// medioCanonico server-side: igual que src/datos/medios.ts pero sin el módulo.
+function medioCanonicoBancos(nombre: string, bancos: Array<{ id: string; nombre: string; aliasDe?: string }>): string {
+  const medio = bancos.find(b => b.nombre === nombre);
+  if (!medio?.aliasDe) return nombre;
+  const destino = bancos.find(b => b.id === medio.aliasDe);
+  return destino?.nombre ?? nombre;
+}
+
+// editarMovimiento — campos editables: descripcion, monto, fecha, tipo, moneda,
+// categoria, subcat, persona, medio.
+// Invariantes forzados: persona=memberId válido o vacío (=familiar); medio→
+// canónico (Efectivo→Mercado Pago); categoria+subcat validados contra taxonomía;
+// TC recomputado si cambia moneda/fecha; mes recomputado si cambia fecha;
+// itemEsperadoId desvinculado si identidad cambia sustancialmente.
+export const editarMovimiento = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { id, cambios } = (request.data ?? {}) as { id?: string; cambios?: Record<string, unknown> };
+    if (!id) throw new HttpsError('invalid-argument', 'id requerido');
+    if (!cambios || typeof cambios !== 'object') throw new HttpsError('invalid-argument', 'cambios requerido');
+
+    const movRef  = db.collection('movimientos').doc(id);
+    const movSnap = await movRef.get();
+    if (!movSnap.exists) throw new HttpsError('not-found', 'Movimiento no encontrado');
+    const mov = movSnap.data()!;
+
+    const configSnap = await db.collection('config').doc('familia').get();
+    if (!configSnap.exists) throw new HttpsError('not-found', 'config/familia no existe');
+    const config = configSnap.data()!;
+    const miembros = (config.miembros ?? {}) as Record<string, { nombre: string; activo: boolean }>;
+    const categorias = (config.categorias ?? []) as Array<{ nombre: string; activo: boolean }>;
+    const bancos = (config.bancos ?? []) as Array<{ id: string; nombre: string; aliasDe?: string }>;
+
+    const update: Record<string, unknown> = {};
+
+    if ('descripcion' in cambios) {
+      const d = cambios.descripcion;
+      if (typeof d !== 'string' || d.trim().length === 0 || d.length > 300)
+        throw new HttpsError('invalid-argument', 'descripcion inválida (1-300 caracteres)');
+      update.descripcion = d.trim();
+    }
+
+    if ('monto' in cambios) {
+      const m = cambios.monto;
+      if (typeof m !== 'number' || !(m > 0))
+        throw new HttpsError('invalid-argument', 'monto debe ser un número positivo');
+      update.monto = m;
+    }
+
+    let fechaDate: Date | null = null;
+    if ('fecha' in cambios) {
+      const f = cambios.fecha;
+      if (typeof f === 'number' && Number.isFinite(f)) {
+        fechaDate = new Date(f);
+      } else if (typeof f === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(f)) {
+        fechaDate = new Date(f + 'T12:00:00');
+      } else {
+        throw new HttpsError('invalid-argument', 'fecha inválida (YYYY-MM-DD o ms)');
+      }
+      update.fecha = Timestamp.fromDate(fechaDate);
+      update.mes   = `${fechaDate.getFullYear()}-${String(fechaDate.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    if ('tipo' in cambios) {
+      const t = cambios.tipo;
+      if (t !== 'Gasto' && t !== 'Ingreso') throw new HttpsError('invalid-argument', 'tipo debe ser Gasto o Ingreso');
+      update.tipo = t;
+    }
+
+    let monedaFinal: 'ARS' | 'USD' = (mov.moneda as 'ARS' | 'USD') ?? 'ARS';
+    if ('moneda' in cambios) {
+      const m = cambios.moneda;
+      if (m !== 'ARS' && m !== 'USD') throw new HttpsError('invalid-argument', 'moneda debe ser ARS o USD');
+      monedaFinal = m;
+      update.moneda = m;
+    }
+
+    if ('moneda' in cambios || 'fecha' in cambios) {
+      const fechaParaTC = fechaDate ?? (mov.fecha as FirebaseFirestore.Timestamp)?.toDate() ?? new Date();
+      if (monedaFinal === 'USD') {
+        update.tcUsdArs = await tcParaFechaAdmin(fechaParaTC);
+      } else {
+        update.tcUsdArs = null;
+      }
+    }
+
+    // categoria → valida contra taxonomía activa; al cambiar se limpia subcat
+    if ('categoria' in cambios) {
+      const c = cambios.categoria;
+      if (c === null || c === undefined || c === '') {
+        update.categoria   = null;
+        update.subcategoria = null;
+      } else {
+        if (typeof c !== 'string') throw new HttpsError('invalid-argument', 'categoria inválida');
+        const catActiva = categorias.find(x => x.nombre === c && x.activo);
+        if (!catActiva) throw new HttpsError('invalid-argument', `Categoría "${c}" no existe o está inactiva`);
+        update.categoria   = c;
+        update.subcategoria = null; // se repone abajo si viene subcat válida
+      }
+    }
+
+    // subcat → valida contra subcategorias/{categoriaPadre} activas
+    if ('subcat' in cambios) {
+      const s = cambios.subcat;
+      if (s === null || s === undefined || s === '') {
+        update.subcategoria = null;
+      } else {
+        if (typeof s !== 'string') throw new HttpsError('invalid-argument', 'subcat inválida');
+        const catPadre = ('categoria' in cambios ? cambios.categoria : mov.categoria) as string | null;
+        if (catPadre) {
+          const subcatSnap = await db.collection('subcategorias')
+            .where('categoriaPadre', '==', catPadre)
+            .where('valor', '==', s)
+            .where('activo', '==', true)
+            .limit(1)
+            .get();
+          update.subcategoria = subcatSnap.empty ? null : s;
+        } else {
+          update.subcategoria = null;
+        }
+      }
+    }
+
+    if ('persona' in cambios) {
+      const p = cambios.persona;
+      if (p === null || p === undefined || p === '') {
+        update.persona = null;
+      } else {
+        if (typeof p !== 'string') throw new HttpsError('invalid-argument', 'persona inválida');
+        if (!miembros[p]) throw new HttpsError('invalid-argument', `persona "${p}" no es un memberId válido`);
+        update.persona = p;
+      }
+    }
+
+    if ('medio' in cambios) {
+      const m = cambios.medio;
+      if (m === null || m === undefined || m === '') {
+        update.banco = null;
+      } else {
+        if (typeof m !== 'string') throw new HttpsError('invalid-argument', 'medio inválido');
+        update.banco = medioCanonicoBancos(m, bancos);
+      }
+    }
+
+    // itemEsperadoId: desvincular si identidad cambia sustancialmente
+    const itemActual = (mov.itemEsperadoId as string | null) ?? null;
+    if (itemActual) {
+      const personaCambio = 'persona' in cambios && update.persona !== (mov.persona ?? null);
+      const catCambio     = 'categoria' in cambios && update.categoria !== (mov.categoria ?? null);
+      const montoNuevo    = ('monto' in cambios ? update.monto as number : (mov.monto as number)) ?? 0;
+      const montoViejo    = (mov.monto as number) ?? 0;
+      const fueraDeTol    = montoViejo > 0 && Math.abs(montoNuevo - montoViejo) / montoViejo > 0.10;
+      if (personaCambio || catCambio || fueraDeTol) {
+        update.itemEsperadoId = null;
+      }
+    }
+
+    if (Object.keys(update).length === 0) return { ok: true };
+
+    update.actualizadoEn = FieldValue.serverTimestamp();
+    await movRef.update(update);
+
+    console.log(`[editarMovimiento] ${id} — campos: ${Object.keys(update).join(', ')} (por ${email})`);
+    return { ok: true };
+  },
+);
+
+// eliminarMovimiento — borra el doc. Guardrail: bloquea si el movimiento es un
+// pago de tarjeta consolidado (resumenTarjetaId != null o excluirDash=true) —
+// borrarlo descuadra la conciliación de resúmenes.
+export const eliminarMovimiento = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { id } = (request.data ?? {}) as { id?: string };
+    if (!id) throw new HttpsError('invalid-argument', 'id requerido');
+
+    const movRef  = db.collection('movimientos').doc(id);
+    const movSnap = await movRef.get();
+    if (!movSnap.exists) throw new HttpsError('not-found', 'Movimiento no encontrado');
+    const mov = movSnap.data()!;
+
+    if (mov.resumenTarjetaId || mov.excluirDash === true) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Este movimiento está vinculado a un resumen de tarjeta y no se puede borrar acá. ' +
+        'Para eliminarlo, descartá el resumen de tarjeta desde la sección Comprobantes.',
+      );
+    }
+
+    await movRef.delete();
+    console.log(`[eliminarMovimiento] ${id} eliminado (por ${email})`);
+    return { ok: true };
+  },
+);

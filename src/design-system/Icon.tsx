@@ -5,6 +5,7 @@ import {
   Bell, Palette, Tags, Wallet, Repeat, LogOut,
   Receipt, BarChart3, Tag, TrendingUp, Share2, AlertCircle, Moon, Sun, Layers,
   Store, FileText, GitCompare, List, CalendarCheck, Clock,
+  Search, Trash2, Pencil, Download,
   type LucideProps,
 } from 'lucide-react';
 
@@ -53,6 +54,10 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   list: List,
   'calendar-check': CalendarCheck,
   clock: Clock,
+  search: Search,
+  'trash-2': Trash2,
+  pencil: Pencil,
+  download: Download,
 };
 
 interface IconProps {

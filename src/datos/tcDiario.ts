@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, where, orderBy, limit, documentId } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, orderBy, limit, documentId, startAt } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export async function tcParaFecha(fecha: Date): Promise<number | null> {
@@ -7,16 +7,21 @@ export async function tcParaFecha(fecha: Date): Promise<number | null> {
   const exactSnap = await getDoc(doc(db, 'tcDiario', dateStr));
   if (exactSnap.exists()) return (exactSnap.data().tcUsdArs as number) ?? null;
 
-  // Tomar el TC más reciente anterior a la fecha (mismo comportamiento que tcForDate del seed)
+  // TC más reciente ≤ fecha: desc + startAt(dateStr) evita el where(documentId()) que
+  // requería un índice compuesto en Firestore. startAt en desc order incluye dateStr y
+  // todos los IDs menores (fechas anteriores), por lo que el primer resultado es el
+  // día exacto o el más reciente anterior.
   const snap = await getDocs(
     query(
       collection(db, 'tcDiario'),
-      where(documentId(), '<=', dateStr),
       orderBy(documentId(), 'desc'),
+      startAt(dateStr),
       limit(1),
     ),
   );
-  return snap.empty ? null : ((snap.docs[0].data().tcUsdArs as number) ?? null);
+  if (snap.empty) return null;
+  const hit = snap.docs[0];
+  return hit.id <= dateStr ? ((hit.data().tcUsdArs as number) ?? null) : null;
 }
 
 export interface TCDiarioItem {

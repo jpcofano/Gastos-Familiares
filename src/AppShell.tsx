@@ -18,6 +18,8 @@ import Categorias from './vistas/perfil/Categorias';
 import MediosPago from './vistas/perfil/MediosPago';
 import TipoCambio from './vistas/perfil/TipoCambio';
 import TarjetasConfig from './vistas/perfil/Tarjetas';
+import BuscarMovimiento from './vistas/perfil/BuscarMovimiento';
+import GraficosConfig from './vistas/perfil/GraficosConfig';
 import TarjetasViewer from './vistas/TarjetasViewer';
 import { Icon } from './design-system/Icon';
 
@@ -29,13 +31,15 @@ const NAV_ITEMS: BottomNavItem[] = [
 ];
 
 const TITULOS_PERFIL_SUB: Record<string, string> = {
-  '/perfil/mis-datos':     'Mis datos',
-  '/perfil/notificaciones': 'Notificaciones',
-  '/perfil/miembros':    'Miembros',
-  '/perfil/categorias':  'Categorías',
-  '/perfil/medios-pago': 'Medios de pago',
-  '/perfil/tc':          'Tipo de cambio',
-  '/perfil/tarjetas':    'Tarjetas',
+  '/perfil/mis-datos':        'Mis datos',
+  '/perfil/notificaciones':   'Notificaciones',
+  '/perfil/graficos':         'Gráficos',
+  '/perfil/miembros':         'Miembros',
+  '/perfil/categorias':       'Categorías',
+  '/perfil/medios-pago':      'Medios de pago',
+  '/perfil/tc':               'Tipo de cambio',
+  '/perfil/tarjetas':         'Tarjetas',
+  '/perfil/buscar-movimiento':'Buscar movimiento',
 };
 
 function tituloDeRuta(pathname: string, nombre: string): { title: string; sub?: string } {
@@ -133,11 +137,13 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
           <Route path="/perfil" element={<Perfil />} />
           <Route path="/perfil/mis-datos" element={<MisDatos />} />
           <Route path="/perfil/notificaciones" element={<Notificaciones />} />
+          <Route path="/perfil/graficos" element={<GraficosConfig />} />
           {esAdmin && <Route path="/perfil/miembros" element={<Miembros />} />}
           {esAdmin && <Route path="/perfil/categorias" element={<Categorias />} />}
           {esAdmin && <Route path="/perfil/medios-pago" element={<MediosPago />} />}
           {esAdmin && <Route path="/perfil/tc" element={<TipoCambio />} />}
           {esAdmin && <Route path="/perfil/tarjetas" element={<TarjetasConfig />} />}
+          {esAdmin && <Route path="/perfil/buscar-movimiento" element={<BuscarMovimiento />} />}
           <Route path="/tarjetas" element={<TarjetasViewer />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

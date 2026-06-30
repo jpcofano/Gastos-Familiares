@@ -7,6 +7,9 @@ import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useMovimientosDelAnio } from '../hooks/useMovimientosDelAnio';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
 import { agregarMensual, agregarAnual, mesAnterior, type DashMensual, type DashAnual } from '../datos/agregados';
+import { CHART_PALETTES, usePaletaIdx } from '../datos/graficosPrefs';
+import EditarMovimiento from './EditarMovimiento';
+import type { Movement } from '../types';
 import './Dashboard.css';
 
 // F9.26 — Dashboard cableado a datos reales (movimientos + config/familia),
@@ -45,14 +48,123 @@ function Kpi({ icon, eyebrow, value, sub, accent }: { icon?: string; eyebrow: Re
   );
 }
 
+// ── Gráficos de categoría ─────────────────────────────────────────────────────
+
+type CatSlice = { nombre: string; color: string; pct: number; count: number; usd: number };
+
+// F9.55 — Dona: top-4 + "Otras" con conic-gradient CSS.
+function DonaChart({ cats }: { cats: CatSlice[] }) {
+  const top4 = cats.slice(0, 4);
+  const resto = cats.slice(4);
+  let cumPct = 0;
+  const segs = top4.map(c => { const from = cumPct; cumPct += c.pct; return { ...c, from, to: cumPct }; });
+  const restoPct = Math.max(0, 100 - cumPct);
+  const gradParts = [
+    ...segs.map(s => `${s.color} ${s.from.toFixed(1)}% ${s.to.toFixed(1)}%`),
+    ...(restoPct > 0 ? [`var(--gf-gray-150) ${cumPct.toFixed(1)}% 100%`] : []),
+  ];
+  const top4Pct = top4.reduce((s, c) => s + c.pct, 0);
+  return (
+    <div style={{ display: 'flex', gap: 14, alignItems: 'center', paddingTop: 10 }}>
+      <div style={{ position: 'relative', width: 116, height: 116, flexShrink: 0 }}>
+        <div style={{ width: 116, height: 116, borderRadius: '50%', background: `conic-gradient(from 0deg, ${gradParts.join(', ')})` }} />
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 72, height: 72, borderRadius: '50%', background: 'var(--color-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 17, fontWeight: 800 }}>{top4Pct}%</div>
+          <div style={{ fontSize: 9, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.3px' }}>Top 4</div>
+        </div>
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {top4.map(c => (
+          <div key={c.nombre} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: c.color, flexShrink: 0 }} />
+            <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nombre}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{c.pct}%</span>
+          </div>
+        ))}
+        {resto.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--gf-gray-150)', flexShrink: 0 }} />
+            <span style={{ fontSize: 12, flex: 1 }}>Otras ({resto.length})</span>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>{restoPct}%</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// F9.55 — Treemap con binary-split recursivo. Coordenadas 0-100 (x,w) × 0-60 (y,h),
+// renderizado con paddingBottom:60% para mantener relación de aspecto 5:3 sin refs.
+type TmRect = { x: number; y: number; w: number; h: number };
+function tmLayout(items: CatSlice[], b: TmRect = { x: 0, y: 0, w: 100, h: 60 }): (CatSlice & TmRect)[] {
+  if (items.length === 0) return [];
+  if (items.length === 1) return [{ ...items[0], ...b }];
+  const total = items.reduce((s, i) => s + i.usd, 0);
+  let sum = 0; let splitIdx = 1;
+  for (let i = 0; i < items.length - 1; i++) {
+    sum += items[i].usd;
+    if (sum >= total / 2) { splitIdx = i + 1; break; }
+  }
+  const g1 = items.slice(0, splitIdx), g2 = items.slice(splitIdx);
+  const g1Frac = g1.reduce((s, i) => s + i.usd, 0) / total;
+  const horiz = b.w >= b.h;
+  const b1 = horiz ? { x: b.x, y: b.y, w: b.w * g1Frac, h: b.h } : { x: b.x, y: b.y, w: b.w, h: b.h * g1Frac };
+  const b2 = horiz ? { x: b.x + b.w * g1Frac, y: b.y, w: b.w * (1 - g1Frac), h: b.h } : { x: b.x, y: b.y + b.h * g1Frac, w: b.w, h: b.h * (1 - g1Frac) };
+  return [...tmLayout(g1, b1), ...tmLayout(g2, b2)];
+}
+
+function TreemapChart({ cats }: { cats: CatSlice[] }) {
+  const items = cats.filter(c => c.usd > 0);
+  const rects = tmLayout(items);
+  return (
+    <div style={{ position: 'relative', paddingBottom: '60%', borderRadius: 8, overflow: 'hidden', marginTop: 10 }}>
+      <div style={{ position: 'absolute', inset: 0 }}>
+        {rects.map(r => {
+          const large = r.w > 25 && r.h > 20;
+          const medium = (r.w > 15 || r.h > 14) && !large;
+          return (
+            <div key={r.nombre} title={`${r.nombre}: ${r.pct}%`} style={{
+              position: 'absolute',
+              left: r.x + '%', top: (r.y / 60 * 100) + '%',
+              width: r.w + '%', height: (r.h / 60 * 100) + '%',
+              background: r.color, border: '1.5px solid var(--color-surface)', boxSizing: 'border-box',
+              display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+              padding: large ? '4px 6px' : 0, overflow: 'hidden',
+            }}>
+              {large && (
+                <>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#fff', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nombre}</div>
+                  <div style={{ fontSize: 10, color: 'rgba(255,255,255,.75)' }}>{r.pct}%</div>
+                </>
+              )}
+              {medium && <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,.85)', padding: 2 }}>{r.pct}%</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Mensual ───────────────────────────────────────────────────────────────────
 
-function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
+function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: DashMensual; cur: Moneda; movsMes: Movement[]; esAdmin: boolean; onEditar: (m: Movement) => void; paleta: string[] }) {
   const tc = d.tc;
   const [compartirInfo, setCompartirInfo] = useState(false);
-  // F9.16 — top 6 + "Otras" (agrupa el resto), misma lista para la barra apilada y el ranking
-  const catTop6 = d.categorias.slice(0, 6);
-  const catResto = d.categorias.slice(6);
+  // F9.55 — tipo de gráfico persiste en localStorage
+  const [tipoGrafico, setTipoGraficoState] = useState<'lista' | 'dona' | 'treemap'>(() =>
+    (localStorage.getItem('gf-chart-tipo') as 'lista' | 'dona' | 'treemap' | null) ?? 'lista'
+  );
+  const setTipoGrafico = (t: 'lista' | 'dona' | 'treemap') => {
+    setTipoGraficoState(t);
+    localStorage.setItem('gf-chart-tipo', t);
+  };
+  // F9.55 — colores por rango de gasto (índice 0 = mayor gasto), no por hash del nombre
+  const catTopAll: CatSlice[] = d.categorias.map((c, i) => ({
+    ...c, color: i < paleta.length ? paleta[i] : 'var(--gf-gray-300)',
+  }));
+  const catTop6 = catTopAll.slice(0, 6);
+  const catResto = catTopAll.slice(6);
   const catOtras = catResto.length > 0
     ? { nombre: 'Otras', color: 'var(--gf-gray-300)', pct: catResto.reduce((s, c) => s + c.pct, 0), count: catResto.reduce((s, c) => s + c.count, 0), usd: catResto.reduce((s, c) => s + c.usd, 0) }
     : null;
@@ -100,36 +212,78 @@ function DashboardMensual({ d, cur }: { d: DashMensual; cur: Moneda }) {
           </div>
         ))}
       </Card>
-      <Card variant="flat" padding="var(--space-3)">
-        <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
-        <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
-      </Card>
-
-      {/* Por categoría — donut + lista */}
-      <Card padding="var(--space-4)">
-        <div style={{ fontSize: 16, fontWeight: 800 }}>Por categoría</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>este mes</div>
-        <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', marginBottom: 14 }}>
-          {catLista.map(c => (
-            <div key={c.nombre} style={{ width: `${c.pct}%`, background: c.color }} title={`${c.nombre} · ${c.pct}%`} />
-          ))}
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-          {catLista.map(c => (
-            <div key={c.nombre}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
-                <span style={{ fontWeight: 600 }}>{c.nombre}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{c.count}</span>
-                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
-              </div>
-              <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${c.pct}%`, background: c.color, borderRadius: 3 }} />
-              </div>
+      {esAdmin && d.movMasAlto.id ? (
+        <button
+          onClick={() => { const m = movsMes.find(x => x.id === d.movMasAlto.id); if (m) onEditar(m); }}
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }}
+        >
+          <Card variant="flat" padding="var(--space-3)">
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+              <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
+              <Icon name="pencil" size={12} color="var(--gf-gray-300)" />
             </div>
-          ))}
+            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
+          </Card>
+        </button>
+      ) : (
+        <Card variant="flat" padding="var(--space-3)">
+          <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
+          <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
+        </Card>
+      )}
+
+      {/* Por categoría — F9.55: selector Lista / Dona / Treemap + paleta por rango */}
+      <Card padding="var(--space-4)">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800 }}>Por categoría</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>este mes</div>
+          </div>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--gf-gray-100)', borderRadius: 8, padding: 2, flexShrink: 0 }}>
+            {(['lista', 'dona', 'treemap'] as const).map(t => {
+              const on = tipoGrafico === t;
+              const iconName = t === 'lista' ? 'list' : t === 'dona' ? 'pie-chart' : 'layout-grid';
+              return (
+                <button key={t} onClick={() => setTipoGrafico(t)} title={t} style={{
+                  padding: '5px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                  background: on ? 'var(--color-surface)' : 'transparent',
+                  boxShadow: on ? 'var(--shadow-sm)' : 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <Icon name={iconName} size={14} color={on ? 'var(--color-text)' : 'var(--gf-gray-300)'} />
+                </button>
+              );
+            })}
+          </div>
         </div>
+        {tipoGrafico === 'lista' && (
+          <>
+            <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', margin: '12px 0 14px' }}>
+              {catLista.map(c => (
+                <div key={c.nombre} style={{ width: `${c.pct}%`, background: c.color }} title={`${c.nombre} · ${c.pct}%`} />
+              ))}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              {catLista.map(c => (
+                <div key={c.nombre}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{c.count}</span>
+                    <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+                  </div>
+                  <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${c.pct}%`, background: c.color, borderRadius: 3 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {tipoGrafico === 'dona' && <DonaChart cats={catLista} />}
+        {tipoGrafico === 'treemap' && <TreemapChart cats={catLista} />}
       </Card>
 
       {/* Top subcategorías */}
@@ -414,6 +568,9 @@ export default function Dashboard() {
   const [sec, setSec] = useState<'mensual' | 'anual'>('mensual');
   const [cur, setCur] = useState<Moneda>('USD');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [editandoMovimiento, setEditandoMovimiento] = useState<Movement | null>(null);
+  const [paletaIdx] = usePaletaIdx();
+  const paleta = CHART_PALETTES[paletaIdx].colores;
 
   const { config } = useFamiliaConfig();
   const { movimientos: movsMes,     cargando: cargandoMes }    = useMovimientosDelMes(mes, persona);
@@ -487,12 +644,21 @@ export default function Dashboard() {
         onPick={onPeriodoPick}
       />
 
+      {editandoMovimiento && (
+        <EditarMovimiento
+          movimiento={editandoMovimiento}
+          onGuardado={() => setEditandoMovimiento(null)}
+          onEliminado={() => setEditandoMovimiento(null)}
+          onCancelar={() => setEditandoMovimiento(null)}
+        />
+      )}
+
       {cargandoSec ? (
         <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Cargando…</p>
       ) : sec === 'mensual' ? (
         dashMensual.movimientos === 0
           ? <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Sin movimientos en {periodoLabel}.</p>
-          : <DashboardMensual d={dashMensual} cur={cur} />
+          : <DashboardMensual d={dashMensual} cur={cur} movsMes={movsMes} esAdmin={esAdmin} onEditar={setEditandoMovimiento} paleta={paleta} />
       ) : (
         dashAnual.mesesConDatos === 0
           ? <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Sin movimientos en {anio}.</p>

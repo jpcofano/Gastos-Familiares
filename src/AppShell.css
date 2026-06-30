@@ -23,11 +23,15 @@ body {
   font-weight: 700;
 }
 
-/* Layout autenticado — shell móvil F9.2: AppBar + Screen scrolleable + BottomNav fijo */
+/* Layout autenticado — shell móvil F9.2: AppBar + Screen scrolleable + BottomNav fijo.
+   height:100dvh (no min-height) hace que el shell sea exactamente el viewport;
+   Screen tiene min-height:0 (ver Screen.tsx) para que el contenido scrollee
+   internamente sin empujar AppBar ni BottomNav. */
 .shell-phone {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--color-bg, #f5f5f5);
 }
 

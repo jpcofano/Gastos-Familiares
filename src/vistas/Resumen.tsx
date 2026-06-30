@@ -6,15 +6,23 @@ import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
 import { confirmarPagoEsperado, desmarcarPago } from '../datos/movimientos';
 import { Icon } from '../design-system/Icon';
-import { Card, Money, StatusBadge, Badge, Button, type EstadoChecklist } from '../design-system/components';
+import { Card, Money, StatusBadge, Badge, Button, BankLogo, type EstadoChecklist } from '../design-system/components';
 import { fmtMoney } from '../datos/money';
-import { medioCanonico, colorMedio } from '../datos/medios';
+import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
 import { calcularChecklist, cubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
-import type { Movement, ExpectedItem, FamiliaConfig } from '../types';
+import EditarMovimiento from './EditarMovimiento';
+import type { Movement, ExpectedItem, FamiliaConfig, MedioPago } from '../types';
 import './Resumen.css';
 
 type Moneda = 'ARS' | 'USD';
+
+// Lookup banco por nombre (aplicando medioCanonico) para obtener id/color/dominio
+function bancoDeNombre(nombre: string, bancos?: MedioPago[]): MedioPago | undefined {
+  const lista = bancos ?? MEDIOS_FALLBACK;
+  const canonico = medioCanonico(nombre, lista);
+  return lista.find(b => b.nombre === canonico);
+}
 
 // F9.26 — Resumen cableado a datos reales. "Por día" = caja del mes
 // (incluirResumenMes=true, paridad legacy 50_ResumenMes.gs). "Gastos Fijos" =
@@ -109,28 +117,18 @@ function porPersonaIngreso(movs: Movement[]): [string, number][] {
 
 // ── KPI block (compartido entre secciones) ───────────────────────────────────
 
-function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
+// F9.55 — "Pesos disponibles" = ingresos ARS del mes (fijo en ARS, sin toggle).
+// "Falta cubrir (USD)" = (Σ esperadosArsEq − pesosDisp) / tc:
+//   > 0 → rojo (falta plata); ≤ 0 → verde "Cubierto".
+// Estas dos tarjetas NO dependen del toggle ARS/USD — siempre muestran su moneda fija.
+function KpiCards({ c, cur, faltaCubrirUsd }: { c: Kpis; cur: Moneda; faltaCubrirUsd: number }) {
   const netBig = cur === 'ARS' ? c.netArsEq : c.netUsdEq;
   const netSmall = cur === 'ARS' ? c.netUsdEq : c.netArsEq;
   const fmtBig = cur === 'ARS' ? fmtArs : fmtUsdEq;
   const fmtSmall = cur === 'ARS' ? fmtUsdEq : fmtArs;
   const ingBig = cur === 'ARS' ? c.ingArsEq : c.ingUsdEq;
   const gasBig = cur === 'ARS' ? c.gasArsEq : c.gasUsdEq;
-  // Disponible (ARS) y Resultado (USD) son magnitudes distintas, no equivalentes entre sí
-  // (no hay conversión válida una a la otra) — "invertir" en USD reordena cuál va primero,
-  // no convierte cifras.
-  const cardDisponible = (
-    <Card eyebrow="Disponible (ARS)" style={{ flex: 1 }}>
-      <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(c.pesosDisp)}</span>
-    </Card>
-  );
-  const cardResultado = (
-    <Card eyebrow="Resultado (USD)" style={{ flex: 1 }}>
-      <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: c.faltanteUsd >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
-        {fmtUsdEq(c.faltanteUsd)}
-      </span>
-    </Card>
-  );
+  const cubierto = faltaCubrirUsd <= 0;
   return (
     <>
       {/* F9.17 — "Neto del mes" como card ink, rima con el hero de Balance del Dashboard */}
@@ -150,7 +148,14 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
-        {cur === 'ARS' ? <>{cardDisponible}{cardResultado}</> : <>{cardResultado}{cardDisponible}</>}
+        <Card eyebrow="Pesos disponibles" style={{ flex: 1 }}>
+          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(c.pesosDisp)}</span>
+        </Card>
+        <Card eyebrow="Falta cubrir (USD)" style={{ flex: 1 }}>
+          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cubierto ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
+            {cubierto ? 'Cubierto' : fmtUsdEq(faltaCubrirUsd)}
+          </span>
+        </Card>
       </div>
     </>
   );
@@ -158,22 +163,56 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
 
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config, cur }: { movs: Movement[]; porRevisar: number; config: FamiliaConfig | null; cur: Moneda }) {
+function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, mes }: {
+  movs: Movement[];
+  porRevisar: number;
+  config: FamiliaConfig | null;
+  cur: Moneda;
+  esAdmin: boolean;
+  onEditarMovimiento?: (mov: Movement) => void;
+  checklist: CheckItem[];
+  mes: string;
+}) {
   const cajaMov = movs.filter(m => m.incluirResumenMes);
   const c = calcularKpis(cajaMov);
   const dias = porDia(cajaMov, config?.bancos);
   const personas = porPersonaIngreso(cajaMov);
   const totalMesEq = dias.reduce((s, d) => s + d.eqArs, 0);
   const hoy = new Date();
-  const movsHoy = cajaMov.filter(m => m.tipo === 'Gasto' && m.fecha.toDateString() === hoy.toDateString());
-  const totalHoy = movsHoy.reduce((s, m) => s + arsEq(m), 0);
   // ARS: como está hoy (ARS principal, USD chico). USD: invertido (USD principal, ARS chico).
   const fmtBig = (ars: number) => cur === 'ARS' ? fmtArs(ars) : fmtMoney(ars, { from: 'ARS', to: 'USD' });
   const fmtSmall = (ars: number) => cur === 'ARS' ? fmtMoney(ars, { from: 'ARS', to: 'USD' }) : fmtArs(ars);
+  const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
+
+  // Card HOY: esperados que vencen hoy (solo para el mes actual)
+  const mesActualHoy = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
+  const esMesActual = mes === mesActualHoy;
+  const hoyItems = esMesActual
+    ? checklist.filter(ci => ci.item.diaVencimiento === hoy.getDate())
+    : [];
+
+  // F9.55 — "Falta cubrir (USD)": Σ esperados ARS-eq del mes ÷ tc − pesosDisp
+  // (cobertura real de la caja contra los compromisos fijos)
+  const esperadosArsEq = checklist.reduce((s, ci) => {
+    const m = ci.item.montoEsperado;
+    if (m == null) return s;
+    return ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
+  }, 0);
+  const faltaCubrirUsd = c.tc > 0 ? (esperadosArsEq - c.pesosDisp) / c.tc : 0;
+
+  // Total de hoy pendiente (ARS eq) para el header de Card HOY
+  const hoyPendienteArsEq = hoyItems
+    .filter(ci => ci.matches.length === 0)
+    .reduce((s, ci) => {
+      const m = ci.item.montoEsperado;
+      if (m == null) return s;
+      return ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
+    }, 0);
+  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(ci => ci.matches.length > 0);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <KpiCards c={c} cur={cur} />
+      <KpiCards c={c} cur={cur} faltaCubrirUsd={faltaCubrirUsd} />
 
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       <Card variant="flat" padding="var(--space-3)" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -183,12 +222,52 @@ function PorDiaSeccion({ movs, porRevisar, config, cur }: { movs: Movement[]; po
       </Card>
 
       <Card variant="flat" padding="var(--space-3)">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
-          <Icon name="calendar" size={13} color="var(--gf-gray-400)" /> Hoy — {hoy.toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit' })}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: hoyItems.length > 0 ? 10 : 4 }}>
+          <Icon name="calendar" size={13} color="var(--gf-gray-400)" />
+          <span style={{ flex: 1 }}>Hoy — {hoy.toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit' })}</span>
+          {hoyItems.length > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: todoPagadoHoy ? 'var(--gf-income)' : 'var(--gf-expense)', textTransform: 'none', letterSpacing: 0 }}>
+              {todoPagadoHoy ? 'Todo pagado' : `$ ${hoyPendienteArsEq.toLocaleString('es-AR', { maximumFractionDigits: 0 })} a pagar`}
+            </span>
+          )}
         </div>
-        <div style={{ fontSize: 13, color: 'var(--color-text-sec)', marginTop: 3 }}>
-          {movsHoy.length === 0 ? 'Sin movimientos para hoy.' : `${movsHoy.length} ${movsHoy.length === 1 ? 'movimiento' : 'movimientos'} · ${fmtArs(totalHoy)}`}
-        </div>
+        {hoyItems.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>
+            {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {hoyItems.map((ci, i) => {
+              const pagado = ci.matches.length > 0;
+              const etiqueta = [ci.item.categoria, ci.item.subcategoria].filter(Boolean).join(' › ') || ci.item.notas || '(sin categoría)';
+              const bancoPago = ci.matches[0]?.banco;
+              const bancoInfo = bancoPago ? bancoDeNombre(bancoPago, config?.bancos) : undefined;
+              return (
+                <div key={ci.item.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0',
+                  borderBottom: i < hoyItems.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
+                }}>
+                  {pagado && bancoInfo ? (
+                    <BankLogo id={bancoInfo.id} nombre={bancoInfo.nombre} color={bancoInfo.color} dominio={bancoInfo.dominio} size={28} radius={7} />
+                  ) : (
+                    <span style={{ width: 28, height: 28, borderRadius: 7, background: pagado ? 'var(--gf-emerald)' : 'var(--gf-gray-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Icon name={pagado ? 'check' : 'clock'} size={14} color={pagado ? '#fff' : 'var(--gf-gray-400)'} />
+                    </span>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiqueta}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
+                      {pagado ? `Conciliado${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}` : 'A pagar'}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, color: pagado ? 'var(--gf-income)' : 'var(--color-text)' }}>
+                    {ci.item.montoEsperado != null ? fmtMoney(ci.item.montoEsperado, { from: ci.item.moneda, to: ci.item.moneda }) : '—'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
 
       {personas.length > 0 && (
@@ -227,29 +306,75 @@ function PorDiaSeccion({ movs, porRevisar, config, cur }: { movs: Movement[]; po
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {dias.map(d => {
-              const isHoy = d.date.toDateString() === hoy.toDateString();
-              const banks = Object.entries(d.banks).sort((a, b) => b[1] - a[1]);
+              const isHoy   = d.date.toDateString() === hoy.toDateString();
+              const banks   = Object.entries(d.banks).sort((a, b) => b[1] - a[1]);
+              const expanded = diasExpandidos.has(d.day);
+              const movsDelDia = cajaMov.filter(m => m.tipo === 'Gasto' && m.fecha.getDate() === d.day && m.fecha.toDateString() === d.date.toDateString());
               return (
                 <Card key={d.day} variant={isHoy ? 'highlight' : 'flat'} padding="var(--space-3)">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button
+                    onClick={() => setDiasExpandidos(prev => { const s = new Set(prev); s.has(d.day) ? s.delete(d.day) : s.add(d.day); return s; })}
+                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+                  >
                     <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
                       <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{d.day}</div>
                       <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', textTransform: 'uppercase' }}>{DIA_ES[d.date.getDay()]}</div>
                     </div>
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                      {banks.map(([b, v]) => (
-                        <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-strong)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '3px 8px' }}>
-                          <span style={{ width: 7, height: 7, borderRadius: 999, background: colorMedio(b, config?.bancos) ?? colorHash(b) }} />
-                          {b} · {fmtBig(v)}
-                        </span>
-                      ))}
+                      {banks.map(([b, v]) => {
+                        const info = bancoDeNombre(b, config?.bancos);
+                        return (
+                          <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-strong)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '3px 8px 3px 4px' }}>
+                            <BankLogo
+                              id={info?.id ?? b}
+                              nombre={info?.nombre ?? b}
+                              color={info?.color ?? (colorMedio(b, config?.bancos) ?? colorHash(b))}
+                              dominio={info?.dominio}
+                              size={17}
+                              radius={999}
+                            />
+                            {b} · {fmtBig(v)}
+                          </span>
+                        );
+                      })}
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(d.eqArs)}</div>
                       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(d.eqArs)}</div>
                     </div>
-                  </div>
+                    <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />
+                  </button>
                   {isHoy && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gf-emerald)', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: 6 }}>Hoy</div>}
+                  {expanded && movsDelDia.length > 0 && (
+                    <div style={{ marginTop: 8, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
+                      {movsDelDia.map((m, i) => (
+                        <button
+                          key={m.id}
+                          onClick={esAdmin ? () => onEditarMovimiento?.(m) : undefined}
+                          disabled={!esAdmin}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0',
+                            borderBottom: i < movsDelDia.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
+                            background: 'none', border: 'none', cursor: esAdmin ? 'pointer' : 'default',
+                            textAlign: 'left', width: '100%', fontFamily: 'var(--font-base)',
+                          }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.descripcion}</div>
+                            {(m.categoria || m.subcategoria) && (
+                              <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
+                                {m.categoria}{m.subcategoria ? ` › ${m.subcategoria}` : ''}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-out)', flexShrink: 0 }}>
+                            {fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                          </div>
+                          {esAdmin && <Icon name="pencil" size={12} color="var(--gf-gray-300)" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </Card>
               );
             })}
@@ -360,8 +485,11 @@ function ResumenVisual() {
   const [mes, setMes] = useState(mesActual);
   const [cur, setCur] = useState<Moneda>('ARS');
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
+  const [editandoMovimiento, setEditandoMovimiento] = useState<Movement | null>(null);
   const tabs: { id: 'dia' | 'fijos'; label: string }[] = [{ id: 'dia', label: 'Por día' }, { id: 'fijos', label: 'Gastos Fijos' }];
 
+  const { miembro } = useMiembroCtx();
+  const esAdmin = miembro.rol === 'admin';
   const { config } = useFamiliaConfig();
   const { movimientos, cargando, error } = useMovimientosDelMes(mes);
   const { items } = useItemsEsperados();
@@ -375,6 +503,17 @@ function ResumenVisual() {
   async function handleDesmarcar(matches: Movement[]) {
     const res = await desmarcarPago(matches);
     if (!res.ok) setErrorAccion(res.error.message);
+  }
+
+  if (editandoMovimiento) {
+    return (
+      <EditarMovimiento
+        movimiento={editandoMovimiento}
+        onGuardado={() => setEditandoMovimiento(null)}
+        onEliminado={() => setEditandoMovimiento(null)}
+        onCancelar={() => setEditandoMovimiento(null)}
+      />
+    );
   }
 
   return (
@@ -424,7 +563,7 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} />
+        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} mes={mes} />
       ) : (
         <GastosFijosSeccion
           checklist={checklist}

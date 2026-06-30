@@ -2,7 +2,8 @@ import {
   collection, getDocs, query, where, addDoc, writeBatch, doc,
   serverTimestamp, Timestamp, type DocumentData,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../firebase';
 import type { Movement, ExpectedItem } from '../types';
 
 export function docAMovimiento(id: string, data: DocumentData): Movement {
@@ -182,6 +183,43 @@ export async function existeNumeroComprobante(numero: string): Promise<boolean> 
     return !snap.empty;
   } catch {
     return false;
+  }
+}
+
+// F9.53 — Callables admin-only para editar/eliminar movimientos.
+// El server valida invariantes (persona=memberId, medio=canónico, cat+subcat
+// contra taxonomía, TC recomputado, mes recomputado, itemEsperadoId desvinculado
+// si identidad cambia). El cliente NO escribe movimientos directamente.
+
+export interface CambiosMovimiento {
+  descripcion?: string;
+  monto?: number;
+  fecha?: string;            // ISO YYYY-MM-DD
+  tipo?: 'Gasto' | 'Ingreso';
+  moneda?: 'ARS' | 'USD';
+  categoria?: string | null;
+  subcat?: string | null;
+  persona?: string | null;   // memberId, null = familiar
+  medio?: string | null;     // nombre del banco; server aplica medioCanonico
+}
+
+export async function llamarEditarMovimiento(id: string, cambios: CambiosMovimiento): Promise<{ ok: boolean; error?: Error }> {
+  try {
+    const fn = httpsCallable(functions, 'editarMovimiento');
+    await fn({ id, cambios });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+export async function llamarEliminarMovimiento(id: string): Promise<{ ok: boolean; error?: Error }> {
+  try {
+    const fn = httpsCallable(functions, 'eliminarMovimiento');
+    await fn({ id });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
 }
 

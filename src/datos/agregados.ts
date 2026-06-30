@@ -71,7 +71,7 @@ export interface DashMensual {
   bancoDominante: string;
   vsMesAnteriorPct: number; vsMesLabel: string; lecturaRapida: string;
   categoriaTop: { nombre: string; pct: number };
-  movMasAlto: { usd: number; desc: string };
+  movMasAlto: { usd: number; desc: string; id: string | null };
   picoDia: { fecha: string; dow: string; usd: number; diaNum: number };
   categorias: CategoriaSlice[];
   subcategorias: SubcategoriaSlice[];
@@ -188,8 +188,8 @@ export function agregarMensual(
   // Mov más alto
   const movMasAltoRaw = [...gastos].sort((a, b) => usdEq(b) - usdEq(a))[0];
   const movMasAlto = movMasAltoRaw
-    ? { usd: usdEq(movMasAltoRaw), desc: `${movMasAltoRaw.descripcion}${movMasAltoRaw.persona ? ' — ' + nombrePersona(movMasAltoRaw.persona, config) : ''}` }
-    : { usd: 0, desc: '—' };
+    ? { usd: usdEq(movMasAltoRaw), desc: `${movMasAltoRaw.descripcion}${movMasAltoRaw.persona ? ' — ' + nombrePersona(movMasAltoRaw.persona, config) : ''}`, id: movMasAltoRaw.id }
+    : { usd: 0, desc: '—', id: null };
 
   // Vs. mes anterior
   const salidasAnteriorUsd = movsMesAnterior.filter(m => !m.excluirDash && m.tipo === 'Gasto').reduce((s, m) => s + usdEq(m), 0);

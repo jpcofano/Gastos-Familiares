@@ -660,18 +660,37 @@ export default function Comprobantes() {
         )}
 
         {/* ── Bandeja de entrada ─────────────────────────────────────────── */}
-        {entrantes.length > 0 && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>Bandeja de entrada</div>
-            <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border-card)', borderRadius: 12, overflow: 'hidden' }}>
-              {entrantes.map((e, i) => (
-                <div key={e.hash} style={{ borderBottom: i < entrantes.length - 1 ? undefined : 'none' }}>
-                  <EntranteCard e={e} esAdmin={esAdmin} />
-                </div>
-              ))}
+        {/* F9.56 — solo visible cuando hay ≥1 ítem pendiente de confirmar.
+            Los ruteados cuyo destino ya está vinculado/confirmado se ocultan:
+            salieron de la bandeja y están en el historial. */}
+        {(() => {
+          const bandejaEntrantes = entrantes.filter(e => {
+            if (e.estado !== 'ruteado') return true;
+            if (!e.destino) return true;
+            if (e.destino.coleccion === 'comprobantes') {
+              const comp = comprobantes.find(c => c.id === e.destino!.id);
+              return !comp || comp.estado !== 'vinculado';
+            }
+            if (e.destino.coleccion === 'resumenesTarjeta') {
+              const res = resumenes.find(r => r.id === e.destino!.id);
+              return !res || res.estado !== 'confirmado';
+            }
+            return true;
+          });
+          if (bandejaEntrantes.length === 0) return null;
+          return (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>Bandeja de entrada</div>
+              <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border-card)', borderRadius: 12, overflow: 'hidden' }}>
+                {bandejaEntrantes.map((e, i) => (
+                  <div key={e.hash} style={{ borderBottom: i < bandejaEntrantes.length - 1 ? undefined : 'none' }}>
+                    <EntranteCard e={e} esAdmin={esAdmin} />
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Lista ──────────────────────────────────────────────────────── */}
         <div>
