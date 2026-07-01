@@ -203,7 +203,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       descripcionOriginal: preload?.descripcionOriginal,
       monto:             montoNum,
       moneda,
-      tcUsdArs:          moneda === 'USD' ? tcUsdArs : null,
+      tcUsdArs:          tcUsdArs,
       categoria,
       subcategoria,
       etiqueta:          etiqueta  || null,
