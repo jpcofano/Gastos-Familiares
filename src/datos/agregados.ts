@@ -22,10 +22,11 @@ export function colorHash(nombre: string): string {
 }
 const colorCategoria = colorHash;
 
-function usdEq(m: Movement): number {
+function usdEq(m: Movement, fallbackTc = 0): number {
   if (m.moneda === 'USD') return m.monto;
-  if (!m.tcUsdArs) return 0;
-  return m.monto / m.tcUsdArs;
+  const tc = m.tcUsdArs ?? fallbackTc;
+  if (!tc) return 0;
+  return m.monto / tc;
 }
 function arsEq(m: Movement): number {
   if (m.moneda === 'ARS') return m.monto;
@@ -146,14 +147,14 @@ export function agregarMensual(
   const gastos = visibles.filter(m => m.tipo === 'Gasto');
   const ingresos = visibles.filter(m => m.tipo === 'Ingreso');
 
-  const ingresosUsd = ingresos.reduce((s, m) => s + usdEq(m), 0);
-  const salidasUsd = gastos.reduce((s, m) => s + usdEq(m), 0);
-  const balanceUsd = ingresosUsd - salidasUsd;
-
-  // TC representativo para el toggle ARS/USD: el más reciente entre los
-  // movimientos del mes (no hay un TC único real — cada mov tiene el suyo).
+  // TC representativo: el más reciente entre los movimientos del mes.
+  // Se calcula primero para usarlo como fallback en movimientos ARS sin tcUsdArs.
   const conTc = visibles.filter(m => m.tcUsdArs).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
   const tc = conTc[0]?.tcUsdArs ?? 1;
+
+  const ingresosUsd = ingresos.reduce((s, m) => s + usdEq(m, tc), 0);
+  const salidasUsd = gastos.reduce((s, m) => s + usdEq(m, tc), 0);
+  const balanceUsd = ingresosUsd - salidasUsd;
 
   const diasConGastoSet = new Set(gastos.map(m => m.fecha.getDate()));
   const [, mNum] = mes.split('-').map(Number);
@@ -162,14 +163,14 @@ export function agregarMensual(
   const esMesActual = mes === `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
   const diasTranscurridos = esMesActual ? hoy.getDate() : diasEnMes;
 
-  const finDeSemanaUsd = gastos.filter(m => [0, 6].includes(m.fecha.getDay())).reduce((s, m) => s + usdEq(m), 0);
+  const finDeSemanaUsd = gastos.filter(m => [0, 6].includes(m.fecha.getDay())).reduce((s, m) => s + usdEq(m, tc), 0);
 
   // Por categoría
   const catMap = new Map<string, { usd: number; count: number }>();
   for (const m of gastos) {
     const cat = m.categoria ?? 'Sin categoría';
     const cur = catMap.get(cat) ?? { usd: 0, count: 0 };
-    cur.usd += usdEq(m); cur.count++;
+    cur.usd += usdEq(m, tc); cur.count++;
     catMap.set(cat, cur);
   }
   const categorias: CategoriaSlice[] = [...catMap.entries()]
@@ -180,7 +181,7 @@ export function agregarMensual(
   const subMap = new Map<string, number>();
   for (const m of gastos) {
     const sub = m.subcategoria ?? 'Sin subcategoría';
-    subMap.set(sub, (subMap.get(sub) ?? 0) + usdEq(m));
+    subMap.set(sub, (subMap.get(sub) ?? 0) + usdEq(m, tc));
   }
   const subcategorias: SubcategoriaSlice[] = [...subMap.entries()]
     .map(([nombre, valor]) => ({ nombre, color: colorCategoria(nombre), valor, pct: salidasUsd > 0 ? Math.round((valor / salidasUsd) * 100) : 0 }))
@@ -191,7 +192,7 @@ export function agregarMensual(
   const descMap = new Map<string, { usd: number; count: number }>();
   for (const m of gastos) {
     const cur = descMap.get(m.descripcion) ?? { usd: 0, count: 0 };
-    cur.usd += usdEq(m); cur.count++;
+    cur.usd += usdEq(m, tc); cur.count++;
     descMap.set(m.descripcion, cur);
   }
   const porDescripcion: DescripcionSlice[] = [...descMap.entries()]
@@ -201,7 +202,7 @@ export function agregarMensual(
 
   // Diaria + pico día
   const diaria = new Array(diasEnMes).fill(0);
-  for (const m of gastos) diaria[m.fecha.getDate() - 1] += usdEq(m);
+  for (const m of gastos) diaria[m.fecha.getDate() - 1] += usdEq(m, tc);
   let picoIdx = 0;
   for (let i = 1; i < diaria.length; i++) if (diaria[i] > diaria[picoIdx]) picoIdx = i;
   const picoDate = new Date(Number(mes.split('-')[0]), mNum - 1, picoIdx + 1);
@@ -211,18 +212,18 @@ export function agregarMensual(
   for (const m of gastos) {
     if (!m.banco) continue;
     const b = medioCanonico(m.banco, config?.bancos);
-    bancoMap.set(b, (bancoMap.get(b) ?? 0) + usdEq(m));
+    bancoMap.set(b, (bancoMap.get(b) ?? 0) + usdEq(m, tc));
   }
   const bancoDominante = [...bancoMap.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
 
   // Mov más alto
-  const movMasAltoRaw = [...gastos].sort((a, b) => usdEq(b) - usdEq(a))[0];
+  const movMasAltoRaw = [...gastos].sort((a, b) => usdEq(b, tc) - usdEq(a, tc))[0];
   const movMasAlto = movMasAltoRaw
-    ? { usd: usdEq(movMasAltoRaw), desc: `${movMasAltoRaw.descripcion}${movMasAltoRaw.persona ? ' — ' + nombrePersona(movMasAltoRaw.persona, config) : ''}`, id: movMasAltoRaw.id }
+    ? { usd: usdEq(movMasAltoRaw, tc), desc: `${movMasAltoRaw.descripcion}${movMasAltoRaw.persona ? ' — ' + nombrePersona(movMasAltoRaw.persona, config) : ''}`, id: movMasAltoRaw.id }
     : { usd: 0, desc: '—', id: null };
 
-  // Vs. mes anterior
-  const salidasAnteriorUsd = movsMesAnterior.filter(m => !m.excluirDash && m.tipo === 'Gasto').reduce((s, m) => s + usdEq(m), 0);
+  // Vs. mes anterior (se usa el mismo TC representativo del mes actual como aproximación)
+  const salidasAnteriorUsd = movsMesAnterior.filter(m => !m.excluirDash && m.tipo === 'Gasto').reduce((s, m) => s + usdEq(m, tc), 0);
   const vsMesAnteriorPct = salidasAnteriorUsd > 0 ? Math.round(((salidasUsd - salidasAnteriorUsd) / salidasAnteriorUsd) * 100) : 0;
   const lecturaRapida = salidasAnteriorUsd === 0 ? 'Sin datos del mes anterior' : vsMesAnteriorPct < 0 ? 'Bajó el gasto' : vsMesAnteriorPct > 0 ? 'Subió el gasto' : 'Gasto estable';
 
@@ -258,13 +259,17 @@ export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: M
   const gastos = visibles.filter(m => m.tipo === 'Gasto');
   const ingresos = visibles.filter(m => m.tipo === 'Ingreso');
 
-  const ingresosUsd = ingresos.reduce((s, m) => s + usdEq(m), 0);
-  const salidasUsd = gastos.reduce((s, m) => s + usdEq(m), 0);
+  // TC representativo del año (más reciente con TC propio), usado como fallback para movs ARS sin TC.
+  const conTc = visibles.filter(m => m.tcUsdArs).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
+  const tc = conTc[0]?.tcUsdArs ?? 0;
+
+  const ingresosUsd = ingresos.reduce((s, m) => s + usdEq(m, tc), 0);
+  const salidasUsd = gastos.reduce((s, m) => s + usdEq(m, tc), 0);
 
   const salidasPorMes = new Array(12).fill(0);
   const ingresosPorMes = new Array(12).fill(0);
-  for (const m of gastos) salidasPorMes[Number(m.mes.split('-')[1]) - 1] += usdEq(m);
-  for (const m of ingresos) ingresosPorMes[Number(m.mes.split('-')[1]) - 1] += usdEq(m);
+  for (const m of gastos) salidasPorMes[Number(m.mes.split('-')[1]) - 1] += usdEq(m, tc);
+  for (const m of ingresos) ingresosPorMes[Number(m.mes.split('-')[1]) - 1] += usdEq(m, tc);
 
   const mesesConDatosIdx = [...new Set(visibles.map(m => Number(m.mes.split('-')[1]) - 1))].sort((a, b) => a - b);
   const mesesConDatos = mesesConDatosIdx.length;
@@ -293,7 +298,7 @@ export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: M
   const { slope: slopeSalidas } = _linreg(salidasReales);
   const tendenciaPct = promedioMensualUsd > 0 ? Math.round((slopeSalidas / promedioMensualUsd) * 100) : 0;
 
-  const salidasAnioAnteriorUsd = movsAnioAnterior.filter(m => !m.excluirDash && m.tipo === 'Gasto').reduce((s, m) => s + usdEq(m), 0);
+  const salidasAnioAnteriorUsd = movsAnioAnterior.filter(m => !m.excluirDash && m.tipo === 'Gasto').reduce((s, m) => s + usdEq(m, tc), 0);
   const comparacionInteranualPct = salidasAnioAnteriorUsd > 0
     ? Math.round(((salidasUsd - salidasAnioAnteriorUsd) / salidasAnioAnteriorUsd) * 100)
     : null;
@@ -307,11 +312,11 @@ export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: M
   const subMap = new Map<string, Map<string, number>>();
   for (const m of gastos) {
     const cat = m.categoria ?? 'Sin categoría';
-    catMap.set(cat, (catMap.get(cat) ?? 0) + usdEq(m));
+    catMap.set(cat, (catMap.get(cat) ?? 0) + usdEq(m, tc));
     const sub = m.subcategoria ?? 'Sin subcategoría';
     if (!subMap.has(cat)) subMap.set(cat, new Map());
     const subs = subMap.get(cat)!;
-    subs.set(sub, (subs.get(sub) ?? 0) + usdEq(m));
+    subs.set(sub, (subs.get(sub) ?? 0) + usdEq(m, tc));
   }
   const categorias: AnualCategoria[] = [...catMap.entries()]
     .map(([nombre, usd]) => {
