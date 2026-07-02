@@ -161,6 +161,17 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   para la selección de payee, que es distinta). Cambios en: `src/vistas/Comprobantes.tsx`,
   `src/vistas/AltaMovimiento.tsx`, `src/datos/movimientos.ts`, `src/datos/comprobantes.ts`,
   `functions/src/index.ts`. Functions requiere `npm run build` + `firebase deploy --only functions`.
+- F8.4 — Cleanup del grupo "Clasificación y aprendizaje": se quitan los placeholders
+  Subcategorías y Etiquetas (ya cubiertos por Perfil › Categorías / F9.38, con
+  `guardarTaxonomia` y cascade a movimientos+diccionario). Componente `Pronto` eliminado
+  (sin uso). Grupo completo: Diccionario (F8.1), Destinos (F8.2), Normalización (F8.3).
+  Desc de Categorías ampliado para descubribilidad. Frontend puro. Deploy: `--only hosting`.
+- F8.3 — Perfil › Normalización: editor admin de `reglasNormalizacion` con preview paso a
+  paso (`normalizar()` puro client-side) y validación de regex server-side. Callable
+  `guardarReglaNormalizacion` (crear/editar/eliminar/reordenar). `activo` ahora REAL:
+  filtro `activo !== false` agregado en `cargarReglasNormalizacion` (server) y
+  `DiccionarioContext` (cliente) — antes ningún lector lo respetaba. Sin cambio de rules.
+  Deploy: `--only functions,hosting`.
 - F8.2 — Perfil › Destinos: editor admin de la colección `destinos`. Rules: read admin,
   write cerrado. Callables `upsertDestino` (crear con `destinoRaw`→normalización server-side /
   editar por `id`; valida FK `itemEsperadoId` contra `itemsEsperados`) y `eliminarDestino`.

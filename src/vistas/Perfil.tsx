@@ -84,10 +84,6 @@ function AparienciaRow({ theme, onChange }: { theme: ThemeMode; onChange: (m: Th
   );
 }
 
-const Pronto = () => (
-  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text-sec)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '2px 8px', letterSpacing: '.3px' }}>PRONTO</span>
-);
-
 export default function Perfil() {
   const { miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
@@ -132,7 +128,7 @@ export default function Perfil() {
   const descMiembros = `${miembrosActivos.length} ${miembrosActivos.length === 1 ? 'persona' : 'personas'} · ${miembrosActivos.filter(m => m.rol === 'admin').length} admin`;
   const itemsActivos = items.filter(i => i.activo).length;
   const descEsperados = `${itemsActivos} ítem${itemsActivos === 1 ? '' : 's'} recurrente${itemsActivos === 1 ? '' : 's'}`;
-  const descCategorias = `${config?.categorias.filter(c => c.activo).length ?? 0} categorías`;
+  const descCategorias = `${config?.categorias.filter(c => c.activo).length ?? 0} categorías · subcategorías y etiquetas`;
   const descMedios = `${mediosVisibles(config?.bancos).length} · bancos y billeteras`;
   const descTarjetas = `${config?.tarjetas.length ?? 0} tarjeta${config?.tarjetas.length === 1 ? '' : 's'} vinculada${config?.tarjetas.length === 1 ? '' : 's'}`;
   const descTC = tcActual != null ? `$ ${tcActual.toLocaleString('es-AR')} / USD` : '—';
@@ -191,9 +187,7 @@ export default function Perfil() {
         <Group title="Clasificación y aprendizaje · admin">
           <Item icon="book-open" title="Diccionario" desc="Reglas de texto → categoría, persona, moneda" onClick={() => navigate('/perfil/diccionario')} />
           <Item icon="store" title="Destinos" desc="Payees aprendidos → ítem esperado" onClick={() => navigate('/perfil/destinos')} />
-          <Item icon="sparkles" title="Normalización" desc="Limpieza previa al matching (prefijos, regex)" right={<Pronto />} />
-          <Item icon="layers" title="Subcategorías" desc="Árbol de subcategorías por categoría" right={<Pronto />} />
-          <Item icon="tag" title="Etiquetas" desc="Etiquetas libres para movimientos" right={<Pronto />} last />
+          <Item icon="sparkles" title="Normalización" desc="Limpieza previa al matching (prefijos, regex)" onClick={() => navigate('/perfil/normalizacion')} last />
         </Group>
       )}
 

@@ -469,6 +469,7 @@ async function cargarReglasNormalizacion(): Promise<NormRule[]> {
   const snap = await db.collection('reglasNormalizacion').get();
   return snap.docs
     .map(d => d.data())
+    .filter(d => d.activo !== false) // F8.3 — soft-disable real
     .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
     .map(d => ({ tipo: d.tipo, patron: d.patron, reemplazo: d.reemplazo ?? '' } as NormRule));
 }
@@ -2479,6 +2480,83 @@ export const eliminarMovimiento = onCall(
     await movRef.delete();
     console.log(`[eliminarMovimiento] ${id} eliminado (por ${email})`);
     return { ok: true };
+  },
+);
+
+// F8.3 — Editor de Normalización: CRUD + reordenar reglas de normalización.
+// Valida regex server-side antes de persistir. activo se filtra en cargarReglasNormalizacion.
+
+export const guardarReglaNormalizacion = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { accion } = (request.data ?? {}) as { accion?: string };
+    if (!['crear', 'editar', 'eliminar', 'reordenar'].includes(accion ?? '')) {
+      throw new HttpsError('invalid-argument', 'accion inválida');
+    }
+    const col = db.collection('reglasNormalizacion');
+
+    if (accion === 'reordenar') {
+      const { ids } = request.data as { ids?: string[] };
+      if (!Array.isArray(ids) || ids.length === 0) throw new HttpsError('invalid-argument', 'ids requerido');
+      const batch = db.batch();
+      ids.forEach((id, i) => batch.set(col.doc(id), { orden: i }, { merge: true }));
+      await batch.commit();
+      console.log(`[guardarReglaNormalizacion] reordenar ${ids.length} (por ${email})`);
+      return { ok: true };
+    }
+
+    if (accion === 'eliminar') {
+      const { id } = request.data as { id?: string };
+      if (!id) throw new HttpsError('invalid-argument', 'id requerido');
+      await col.doc(id).delete();
+      console.log(`[guardarReglaNormalizacion] eliminar ${id} (por ${email})`);
+      return { ok: true };
+    }
+
+    const { id, tipo, patron, reemplazo, activo, notas } = request.data as {
+      id?: string; tipo?: string; patron?: string; reemplazo?: string;
+      activo?: boolean; notas?: string | null;
+    };
+    if (!['prefix', 'suffix', 'replace', 'regex'].includes(tipo ?? '')) {
+      throw new HttpsError('invalid-argument', 'tipo inválido');
+    }
+    if (typeof patron !== 'string' || patron.length === 0) {
+      throw new HttpsError('invalid-argument', 'patron requerido');
+    }
+    if (tipo === 'regex') {
+      try { new RegExp(patron, 'gi'); }
+      catch (e) { throw new HttpsError('invalid-argument', `regex inválido: ${(e as Error).message}`); }
+    }
+
+    const payload: Record<string, unknown> = {
+      tipo, patron,
+      reemplazo: typeof reemplazo === 'string' ? reemplazo : '',
+      activo: activo !== false,
+      notas: notas ?? null,
+    };
+
+    if (accion === 'editar') {
+      if (!id) throw new HttpsError('invalid-argument', 'id requerido para editar');
+      const snap = await col.doc(id).get();
+      if (!snap.exists) throw new HttpsError('not-found', 'Regla no encontrada');
+      await col.doc(id).set(payload, { merge: true });
+      console.log(`[guardarReglaNormalizacion] editar ${id} (por ${email})`);
+      return { ok: true, id };
+    }
+
+    const all = await col.get();
+    const maxOrden = all.docs.reduce((m, d) => Math.max(m, (d.data().orden ?? 0) as number), -1);
+    const ref = await col.add({ ...payload, orden: maxOrden + 1 });
+    console.log(`[guardarReglaNormalizacion] crear ${ref.id} orden=${maxOrden + 1} (por ${email})`);
+    return { ok: true, id: ref.id };
   },
 );
 

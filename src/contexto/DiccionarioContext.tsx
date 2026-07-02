@@ -42,6 +42,7 @@ export function DiccionarioProvider({ children }: { children: ReactNode }) {
         });
         reglasRef.current = reglasSnap.docs
           .map(d => d.data())
+          .filter(d => d.activo !== false) // F8.3 — soft-disable real (espejo del server)
           .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
           .map(d => ({ tipo: d.tipo, patron: d.patron, reemplazo: d.reemplazo ?? '' } satisfies NormRule));
         cacheRef.current.clear();

@@ -22,6 +22,7 @@ import BuscarMovimiento from './vistas/perfil/BuscarMovimiento';
 import GraficosConfig from './vistas/perfil/GraficosConfig';
 import Diccionario from './vistas/perfil/Diccionario';
 import Destinos from './vistas/perfil/Destinos';
+import Normalizacion from './vistas/perfil/Normalizacion';
 import TarjetasViewer from './vistas/TarjetasViewer';
 import { Icon } from './design-system/Icon';
 
@@ -44,6 +45,7 @@ const TITULOS_PERFIL_SUB: Record<string, string> = {
   '/perfil/buscar-movimiento':'Buscar movimiento',
   '/perfil/diccionario':      'Diccionario',
   '/perfil/destinos':         'Destinos',
+  '/perfil/normalizacion':    'Normalización',
 };
 
 function tituloDeRuta(pathname: string, nombre: string): { title: string; sub?: string } {
@@ -151,6 +153,7 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
           {esAdmin && <Route path="/perfil/buscar-movimiento" element={<BuscarMovimiento />} />}
           {esAdmin && <Route path="/perfil/diccionario" element={<Diccionario />} />}
           {esAdmin && <Route path="/perfil/destinos" element={<Destinos />} />}
+          {esAdmin && <Route path="/perfil/normalizacion" element={<Normalizacion />} />}
           <Route path="/tarjetas" element={<TarjetasViewer />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
