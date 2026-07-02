@@ -84,6 +84,10 @@ function AparienciaRow({ theme, onChange }: { theme: ThemeMode; onChange: (m: Th
   );
 }
 
+const Pronto = () => (
+  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--color-text-sec)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '2px 8px', letterSpacing: '.3px' }}>PRONTO</span>
+);
+
 export default function Perfil() {
   const { miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
@@ -180,6 +184,16 @@ export default function Perfil() {
           <Item icon="credit-card" title="Tarjetas" desc={descTarjetas} onClick={() => navigate('/perfil/tarjetas')} />
           <Item icon="repeat" title="Tipo de cambio" desc={descTC} onClick={() => navigate('/perfil/tc')} />
           <Item icon="search" title="Buscar / editar movimiento" desc="Corregir subcat, monto, persona…" onClick={() => navigate('/perfil/buscar-movimiento')} last />
+        </Group>
+      )}
+
+      {esAdmin && (
+        <Group title="Clasificación y aprendizaje · admin">
+          <Item icon="book-open" title="Diccionario" desc="Reglas de texto → categoría, persona, moneda" onClick={() => navigate('/perfil/diccionario')} />
+          <Item icon="store" title="Destinos" desc="Payees aprendidos → ítem esperado" right={<Pronto />} />
+          <Item icon="sparkles" title="Normalización" desc="Limpieza previa al matching (prefijos, regex)" right={<Pronto />} />
+          <Item icon="layers" title="Subcategorías" desc="Árbol de subcategorías por categoría" right={<Pronto />} />
+          <Item icon="tag" title="Etiquetas" desc="Etiquetas libres para movimientos" right={<Pronto />} last />
         </Group>
       )}
 

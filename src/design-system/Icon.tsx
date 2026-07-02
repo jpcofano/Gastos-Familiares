@@ -6,6 +6,7 @@ import {
   Receipt, BarChart3, Tag, TrendingUp, Share2, AlertCircle, Moon, Sun, Layers,
   Store, FileText, GitCompare, List, CalendarCheck, Clock,
   Search, Trash2, Pencil, Download,
+  BookOpen, Sparkles,
   type LucideProps,
 } from 'lucide-react';
 
@@ -58,6 +59,8 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   'trash-2': Trash2,
   pencil: Pencil,
   download: Download,
+  'book-open': BookOpen,
+  sparkles: Sparkles,
 };
 
 interface IconProps {
