@@ -56,7 +56,7 @@ export function mesAnterior(mes: string): string {
 
 // ── Shapes (mismos que consumía Dashboard.tsx con EXAMPLE_DASH/ANUAL) ──────
 
-export interface CategoriaSlice { nombre: string; color: string; pct: number; count: number; usd: number; }
+export interface CategoriaSlice { nombre: string; color: string; pct: number; count: number; usd: number; subs: { nombre: string; usd: number }[]; }
 export interface SubcategoriaSlice { nombre: string; color: string; valor: number; pct: number; }
 export interface DescripcionSlice { desc: string; usd: number; count: number; }
 
@@ -167,14 +167,25 @@ export function agregarMensual(
 
   // Por categoría
   const catMap = new Map<string, { usd: number; count: number }>();
+  const catSubMap = new Map<string, Map<string, number>>();
   for (const m of gastos) {
     const cat = m.categoria ?? 'Sin categoría';
     const cur = catMap.get(cat) ?? { usd: 0, count: 0 };
     cur.usd += usdEq(m, tc); cur.count++;
     catMap.set(cat, cur);
+    const sub = m.subcategoria ?? 'Sin subcategoría';
+    if (!catSubMap.has(cat)) catSubMap.set(cat, new Map());
+    const csubs = catSubMap.get(cat)!;
+    csubs.set(sub, (csubs.get(sub) ?? 0) + usdEq(m, tc));
   }
   const categorias: CategoriaSlice[] = [...catMap.entries()]
-    .map(([nombre, c]) => ({ nombre, color: colorCategoria(nombre), usd: c.usd, count: c.count, pct: salidasUsd > 0 ? Math.round((c.usd / salidasUsd) * 100) : 0 }))
+    .map(([nombre, c]) => ({
+      nombre, color: colorCategoria(nombre), usd: c.usd, count: c.count,
+      pct: salidasUsd > 0 ? Math.round((c.usd / salidasUsd) * 100) : 0,
+      subs: [...(catSubMap.get(nombre) ?? new Map()).entries()]
+        .map(([snombre, susd]) => ({ nombre: snombre, usd: susd }))
+        .sort((a, b) => b.usd - a.usd),
+    }))
     .sort((a, b) => b.usd - a.usd);
 
   // Por subcategoría (top 5)
@@ -318,10 +329,11 @@ export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: M
     const subs = subMap.get(cat)!;
     subs.set(sub, (subs.get(sub) ?? 0) + usdEq(m, tc));
   }
+  const totalCatUsd = [...catMap.values()].reduce((s, v) => s + v, 0);
   const categorias: AnualCategoria[] = [...catMap.entries()]
     .map(([nombre, usd]) => {
       const subs = [...(subMap.get(nombre) ?? new Map()).entries()]
-        .map(([snombre, susd]) => ({ nombre: snombre, usd: susd, pct: usd > 0 ? Math.round((susd / usd) * 100) : 0 }))
+        .map(([snombre, susd]) => ({ nombre: snombre, usd: susd, pct: totalCatUsd > 0 ? Math.round((susd / totalCatUsd) * 100) : 0 }))
         .sort((a, b) => b.usd - a.usd);
       return { nombre, color: colorCategoria(nombre), usd, subcategorias: subs };
     })

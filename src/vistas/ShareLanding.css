@@ -1,7 +1,5 @@
-/* F9.51 — animaciones del landing de share-target (porteadas del kit
-   ui_kits/mobile/ShareLanding.jsx, que las asume globales desde su demo
-   shell). No existen en ningún otro CSS del repo — viven acá porque
-   ShareLanding es el único consumidor real. */
+/* F9.51 — animaciones del landing de share-target.
+   F9.66 — gfRing/gfScan actualizados + gfShimmer/gfFloat nuevos. */
 
 @keyframes gfRiseIn {
   from { opacity: 0; transform: translateY(4px); }
@@ -9,17 +7,29 @@
 }
 
 @keyframes gfRing {
-  0%   { transform: scale(0.85); opacity: .6; }
-  70%  { transform: scale(1.15); opacity: 0; }
-  100% { transform: scale(1.15); opacity: 0; }
+  0%   { transform: scale(.8); opacity: .55; }
+  70%  { opacity: 0; }
+  100% { transform: scale(2.1); opacity: 0; }
 }
 
 @keyframes gfScan {
-  0%   { transform: translateY(-10px); }
-  50%  { transform: translateY(100px); }
-  100% { transform: translateY(-10px); }
+  0%   { transform: translateY(-8%); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateY(108%); opacity: 0; }
 }
 
 @keyframes gfSpin {
   to { transform: rotate(360deg); }
+}
+
+/* Esqueleto "cargando" y flote del documento durante la espera. */
+@keyframes gfShimmer {
+  0%, 100% { opacity: .30; }
+  50%      { opacity: .62; }
+}
+
+@keyframes gfFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
 }

@@ -150,6 +150,95 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.73 — Logos de comercios vía Brand Search API (async).
+  **`src/datos/comerciosLogos.ts`** (nuevo): reemplaza el lookup sync de `comerciosDominios.ts` con un resolver
+  async de 3 capas: (a) override curado (`COMERCIOS_DOMINIOS`), (b) Brand Search API (`GET /v2/search/{nombre}?c=CID`,
+  elige best candidate por `verified → claimed → qualityScore`) y (c) null. Guard `pareceComercio()` evita llamadas
+  para personas/transferencias P2P. Dual-cache: `Map<string, string|null>` en memoria + `localStorage` con prefijo
+  `gf-logo:`. **`MerchantLogo`** reescrito: `useEffect` llama `logoDeComercio(nombre)` (async), muestra monograma
+  mientras resuelve o si falla. `comerciosDominios.ts` inalterado. Frontend puro. Deploy: `--only hosting`.
+- F9.72 — Resumen: detalle del día con MerchantLogo.
+  Filas de movimientos en el panel expandible del día (F9.53) ahora muestran `<MerchantLogo nombre={m.descripcion}
+  size={30} radius={8} />` antes del texto. Línea secundaria actualizada: `medioCanonico(m.banco) · m.subcategoria`
+  (antes: `categoria › subcategoria`). Monto del movimiento en su moneda nativa; si USD y hay `tcUsdArs`, muestra
+  ARS-eq debajo (`fmtArs(arsEq(m))`). Import de `MerchantLogo` agregado a `Resumen.tsx`. Frontend puro.
+  Deploy: `--only hosting`.
+- F9.71 — Resumen: "Neto del mes" rediseñado (centrado, 3 valores con eq).
+  `KpiCards` (card oscura ink): `textAlign:center`. Fila superior: eyebrow "Neto del mes", valor grande (`fontSize:34`,
+  fontWeight 800, signo +/−) en la moneda del toggle, eq en la otra moneda debajo (`fontSize:14`). Fila inferior
+  separada por `borderTop`: dos columnas Ingresos (verde `--gf-emerald-100`) y Gastos (rojo `#fca5a5`), divididas
+  por `borderLeft rgba(255,255,255,.12)`; cada columna tiene label eyebrow + valor (`fontSize:19`) + eq (`fontSize:12`).
+  Helpers: `fmt(v)` = moneda toggle, `fmtOtra(v)` = la otra; `ingSmall`/`gasSmall` agregados. Tarjetas de abajo
+  ("Pesos disponibles" / "Falta cubrir") sin cambios. Frontend puro. Deploy: `--only hosting`.
+- F9.70 — Header global: cluster avatar · luna · campana.
+  `AppBar` ya no renderiza `ThemeButton` internamente (`ThemeButton` permanece en el archivo pero no se usa en JSX).
+  `ShellFrame` llama `useTheme()`, `useRecordatorios()`, `contarVencProximos()` y construye `globalRight`:
+  (1) botón "Tarjetas" condicional (solo en `/resumen` + esAdmin); (2) avatar-inicial circular (ink) → navega
+  a `/perfil`; (3) toggle dark/light (ícono sol/luna); (4) campana → `/perfil/notificaciones`, con badge rojo
+  `vencN > 0` (posición `absolute`, `border: 2px solid var(--color-surface)` para halo). `right={globalRight}`
+  se pasa a `AppBar` en todas las pantallas. Frontend puro. Deploy: `--only hosting`.
+- F9.69 — Dashboard Mensual: Top subcategorías reescalado + KPIs centrados + toggle parity.
+  **Top subcategorías:** barras reescaladas al máximo real de la lista (`maxSubVal = max(s.valor)`, ancho =
+  `max(valor/maxSubVal*100, 5)%`) dentro de un track gris con `overflow:hidden`. Eliminada la deformación
+  por factor fijo `pct*2.6`. `overflow:hidden` agregado al contenedor del chart de Evolución diaria
+  para evitar que la línea de promedio diario (absoluta) desborde visualmente a la card de arriba.
+  **KPIs centrados:** componente `Kpi` gana `textAlign:'center'` en la Card y prop `center` en `Eyebrow`
+  (`justifyContent:'center'`). Valor ya tenía `nowrap+ellipsis`. La tira compacta de 3 KPIs ya tenía
+  `textAlign:'center'` — sin cambios allí. **Toggle parity:** el segmentado Lista/Dona/Treemap ya
+  matcheaba el kit; no requirió cambios. Frontend puro. Deploy: `--only hosting`.
+- F9.68 — Dashboard: "Por categoría" drilleable + % sobre total (Mensual y Anual).
+  **Datos:** `CategoriaSlice` suma `subs: { nombre: string; usd: number }[]` (subcats de esa categoría,
+  desc por usd). `agregarMensual` computa `catSubMap` en el mismo loop que `catMap` y puebla `subs` por cat.
+  **% sobre total:** Mensual y Anual muestran chip pill-gris con `%` junto al monto de cada categoría y
+  subcategoría. `pct = Math.round(usd/total*100)`; si 0 pero `usd>0` → `<1%`.
+  **Drill Mensual/Lista:** tap en categoría alterna `openCatMes`; expandido muestra subcats con barrita
+  escalada al `maxSub` de esa categoría (no al total), monto y `%total`.
+  **Drill Mensual/Treemap:** estado `zoomCat`; sin zoom: tiles con subs son clickeables (pointer), tap
+  entra al treemap de subcats de esa cat. Con zoom: back-button "‹ {cat}" + caption inferior. `TreemapChart`
+  acepta `onClickTile?(nombre)` opcional. Al cambiar tipo de gráfico se resetea `zoomCat`.
+  **Anual:** subcats cambian base de `%` de relativo-al-padre a **relativo-al-total** (`totalCatUsd` en
+  `agregarAnual`); barra de subcat sigue escalada al padre (`s.usd/c.usd`). Chip `%` sumado a fila de cat.
+  `catOtras` tipada con `subs:[]`. Frontend puro. Deploy: `--only hosting`.
+- F9.67 — Logos de comercios en "Por descripción" del Dashboard.
+  **`src/datos/comerciosDominios.ts`** (nuevo): mapa curado de 33 comercios (`COMERCIOS_DOMINIOS`) con
+  match por substring sin acentos + función `comercioDominio(nombre)` → dominio o null. Fuente única para
+  resolver nombre→dominio (aparte del diccionario/destinos; nunca adivina para personas/transferencias P2P).
+  **`src/design-system/components/core/MerchantLogo.tsx`** (nuevo): mismo patrón que `BankLogo`
+  (Brandfetch CDN, `VITE_BRANDFETCH_CLIENT_ID`), resuelve `nombre→dominio` vía `comercioDominio()`.
+  Fallback: monograma con inicial. Reset de `fail` con `useEffect` al cambiar `nombre`. Exportado desde
+  el barrel `design-system/components/index.ts`. En "Por descripción" del Dashboard Mensual, cada fila
+  muestra `<MerchantLogo nombre={x.desc} size={30} />` entre el número de rank y el texto de descripción.
+  Frontend puro. Deploy: `--only hosting`.
+- F9.66 — ShareLanding rediseñado: espera full-screen + documento animado + indicadores compactos.
+  **Layout:** durante `!listo`, cuerpo usa `justifyContent:'space-between'`: chip de tipo arriba, documento
+  animado + caption al centro, indicador abajo (para ambas ramas). Al `listo`: `justifyContent:'center'`
+  con `gap:16`. Pill de nombre de archivo eliminado (absorbió F9.65). **Documento nuevo `LandingDoc`:**
+  152×190 mientras escanea (dos anillos `gfRing`, barrido `gfScan`, flote `gfFloat`, shimmer en líneas,
+  fila de total resaltada); colapsa a 92×116 con check `gfRiseIn` al terminar.
+  **Keyframes nuevos** en `ShareLanding.css`: `gfShimmer` (esqueleto), `gfFloat` (flote); `gfRing`/`gfScan`
+  actualizados con las curvas del kit.
+  **Dos indicadores compactos `LandingInd`** (`tone: 'amber'|'green'|'neutral'`):
+  - **Pre-clasificado** (ámbar, `sparkles`) — aparece al `clasificado` si `factura.categoria` tiene valor.
+  - **Gasto esperado / Movimiento nuevo** (verde / neutral, `git-compare` / `plus`) — aparece al `listo`.
+  `FacturaLanding.categoria` nuevo campo (`string | null`): `[categoriaPrellena, subcategoriaPrellena].join(' · ')` —
+  fuente del indicador ámbar. Populado en `Comprobantes.tsx` desde `propuestaMatch`.
+  **§4 — Confirm (`PropuestaCard`):** par de `Badge` reemplazado por el mismo par de indicadores compactos
+  icon-forward (ámbar `sparkles` + verde/neutral `git-compare`/`plus`), con tokens de diseño que adaptan
+  a light/dark. Frontend puro. Deploy: `--only hosting`.
+- F9.65 — ShareLanding: badge de resultado sube justo debajo del valor; nombre de archivo eliminado.
+  Pill de nombre de archivo (`nombreArchivo` + tamaño KB) eliminado del bloque "Documento". En la rama
+  factura, el badge de match (antes al final de la lista de campos) pasa a ser el **primer** elemento
+  dentro del contenedor `flexDirection:'column'`, antes del map Comercio/Vence — queda pegado
+  inmediatamente debajo del monto hero, visible sin scrollear. `marginTop: 4` del badge removido
+  (el `gap: 8` del contenedor lo reemplaza). `nombreArchivo` y `tamano` permanecen en `ShareLandingProps`
+  (el padre los pasa) pero ya no se usan en el render. Frontend puro. Deploy: `--only hosting`.
+- F9.64 — Payee real en historial y ShareLanding; nombre de archivo deja de ser el título de la card.
+  Helper `payeeDeDatos(d: DatosExtraidos): string | undefined` (módulo-level en `Comprobantes.tsx`):
+  factura → `comercioRazonSocial ?? destinoNombre`; pago/transferencia → `destinoNombre ?? comercioRazonSocial`
+  (gateado por tipo, NO con `??` directo — Mercado Pago es billetera, no el payee). Reutilizado en 4 lugares:
+  (1) fila de detalle `DatosResumen`; (2) título de la card del historial (fallback a `nombreArchivo` si todavía
+  sin datos extraídos); (3) `descripcionCruda` en ramas 2/3 (reemplaza el bloque `esPagoDoc` inline);
+  (4) campo `comercio` de `facturaLanding` en ShareLanding. Frontend puro. Deploy: `--only hosting`.
 - F9.63 — Fecha del movimiento desde el vencimiento + `pagado`/`confirmadoPago` por fecha (fuente única).
   **Fecha:** `vencimientos[0]?.fecha ?? emisión ?? hoy` — el primer vencimiento alinea el `mes` del movimiento
   con el mes en que se paga el ítem esperado (ej. factura emitida en junio con vencimiento en julio → mes julio).

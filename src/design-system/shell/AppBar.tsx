@@ -52,8 +52,7 @@ export function AppBar({ title, sub, left, right, onBack }: AppBarProps) {
         <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--color-text)', lineHeight: 1.1 }}>{title}</div>
         {sub && <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>{sub}</div>}
       </div>
-      {right && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{right}<ThemeButton /></div>}
-      {!right && <ThemeButton />}
+      {right}
     </div>
   );
 }

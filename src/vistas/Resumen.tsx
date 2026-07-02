@@ -6,7 +6,7 @@ import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
 import { confirmarPagoEsperado, desmarcarPago } from '../datos/movimientos';
 import { Icon } from '../design-system/Icon';
-import { Card, Money, StatusBadge, Badge, Button, BankLogo, type EstadoChecklist } from '../design-system/components';
+import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
 import { fmtMoney } from '../datos/money';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
@@ -121,30 +121,33 @@ function porPersonaIngreso(movs: Movement[]): [string, number][] {
 // "Falta cubrir (USD)" = (Σ esperadosArsEq − pesosDisp) / tc:
 //   > 0 → rojo (falta plata); ≤ 0 → verde "Cubierto".
 // Estas dos tarjetas NO dependen del toggle ARS/USD — siempre muestran su moneda fija.
+// F9.71 — card oscura centrada: Neto grande + eq, Ingresos/Gastos columnas con eq.
 function KpiCards({ c, cur, faltaCubrirUsd }: { c: Kpis; cur: Moneda; faltaCubrirUsd: number }) {
   const netBig = cur === 'ARS' ? c.netArsEq : c.netUsdEq;
   const netSmall = cur === 'ARS' ? c.netUsdEq : c.netArsEq;
-  const fmtBig = cur === 'ARS' ? fmtArs : fmtUsdEq;
-  const fmtSmall = cur === 'ARS' ? fmtUsdEq : fmtArs;
+  const fmt = cur === 'ARS' ? fmtArs : fmtUsdEq;
+  const fmtOtra = cur === 'ARS' ? fmtUsdEq : fmtArs;
   const ingBig = cur === 'ARS' ? c.ingArsEq : c.ingUsdEq;
+  const ingSmall = cur === 'ARS' ? c.ingUsdEq : c.ingArsEq;
   const gasBig = cur === 'ARS' ? c.gasArsEq : c.gasUsdEq;
+  const gasSmall = cur === 'ARS' ? c.gasUsdEq : c.gasArsEq;
   const cubierto = faltaCubrirUsd <= 0;
   return (
     <>
-      {/* F9.17 — "Neto del mes" como card ink, rima con el hero de Balance del Dashboard */}
-      <div style={{ background: 'linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)', borderRadius: 'var(--radius-card)', padding: 'var(--space-4)', boxShadow: 'var(--shadow-soft)', color: '#fff' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'rgba(255,255,255,.6)', marginBottom: 8 }}>Neto del mes</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
-          <span style={{ fontSize: 28, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.5px', color: '#fff' }}>
-            {netBig >= 0 ? '+' : '−'}{fmtBig(Math.abs(netBig))}
-          </span>
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,.7)', fontVariantNumeric: 'tabular-nums' }}>
-            {fmtSmall(Math.abs(netSmall))}
-          </span>
+      <div style={{ background: 'linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)', borderRadius: 'var(--radius-card)', padding: 'var(--space-4)', color: '#fff', boxShadow: 'var(--shadow-soft)', textAlign: 'center' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'rgba(255,255,255,.55)' }}>Neto del mes</div>
+        <div style={{ fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.5px', lineHeight: 1.05, marginTop: 6 }}>
+          {netBig >= 0 ? '+' : '−'}{fmt(Math.abs(netBig))}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'rgba(255,255,255,.7)', marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,.15)' }}>
-          <span>Ingresos {fmtBig(ingBig)}</span>
-          <span>Gastos {fmtBig(gasBig)}</span>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,.6)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtOtra(Math.abs(netSmall))}</div>
+        <div style={{ display: 'flex', marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.15)' }}>
+          {([{ label: 'Ingresos', v: ingBig, eq: ingSmall, col: 'var(--gf-emerald-100)' }, { label: 'Gastos', v: gasBig, eq: gasSmall, col: '#fca5a5' }] as const).map((x, i) => (
+            <div key={x.label} style={{ flex: 1, borderLeft: i > 0 ? '1px solid rgba(255,255,255,.12)' : 'none' }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'rgba(255,255,255,.5)' }}>{x.label}</div>
+              <div style={{ fontSize: 19, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: x.col, marginTop: 3 }}>{fmt(x.v)}</div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,.55)', fontVariantNumeric: 'tabular-nums', marginTop: 1 }}>{fmtOtra(x.eq)}</div>
+            </div>
+          ))}
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
@@ -361,16 +364,23 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                             textAlign: 'left', width: '100%', fontFamily: 'var(--font-base)',
                           }}
                         >
+                          <MerchantLogo nombre={m.descripcion} size={30} radius={8} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.descripcion}</div>
-                            {(m.categoria || m.subcategoria) && (
-                              <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
-                                {m.categoria}{m.subcategoria ? ` › ${m.subcategoria}` : ''}
+                            <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
+                              {m.banco ? medioCanonico(m.banco, config?.bancos) : ''}
+                              {m.subcategoria ? ` · ${m.subcategoria}` : ''}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-out)' }}>
+                              {fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                            </div>
+                            {m.moneda === 'USD' && m.tcUsdArs && (
+                              <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>
+                                {fmtArs(arsEq(m))}
                               </div>
                             )}
-                          </div>
-                          <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-out)', flexShrink: 0 }}>
-                            {fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
                           </div>
                           {esAdmin && <Icon name="pencil" size={12} color="var(--gf-gray-300)" />}
                         </button>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, Sheet, Message, type SheetOption } from '../design-system/components';
+import { Card, Sheet, Message, MerchantLogo, type SheetOption } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import { fmtMoney } from '../datos/money';
 import { useMiembroCtx } from '../contexto/MiembroContext';
@@ -29,9 +29,9 @@ function curEq(usd: number, cur: Moneda, tc: number): string {
   return fmtMoney(usd, { from: 'USD', to: cur === 'USD' ? 'ARS' : 'USD', tc });
 }
 
-function Eyebrow({ icon, children }: { icon?: string; children: React.ReactNode }) {
+function Eyebrow({ icon, children, center }: { icon?: string; children: React.ReactNode; center?: boolean }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: center ? 'center' : undefined, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
       {icon && <Icon name={icon} size={13} color="var(--gf-gray-400)" />}
       {children}
     </div>
@@ -40,8 +40,8 @@ function Eyebrow({ icon, children }: { icon?: string; children: React.ReactNode 
 
 function Kpi({ icon, eyebrow, value, sub, accent }: { icon?: string; eyebrow: React.ReactNode; value: React.ReactNode; sub?: React.ReactNode; accent?: string }) {
   return (
-    <Card variant="flat" padding="var(--space-3)" style={{ flex: 1, minWidth: 0 }}>
-      <Eyebrow icon={icon}>{eyebrow}</Eyebrow>
+    <Card variant="flat" padding="var(--space-3)" style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+      <Eyebrow icon={icon} center>{eyebrow}</Eyebrow>
       <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, color: accent ?? 'var(--color-text)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
       {sub && <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{sub}</div>}
     </Card>
@@ -50,7 +50,7 @@ function Kpi({ icon, eyebrow, value, sub, accent }: { icon?: string; eyebrow: Re
 
 // ── Gráficos de categoría ─────────────────────────────────────────────────────
 
-type CatSlice = { nombre: string; color: string; pct: number; count: number; usd: number };
+type CatSlice = { nombre: string; color: string; pct: number; count: number; usd: number; subs: { nombre: string; usd: number }[] };
 
 // F9.55 — Dona: top-4 + "Otras" con conic-gradient CSS.
 function DonaChart({ cats }: { cats: CatSlice[] }) {
@@ -113,7 +113,7 @@ function tmLayout(items: CatSlice[], b: TmRect = { x: 0, y: 0, w: 100, h: 60 }):
   return [...tmLayout(g1, b1), ...tmLayout(g2, b2)];
 }
 
-function TreemapChart({ cats }: { cats: CatSlice[] }) {
+function TreemapChart({ cats, onClickTile }: { cats: CatSlice[]; onClickTile?: (nombre: string) => void }) {
   const items = cats.filter(c => c.usd > 0);
   const rects = tmLayout(items);
   return (
@@ -122,14 +122,18 @@ function TreemapChart({ cats }: { cats: CatSlice[] }) {
         {rects.map(r => {
           const large = r.w > 25 && r.h > 20;
           const medium = (r.w > 15 || r.h > 14) && !large;
+          const clickable = onClickTile != null && (r.subs?.length ?? 0) > 0;
           return (
-            <div key={r.nombre} title={`${r.nombre}: ${r.pct}%`} style={{
+            <div key={r.nombre} title={`${r.nombre}: ${r.pct}%`}
+              onClick={clickable ? () => onClickTile!(r.nombre) : undefined}
+              style={{
               position: 'absolute',
               left: r.x + '%', top: (r.y / 60 * 100) + '%',
               width: r.w + '%', height: (r.h / 60 * 100) + '%',
               background: r.color, border: '1.5px solid var(--color-surface)', boxSizing: 'border-box',
               display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
               padding: large ? '4px 6px' : 0, overflow: 'hidden',
+              cursor: clickable ? 'pointer' : 'default',
             }}>
               {large && (
                 <>
@@ -151,12 +155,15 @@ function TreemapChart({ cats }: { cats: CatSlice[] }) {
 function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: DashMensual; cur: Moneda; movsMes: Movement[]; esAdmin: boolean; onEditar: (m: Movement) => void; paleta: string[] }) {
   const tc = d.tc;
   const [compartirInfo, setCompartirInfo] = useState(false);
+  const [openCatMes, setOpenCatMes] = useState<string | null>(null);
+  const [zoomCat, setZoomCat] = useState<string | null>(null);
   // F9.55 — tipo de gráfico persiste en localStorage
   const [tipoGrafico, setTipoGraficoState] = useState<'lista' | 'dona' | 'treemap'>(() =>
     (localStorage.getItem('gf-chart-tipo') as 'lista' | 'dona' | 'treemap' | null) ?? 'lista'
   );
   const setTipoGrafico = (t: 'lista' | 'dona' | 'treemap') => {
     setTipoGraficoState(t);
+    setZoomCat(null);
     localStorage.setItem('gf-chart-tipo', t);
   };
   // F9.55 — colores por rango de gasto (índice 0 = mayor gasto), no por hash del nombre
@@ -166,10 +173,11 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
   const catTop6 = catTopAll.slice(0, 6);
   const catResto = catTopAll.slice(6);
   const catOtras = catResto.length > 0
-    ? { nombre: 'Otras', color: 'var(--gf-gray-300)', pct: catResto.reduce((s, c) => s + c.pct, 0), count: catResto.reduce((s, c) => s + c.count, 0), usd: catResto.reduce((s, c) => s + c.usd, 0) }
+    ? { nombre: 'Otras', color: 'var(--gf-gray-300)', pct: catResto.reduce((s, c) => s + c.pct, 0), count: catResto.reduce((s, c) => s + c.count, 0), usd: catResto.reduce((s, c) => s + c.usd, 0), subs: [] as { nombre: string; usd: number }[] }
     : null;
   const catLista = catOtras ? [...catTop6, catOtras] : catTop6;
   const maxDia = Math.max(...d.diaria, 1);
+  const maxSubVal = Math.max(...d.subcategorias.map(s => s.valor), 1);
   const chartH = 120;
 
   return (
@@ -266,24 +274,79 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
               ))}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {catLista.map(c => (
-                <div key={c.nombre}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
-                    <span style={{ fontWeight: 600 }}>{c.nombre}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{c.count}</span>
-                    <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+              {catLista.map(c => {
+                const isOpenMes = openCatMes === c.nombre;
+                const canDrill = (c.subs?.length ?? 0) > 0;
+                const maxSubUsd = canDrill ? Math.max(...c.subs.map(x => x.usd)) : 1;
+                return (
+                  <div key={c.nombre}>
+                    <div
+                      onClick={canDrill ? () => setOpenCatMes(isOpenMes ? null : c.nombre) : undefined}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4, cursor: canDrill ? 'pointer' : 'default' }}
+                    >
+                      <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{c.count}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 6px' }}>{c.pct === 0 && c.usd > 0 ? '<1%' : `${c.pct}%`}</span>
+                      <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+                      {canDrill && <Icon name={isOpenMes ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />}
+                    </div>
+                    <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${c.pct}%`, background: c.color, borderRadius: 3 }} />
+                    </div>
+                    {isOpenMes && canDrill && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, margin: '8px 0 2px 17px' }}>
+                        {c.subs.map(s => {
+                          const sPct = d.salidasUsd > 0 ? Math.round((s.usd / d.salidasUsd) * 100) : 0;
+                          return (
+                            <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ width: 84, flexShrink: 0, fontSize: 11.5, color: 'var(--color-text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.nombre}</span>
+                              <div style={{ flex: 1, height: 5, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${Math.max((s.usd / maxSubUsd) * 100, 5)}%`, background: c.color, opacity: 0.6, borderRadius: 3 }} />
+                              </div>
+                              <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc)}</span>
+                              <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{sPct === 0 && s.usd > 0 ? '<1%' : `${sPct}%`}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${c.pct}%`, background: c.color, borderRadius: 3 }} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         )}
         {tipoGrafico === 'dona' && <DonaChart cats={catLista} />}
-        {tipoGrafico === 'treemap' && <TreemapChart cats={catLista} />}
+        {tipoGrafico === 'treemap' && (
+          <>
+            {zoomCat && (
+              <div style={{ marginTop: 10 }}>
+                <button onClick={() => setZoomCat(null)} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--gf-gray-100)', border: 'none', borderRadius: 7, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)', color: 'var(--color-text)' }}>
+                  ‹ {zoomCat}
+                </button>
+              </div>
+            )}
+            <TreemapChart
+              cats={zoomCat ? (() => {
+                const p = catTopAll.find(c => c.nombre === zoomCat);
+                return (p?.subs ?? []).map(s => ({
+                  nombre: s.nombre, color: p?.color ?? 'var(--gf-gray-300)',
+                  usd: s.usd, count: 0,
+                  pct: d.salidasUsd > 0 ? Math.round((s.usd / d.salidasUsd) * 100) : 0,
+                  subs: [] as { nombre: string; usd: number }[],
+                }));
+              })() : catLista}
+              onClickTile={!zoomCat ? (nombre) => {
+                const cat = catTopAll.find(c => c.nombre === nombre);
+                if (cat?.subs?.length) setZoomCat(nombre);
+              } : undefined}
+            />
+            <div style={{ fontSize: 11, color: 'var(--color-text-sec)', textAlign: 'center', marginTop: 6 }}>
+              {zoomCat ? `Subcategorías de ${zoomCat}` : 'Tocá una categoría para ver sus subcategorías'}
+            </div>
+          </>
+        )}
       </Card>
 
       {/* Top subcategorías */}
@@ -295,7 +358,9 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
             <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ width: 96, flexShrink: 0, fontSize: 12.5, color: 'var(--color-text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{s.nombre}</span>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <div style={{ height: 22, borderRadius: 5, background: s.color, width: `${s.pct * 2.6}%`, minWidth: 8 }} />
+                <div style={{ flex: 1, height: 22, background: 'var(--gf-gray-100)', borderRadius: 5, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', background: s.color, width: `${Math.max((s.valor / maxSubVal) * 100, 5)}%`, borderRadius: 5 }} />
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0, width: 116, justifyContent: 'flex-end' }}>
                   <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{curBig(s.valor, cur, tc)}</span>
                   <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right' }}>{s.pct}%</span>
@@ -310,7 +375,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
       <Card padding="var(--space-4)">
         <div style={{ fontSize: 16, fontWeight: 800 }}>Evolución diaria</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>· pico {d.picoDia.fecha} · {d.picoDia.dow}</div>
-        <div style={{ position: 'relative', height: chartH, display: 'flex', alignItems: 'flex-end', gap: 2 }}>
+        <div style={{ position: 'relative', height: chartH, display: 'flex', alignItems: 'flex-end', gap: 2, overflow: 'hidden' }}>
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: `${(d.promedioDiarioUsd / maxDia) * chartH}px`, borderTop: '1.5px dashed var(--gf-out)', zIndex: 1 }}>
             <span style={{ position: 'absolute', top: -14, left: 0, fontSize: 9, color: 'var(--gf-out)', fontWeight: 600 }}>promedio diario</span>
           </div>
@@ -354,6 +419,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
           {d.porDescripcion.map((x, i) => (
             <div key={x.desc} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderBottom: i < d.porDescripcion.length - 1 ? '1px solid var(--gf-gray-100)' : 'none' }}>
               <span style={{ width: 18, fontSize: 12, fontWeight: 700, color: 'var(--gf-gray-400)' }}>{i + 1}</span>
+              <MerchantLogo nombre={x.desc} size={30} radius={8} />
               <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.desc}</span>
               <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{x.count}</span>
               <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: 13 }}>{curBig(x.usd, cur, tc)}</span>
@@ -488,7 +554,8 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
                 >
                   <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
                   <span style={{ fontWeight: 600 }}>{c.nombre}</span>
-                  <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+                  {totalCat > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 6px', marginLeft: 'auto' }}>{Math.round(c.usd / totalCat * 100) === 0 && c.usd > 0 ? '<1%' : `${Math.round(c.usd / totalCat * 100)}%`}</span>}
+                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
                   <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />
                 </div>
                 <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
@@ -500,10 +567,10 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
                       <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ width: 84, flexShrink: 0, fontSize: 11.5, color: 'var(--color-text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.nombre}</span>
                         <div style={{ flex: 1, height: 5, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${s.pct}%`, background: c.color, opacity: 0.6, borderRadius: 3 }} />
+                          <div style={{ height: '100%', width: `${Math.max(c.usd > 0 ? (s.usd / c.usd) * 100 : 0, 3)}%`, background: c.color, opacity: 0.6, borderRadius: 3 }} />
                         </div>
                         <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc)}</span>
-                        <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{s.pct}%</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{s.pct === 0 && s.usd > 0 ? '<1%' : `${s.pct}%`}</span>
                       </div>
                     ))}
                   </div>

@@ -6,6 +6,8 @@ import { MiembroContext } from './contexto/MiembroContext';
 import { ItemsEsperadosProvider } from './contexto/ItemsEsperadosContext';
 import { DiccionarioProvider }    from './contexto/DiccionarioContext';
 import { AppBar, Screen, BottomNav, InstallBanner, type BottomNavItem } from './design-system/shell';
+import { useTheme } from './datos/theme';
+import { useRecordatorios, contarVencProximos } from './vistas/perfil/Notificaciones';
 import Dashboard from './vistas/Dashboard';
 import Resumen from './vistas/Resumen';
 import ConfigEsperados from './vistas/ConfigEsperados';
@@ -120,20 +122,39 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
   const onBack = vuelveAPerfil
     ? () => navigate('/perfil')
     : location.pathname === '/tarjetas' ? () => navigate('/resumen') : undefined;
-  const right = location.pathname === '/resumen' && esAdmin
-    ? (
-      <button
-        onClick={() => navigate('/tarjetas')}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--gf-gray-100)', border: 'none', borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 600, color: 'var(--color-text-strong)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}
-      >
-        <Icon name="credit-card" size={15} /> Tarjetas
+
+  const { theme, setTheme } = useTheme();
+  const { recordatorios } = useRecordatorios();
+  const vencN = contarVencProximos(recordatorios);
+  const inicial = nombre.trim().charAt(0).toUpperCase();
+
+  const globalRight = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      {location.pathname === '/resumen' && esAdmin && (
+        <button onClick={() => navigate('/tarjetas')} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'var(--gf-gray-100)', border: 'none', borderRadius: 999, padding: '6px 12px', fontSize: 12, fontWeight: 600, color: 'var(--color-text-strong)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+          <Icon name="credit-card" size={15} /> Tarjetas
+        </button>
+      )}
+      <button onClick={() => navigate('/perfil')} aria-label="Perfil" style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: 'pointer', background: 'var(--gf-ink)', color: '#fff', fontSize: 14, fontWeight: 700, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        {inicial}
       </button>
-    )
-    : undefined;
+      <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'} style={{ width: 34, height: 34, borderRadius: 999, border: 'none', background: 'var(--gf-gray-100)', color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+        <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={17} />
+      </button>
+      <button onClick={() => navigate('/perfil/notificaciones')} aria-label="Notificaciones" style={{ position: 'relative', width: 34, height: 34, borderRadius: 999, border: 'none', background: 'var(--gf-gray-100)', color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+        <Icon name="bell" size={18} />
+        {vencN > 0 && (
+          <span style={{ position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 999, background: 'var(--gf-expense)', color: '#fff', fontSize: 10, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px', border: '2px solid var(--color-surface)' }}>
+            {vencN}
+          </span>
+        )}
+      </button>
+    </div>
+  );
 
   return (
     <div className="shell-phone">
-      <AppBar title={title} sub={sub} onBack={onBack} right={right} />
+      <AppBar title={title} sub={sub} onBack={onBack} right={globalRight} />
       <Screen>
         <InstallBanner />
         <Routes>

@@ -62,13 +62,25 @@ function RazonVinculado({ pm }: { pm: Comprobante['propuestaMatch'] }) {
   return <Badge tone={tone}>{texto}</Badge>;
 }
 
+// ── Helpers de datos ──────────────────────────────────────────────────────────
+
+// Payee legible del comprobante: factura → emisor (comercioRazonSocial);
+// transferencia/pago → destinatario (destinoNombre). Gateado por tipo, NO con ??:
+// una billetera (Mercado Pago) llena comercioRazonSocial con su marca y taparía el destino.
+function payeeDeDatos(d: DatosExtraidos): string | undefined {
+  const esPagoDoc = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
+  return esPagoDoc
+    ? (d.destinoNombre ?? d.comercioRazonSocial ?? undefined)
+    : (d.comercioRazonSocial ?? d.destinoNombre ?? undefined);
+}
+
 // ── Resumen de datosExtraidos ─────────────────────────────────────────────────
 
 function DatosResumen({ d }: { d: DatosExtraidos }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 13, color: 'var(--color-text-sec)', marginTop: 6 }}>
       <span style={{ fontWeight: 700, color: 'var(--color-text-strong)', textTransform: 'capitalize' }}>{d.tipoDocumento.replace(/_/g, ' ')}</span>
-      {d.comercioRazonSocial && <span>{d.comercioRazonSocial}</span>}
+      {payeeDeDatos(d) && <span>{payeeDeDatos(d)}</span>}
       {d.montoTotal != null && <span style={{ fontWeight: 700, color: 'var(--color-text)' }}>{fmtMonto(d.montoTotal, d.moneda)}</span>}
       {d.fecha && <span>{d.fecha}</span>}
       {d.vencimientos && d.vencimientos.length > 1 && (
@@ -215,13 +227,7 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
   }
 
   // Ramas 2 y 3: para el usuario el gesto es idéntico — alta pre-clasificada
-  // payee del comprobante: factura → emisor (comercioRazonSocial); transferencia/pago → destinatario (destinoNombre).
-  // Gateado por tipo, NO con ??: una billetera (Mercado Pago) llena comercioRazonSocial con su marca
-  // (truthy), lo que bloquearía el fallback. En pagos el payee es SIEMPRE el destinatario.
-  const esPagoDoc = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
-  const descripcionCruda = esPagoDoc
-    ? (d.destinoNombre   ?? d.comercioRazonSocial ?? undefined)
-    : (d.comercioRazonSocial ?? d.destinoNombre   ?? undefined);
+  const descripcionCruda = payeeDeDatos(d);
   const sugerencia       = descripcionCruda ? clasificar(descripcionCruda) : null;
   const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
   const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
@@ -267,13 +273,19 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
 
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <Badge tone="success">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {(pm.categoriaPrellena || sugerenciaValida) && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 8, padding: '6px 11px', background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.25)', fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>
+            <Icon name="sparkles" size={13} color="#d97706" />
+            {pm.categoriaPrellena ?? sugerenciaValida?.categoria ?? 'Pre-clasificado'}
+          </span>
+        )}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 8, padding: '6px 11px', background: pm.rama === 2 ? 'rgba(12,143,98,.10)' : 'var(--gf-gray-100)', border: pm.rama === 2 ? '1px solid var(--gf-emerald-line)' : '1px solid transparent', fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>
+          <Icon name={pm.rama === 2 ? 'git-compare' : 'plus'} size={13} color={pm.rama === 2 ? 'var(--color-accent)' : 'var(--color-text-sec)'} />
           {pm.rama === 2
-            ? (pm.esAdicional ? 'Pago adicional de un gasto esperado' : 'Cumple un gasto esperado')
+            ? (pm.esAdicional ? 'Pago adicional' : 'Gasto esperado')
             : 'Movimiento nuevo'}
-        </Badge>
-        {(pm.categoriaPrellena || sugerenciaValida) && <Badge tone="info">Pre-clasificado</Badge>}
+        </span>
       </div>
       {!mostrarAlta && (
         <Button variant="primary" size="sm" disabled={cargandoDict} onClick={() => setMostrarAlta(true)}>
@@ -330,7 +342,7 @@ function ComprobanteCard({
     <Card variant="flat" padding="var(--space-3)" style={{ position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <BadgeEstado estado={comp.estado} />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{comp.nombreArchivo}</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(comp.datosExtraidos && payeeDeDatos(comp.datosExtraidos)) || comp.nombreArchivo}</span>
         <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', flexShrink: 0 }}>{(comp.tamano / 1024).toFixed(0)} KB</span>
         {esAdmin && (
           <button
@@ -580,11 +592,12 @@ export default function Comprobantes() {
   const facturaLanding: FacturaLanding | undefined =
     faseCompartido.tipo === 'factura' && faseCompartido.comp?.datosExtraidos && faseCompartido.comp.propuestaMatch
       ? {
-          monto:    faseCompartido.comp.datosExtraidos.montoTotal,
-          moneda:   faseCompartido.comp.datosExtraidos.moneda,
-          comercio: faseCompartido.comp.datosExtraidos.comercioRazonSocial,
-          vence:    fmtFechaIso(faseCompartido.comp.datosExtraidos.vencimientos?.[0]?.fecha ?? faseCompartido.comp.datosExtraidos.fecha),
-          badge:    construirBadgeFactura(faseCompartido.comp.propuestaMatch, items),
+          monto:     faseCompartido.comp.datosExtraidos.montoTotal,
+          moneda:    faseCompartido.comp.datosExtraidos.moneda,
+          comercio:  payeeDeDatos(faseCompartido.comp.datosExtraidos) ?? null,
+          vence:     fmtFechaIso(faseCompartido.comp.datosExtraidos.vencimientos?.[0]?.fecha ?? faseCompartido.comp.datosExtraidos.fecha),
+          categoria: [faseCompartido.comp.propuestaMatch.categoriaPrellena, faseCompartido.comp.propuestaMatch.subcategoriaPrellena].filter(Boolean).join(' · ') || null,
+          badge:     construirBadgeFactura(faseCompartido.comp.propuestaMatch, items),
         }
       : undefined;
 
