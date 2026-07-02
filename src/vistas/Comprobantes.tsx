@@ -226,11 +226,9 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
   const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
   const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
 
-  const esPago = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
-
   const preloadBase = {
     tipo:                'Gasto' as const,
-    fecha:               d.fecha         ?? undefined,
+    fecha:               d.vencimientos?.[0]?.fecha ?? d.fecha ?? undefined,
     descripcion:         descripcionFinal,
     descripcionOriginal: (descripcionCruda && descripcionFinal !== descripcionCruda) ? descripcionCruda : undefined,
     moneda:              d.moneda,
@@ -242,7 +240,9 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
     subcategoria:        pm.subcategoriaPrellena ?? sugerenciaValida?.subcategoria ?? undefined,
     etiqueta:            pm.etiquetaPrellena     ?? sugerenciaValida?.etiqueta     ?? undefined,
     banco:               'Efectivo' as const,
-    confirmadoPago:      esPago ? confirmadoPagoPorFecha(d.fecha) : false,
+    // F9.63 — la regla de pago aplica a TODO comprobante (no solo esPago) y sobre la
+    // fecha resuelta (vencimiento ?? emisión), la misma que se usa para `fecha`.
+    confirmadoPago:      confirmadoPagoPorFecha(d.vencimientos?.[0]?.fecha ?? d.fecha),
     // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
     destinoCbu:          d.destinoCbu    ?? null,
     destinoCuit:         d.destinoCuit   ?? null,

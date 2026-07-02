@@ -130,7 +130,7 @@ export async function confirmarRama1(
     batch.update(doc(db, 'movimientos', movimientoId), {
       hashPdf:        comp.hashPdf,
       refStoragePdf:  comp.refStoragePdf,
-      confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.fecha),
+      confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.vencimientos?.[0]?.fecha ?? comp.datosExtraidos?.fecha),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
       // F6.8 — propagar destino y vencimientos para que aprenderDestino() aprenda
       // seedImport: false — gradúa el mov de "seed pristino" a "tocado por usuario"

@@ -1499,6 +1499,11 @@ export const cargarMovimientoDesdeComprobante = onCall(
     const movRef = db.collection('movimientos').doc();
     const batch  = db.batch();
 
+    // F9.63 — estado de pago recalculado server-side desde la fecha final (fechaMs viene a
+    // mediodía local, así que toISOString().slice(0,10) da el día calendario correcto).
+    const fechaMovISO    = new Date(fechaMs).toISOString().slice(0, 10);
+    const pagadoPorFecha = fechaMovISO <= hoyArgentinaISO();
+
     batch.set(movRef, {
       fecha, mes,
       tipo, descripcion,
@@ -1511,11 +1516,11 @@ export const cargarMovimientoDesdeComprobante = onCall(
       banco:             payload.banco              ?? null,
       persona, creadoPor,
       subtipo: 'Manual', origen: 'Manual',
-      excluirDash: false, pagado: true,
+      excluirDash: false, pagado: pagadoPorFecha,
       incluirResumenMes: payload.incluirResumenMes  ?? true,
       itemEsperadoId:    payload.itemEsperadoId      ?? null,
       numeroComprobante: payload.numeroComprobante  ?? null,
-      confirmadoPago:    payload.confirmadoPago      ?? false,
+      confirmadoPago:    pagadoPorFecha,
       hashPdf:           payload.hashPdf             ?? null,
       refStoragePdf:     payload.refStoragePdf       ?? null,
       destinoCbu:        payload.destinoCbu          ?? null,

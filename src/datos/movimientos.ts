@@ -70,6 +70,7 @@ export interface NuevoMovimiento {
   persona: string;
   creadoPor: string;
   incluirResumenMes: boolean;
+  pagado?: boolean;
   itemEsperadoId?: string;
   numeroComprobante?: string;
   // F6.3 — link a comprobante (opcionales)
@@ -114,7 +115,7 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       subtipo:           'Manual',
       origen:            'Manual',
       excluirDash:       false,
-      pagado:            true,
+      pagado:            payload.pagado ?? true,
       incluirResumenMes: payload.incluirResumenMes,
       itemEsperadoId:    payload.itemEsperadoId     ?? null,
       numeroComprobante: payload.numeroComprobante ?? null,

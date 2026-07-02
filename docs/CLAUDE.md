@@ -150,6 +150,17 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.63 — Fecha del movimiento desde el vencimiento + `pagado`/`confirmadoPago` por fecha (fuente única).
+  **Fecha:** `vencimientos[0]?.fecha ?? emisión ?? hoy` — el primer vencimiento alinea el `mes` del movimiento
+  con el mes en que se paga el ítem esperado (ej. factura emitida en junio con vencimiento en julio → mes julio).
+  **`pagado`/`confirmadoPago`:** única regla `fecha ≤ hoyAR` sobre la fecha final, para TODO comprobante (ya no
+  solo `esPago`). El server (callable `cargarMovimientoDesdeComprobante`) es la autoridad: recalcula desde
+  `fechaMs` con `hoyArgentinaISO()`; el front calcula para preview (`pagadoPorFecha` en `AltaMovimiento`).
+  Eliminado el hardcode `pagado: true` en `crearMovimiento` → usa `payload.pagado ?? true`.
+  `confirmarRama1` también usa la regla de vencimiento. `esPago` eliminado de `preloadBase` (queda `esPagoDoc`
+  para la selección de payee, que es distinta). Cambios en: `src/vistas/Comprobantes.tsx`,
+  `src/vistas/AltaMovimiento.tsx`, `src/datos/movimientos.ts`, `src/datos/comprobantes.ts`,
+  `functions/src/index.ts`. Functions requiere `npm run build` + `firebase deploy --only functions`.
 - F9.62 — Resumen: "Revisar pendientes del mes" navega a la solapa Gastos Fijos al hacer tap
   (card recibe `onClick={onIrAGastos}` → `setSec('fijos')`; `Card` extiende `HTMLAttributes<HTMLDivElement>`
   y reenvía `onClick` sin cambios). Reconteo de `porRevisar`: ahora filtra solo los ítems SIN CARGAR

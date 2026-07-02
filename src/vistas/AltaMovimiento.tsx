@@ -196,6 +196,10 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       return;
     }
 
+    // F9.63 — estado de pago derivado de la fecha FINAL del movimiento (post-edición),
+    // no del preload. fecha ≤ hoy → pagado/confirmado; futura → pendiente. Un solo booleano
+    // alimenta `pagado` y `confirmadoPago` (fuente única de la regla en el front).
+    const pagadoPorFecha = fecha <= hoyISO();
     const payload: Parameters<typeof crearMovimiento>[0] = {
       fecha:             new Date(fecha + 'T12:00:00'),
       tipo,
@@ -214,7 +218,8 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       itemEsperadoId:    preload?.itemEsperadoId,
       hashPdf:           preload?.hashPdf,
       refStoragePdf:     preload?.refStoragePdf,
-      confirmadoPago:    preload?.confirmadoPago,
+      pagado:            pagadoPorFecha,
+      confirmadoPago:    pagadoPorFecha,
       destinoCbu:           preload?.destinoCbu            ?? null,
       destinoCuit:          preload?.destinoCuit           ?? null,
       destinoAlias:         preload?.destinoAlias          ?? null,
