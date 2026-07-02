@@ -150,6 +150,31 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.62 — Resumen: "Revisar pendientes del mes" navega a la solapa Gastos Fijos al hacer tap
+  (card recibe `onClick={onIrAGastos}` → `setSec('fijos')`; `Card` extiende `HTMLAttributes<HTMLDivElement>`
+  y reenvía `onClick` sin cambios). Reconteo de `porRevisar`: ahora filtra solo los ítems SIN CARGAR
+  (`c.matches.length === 0 && ACCIONABLE.includes(c.estado)`); `por_confirmar` (con match, sin confirmar)
+  ya no cuenta. Card PENDIENTE (solapa Gastos Fijos): antes sumaba solo `montoEsperado` de ítems sin
+  cobertura y con monto definido (daba $0 si todos eran `por_confirmar`); ahora suma TODO lo no pagado:
+  ítems `por_confirmar`/`parcial` aportan el **monto real** de sus matches; los sin match aportan
+  `montoEsperado`. Ítems sin monto ni match no aportan. `cubierto()` sin cambios. Solo frontend.
+- F9.61 — `estadoItem` aplica "pagado por fecha" a ítems `pagoAutomatico`. Antes, `pagoAutomatico`
+  siempre retornaba `'automatico'` sin importar el mes ni el `diaVencimiento`. Ahora: mes pasado →
+  `pagado` (el débito ya ocurrió); mes futuro → `programado` (aún no ocurre); mes actual con
+  `diaVencimiento <= hoy` → `pagado` (se debitó hoy o antes); mes actual con `diaVencimiento > hoy`
+  (o sin diaVencimiento) → `automatico` (se debitará más adelante este mes). Cambio en
+  `src/datos/checklist.ts`; state machine actualizada en docs. `cubierto()` no cambia.
+- F9.60 — `matchConEsperados` usa `destinoNombre` como fallback cuando `comercioRazonSocial` es null.
+  Antes la función retornaba `[]` inmediatamente si `comercioRazonSocial` era null, dejando sin match
+  a los comprobantes de transferencia (que tienen `destinoNombre` pero no razón social del comercio).
+  Ahora: `texto = comercioRazonSocial ?? destinoNombre`. Sin schema ni tipo nuevo — solo lógica en
+  `functions/src/matchLogica.ts`. Impacto: una transferencia a "EDESUR SA" con un `itemEsperado`
+  que tenga `matchTexto.incluye: ["edesur"]` ahora se clasifica como rama 2 en vez de caer a rama 3.
+  F9.60.1 (concatenar-fix): el `??` de F9.60 descartaba `destinoNombre` cuando `comercioRazonSocial`
+  era no-null (ej. billetera "MERCADO PAGO" pagando a "EDESUR SA" — solo evaluaba "mercado pago").
+  Ahora: `partes = [comercioRazonSocial, destinoNombre].filter(non-empty).join(' ')` — el text de
+  match es la concatenación de ambos, por lo que "edesur" en `incluye` engancha aunque la billetera
+  tenga su propio nombre en `comercioRazonSocial`.
 - F9.58 — Banner de instalación PWA in-app + fix warnings de manifest.
   1. **Meta tag nueva:** `<meta name="mobile-web-app-capable" content="yes" />` agregada
      en `index.html` junto a la versión `apple-mobile-web-app-capable` (iOS) — elimina el
@@ -444,10 +469,10 @@ Derivada en vivo, NO materializada. Nueve estados (F5.5):
 - `pagado`: mes cerrado con match(es), O mes en curso con al menos un match confirmado y monto >= 99%.
 - `por_confirmar`: mes en curso/futuro con match(es) detectados pero ninguno con `confirmadoPago=true`.
 - `parcial`: mes en curso/futuro con confirmados pero monto confirmado < 99% esperado.
-- `automatico`: sin match, `pagoAutomatico=true`; cubierto sin conciliar.
+- `automatico`: mes en curso, sin match, `pagoAutomatico=true` y `diaVencimiento` aún no llegó (o sin diaVencimiento). Cubierto sin conciliar.
 - `pendiente`: mes en curso, sin match, diaVencimiento no alcanzado (o sin diaVencimiento).
 - `vencido`: mes en curso, sin match, diaVencimiento < hoy.
-- `programado`: mes futuro, sin match.
+- `programado`: mes futuro, sin match (incluye `pagoAutomatico` de mes futuro desde F9.61).
 - `no_registrado`: mes cerrado, sin match.
 - `no_aplica`: periodicidad no incluye este mes (placeholder; requiere mes-ancla cuando se active).
 

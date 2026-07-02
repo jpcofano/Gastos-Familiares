@@ -163,9 +163,10 @@ function KpiCards({ c, cur, faltaCubrirUsd }: { c: Kpis; cur: Moneda; faltaCubri
 
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, mes }: {
+function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, mes, onIrAGastos }: {
   movs: Movement[];
   porRevisar: number;
+  onIrAGastos: () => void;
   config: FamiliaConfig | null;
   cur: Moneda;
   esAdmin: boolean;
@@ -215,7 +216,8 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       <KpiCards c={c} cur={cur} faltaCubrirUsd={faltaCubrirUsd} />
 
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
-      <Card variant="flat" padding="var(--space-3)" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* F9.62 — clickeable: lleva a la solapa Gastos Fijos */}
+      <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
         <Icon name="alert-circle" size={17} color="var(--gf-out)" />
         <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>Revisar pendientes del mes</span>
         <span style={{ minWidth: 22, height: 22, borderRadius: 999, background: 'var(--gf-out)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{porRevisar}</span>
@@ -408,7 +410,16 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMes
   esMesActual: boolean;
 }) {
   const alDia = checklist.filter(c => cubierto(c.estado)).length;
-  const pendiente = checklist.filter(c => !cubierto(c.estado) && c.item.montoEsperado != null).reduce((s, c) => s + (c.item.montoEsperado ?? 0), 0);
+  // F9.62 — "pendiente" suma TODO lo no pagado: si el ítem tiene un movimiento sin confirmar
+  // (por_confirmar/parcial) usa el monto REAL del movimiento; si no, el montoEsperado. Ítems
+  // sin monto ni match no aportan (no hay número que sumar).
+  const pendiente = checklist
+    .filter(c => !cubierto(c.estado))
+    .reduce((s, c) => {
+      const noConfirmado = c.estado === 'por_confirmar' || c.estado === 'parcial';
+      const montoReal = c.matches.reduce((a, m) => a + Math.abs(m.monto), 0);
+      return s + (noConfirmado ? montoReal : (c.item.montoEsperado ?? 0));
+    }, 0);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -494,7 +505,9 @@ function ResumenVisual() {
   const { movimientos, cargando, error } = useMovimientosDelMes(mes);
   const { items } = useItemsEsperados();
   const checklist = calcularChecklist(items, movimientos, mes);
-  const porRevisar = checklist.filter(c => ACCIONABLE.includes(c.estado)).length;
+  // F9.62 — "revisar" cuenta solo lo SIN CARGAR (sin movimiento asociado). por_confirmar
+  // tiene match (cargado, falta confirmar) y NO entra en este conteo.
+  const porRevisar = checklist.filter(c => c.matches.length === 0 && ACCIONABLE.includes(c.estado)).length;
 
   async function handleConfirmar(item: ExpectedItem, matches: Movement[]) {
     const res = await confirmarPagoEsperado(item, matches);
@@ -563,7 +576,7 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} mes={mes} />
+        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} mes={mes} onIrAGastos={() => setSec('fijos')} />
       ) : (
         <GastosFijosSeccion
           checklist={checklist}

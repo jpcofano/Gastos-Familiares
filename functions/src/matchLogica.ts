@@ -171,8 +171,12 @@ export function matchConEsperados(
   datos: DatosExtractosMin,
   items: ItemEsperadoMin[],
 ): ItemEsperadoMin[] {
-  if (!datos.comercioRazonSocial) return [];
-  const comercio = datos.comercioRazonSocial.toLowerCase();
+  // F9.60.1 — concatenar comercioRazonSocial + destinoNombre para que matchTexto evalúe ambos
+  // (F9.60 usaba ?? y perdía destinoNombre cuando comercioRazonSocial era no-null, ej. "MERCADO PAGO")
+  const partes = [datos.comercioRazonSocial, datos.destinoNombre]
+    .filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
+  if (partes.length === 0) return [];
+  const comercio = partes.join(' ').toLowerCase();
 
   return items.filter(item => {
     if (!item.activo)   return false;

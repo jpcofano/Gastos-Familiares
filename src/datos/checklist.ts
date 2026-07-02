@@ -49,7 +49,14 @@ export function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr
     }
     return 'por_confirmar';
   }
-  if (item.pagoAutomatico) return 'automatico';
+  if (item.pagoAutomatico) {
+    // F9.61 — débito automático: usa la fecha para determinar si ya se ejecutó
+    if (mes < mesActualStr) return 'pagado';
+    if (mes > mesActualStr) return 'programado';
+    // mes actual: pagado si el diaVencimiento ya llegó (o no hay día → asumir vigente)
+    if (item.diaVencimiento && item.diaVencimiento <= new Date().getDate()) return 'pagado';
+    return 'automatico';
+  }
   if (mes > mesActualStr) return 'programado';
   if (mes < mesActualStr) return 'no_registrado';
   if (item.diaVencimiento && item.diaVencimiento < new Date().getDate()) return 'vencido';
