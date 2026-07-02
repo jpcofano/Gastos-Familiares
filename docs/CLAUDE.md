@@ -161,6 +161,12 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   para la selección de payee, que es distinta). Cambios en: `src/vistas/Comprobantes.tsx`,
   `src/vistas/AltaMovimiento.tsx`, `src/datos/movimientos.ts`, `src/datos/comprobantes.ts`,
   `functions/src/index.ts`. Functions requiere `npm run build` + `firebase deploy --only functions`.
+- F8.2 — Perfil › Destinos: editor admin de la colección `destinos`. Rules: read admin,
+  write cerrado. Callables `upsertDestino` (crear con `destinoRaw`→normalización server-side /
+  editar por `id`; valida FK `itemEsperadoId` contra `itemsEsperados`) y `eliminarDestino`.
+  Sin campo `activo`: "desactivar" = confianza < 0.7 (umbral del matcher). Chip warning si
+  confianza < umbral. Edición: `destinoNorm`/`tipo` inmutables (clave). Wrapper
+  `src/datos/destinos.ts`. Deploy: `--only functions,firestore:rules,hosting`.
 - F8.1 — Perfil › grupo "Clasificación y aprendizaje · admin". Editor de Diccionario
   (CRUD client-side; rules ya permiten admin/Manual). Ítems Destinos/Normalización/
   Subcategorías/Etiquetas presentes con badge PRONTO (F8.2–F8.4). Deploy: --only hosting.

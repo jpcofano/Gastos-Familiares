@@ -110,5 +110,11 @@ service cloud.firestore {
       allow create, update: if esAdmin() || (esMiembro() && request.resource.data.origen == 'Manual');
       allow delete: if esAdmin();
     }
+
+    // Destinos — solo lectura admin; toda escritura vía callable (Admin SDK, bypassa rules)
+    match /destinos/{id} {
+      allow read:  if esAdmin();
+      allow write: if false;
+    }
   }
 }

@@ -2481,3 +2481,95 @@ export const eliminarMovimiento = onCall(
     return { ok: true };
   },
 );
+
+// F8.2 — Editor de Destinos: upsert (crear/editar) y eliminar payees aprendidos.
+// La normalización es server-side; el cliente manda `destinoRaw` en creación.
+// Write cerrado en rules → toda mutación pasa por acá (Admin SDK, bypassa rules).
+
+export const upsertDestino = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const {
+      id, destinoRaw,
+      itemEsperadoId, categoria, subcategoria, etiqueta, confianza,
+    } = (request.data ?? {}) as {
+      id?: string; destinoRaw?: string;
+      itemEsperadoId?: string | null;
+      categoria?: string | null; subcategoria?: string | null; etiqueta?: string | null;
+      confianza?: number;
+    };
+
+    const cat  = (categoria ?? null) || null;
+    const item = (itemEsperadoId ?? null) || null;
+
+    if (!cat && !item) throw new HttpsError('invalid-argument', 'Se requiere categoría o ítem esperado');
+
+    if (confianza != null && (typeof confianza !== 'number' || confianza < 0 || confianza > 1)) {
+      throw new HttpsError('invalid-argument', 'confianza fuera de rango [0,1]');
+    }
+
+    if (item) {
+      const itemSnap = await db.collection('itemsEsperados').doc(item).get();
+      if (!itemSnap.exists) throw new HttpsError('invalid-argument', `itemEsperadoId inexistente: ${item}`);
+    }
+
+    let ref: FirebaseFirestore.DocumentReference;
+    let base: Record<string, unknown> = {};
+
+    if (id) {
+      ref = db.collection('destinos').doc(id);
+      const snap = await ref.get();
+      if (!snap.exists) throw new HttpsError('not-found', 'Destino no encontrado');
+    } else {
+      if (!destinoRaw || typeof destinoRaw !== 'string') {
+        throw new HttpsError('invalid-argument', 'destinoRaw requerido para crear');
+      }
+      const parsed = normalizarDestino(destinoRaw);
+      if (!parsed) throw new HttpsError('invalid-argument', 'destinoRaw no normalizable');
+      const nid = idDestinoNorm(parsed.norm);
+      ref = db.collection('destinos').doc(nid);
+      base = { destinoNorm: parsed.norm, tipo: parsed.tipo, creadoPor: email };
+    }
+
+    const update: Record<string, unknown> = {
+      ...base,
+      categoria:     cat,
+      subcategoria:  (subcategoria ?? null) || null,
+      etiqueta:      (etiqueta ?? null) || null,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    };
+    update.itemEsperadoId = item;
+    if (confianza != null) update.confianza = confianza;
+    else if (!id) update.confianza = 0.8;
+
+    await ref.set(update, { merge: true });
+    console.log(`[upsertDestino] ${ref.id} → cat=${cat ?? '-'} item=${item ?? '-'} (por ${email})`);
+    return { ok: true, id: ref.id };
+  },
+);
+
+export const eliminarDestino = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+    const { id } = (request.data ?? {}) as { id?: string };
+    if (!id) throw new HttpsError('invalid-argument', 'id requerido');
+    await db.collection('destinos').doc(id).delete();
+    console.log(`[eliminarDestino] ${id} (por ${email})`);
+    return { ok: true };
+  },
+);

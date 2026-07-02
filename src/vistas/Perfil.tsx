@@ -190,7 +190,7 @@ export default function Perfil() {
       {esAdmin && (
         <Group title="Clasificación y aprendizaje · admin">
           <Item icon="book-open" title="Diccionario" desc="Reglas de texto → categoría, persona, moneda" onClick={() => navigate('/perfil/diccionario')} />
-          <Item icon="store" title="Destinos" desc="Payees aprendidos → ítem esperado" right={<Pronto />} />
+          <Item icon="store" title="Destinos" desc="Payees aprendidos → ítem esperado" onClick={() => navigate('/perfil/destinos')} />
           <Item icon="sparkles" title="Normalización" desc="Limpieza previa al matching (prefijos, regex)" right={<Pronto />} />
           <Item icon="layers" title="Subcategorías" desc="Árbol de subcategorías por categoría" right={<Pronto />} />
           <Item icon="tag" title="Etiquetas" desc="Etiquetas libres para movimientos" right={<Pronto />} last />
