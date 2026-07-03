@@ -11,6 +11,7 @@ import {
   calcularPropuesta,
   normalizarDestino,
   reconciliarPorPayee,
+  reconciliarPorNombre,
   type DatosExtractosMin,
   type MovimientoMin,
   type ItemEsperadoMin,
@@ -222,6 +223,23 @@ export const extraerComprobante = onDocumentCreated(
   },
 );
 
+// F9.82 — carga nombres aprendidos en /destinos tipo='nombre' con confianza suficiente
+async function cargarNombresDestinoAprendidos(): Promise<Map<string, string>> {
+  const snap = await db.collection('destinos')
+    .where('tipo', '==', 'nombre')
+    .where('confianza', '>=', 0.7)
+    .limit(500)
+    .get();
+  const mapa = new Map<string, string>();
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    if (data.destinoNorm && data.itemEsperadoId) {
+      mapa.set(data.destinoNorm as string, data.itemEsperadoId as string);
+    }
+  }
+  return mapa;
+}
+
 export const matchComprobante = onDocumentUpdated(
   {
     document:       'comprobantes/{hash}',
@@ -307,6 +325,8 @@ export const matchComprobante = onDocumentUpdated(
         destinoCuit:    (data.destinoCuit    as string | null)  ?? null,
         destinoCbu:     (data.destinoCbu     as string | null)  ?? null,
         destinoAlias:   (data.destinoAlias   as string | null)  ?? null,
+        destinoNombre:  (data.destinoNombre  as string | null)  ?? null,
+        vencimientos:   (data.vencimientos   as Array<{ monto?: number | null }> | null) ?? null,
         confirmadoPago: (data.confirmadoPago as boolean)        ?? false,
       };
     });
@@ -359,7 +379,28 @@ export const matchComprobante = onDocumentUpdated(
         console.log(`[matchComprobante] ${hashActual} → rama 1 candidatos (reconciliación, ${reconc.length})`);
         return;
       }
-      // 0 candidatos → cae a clasificación normal
+      // F9.82 — 0 candidatos fuerte: pase débil por nombre (nunca auto-confirma)
+      const nombresAprendidos = await cargarNombresDestinoAprendidos();
+      const reconcDebil = reconciliarPorNombre(datos, movs, nombresAprendidos);
+      if (reconcDebil.length > 0) {
+        await ref.update({
+          propuestaMatch: {
+            rama: 1,
+            candidatos: reconcDebil.map(m => ({
+              tipo: 'movimiento' as const,
+              id: m.id, score: 0,
+              descripcion: m.descripcion, monto: m.monto, moneda: m.moneda,
+              fecha: m.fecha.toISOString().slice(0, 10),
+            })),
+            origenReconciliacion: true,
+            reconciliacionDebil: true,
+            calculadoEn: FieldValue.serverTimestamp(),
+          },
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+        console.log(`[matchComprobante] ${hashActual} → rama 1 débil (nombre, ${reconcDebil.length} candidatos)`);
+        return;
+      }
     }
 
     // Rama destino: match por CBU/alias/nombre aprendido (prioridad sobre texto)
@@ -610,6 +651,32 @@ async function aprenderDestino(data: FirebaseFirestore.DocumentData): Promise<vo
       actualizadoEn: FieldValue.serverTimestamp(),
     });
     console.log(`[aprenderDestino] insert ${id} (${parsed.tipo}) → ${categoria ?? 'sin cat'} / item=${itemEsperadoId ?? '-'}`);
+  }
+
+  // F9.82 — si la llave principal es fuerte (CBU/CUIT/alias), también aprender el
+  // destinoNombre como entrada tipo 'nombre' para que el pase débil lo encuentre el
+  // mes siguiente (el banco repite el mismo texto pero sin CUIT/CBU).
+  if (parsed.tipo !== 'nombre' && destinoNombre) {
+    const parsedNombre = normalizarDestino(destinoNombre);
+    if (parsedNombre?.tipo === 'nombre') {
+      const idNombre  = idDestinoNorm(parsedNombre.norm);
+      const refNombre = db.collection('destinos').doc(idNombre);
+      const docNombre = await refNombre.get();
+      if (!docNombre.exists) {
+        await refNombre.set({
+          destinoNorm:  parsedNombre.norm,
+          tipo:         'nombre',
+          ...(itemEsperadoId ? { itemEsperadoId } : {}),
+          categoria, subcategoria, etiqueta,
+          confianza:    0.8,
+          creadoPor,
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+        console.log(`[aprenderDestino] insert nombre alias ${idNombre} → item=${itemEsperadoId ?? '-'}`);
+      } else if (itemEsperadoId && !docNombre.data()?.itemEsperadoId) {
+        await refNombre.update({ itemEsperadoId, actualizadoEn: FieldValue.serverTimestamp() });
+      }
+    }
   }
 }
 

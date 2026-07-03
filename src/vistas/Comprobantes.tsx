@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmadoPagoPorFecha, esObligacionDoc } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, buscarObligacionAbierta, confirmadoPagoPorFecha, esObligacionDoc } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -109,10 +109,13 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
   const { clasificar, cargando: cargandoDict } = useDiccionario();
-  const [confirmando,  setConfirmando]  = useState(false);
-  const [mostrarAlta,  setMostrarAlta]  = useState(false);
-  const [candidatoSel, setCandidatoSel] = useState<string>('');
-  const [errorLocal,   setErrorLocal]   = useState<string | null>(null);
+  const [confirmando,   setConfirmando]   = useState(false);
+  const [mostrarAlta,   setMostrarAlta]   = useState(false);
+  const [candidatoSel,  setCandidatoSel]  = useState<string>('');
+  const [errorLocal,    setErrorLocal]    = useState<string | null>(null);
+  const [mostrarPicker, setMostrarPicker] = useState(false);
+  const [pickerItem,    setPickerItem]    = useState<string>('');
+  const [pickerCargando, setPickerCargando] = useState(false);
   const autoConfirmadoRef = useRef(false);
   const autoAbiertoRef = useRef(false);
 
@@ -170,10 +173,11 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
     // Múltiples candidatos: elección real del usuario
     if (!pm.movimientoId && pm.candidatos && pm.candidatos.length > 0) {
       const movCands = pm.candidatos.filter(c => c.tipo === 'movimiento');
+      const esDebil  = pm.reconciliacionDebil === true;
       return (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Badge tone="info">Pagó una obligación</Badge>
-          <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Este pago salda una obligación abierta — elegí cuál movimiento</span>
+          <Badge tone={esDebil ? 'warning' : 'info'}>{esDebil ? 'Posible pago de factura' : 'Pagó una obligación'}</Badge>
+          <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>{esDebil ? 'Coincidencia por nombre — confirmá si corresponde' : 'Este pago salda una obligación abierta — elegí cuál movimiento'}</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {movCands.map(c => (
               <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '6px 0', borderBottom: '1px solid var(--gf-gray-100)' }}>
@@ -301,6 +305,39 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
     </span>
   );
 
+  // F9.82 — picker "Conciliar con gasto esperado": solo admin + pago + ramas 2/3
+  const esPagoDoc = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
+  const itemsGasto = items.filter(i => i.activo && i.tipo === 'Gasto' && i.moneda === d.moneda);
+  const labelItem  = (i: ExpectedItem) =>
+    i.notas || i.matchTexto?.incluye[0] || [i.categoria, i.subcategoria].filter(Boolean).join(' › ') || i.id;
+
+  async function handleConciliar() {
+    if (!pickerItem) return;
+    setPickerCargando(true);
+    setErrorLocal(null);
+    const fechaComp = d.vencimientos?.[0]?.fecha ?? d.fecha;
+    const mes = fechaComp ? fechaComp.slice(0, 7) : new Date().toISOString().slice(0, 7);
+    const movId = await buscarObligacionAbierta(pickerItem, mes);
+    if (movId) {
+      const res = await confirmarRama1(comp, movId, pickerItem);
+      setPickerCargando(false);
+      if (!res.ok) setErrorLocal(res.error.message);
+    } else {
+      const itemEsp = items.find(i => i.id === pickerItem);
+      const payload = {
+        ...preloadBase,
+        itemEsperadoId: pickerItem,
+        categoria:      itemEsp?.categoria  ?? preloadBase.categoria,
+        subcategoria:   itemEsp?.subcategoria ?? preloadBase.subcategoria,
+        banco:          undefined,
+      };
+      const res = await cargarMovimientoDesdeComprobante(comp.id, payload);
+      setPickerCargando(false);
+      if (!res.ok) setErrorLocal(res.error.message);
+      else setMostrarPicker(false);
+    }
+  }
+
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -317,7 +354,38 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
             : 'Movimiento nuevo'}
         </span>
       </div>
-      {!mostrarAlta && (
+
+      {/* F9.82 — picker para pagos sin obligación detectada automáticamente */}
+      {esAdmin && esPagoDoc && !mostrarAlta && (
+        <Button variant="ghost" size="sm" onClick={() => { setMostrarPicker(p => !p); setPickerItem(''); setErrorLocal(null); }}>
+          <Icon name="git-compare" size={13} /> Conciliar con gasto esperado
+        </Button>
+      )}
+      {mostrarPicker && esAdmin && esPagoDoc && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Elegí el gasto esperado que paga este comprobante</span>
+          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {itemsGasto.map(i => (
+              <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', cursor: 'pointer' }}>
+                <input type="radio" name={`picker-${comp.id}`} value={i.id} checked={pickerItem === i.id} onChange={() => setPickerItem(i.id)} />
+                <span style={{ flex: 1 }}>
+                  {labelItem(i)}
+                  {i.montoEsperado != null && <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6 }}>{fmtMonto(i.montoEsperado, i.moneda)}</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+          {errorLocal && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errorLocal}</span>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button variant="primary" size="sm" disabled={!pickerItem || pickerCargando} onClick={handleConciliar}>
+              {pickerCargando ? 'Conciliando…' : 'Confirmar'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setMostrarPicker(false)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+
+      {!mostrarAlta && !mostrarPicker && (
         <Button variant="primary" size="sm" disabled={cargandoDict} onClick={() => setMostrarAlta(true)}>
           {cargandoDict ? 'Cargando…' : 'Revisar y cargar'}
         </Button>

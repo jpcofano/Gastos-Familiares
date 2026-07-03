@@ -177,6 +177,8 @@ export interface PropuestaMatch {
   dedupInfo?: { movId: string; mes: string | null; monto: number | null; item?: string | null };
   // F6.9 — la rama 1 del flujo de comprobantes es siempre reconciliación por payee
   origenReconciliacion?: boolean;
+  // F9.82 — pase débil por nombre: rama 1 candidatos, nunca auto-confirma
+  reconciliacionDebil?: boolean;
 }
 
 export interface Comprobante {

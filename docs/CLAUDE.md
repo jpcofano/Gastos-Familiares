@@ -150,6 +150,48 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.83 — Backfill: `scripts/seed/backfillCategoriaCanonica.ts`. Completa `categoria` en movimientos
+  que tienen `subcategoria` seteada pero `categoria` vacía/null o inconsistente. Fuente de verdad:
+  `/subcategorias` (campo `valor` → `categoriaPadre`) + `config/familia.categorias` (activas).
+  Normalización NFD+lowercase para el lookup. Tres grupos en dry-run: (1) A completar — se escriben
+  con `--apply`; (2) Revisión manual — subcat sin match en taxonomía, loguear para decidir; (3) Sin
+  subcategoría ni categoría — no tocar. Batches ≤ 450, idempotente.
+  Uso: `tsx scripts/seed/backfillCategoriaCanonica.ts` (dry-run) → `--apply` → prod con `--target=production --apply --i-am-sure`.
+- F9.82 — Conciliación pago↔obligación: pase débil + picker + alias-learning.
+  **Bloqueos resueltos en `reconciliarPorPayee` (`matchLogica.ts`):** (1) ya no corta con `return []`
+  si no hay CUIT/CBU/alias — ahora llama al nuevo pase débil por nombre; (2) comparación de monto
+  cambiada de `m.monto` exacto a `montoSalda()` que también evalúa `m.vencimientos[].monto` (cierra
+  el caso 2º vencimiento). `MovimientoMin` suma `destinoNombre` y `vencimientos` (mapeados en el bloque
+  de `movs` de `matchComprobante`). **Pase débil (`reconciliarPorNombre`):** nueva función exportada que
+  matchea por nombre normalizado y/o `itemEsperadoId` aprendido en `/destinos tipo='nombre'`; NUNCA
+  auto-confirma: el caller lo escribe como rama 1 `candidatos` con `reconciliacionDebil:true`. Corre
+  después del pase fuerte con 0 candidatos; helper `cargarNombresDestinoAprendidos()` carga hasta 500
+  entradas `tipo='nombre' && confianza≥0.7` de `/destinos`. **Merge conservador en `confirmarRama1`
+  (`comprobantes.ts`):** campos `destinoCbu/Cuit/Alias/Nombre/vencimientos` solo se escriben si el pago
+  los trae (antes pisaban con null el payee fuerte de la factura). **Alias-learning (`aprenderDestino`,
+  `index.ts`):** cuando la llave principal es CBU/CUIT/alias y hay `destinoNombre`, inserta una entrada
+  adicional `tipo='nombre'` en `/destinos` para que el pase débil lo encuentre el mes siguiente.
+  **`PropuestaMatch` gemelo** (functions `matchLogica.ts` + cliente `types/index.ts` + `docAComprobante`):
+  suma campo `reconciliacionDebil?: boolean`. **Picker "Conciliar con gasto esperado" (`Comprobantes.tsx`,
+  admin-only):** aparece en pagos (transferencia/comprobante_pago) con propuesta rama 2/3; lista ítems
+  activos del mes ordenados; al confirmar busca obligación abierta con `buscarObligacionAbierta()` (nueva
+  query `itemEsperadoId + confirmadoPago==false + mes`) — si la encuentra llama `confirmarRama1` (sin
+  movimiento nuevo), si no llama `cargarMovimientoDesdeComprobante` con `itemEsperadoId` prefijado.
+  Candidatos débiles reusan la UI de candidatos rama 1 con badge ámbar "Posible pago de factura".
+  **Pendientes que F9.82 NO resuelve:** actualizar monto del movimiento al del 2º vencimiento al conciliar
+  (decisión pendiente de Juan); "AYSA" vs "Agua y Saneamientos Argentinos S.A." no matchea por includes
+  (primera vez siempre es picker manual; alias-learning cierra el gap desde el 2º mes).
+  Deploy: `cd functions && npm run build` → `firebase deploy --only functions,hosting`.
+- F9.81 — Migración `reasignarPersonaColegio.ts` (script en `scripts/seed/`): reasigna
+  `persona` de movimientos e `itemsEsperados` donde algún campo normalizado contiene
+  "colegio" y `persona ∈ {Federico, Sofía}` → `persona = 'Juan'`. Dry-run por defecto;
+  `--apply` para escribir; `--target=production --apply --i-am-sure` para prod.
+  Mismo patrón que backfillPersonaMemberId.ts (F9.24): batches ≤ 450, idempotente,
+  valida IDs contra `config/familia.miembros` al arrancar. Cubre también `itemsEsperados`
+  para que el prellenado de nuevos gastos de colegio sugiera al padre (no al hijo).
+  Privacidad: los dependientes solo ven movimientos con `where('persona','==',memberId)`;
+  reasignar persona es la única forma de ocultarles un gasto sin borrar ni agregar Rules.
+  No es cambio de UI — solo migración de datos.
 - F9.80 — Notificaciones (repo) al diseño del kit: grupo "Vencidos · N" con header rojo uppercase
   FUERA de la Card (antes adentro con estilo interno); card "Próximos 14 días" con badge de conteo
   ámbar si ≥1 / gris si 0, filtrando `ventana = hoy + proximo` (antes `estado !== 'vencido'` que

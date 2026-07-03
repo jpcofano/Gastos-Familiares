@@ -32,6 +32,9 @@ export interface MovimientoMin {
   destinoCuit?:    string | null;
   destinoCbu?:     string | null;
   destinoAlias?:   string | null;
+  destinoNombre?:  string | null;
+  // F9.82 — para comparar contra 2º vencimiento
+  vencimientos?:   Array<{ monto?: number | null }> | null;
   confirmadoPago?: boolean;
 }
 
@@ -66,6 +69,8 @@ export interface PropuestaMatch {
   dedupInfo?: { movId: string; mes: string | null; monto: number | null; item?: string | null };
   // F6.9 — la rama 1 del flujo de comprobantes es siempre reconciliación por payee
   origenReconciliacion?: boolean;
+  // F9.82 — pase débil por nombre: rama 1 candidatos, nunca auto-confirma
+  reconciliacionDebil?: boolean;
 }
 
 // CBU/CVU argentino = 22 dígitos exactos
@@ -239,6 +244,14 @@ export function calcularPropuesta(
   return { rama: 3, calculadoEn: ahora };
 }
 
+// F9.82 — un pago puede saldar el monto cabecera O cualquier vencimiento (1º/2º venc)
+function montoSalda(m: MovimientoMin, montoTotal: number): boolean {
+  if (Math.abs(m.monto - montoTotal) < 0.01) return true;
+  return (m.vencimientos ?? []).some(
+    v => typeof v?.monto === 'number' && Math.abs(v.monto - montoTotal) < 0.01,
+  );
+}
+
 export function reconciliarPorPayee(
   datos: DatosExtractosMin,
   movs: MovimientoMin[],
@@ -262,6 +275,33 @@ export function reconciliarPorPayee(
       (!!pCbu   && mCbu   === pCbu)   ||
       (!!pAlias && mAlias === pAlias);
     if (!mismoPayee) return false;
-    return Math.abs(m.monto - (datos.montoTotal as number)) < 0.01;
+    return montoSalda(m, datos.montoTotal as number);
+  });
+}
+
+// F9.82 — pase débil: payee por nombre normalizado cuando no hay CUIT/CBU/alias.
+// NUNCA auto-confirma: el caller siempre lo baja a rama 1 `candidatos`.
+export function reconciliarPorNombre(
+  datos: DatosExtractosMin,
+  movs: MovimientoMin[],
+  nombresDestinoAprendidos: Map<string, string> | null,
+): MovimientoMin[] {
+  const norm = (s: string | null | undefined) =>
+    (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const pNombre = norm(datos.destinoNombre) || norm(datos.comercioRazonSocial);
+  if (!pNombre || datos.montoTotal == null) return [];
+
+  const itemAprendido = nombresDestinoAprendidos?.get(pNombre) ?? null;
+
+  return movs.filter(m => {
+    if (m.tipo !== 'Gasto')        return false;
+    if (m.moneda !== datos.moneda) return false;
+    if (m.confirmadoPago)          return false;
+    if (!montoSalda(m, datos.montoTotal as number)) return false;
+    const mNombre = norm(m.destinoNombre);
+    const nombreCoincide = !!mNombre &&
+      (mNombre === pNombre || mNombre.includes(pNombre) || pNombre.includes(mNombre));
+    const itemCoincide = !!itemAprendido && m.itemEsperadoId === itemAprendido;
+    return nombreCoincide || itemCoincide;
   });
 }

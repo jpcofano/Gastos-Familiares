@@ -1,6 +1,6 @@
 import {
   doc, getDoc, setDoc, serverTimestamp, writeBatch,
-  collection, query, orderBy, getDocs, type DocumentData,
+  collection, query, orderBy, where, limit, getDocs, type DocumentData,
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
@@ -42,6 +42,8 @@ export function docAComprobante(id: string, data: DocumentData): Comprobante {
         monto: (dd.monto as number | null) ?? null,
         item:  (dd.item  as string | null | undefined),
       } : undefined,
+      origenReconciliacion: (pm.origenReconciliacion as boolean | undefined),
+      reconciliacionDebil:  (pm.reconciliacionDebil  as boolean | undefined),
     } : undefined,
   };
 }
@@ -145,13 +147,15 @@ export async function confirmarRama1(
       // F6.8 — propagar destino y vencimientos para que aprenderDestino() aprenda
       // seedImport: false — gradúa el mov de "seed pristino" a "tocado por usuario"
       //             para que aprenderMovimientoActualizado no lo saltee
-      seedImport:    false,
-      destinoCbu:    comp.datosExtraidos?.destinoCbu    ?? null,
-      destinoCuit:   comp.datosExtraidos?.destinoCuit   ?? null,
-      destinoAlias:  comp.datosExtraidos?.destinoAlias  ?? null,
-      destinoNombre: comp.datosExtraidos?.destinoNombre ?? null,
-      vencimientos:  comp.datosExtraidos?.vencimientos  ?? null,
-      actualizadoEn:  serverTimestamp(),
+      seedImport: false,
+      // F9.82 — merge conservador: no pisar payee del emisor con null
+      // (el pago suele traer menos datos que la factura: BBVA no trae CUIT)
+      ...(comp.datosExtraidos?.destinoCbu    ? { destinoCbu:    comp.datosExtraidos.destinoCbu }    : {}),
+      ...(comp.datosExtraidos?.destinoCuit   ? { destinoCuit:   comp.datosExtraidos.destinoCuit }   : {}),
+      ...(comp.datosExtraidos?.destinoAlias  ? { destinoAlias:  comp.datosExtraidos.destinoAlias }  : {}),
+      ...(comp.datosExtraidos?.destinoNombre ? { destinoNombre: comp.datosExtraidos.destinoNombre } : {}),
+      ...(comp.datosExtraidos?.vencimientos?.length ? { vencimientos: comp.datosExtraidos.vencimientos } : {}),
+      actualizadoEn: serverTimestamp(),
     });
     batch.update(doc(db, 'comprobantes', comp.id), {
       estado:       'vinculado',
@@ -177,5 +181,26 @@ export async function cargarMovimientoDesdeComprobante(
     return { ok: true, data: res.data as { movimientoId: string } };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+// F9.82 — picker "Conciliar con gasto esperado": busca obligación abierta para un item
+export async function buscarObligacionAbierta(
+  itemEsperadoId: string,
+  mes: string,
+): Promise<string | null> {
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, 'movimientos'),
+        where('itemEsperadoId', '==', itemEsperadoId),
+        where('confirmadoPago', '==', false),
+        where('mes', '==', mes),
+        limit(5),
+      ),
+    );
+    return snap.empty ? null : snap.docs[0].id;
+  } catch {
+    return null;
   }
 }
