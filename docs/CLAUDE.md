@@ -150,6 +150,57 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.87 — Navegación: Perfil vía avatar; Patrimonio en 4º slot del bottom-nav (gated a `jpcofano@gmail.com`).
+  Avatar del header (ya existía, F9.70) navega a `/perfil`. Bottom-nav reorganizado: `NAV_BASE` (Inicio/Resumen/Cargar)
+  más 4º slot condicional — `NAV_PATRIMONIO` (landmark, `/patrimonio`) para el dueño, `NAV_PERFIL` (user-round, `/perfil`)
+  para el resto (otros admin, dependientes). Ruta `/patrimonio` reemplaza `/perfil/patrimonio` (ya no es sub-pantalla de
+  Perfil sino tab de primer nivel); `TITULOS_PERFIL_SUB` pierde la entrada de patrimonio; `tituloDeRuta` maneja
+  `/patrimonio` directamente. Para el dueño, estar en `/perfil` o sub-pantallas no resalta ningún tab (Perfil ya no es
+  tab). Perfil.tsx actualiza el link de Patrimonio a `/patrimonio`. Gate de ruta (`esDueno && <Route path="/patrimonio">`)
+  sin cambios. Frontend puro.
+- F9.88 — Notificaciones: inclusión por estado del checklist, no por `diaVencimiento`.
+  `recordatoriosEsperados` reescrita: ya no filtra `item.diaVencimiento == null` — incluye todo ítem
+  cuyo estado del checklist sea `pendiente | vencido | por_confirmar | parcial` (lista local
+  `ACCIONABLE_NOTIF`, excluye `no_registrado` de meses pasados). `diaVencimiento` pasa a ser opcional:
+  si existe se construye la fecha y se aplica la ventana de 14 días; si no existe el ítem es "esperado
+  del mes" (siempre visible, va como `proximo` o `vencido` según estado). `Recordatorio.fecha: Date | null`;
+  `RecordatorioRow` muestra número de día + mes cuando hay fecha, o punto de color + "Este mes" cuando
+  no. Sort: vencido → hoy → proximo; dentro de proximo, con-fecha primero (por día), sin-fecha al final.
+  `contarVencProximos` no se infla (los sin-día van como `proximo`). `console.debug` de F9.86 eliminado.
+  Frontend puro. Deploy: `--only hosting`.
+- F9.86 — Notificaciones vacías pese a haber vencimientos en los próximos 14 días: diagnóstico de datos,
+  no de ventana (la ventana de 14 días es correcta). Log temporal `console.debug('[notif]', ...)` agregado
+  en `useRecordatorios` (Notificaciones.tsx) con conteos de items/movimientos/resumenes/recEsperados/
+  recTarjetas para identificar en qué paso devuelve 0. El fix concreto depende del log: desalineación
+  de nombre de campo `diaVencimiento` vs Firestore, ítems sin `diaVencimiento` cargado, o ítems
+  marcados cubiertos de más. Sacar el log una vez resuelto. → Resuelto en F9.88.
+- F9.85 — Dashboard: subtítulo de la card "Top 3 categorías" corregido de "Mes en superávit" (heredado
+  del kit, incorrecto) a "del gasto del mes" (describe el valor real: concentración del gasto en las
+  3 mayores categorías). Cambio de 1 línea en `src/vistas/Dashboard.tsx`. Frontend puro.
+- F9.84 — Patrimonio: vista privada de portafolio de inversiones, gateada a `jpcofano@gmail.com`
+  (`esAdmin` + email exacto). Esqueleto de UI + motor de métricas determinístico en front con datos mock
+  de la foto real ~USD 111k al 01/07/2026. `src/vistas/Patrimonio.tsx` (sub-pantalla de Perfil en
+  `/perfil/patrimonio`). Tipo `Posicion` propio (NO reusar tipos de gastos). 4 solapas:
+  **Resumen** (hero oscuro + total USD + eq ARS vía `tcDiario` + barra apilada por sector);
+  **Tenencias** (posiciones agrupadas por sector, chip ticker + tipo/país/moneda + valorUsd + %);
+  **Riesgo** (5 métricas con semáforo UCITS/HHI: nombre top excl. cripto · sector · país · cripto clase · HHI;
+  Top-3/Top-5; % RV informativo sin semáforo);
+  **Plan** (idea madre + 4 palancas de rebalanceo + disclaimer). Motor `calcMetrics()` determinístico:
+  total, bySector, byTipo, byPais, top1/3/5, HHI, sectorTop, paisAr, cripto, rvPct.
+  Bandas semáforo: nombre ≤5/10% · sector <25/40% · país <40/60% · cripto <10/20% · HHI <0,15/0,25.
+  % RV sin semáforo (la postura busca RV alta). Ícono `landmark` agregado a Icon.tsx.
+  Datos: `PAT_POS` mock (15 posiciones, foto real); TC real de `cargarTCReciente(1)`, fallback `TC_DEFAULT`.
+  Fuera de alcance en este prompt: ingesta .txt, colección `posiciones`, Firestore rules, Functions.
+  Puntero al contrato completo: `docs/patrimonio/CLAUDE-PATRIMONIO.md` (ver §Anexo: Patrimonio).
+- F9.84.1 — Patrimonio: variante A fija (no toggle). Resumen reemplazado: hero oscuro + 3 riesgos semáforo
+  (HeadlineSem: Nombre top excl. cripto · Sector top · Cripto clase) + primeras 3 palancas de rebalanceo
+  (cards numeradas) + Patrimonio total al pie (portafolio + Depto USD 220k + Auto USD 10k ≈ USD 341.5k;
+  bienes fuera del análisis de riesgo). `PAT_BIENES` constante nueva. Tenencias gana CompBar arriba +
+  `MerchantLogo` (fallback monograma) en lugar del ticker-box. `MerchantLogo` importado. Frontend puro.
+- F9.89 — Dashboard Inicio: dos ajustes cosméticos. (1) Top subcategorías: barras 13px/borderRadius 7
+  (antes 6px/3px), escaladas al máximo de la lista (`Math.max((valor/maxSub)*100, 4)%`). (2) Card
+  "Top 3 categorías": contenido centrado (`textAlign:'center'`), valor 22px fontWeight 800,
+  subtítulo "del gasto del mes". Frontend puro.
 - F9.83 — Backfill: `scripts/seed/backfillCategoriaCanonica.ts`. Completa `categoria` en movimientos
   que tienen `subcategoria` seteada pero `categoria` vacía/null o inconsistente. Fuente de verdad:
   `/subcategorias` (campo `valor` → `categoriaPadre`) + `config/familia.categorias` (activas).
@@ -947,6 +998,7 @@ componente — `ResumenCard` ahora solo aporta las acciones (vía `children`).
 - `docs/CLAUDE.md` — este archivo. Fuente de verdad.
 - `docs/prompts/` — prompts iniciales de cada sesion con Claude Code.
 - `docs/sesiones/` — resumenes de sesion al cerrar cada fase.
+- `docs/patrimonio/` — Anexo: Patrimonio (ver §Anexo: Patrimonio más abajo).
 - `scripts/seed/` — script de migracion Sheets a Firestore.
 - `data/` — snapshots .xlsx versionados.
 - `secrets/` — service account JSON (gitignored).
@@ -955,3 +1007,16 @@ componente — `ResumenCard` ahora solo aporta las acciones (vía `children`).
 - `firestore.rules` — Security Rules.
 - `firestore.indexes.json` — indices compuestos.
 - `firebase.json` — config de Hosting + Emulators + Headers.
+
+## Anexo: Patrimonio
+
+Vista privada de portafolio de inversiones. Gateada a `jpcofano@gmail.com` (esAdmin + email exacto).
+Aislamiento absoluto: colecciones propias (`posiciones`, `snapshotsPortafolio`); sin puente con gastos.
+
+Contrato completo: `docs/patrimonio/CLAUDE-PATRIMONIO.md` (fuente de verdad técnica).
+Resumen de sesión de diseño: `docs/patrimonio/RESUMEN-SESION.md`.
+Prompt de extracción: `docs/patrimonio/patrimonio-extraccion.md`.
+Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
+
+**Implementado (F9.84):** esqueleto UI (`src/vistas/Patrimonio.tsx`) + motor de métricas determinístico
+en front con datos mock de la foto real. Ingesta .txt, Firestore rules y Functions van en prompts aparte.

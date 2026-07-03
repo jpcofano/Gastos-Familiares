@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gastos-familiares/patrimonio/posicion.schema.json",
+  "title": "Patrimonio — corrida de posiciones",
+  "description": "Contrato del .txt que produce la ventana de extracción y consume la solapa Patrimonio. La app valida contra este schema y solo confirma; no reedita campo a campo.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["meta", "posiciones"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["fecha_corrida", "entidad", "fuentes", "total_declarado_usd"],
+      "properties": {
+        "fecha_corrida": {
+          "type": "string",
+          "format": "date",
+          "description": "Fecha de la foto (YYYY-MM-DD). La app usa tcDiario[fecha_corrida] para convertir ARS."
+        },
+        "entidad": {
+          "type": "string",
+          "const": "familia",
+          "description": "Unidad de medida: la familia como una sola entidad."
+        },
+        "fuentes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Nombres de los archivos de origen."
+        },
+        "total_declarado_usd": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Suma de los totales USD que declara cada resumen. Checksum contra el cálculo propio de la app."
+        },
+        "nota_tc": { "type": "string" }
+      }
+    },
+    "posiciones": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/posicion" }
+    }
+  },
+  "$defs": {
+    "posicion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cuenta", "titular", "ticker", "tipo", "sector",
+        "pais_riesgo", "moneda_origen", "valor_origen", "cantidad", "fuente", "revisar"
+      ],
+      "properties": {
+        "cuenta": {
+          "type": "string",
+          "description": "Identificador de cuenta, ej. 'Balanz 402665', 'PPI 101268', 'Nexo', 'Bitfinex'."
+        },
+        "titular": {
+          "type": ["string", "null"],
+          "description": "Titular(es). null si la fuente no lo muestra (marcar revisar=true)."
+        },
+        "ticker": { "type": "string" },
+        "tipo": {
+          "type": "string",
+          "enum": ["accion", "bono", "on", "cedear", "fci", "cripto", "cash"]
+        },
+        "sector": {
+          "type": "string",
+          "description": "Para acciones: sector económico. Para no-acciones: driver de riesgo (cer_pesos, soberano_usd, corporativo_usd, lecaps_pesos, money_market_pesos, renta_variable_ar, cripto, stablecoin, efectivo)."
+        },
+        "pais_riesgo": {
+          "type": "string",
+          "enum": ["AR", "global"]
+        },
+        "moneda_origen": {
+          "type": "string",
+          "enum": ["ARS", "USD"],
+          "description": "Moneda tal como la presenta el resumen. La app convierte solo las ARS."
+        },
+        "valor_origen": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Valor en moneda_origen. Balanz/Nexo/Bitfinex en USD; PPI en ARS."
+        },
+        "cantidad": {
+          "type": ["number", "null"],
+          "description": "Nominal/unidades. null para cash."
+        },
+        "fuente": {
+          "type": "string",
+          "description": "Archivo de origen (trazabilidad)."
+        },
+        "revisar": {
+          "type": "boolean",
+          "description": "true si la extracción no fue concluyente (clasificación dudosa, titular faltante, saldo pendiente, ticker fuera de tabla)."
+        }
+      }
+    }
+  }
+}

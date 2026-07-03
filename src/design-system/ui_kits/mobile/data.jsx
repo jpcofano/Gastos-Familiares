@@ -21,6 +21,8 @@ const M_MOVS = [
   _m(16, 'Rugby Federico', 28500, 'Gasto', 'Educación y chicos', 'Actividades extracurriculares', 'Federico', 'Mercado Pago'),
   _m(18, 'Internet Fibertel', 29900, 'Gasto', 'Casa', 'Internet', 'Juan', 'Galicia'),
   _m(22, 'Cena restaurante', 71400, 'Gasto', 'Salidas', '', 'María', 'Galicia'),
+  // Pago de hoy (29) que concilia con el esperado 'luz' que vence hoy.
+  _m(29, 'Edenor — luz', 38900, 'Gasto', 'Casa', 'Luz', 'Juan', 'Mercado Pago'),
 ];
 
 // Medios de pago reales (hoja ResumenMes / Obligaciones): banco / billetera / efectivo.
@@ -62,23 +64,26 @@ const M_ESPERADOS = [
   { id: 'colf', label: 'Colegio Federico', persona: 'María', monto: 186000, moneda: 'ARS', estado: 'pagado', categoria: 'Educación y chicos', subcat: 'Colegio Fede', etiqueta: 'hijos' },
   { id: 'cols', label: 'Colegio Sofía', persona: 'María', monto: 168000, moneda: 'ARS', estado: 'pagado', categoria: 'Educación y chicos', subcat: 'Colegio Sofi', etiqueta: 'hijos' },
   { id: 'exp', label: 'Expensas', persona: 'Juan', monto: 134200, moneda: 'ARS', estado: 'pagado', categoria: 'Casa', subcat: 'Expensas', etiqueta: 'rutina-casa' },
-  { id: 'luz', label: 'Edenor — luz', persona: 'Juan', monto: 38900, moneda: 'ARS', estado: 'por_confirmar', vence: 27, categoria: 'Casa', subcat: 'Luz', etiqueta: 'rutina-casa' },
-  { id: 'gas', label: 'Metrogas', persona: 'Juan', monto: 21500, moneda: 'ARS', estado: 'pendiente', vence: 30, categoria: 'Casa', subcat: 'Gas', etiqueta: 'rutina-casa' },
+  { id: 'luz', label: 'Edenor — luz', persona: 'Juan', monto: 38900, moneda: 'ARS', estado: 'pagado', vence: 29, categoria: 'Casa', subcat: 'Luz', etiqueta: 'rutina-casa', conciliadoCon: 'edenor-—-luz-29' },
+  { id: 'gas', label: 'Metrogas', persona: 'Juan', monto: 21500, moneda: 'ARS', estado: 'pendiente', vence: 29, categoria: 'Casa', subcat: 'Gas', etiqueta: 'rutina-casa' },
   { id: 'inet', label: 'Internet Fibertel', persona: 'Juan', monto: 29900, moneda: 'ARS', estado: 'vencido', vence: 22, categoria: 'Casa', subcat: 'Internet', etiqueta: 'rutina-casa' },
   { id: 'mono', label: 'Monotributo Juan', persona: 'Juan', monto: 48000, moneda: 'ARS', estado: 'automatico', vence: 20, categoria: 'Impuestos y finanzas', subcat: 'Monotributo', etiqueta: 'rutina-trabajo' },
   { id: 'galvisa', label: 'Galicia Visa', persona: 'María', monto: 1403704, moneda: 'ARS', estado: 'parcial', vence: 30, categoria: 'Tarjetas', subcat: 'Pago Tarjeta', etiqueta: 'Galicia VisaARS' },
   { id: 'bbvavisa', label: 'BBVA Visa Signature', persona: 'Juan', monto: 2018435, moneda: 'ARS', estado: 'pendiente', vence: 16, categoria: 'Tarjetas', subcat: 'Pago Tarjeta', etiqueta: 'Frances VisaARS' },
 ];
 
-// Historiales separados para Cargar: comprobantes/facturas y resúmenes de tarjeta.
-// Cada lista se muestra recortada (4) con "ver todo". estado: ok|wait|warn|err.
+// Historial de comprobantes/facturas para Cargar. Refleja el card VIVO (F9.60–64):
+// estado de vínculo (vinculado|nuevo|proceso|revisar), tipo legible, payee (F9.64:
+// factura→emisor, transferencia→destinatario), medio (plataforma), monto, fecha,
+// badge de match, tamaño y —en facturas— info de vencimientos.
+// El título usa payee; cae al nombre de archivo solo mientras se extrae (proceso).
 const M_COMPROBANTES = [
-  { id: 'c1', nombre: 'Edenor_factura_06.pdf', estado: 'wait', detalle: 'Extrayendo datos…', fecha: '24/06' },
-  { id: 'c2', nombre: 'Aysa_factura.pdf', estado: 'warn', detalle: 'Falta categoría', fecha: '22/06' },
-  { id: 'c3', nombre: 'Metrogas_junio.pdf', estado: 'ok', detalle: 'Gas · $ 18.400', fecha: '20/06' },
-  { id: 'c4', nombre: 'Movistar_06.pdf', estado: 'ok', detalle: 'Telefonía · $ 12.999', fecha: '18/06' },
-  { id: 'c5', nombre: 'Farmacity_ticket.jpg', estado: 'ok', detalle: 'Salud · $ 27.600', fecha: '17/06' },
-  { id: 'c6', nombre: 'Coto_compra.jpg', estado: 'ok', detalle: 'Supermercado · $ 84.200', fecha: '15/06' },
+  { id: 'c0', nombre: 'IMG-20260701-WA0015.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Baggini Juan Francisco', medio: 'Mercado Pago', monto: 45000, fechaFull: '2026-07-01', vinculo: 'vinculado', match: true, kb: 80, detalle: 'Personal', fecha: '01/07' },
+  { id: 'c1', nombre: 'Aysa_0111B15526643.pdf', tipoDoc: 'factura', tipoLabel: 'Factura B', payee: 'Agua y Saneamientos Argentinos S.A.', medio: null, monto: 22208.61, fechaFull: '2026-05-30', vinculo: 'vinculado', match: true, kb: 1023, detalle: 'Casa · Agua', fecha: '30/05', vencimientos: { n: 2, segVenc: 22498.48 } },
+  { id: 'c2', nombre: 'Edenor_factura_07.pdf', tipoDoc: 'factura', tipoLabel: 'Factura', payee: null, medio: null, monto: null, fechaFull: null, vinculo: 'proceso', match: false, kb: 210, detalle: 'Extrayendo datos…', fecha: '01/07' },
+  { id: 'c3', nombre: 'Metrogas_junio.pdf', tipoDoc: 'factura', tipoLabel: 'Factura', payee: 'Metrogas S.A.', medio: null, monto: 18400, fechaFull: '2026-06-20', vinculo: 'revisar', match: false, kb: 96, detalle: 'Falta categoría', fecha: '20/06' },
+  { id: 'c4', nombre: 'transf_movistar.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Telefónica Móviles Arg.', medio: 'Personal Pay', monto: 12999, fechaFull: '2026-06-18', vinculo: 'nuevo', match: false, kb: 64, detalle: 'Telefonía', fecha: '18/06' },
+  { id: 'c5', nombre: 'Farmacity_ticket.jpg', tipoDoc: 'factura', tipoLabel: 'Ticket', payee: 'Farmacity', medio: null, monto: 27600, fechaFull: '2026-06-17', vinculo: 'vinculado', match: true, kb: 120, detalle: 'Salud', fecha: '17/06' },
 ];
 const M_RESUMENES_IN = [
   { id: 'r1', nombre: 'Resumen_Visa_junio.pdf', estado: 'ok', detalle: 'Conciliado · 14 consumos', fecha: '16/06' },
@@ -172,13 +177,28 @@ const M_DASH = {
   movMasAlto: { usd: 871, desc: 'Escuela Philips (ITPA SA) — Federico · Arancel + Taller + Transporte' },
   picoDia: { fecha: '10/06', dow: 'mié', usd: 1563, diaNum: 10 },
   categorias: [
-    { nombre: 'Educación y chicos', color: '#4f8ef7', pct: 65, count: 9, usd: 1693 },
-    { nombre: 'Casa', color: '#2bb673', pct: 21, count: 7, usd: 537 },
-    { nombre: 'Personal', color: '#f5a623', pct: 5, count: 6, usd: 132 },
-    { nombre: 'Salud', color: '#8b5cf6', pct: 3, count: 2, usd: 87 },
-    { nombre: 'Alimentación cotidiana', color: '#ef5350', pct: 2, count: 7, usd: 60 },
-    { nombre: 'Impuestos y finanzas', color: '#06b6d4', pct: 2, count: 3, usd: 51 },
-    { nombre: 'Otros', color: '#f97316', pct: 2, count: 2, usd: 48 },
+    { nombre: 'Educación y chicos', color: '#4f8ef7', pct: 65, count: 9, usd: 1693, subs: [
+      { nombre: 'Colegio Federico', usd: 871 }, { nombre: 'Colegio Sofi', usd: 564 },
+      { nombre: 'Actividades extra', usd: 152 }, { nombre: 'Útiles y libros', usd: 106 },
+    ] },
+    { nombre: 'Casa', color: '#2bb673', pct: 21, count: 7, usd: 537, subs: [
+      { nombre: 'Expensas', usd: 267 }, { nombre: 'Luz', usd: 180 }, { nombre: 'Internet', usd: 90 },
+    ] },
+    { nombre: 'Personal', color: '#f5a623', pct: 5, count: 6, usd: 132, subs: [
+      { nombre: 'Suscripciones', usd: 60 }, { nombre: 'Varios', usd: 72 },
+    ] },
+    { nombre: 'Salud', color: '#8b5cf6', pct: 3, count: 2, usd: 87, subs: [
+      { nombre: 'Farmacia', usd: 81 }, { nombre: 'Consultas', usd: 6 },
+    ] },
+    { nombre: 'Alimentación cotidiana', color: '#ef5350', pct: 2, count: 7, usd: 60, subs: [
+      { nombre: 'Supermercado', usd: 48 }, { nombre: 'Delivery', usd: 12 },
+    ] },
+    { nombre: 'Impuestos y finanzas', color: '#06b6d4', pct: 2, count: 3, usd: 51, subs: [
+      { nombre: 'Monotributo', usd: 48 }, { nombre: 'Comisiones', usd: 3 },
+    ] },
+    { nombre: 'Otros', color: '#f97316', pct: 2, count: 2, usd: 48, subs: [
+      { nombre: 'Sin categoría', usd: 48 },
+    ] },
   ],
   subcategorias: [
     { nombre: 'Colegio Federico', color: '#4f8ef7', valor: 871, pct: 34 },
@@ -208,8 +228,10 @@ const M_ANUAL = {
   promedioMensualUsd: 2044, mesMasAlto: 'Mar', mesMasBajo: 'Jul', tendenciaPct: 18,
   mesesConDatos: 6, comparacionInteranualPct: 117, mejorMesAhorro: 'Ene',
   meses: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'],
-  salidasPorMes: [1800, 2100, 3200, 2600, 2400, 2560, 1200, 1900, 2000, 2300, 2100, 1391],
-  ingresosPorMes: [3100, 2400, 2800, 2600, 2500, 4086, 1400, 2000, 2100, 2300, 2200, 1936],
+  // mesActualIdx: junio (0-indexed = 5). Meses 0..5 = reales; 6..11 = futuros → proyección.
+  mesActualIdx: 5,
+  salidasPorMes: [1800, 2100, 3200, 2600, 2400, 2560, 0, 0, 0, 0, 0, 0],
+  ingresosPorMes: [3100, 2400, 2800, 2600, 2500, 4086, 0, 0, 0, 0, 0, 0],
   categorias: [
     { nombre: 'Educación y chicos', color: '#4f8ef7', usd: 6925, subs: [
       { nombre: 'Colegio Federico', usd: 3120 }, { nombre: 'Colegio Sofi', usd: 2040 },
@@ -346,3 +368,124 @@ const M_RESUMENES_TARJETA = [
 ];
 
 Object.assign(window, { M_PERIODO_ACTUAL, M_RESUMENES_TARJETA });
+
+// ── Clasificación y aprendizaje · admin (F8.1–8.4, colección viva) ───────────
+// Grupo admin-only que edita lo configurable de Firestore que no tenía UI:
+// diccionario (reglas de prellenado), destinos (payees aprendidos, rama-2),
+// normalización (limpieza de descripciones on-boot).
+
+// Etiquetas transversales (tag aparte de categoría/subcategoría).
+const M_ETIQUETAS = ['hijos', 'rutina-casa', 'rutina-trabajo', 'ocio', 'salud-familia'];
+
+// Diccionario: cada entrada prellena categoría/subcat/persona/moneda cuando el
+// `patron` matchea la descripción. `personaDefault` = memberId (o null).
+const M_DICCIONARIO = [
+  { id: 'd-edenor', patron: 'edenor', tipoMatch: 'contains', categoria: 'Casa', subcategoria: 'Luz', etiqueta: 'rutina-casa', personaDefault: 'juan', monedaDefault: 'ARS', activo: true, confianza: 0.95 },
+  { id: 'd-metrogas', patron: 'metrogas', tipoMatch: 'contains', categoria: 'Casa', subcategoria: 'Gas', etiqueta: 'rutina-casa', personaDefault: 'juan', monedaDefault: 'ARS', activo: true, confianza: 0.95 },
+  { id: 'd-fibertel', patron: 'fibertel', tipoMatch: 'contains', categoria: 'Casa', subcategoria: 'Internet', etiqueta: 'rutina-casa', personaDefault: 'juan', monedaDefault: null, activo: true, confianza: 0.9 },
+  { id: 'd-coto', patron: 'coto', tipoMatch: 'contains', categoria: 'Alimentación cotidiana', subcategoria: null, etiqueta: null, personaDefault: 'maria', monedaDefault: 'ARS', activo: true, confianza: 0.85 },
+  { id: 'd-ypf', patron: 'ypf', tipoMatch: 'contains', categoria: 'Auto', subcategoria: 'Cochera', etiqueta: null, personaDefault: 'juan', monedaDefault: null, activo: true, confianza: 0.8 },
+  { id: 'd-colfede', patron: 'colegio federico', tipoMatch: 'contains', categoria: 'Educación y chicos', subcategoria: 'Colegio Fede', etiqueta: 'hijos', personaDefault: 'maria', monedaDefault: 'ARS', activo: true, confianza: 0.9 },
+  { id: 'd-rugby', patron: 'rugby', tipoMatch: 'contains', categoria: 'Educación y chicos', subcategoria: 'Actividades extracurriculares', etiqueta: 'hijos', personaDefault: 'fede', monedaDefault: null, activo: false, confianza: 0.7 },
+];
+
+// Destinos aprendidos: un payee normalizado → ítem esperado (rama-2) o categoría.
+// `confianza < 0.7` = ignorado por el matcher (chip ámbar de aviso).
+const UMBRAL_DESTINO = 0.7;
+const M_DESTINOS = [
+  { id: 'de-edenor', destinoNorm: 'EDENOR SA', tipo: 'nombre', confianza: 0.92, itemEsperadoId: 'luz', categoria: null, subcategoria: null, etiqueta: null },
+  { id: 'de-metrogas', destinoNorm: 'METROGAS SA', tipo: 'nombre', confianza: 0.9, itemEsperadoId: 'gas', categoria: null, subcategoria: null, etiqueta: null },
+  { id: 'de-exp', destinoNorm: '0170099220000012345678', tipo: 'cbu', confianza: 0.88, itemEsperadoId: 'exp', categoria: null, subcategoria: null, etiqueta: null },
+  { id: 'de-colfede', destinoNorm: 'colegio.fede.mp', tipo: 'alias', confianza: 0.82, itemEsperadoId: 'colf', categoria: null, subcategoria: null, etiqueta: 'hijos' },
+  { id: 'de-aysa', destinoNorm: '30546666561', tipo: 'cuit', confianza: 0.64, itemEsperadoId: null, categoria: 'Casa', subcategoria: 'Agua', etiqueta: 'rutina-casa' },
+  { id: 'de-varios', destinoNorm: 'TRANSFERENCIAS VARIAS', tipo: 'nombre', confianza: 0.55, itemEsperadoId: null, categoria: 'Personal', subcategoria: null, etiqueta: null },
+];
+
+// Reglas de normalización: limpian la descripción cruda antes de clasificar.
+// Se aplican EN ORDEN (orden asc); sólo las `activo:true` corren. Espejo del
+// algoritmo real (prefix/suffix/replace/regex). Ver src/datos/normalizador.ts.
+const M_REGLAS_NORM = [
+  { id: 'n-compra', tipo: 'replace', patron: 'COMPRA ', reemplazo: '', activo: true, orden: 0, notas: 'Saca el prefijo "COMPRA" de las tarjetas.' },
+  { id: 'n-mp', tipo: 'replace', patron: 'MERCADOPAGO*', reemplazo: '', activo: true, orden: 1, notas: 'Limpia el asterisco de Mercado Pago.' },
+  { id: 'n-fecha', tipo: 'regex', patron: '\\s*\\d{2}/\\d{2}$', reemplazo: '', activo: true, orden: 2, notas: 'Saca la fecha dd/mm del final.' },
+  { id: 'n-pago', tipo: 'prefix', patron: 'PAGO ', reemplazo: '', activo: true, orden: 3, notas: null },
+  { id: 'n-espacios', tipo: 'replace', patron: '  ', reemplazo: ' ', activo: false, orden: 4, notas: 'Colapsa dobles espacios (desactivada).' },
+];
+
+// Espejo de src/datos/normalizador.ts — mismo algoritmo, para el preview paso a paso.
+function gfNormalizar(s, rules) {
+  if (s == null || s === '') return s;
+  let out = String(s);
+  for (const r of rules) {
+    if (!out) break;
+    switch (r.tipo) {
+      case 'prefix': if (out.startsWith(r.patron)) out = (r.reemplazo + out.slice(r.patron.length)).trim(); break;
+      case 'suffix': if (out.endsWith(r.patron)) out = (out.slice(0, out.length - r.patron.length) + r.reemplazo).trim(); break;
+      case 'replace': out = out.split(r.patron).join(r.reemplazo).trim(); break;
+      case 'regex': try { out = out.replace(new RegExp(r.patron, 'gi'), r.reemplazo).trim(); } catch (e) { /* inválido, ignorar */ } break;
+    }
+  }
+  return out;
+}
+
+Object.assign(window, { M_ETIQUETAS, M_DICCIONARIO, M_DESTINOS, UMBRAL_DESTINO, M_REGLAS_NORM, gfNormalizar });
+
+// ── Logos de comercios (Brandfetch por dominio) ──────────────────────────────
+// Brandfetch necesita un DOMINIO; los movimientos traen razón social ("…Norte
+// S.A. (Edenor)"). Mapa curado comercio→dominio (match por substring, sin
+// acentos). Fallback: heurística slug (.com.ar) y, si falla, monograma. Mapa
+// APARTE del diccionario/destinos (no los ensucia). En el repo esto vive como
+// una colección/const `comerciosDominios` editable, con la misma resolución.
+const M_COMERCIO_DOMINIOS = [
+  { dominio: 'edenor.com', match: ['edenor', 'empresa distribuidora y comercializadora norte'] },
+  { dominio: 'telecom.com.ar', match: ['telecom'] },
+  { dominio: 'personal.com.ar', match: ['personal pay', 'telecom personal'] },
+  { dominio: 'movistar.com.ar', match: ['movistar', 'telefonica'] },
+  { dominio: 'aysa.com.ar', match: ['aysa', 'agua y saneamientos'] },
+  { dominio: 'metrogas.com.ar', match: ['metrogas'] },
+  { dominio: 'naturgy.com.ar', match: ['naturgy'] },
+  { dominio: 'afip.gob.ar', match: ['afip', 'monotributo'] },
+  { dominio: 'fibertel.com.ar', match: ['fibertel'] },
+  { dominio: 'farmacity.com.ar', match: ['farmacity'] },
+  { dominio: 'coto.com.ar', match: ['coto'] },
+  { dominio: 'jumbo.com.ar', match: ['jumbo'] },
+  { dominio: 'carrefour.com.ar', match: ['carrefour'] },
+  { dominio: 'disco.com.ar', match: ['disco'] },
+  { dominio: 'dia.com.ar', match: ['supermercado dia', 'dia %'] },
+  { dominio: 'ypf.com', match: ['ypf'] },
+  { dominio: 'shell.com.ar', match: ['shell'] },
+  { dominio: 'despegar.com', match: ['despegar'] },
+  { dominio: 'aerolineas.com.ar', match: ['aerolineas'] },
+  { dominio: 'apple.com', match: ['apple', 'itunes', 'icloud'] },
+  { dominio: 'mercadolibre.com.ar', match: ['mercadolibre', 'mercado libre'] },
+  { dominio: 'mercadopago.com.ar', match: ['mercadopago', 'mercado pago'] },
+  { dominio: 'netflix.com', match: ['netflix'] },
+  { dominio: 'spotify.com', match: ['spotify'] },
+  { dominio: 'rappi.com.ar', match: ['rappi'] },
+  { dominio: 'pedidosya.com.ar', match: ['pedidosya', 'pedidos ya'] },
+  { dominio: 'starbucks.com.ar', match: ['starbucks'] },
+  { dominio: 'sodimac.com.ar', match: ['sodimac'] },
+  { dominio: 'easy.com.ar', match: ['easy'] },
+  { dominio: 'fravega.com', match: ['fravega'] },
+  { dominio: 'garbarino.com', match: ['garbarino'] },
+  { dominio: 'musimundo.com', match: ['musimundo'] },
+  { dominio: 'cinemark.com.ar', match: ['cinemark', 'cinemark hoyts'] },
+  { dominio: 'dexter.com.ar', match: ['dexter'] },
+];
+
+// Normaliza para el match: minúsculas, sin acentos, sin puntuación redundante.
+const _norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+// comercioDominio(nombre) → dominio o null. 1) mapa curado (substring), 2) null
+// (el componente decide el fallback). NO adivina dominios de nombres propios de
+// persona (transferencias P2P) para no traer logos equivocados.
+function comercioDominio(nombre) {
+  const n = _norm(nombre);
+  if (!n) return null;
+  for (const e of M_COMERCIO_DOMINIOS) {
+    if (e.match.some((m) => n.includes(m.replace(' %', '')))) return e.dominio;
+  }
+  return null;
+}
+
+Object.assign(window, { M_COMERCIO_DOMINIOS, comercioDominio });

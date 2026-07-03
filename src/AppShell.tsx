@@ -26,14 +26,16 @@ import Diccionario from './vistas/perfil/Diccionario';
 import Destinos from './vistas/perfil/Destinos';
 import Normalizacion from './vistas/perfil/Normalizacion';
 import TarjetasViewer from './vistas/TarjetasViewer';
+import Patrimonio from './vistas/Patrimonio';
 import { Icon } from './design-system/Icon';
 
-const NAV_ITEMS: BottomNavItem[] = [
+const NAV_BASE: BottomNavItem[] = [
   { to: '/',            label: 'Inicio',  icon: 'house',       end: true },
   { to: '/resumen',     label: 'Resumen', icon: 'list-checks' },
   { to: '/comprobantes',label: 'Cargar',  icon: 'upload' },
-  { to: '/perfil',      label: 'Perfil',  icon: 'user-round' },
 ];
+const NAV_PATRIMONIO: BottomNavItem = { to: '/patrimonio', label: 'Patrimonio', icon: 'landmark' };
+const NAV_PERFIL: BottomNavItem     = { to: '/perfil',     label: 'Perfil',     icon: 'user-round' };
 
 const TITULOS_PERFIL_SUB: Record<string, string> = {
   '/perfil/mis-datos':        'Mis datos',
@@ -55,6 +57,7 @@ function tituloDeRuta(pathname: string, nombre: string): { title: string; sub?: 
   if (pathname === '/resumen')          return { title: 'Resumen', sub: 'Gastos del mes' };
   if (pathname === '/perfil')           return { title: 'Tu Perfil', sub: 'Cuenta y configuración' };
   if (pathname === '/config-esperados') return { title: 'Pagos esperados' };
+  if (pathname === '/patrimonio')        return { title: 'Patrimonio', sub: 'Portafolio de inversiones' };
   if (pathname === '/tarjetas')         return { title: 'Tarjetas', sub: 'Resúmenes (solo lectura)' };
   if (TITULOS_PERFIL_SUB[pathname])     return { title: TITULOS_PERFIL_SUB[pathname] };
   return { title: `Hola, ${nombre}`, sub: 'Gastos Familiares' };
@@ -101,20 +104,22 @@ export default function AppShell() {
   }
 
   const esAdmin = miembro!.rol === 'admin';
-  const navItems = esAdmin ? NAV_ITEMS : NAV_ITEMS.filter(n => n.to !== '/resumen');
+  const esDueno = esAdmin && miembro!.emails.some(e => e === 'jpcofano@gmail.com');
+  const navBase = esAdmin ? NAV_BASE : NAV_BASE.filter(n => n.to !== '/resumen');
+  const navItems = [...navBase, esDueno ? NAV_PATRIMONIO : NAV_PERFIL];
 
   return (
     <MiembroContext.Provider value={{ memberId: memberId!, miembro: miembro! }}>
     <DiccionarioProvider>
     <ItemsEsperadosProvider>
-      <ShellFrame esAdmin={esAdmin} nombre={miembro!.nombre} navItems={navItems} />
+      <ShellFrame esAdmin={esAdmin} esDueno={esDueno} nombre={miembro!.nombre} navItems={navItems} />
     </ItemsEsperadosProvider>
     </DiccionarioProvider>
     </MiembroContext.Provider>
   );
 }
 
-function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: string; navItems: BottomNavItem[] }) {
+function ShellFrame({ esAdmin, esDueno, nombre, navItems }: { esAdmin: boolean; esDueno: boolean; nombre: string; navItems: BottomNavItem[] }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { title, sub } = tituloDeRuta(location.pathname, nombre);
@@ -175,6 +180,7 @@ function ShellFrame({ esAdmin, nombre, navItems }: { esAdmin: boolean; nombre: s
           {esAdmin && <Route path="/perfil/diccionario" element={<Diccionario />} />}
           {esAdmin && <Route path="/perfil/destinos" element={<Destinos />} />}
           {esAdmin && <Route path="/perfil/normalizacion" element={<Normalizacion />} />}
+          {esDueno && <Route path="/patrimonio" element={<Patrimonio />} />}
           <Route path="/tarjetas" element={<TarjetasViewer />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

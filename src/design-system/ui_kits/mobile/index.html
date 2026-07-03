@@ -6,6 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Gastos Familiares — móvil</title>
 <link rel="stylesheet" href="../../styles.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" />
 <style>
   html, body { margin: 0; height: 100%; }
   body { background: #0d1117; font-family: var(--font-base); color: var(--color-text); }
@@ -18,6 +21,12 @@
     transition: transform .1s;
   }
   .fab:active { transform: scale(.94); }
+  @keyframes gfRiseIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes gfConcilia { 0% { background: var(--gf-emerald-50); } 100% { background: transparent; } }
+  @keyframes gfBadgePop { 0% { transform: scale(.4); opacity: 0; } 55% { transform: scale(1.18); } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes gfStrike { 0% { transform: scale(1); } 50% { transform: scale(.96); } 100% { transform: scale(1); } }
+  .gf-row-concilia { animation: gfConcilia 1.1s ease-out both; }
+  .gf-badge-pop { animation: gfBadgePop .42s cubic-bezier(.34,1.56,.64,1) both; }
 </style>
 </head>
 <body>
@@ -43,6 +52,10 @@
 <script type="text/babel" src="TarjetasMobile.jsx"></script>
 <script type="text/babel" src="PerfilMobile.jsx"></script>
 <script type="text/babel" src="PerfilScreens.jsx"></script>
+<script type="text/babel" src="PatrimonioMobile.jsx"></script>
+<script type="text/babel" src="ClasificacionScreens.jsx"></script>
+<script type="text/babel" src="EditarMovimiento.jsx"></script>
+<script type="text/babel" src="BuscarMovimiento.jsx"></script>
 <script type="text/babel" src="ComprobanteConfirm.jsx"></script>
 <script type="text/babel" src="ShareLanding.jsx"></script>
 <script type="text/babel" src="ManualGasto.jsx"></script>
@@ -65,13 +78,19 @@
     'tarjetas-cfg': { t: 'Tarjetas', s: 'Tus tarjetas y sus ciclos' },
     tc:         { t: 'Tipo de cambio', s: 'USD → ARS' },
     notificaciones: { t: 'Notificaciones', s: 'Vencimientos y recordatorios' },
+    patrimonio: { t: 'Patrimonio', s: 'Portafolio de inversión · privado' },
+    'buscar-mov': { t: 'Buscar movimiento', s: 'Editar o eliminar un cargado' },
+    diccionario:   { t: 'Diccionario', s: 'Reglas de prellenado' },
+    destinos:      { t: 'Destinos', s: 'Payees aprendidos' },
+    normalizacion: { t: 'Normalización', s: 'Limpieza de descripciones' },
   };
 
   function App() {
     const {
       Phone, AppBar, Screen, BottomNav, Icon,
       DashboardMobile, ResumenMobile, CargaMobile, TarjetasMobile, PerfilMobile,
-      MiembrosMobile, EsperadosConfigMobile, CategoriasMobile, MediosPagoMobile, TarjetasConfigMobile, TipoCambioMobile, NotificacionesMobile,
+      MiembrosMobile, EsperadosConfigMobile, CategoriasMobile, MediosPagoMobile, TarjetasConfigMobile, TipoCambioMobile, NotificacionesMobile, BuscarMovimiento, PatrimonioMobile,
+      DiccionarioMobile, DestinosMobile, NormalizacionMobile,
       ComprobanteConfirm, ManualGasto, ShareLanding,
     } = window;
     const [tab, setTab] = React.useState('inicio');
@@ -99,6 +118,19 @@
         <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
       </button>
     );
+    // Header global: avatar (abre Perfil) · luna (tema) · campana (vencimientos → Notificaciones).
+    const me = window.M_MIEMBRO;
+    const vencN = window.contarVencProximos ? window.contarVencProximos() : 0;
+    const avatarBtn = (
+      <button onClick={() => { setSub(null); setTab('perfil'); }} aria-label="Perfil" style={{ width: 34, height: 34, borderRadius: '50%', border: 'none', cursor: 'pointer', background: 'var(--gf-ink)', color: '#fff', fontSize: 14, fontWeight: 700, flexShrink: 0, fontFamily: 'var(--font-base)' }}>{me.nombre.charAt(0)}</button>
+    );
+    const bellBtn = (
+      <button onClick={() => setSub('notificaciones')} aria-label="Notificaciones" style={{ position: 'relative', width: 34, height: 34, borderRadius: 999, border: 'none', background: 'var(--gf-gray-100)', color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+        <Icon name="bell" size={18} />
+        {vencN > 0 && <span style={{ position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 999, background: 'var(--gf-expense)', color: '#fff', fontSize: 10, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px', border: '2px solid var(--color-surface)' }}>{vencN}</span>}
+      </button>
+    );
+    const globalRight = (<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{avatarBtn}{themeBtn}{bellBtn}</div>);
 
     const goTab = (t) => { setSub(null); setTab(t); };
     const onNav = (dest) => { setSub(dest); };
@@ -106,10 +138,10 @@
     // Sub-screen takes over (reached from Perfil)
     if (sub) {
       const meta = SUB_TITLES[sub];
-      const map = { miembros: <MiembrosMobile />, esperados: <EsperadosConfigMobile />, categorias: <CategoriasMobile />, medios: <MediosPagoMobile />, 'tarjetas-cfg': <TarjetasConfigMobile />, tc: <TipoCambioMobile />, notificaciones: <NotificacionesMobile /> };
+      const map = { miembros: <MiembrosMobile />, esperados: <EsperadosConfigMobile />, categorias: <CategoriasMobile />, medios: <MediosPagoMobile />, 'tarjetas-cfg': <TarjetasConfigMobile />, tc: <TipoCambioMobile />, notificaciones: <NotificacionesMobile />, patrimonio: <PatrimonioMobile />, 'buscar-mov': <BuscarMovimiento />, diccionario: <DiccionarioMobile />, destinos: <DestinosMobile />, normalizacion: <NormalizacionMobile /> };
       return (
         <Phone>
-          <AppBar title={meta.t} sub={meta.s} onBack={() => setSub(null)} right={themeBtn} />
+          <AppBar title={meta.t} sub={meta.s} onBack={() => setSub(null)} right={globalRight} />
           <Screen key={sub}>{map[sub]}</Screen>
           <BottomNav active="perfil" onSelect={goTab} />
         </Phone>
@@ -132,7 +164,7 @@
 
     return (
       <Phone>
-        <AppBar title={meta.t} sub={meta.s} onBack={view === 'tarjetas' ? () => setTab('resumen') : undefined} right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{headerRight}{themeBtn}</div>} />
+        <AppBar title={meta.t} sub={meta.s} onBack={view === 'tarjetas' ? () => setTab('resumen') : undefined} right={<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{headerRight}{globalRight}</div>} />
         <Screen key={view}>{screen}</Screen>
         {!modal && view === 'cargar' && (
           <button className="fab" onClick={() => setModal('manual')} aria-label="Nuevo movimiento">
@@ -151,6 +183,9 @@
       "#047857",
       "#d97706"
     ],
+    "font": "Sistema",
+    "accent": "Esmeralda",
+    "chartPalette": "Daltónico-safe",
     "dark": false
   }/*EDITMODE-END*/;
 
@@ -163,19 +198,136 @@
     { name: 'Tierra', inc: '#0d9488', out: '#c2410c', note: 'Teal + terracota. Cálida y calma; buena para una app de familia, sin estridencia.' },
   ];
 
+  // Tipografía (#1) — system vs webfont con carácter. Override de --font-base.
+  const FONTS = [
+    { name: 'Sistema', stack: null, note: 'La nativa del SO (SF Pro / Segoe / Roboto). Rápida y neutra — lo de hoy.' },
+    { name: 'Geist', stack: "'Geist', system-ui, sans-serif", note: 'Grotesca moderna, numéros tabulares prolijos. Da aire “producto”, ideal para datos.' },
+    { name: 'Hanken', stack: "'Hanken Grotesk', system-ui, sans-serif", note: 'Grotesca humanista, más cálida y redonda. Amable para una app de familia.' },
+    { name: 'Fraunces', stack: "'Fraunces', Georgia, serif", note: 'Serif display con personalidad. Editorial y premium; menos “app”, más revista.' },
+  ];
+
+  // Acento (#5) — un solo color de marca, con disciplina. Override de los
+  // tokens de primary/accent + focus ring (botones, FAB, nav activa, card HOY).
+  const ACCENTS = [
+    { name: 'Esmeralda', base: '#065f46', deep: '#054b38', ring: 'rgba(6,95,70,.2)', tint: '#ecfdf5', note: 'El verde de marca. Confianza + finanzas; lo actual.' },
+    { name: 'Índigo', base: '#4338ca', deep: '#3730a3', ring: 'rgba(67,56,202,.2)', tint: '#eef2ff', note: 'Azul-violeta. Tech y confiable; se despega del verde.' },
+    { name: 'Tinta', base: '#1f2937', deep: '#111827', ring: 'rgba(31,41,55,.2)', tint: '#f3f4f6', note: 'Gris-tinta neutro. Sobrio y premium; deja el verde solo para “ingreso”.' },
+    { name: 'Teal', base: '#0f766e', deep: '#115e59', ring: 'rgba(15,118,110,.2)', tint: '#f0fdfa', note: 'Verde-azulado. Calmo y fresco, primo del esmeralda.' },
+  ];
+
+  // Paletas de gráficos por categoría (8 colores c/u; se asignan por orden de gasto,
+  // la 9ª+ cae en gris "Otras"). Set --gf-cat-0..7. (ver backlog-config-graficos)
+  const CHART_PALETTES = [
+    { name: 'Marca', colors: ['#4f8ef7','#2bb673','#ef5350','#f5a623','#a855f7','#06b6d4','#14b8a6','#ec4899'], note: 'La actual: brillante y variada.' },
+    { name: 'Editorial', colors: ['#5b7c99','#7fa074','#c08552','#b5654a','#8a6d9e','#4f8a8b','#c29b4a','#99708a'], note: 'Apagada y sobria, combina con el sistema.' },
+    { name: 'Vívido', colors: ['#2563eb','#16a34a','#dc2626','#ea580c','#9333ea','#0891b2','#0d9488','#db2777'], note: 'Saturada, alto contraste.' },
+    { name: 'Pastel', colors: ['#93c5fd','#86efac','#fca5a5','#fcd34d','#d8b4fe','#a5f3fc','#99f6e4','#f9a8d4'], note: 'Suave y clara.' },
+    { name: 'Tierra', colors: ['#a16207','#4d7c0f','#b45309','#166534','#78350f','#57534e','#854d0e','#7c2d12'], note: 'Cálida y natural.' },
+    { name: 'Fríos', colors: ['#2563eb','#0891b2','#0d9488','#4f46e5','#7c3aed','#0284c7','#059669','#6366f1'], note: 'Azules, verdes y violetas.' },
+    { name: 'Cálidos', colors: ['#dc2626','#ea580c','#d97706','#ca8a04','#b45309','#e11d48','#f59e0b','#c2410c'], note: 'Rojos, naranjas y ámbar.' },
+    { name: 'Mono esmeralda', colors: ['#064e3b','#065f46','#047857','#059669','#10b981','#34d399','#6ee7b7','#a7f3d0'], note: 'Degradé del verde de marca.' },
+    { name: 'Daltónico-safe', colors: ['#0072b2','#009e73','#d55e00','#e6c200','#cc79a7','#56b4e9','#e69f00','#555555'], note: 'Okabe–Ito, distinguible con daltonismo.' },
+  ];
+
   function Root() {
-    const { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakToggle, TweakButton } = window;
-    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+    const { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakToggle, TweakButton } = window;    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
     React.useEffect(() => {
       const [inc, out] = t.palette || TWEAK_DEFAULTS.palette;
       const r = document.documentElement.style;
       r.setProperty('--gf-income', inc);
       r.setProperty('--gf-out', out);
     }, [t.palette]);
+    React.useEffect(() => {
+      const f = FONTS.find((x) => x.name === t.font) || FONTS[0];
+      const r = document.documentElement.style;
+      if (f.stack) r.setProperty('--font-base', f.stack); else r.removeProperty('--font-base');
+    }, [t.font]);
+    React.useEffect(() => {
+      const a = ACCENTS.find((x) => x.name === t.accent) || ACCENTS[0];
+      const r = document.documentElement.style;
+      r.setProperty('--color-accent', a.base);
+      r.setProperty('--color-primary', a.base);
+      r.setProperty('--gf-emerald', a.base);
+      r.setProperty('--color-primary-dark', a.deep);
+      r.setProperty('--gf-emerald-deep', a.deep);
+      r.setProperty('--color-focus-ring', a.ring);
+      r.setProperty('--gf-emerald-50', a.tint);
+    }, [t.accent]);
+    React.useEffect(() => {
+      const p = CHART_PALETTES.find((x) => x.name === t.chartPalette) || CHART_PALETTES[0];
+      const r = document.documentElement.style;
+      p.colors.forEach((c, i) => r.setProperty('--gf-cat-' + i, c));
+    }, [t.chartPalette]);
     return (
       <React.Fragment>
         <App />
         <TweaksPanel>
+          <TweakSection label="Tipografía" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {FONTS.map((f) => {
+              const active = (t.font || 'Sistema') === f.name;
+              return (
+                <button key={f.name} onClick={() => setTweak('font', f.name)} style={{
+                  display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'stretch', textAlign: 'left',
+                  padding: '10px 11px', borderRadius: 10, cursor: 'pointer', width: '100%',
+                  fontFamily: f.stack || 'var(--font-base)',
+                  background: active ? 'var(--gf-gray-100)' : 'var(--color-surface)',
+                  border: active ? '2px solid var(--color-text)' : '1px solid var(--color-border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{f.name}</span>
+                    <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>$ 1.234.567</span>
+                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)' }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sec)', fontFamily: 'var(--font-base)' }}>{f.note}</span>
+                </button>
+              );
+            })}
+          </div>
+          <TweakSection label="Acento" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {ACCENTS.map((a) => {
+              const active = (t.accent || 'Esmeralda') === a.name;
+              return (
+                <button key={a.name} onClick={() => setTweak('accent', a.name)} style={{
+                  display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'stretch', textAlign: 'left',
+                  padding: '10px 11px', borderRadius: 10, cursor: 'pointer', width: '100%', fontFamily: 'var(--font-base)',
+                  background: active ? 'var(--gf-gray-100)' : 'var(--color-surface)',
+                  border: active ? '2px solid var(--color-text)' : '1px solid var(--color-border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ width: 18, height: 18, borderRadius: 5, background: a.base, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{a.name}</span>
+                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)' }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sec)' }}>{a.note}</span>
+                </button>
+              );
+            })}
+          </div>
+          <TweakSection label="Paleta de gráficos (categorías)" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {CHART_PALETTES.map((p) => {
+              const active = (t.chartPalette || 'Marca') === p.name;
+              return (
+                <button key={p.name} onClick={() => setTweak('chartPalette', p.name)} style={{
+                  display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', textAlign: 'left',
+                  padding: '10px 11px', borderRadius: 10, cursor: 'pointer', width: '100%', fontFamily: 'var(--font-base)',
+                  background: active ? 'var(--gf-gray-100)' : 'var(--color-surface)',
+                  border: active ? '2px solid var(--color-text)' : '1px solid var(--color-border)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <span style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', flexShrink: 0 }}>
+                      {p.colors.map((c, i) => <span key={i} style={{ width: 12, height: 16, background: c }} />)}
+                    </span>
+                    <span style={{ fontWeight: 700, fontSize: 13, marginLeft: 3 }}>{p.name}</span>
+                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)' }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sec)' }}>{p.note}</span>
+                </button>
+              );
+            })}
+          </div>
           <TweakSection label="Paleta ingresos / salidas" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {PALETTES.map((p) => {

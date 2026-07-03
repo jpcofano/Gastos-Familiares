@@ -6,7 +6,7 @@ import {
   Receipt, BarChart3, Tag, TrendingUp, Share2, AlertCircle, Moon, Sun, Layers,
   Store, FileText, GitCompare, List, CalendarCheck, Clock,
   Search, Trash2, Pencil, Download,
-  BookOpen, Sparkles, PieChart, LayoutGrid,
+  BookOpen, Sparkles, PieChart, LayoutGrid, Landmark,
   type LucideProps,
 } from 'lucide-react';
 
@@ -63,6 +63,7 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   sparkles: Sparkles,
   'pie-chart': PieChart,
   'layout-grid': LayoutGrid,
+  landmark: Landmark,
 };
 
 interface IconProps {

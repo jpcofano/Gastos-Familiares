@@ -364,8 +364,8 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                   <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px', fontVariantNumeric: 'tabular-nums' }}>{s.pct}%</span>
                 </span>
               </div>
-              <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${Math.max((s.valor / maxSubVal) * 100, 4)}%`, background: s.color, borderRadius: 3 }} />
+              <div style={{ height: 13, background: 'var(--gf-gray-100)', borderRadius: 7, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.max((s.valor / maxSubVal) * 100, 4)}%`, background: s.color, borderRadius: 7 }} />
               </div>
             </div>
           ))}
@@ -397,9 +397,11 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
         <Kpi eyebrow="Promedio diario" value={curBig(d.promedioDiarioUsd, cur, tc)} />
       </div>
       <Card variant="flat" padding="var(--space-3)">
-        <Eyebrow>Top 3 categorías</Eyebrow>
-        <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4 }}>{d.top3Pct}%</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Mes en superávit</div>
+        <div style={{ textAlign: 'center' }}>
+          <Eyebrow center>Top 3 categorías</Eyebrow>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{d.top3Pct}%</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>del gasto del mes</div>
+        </div>
       </Card>
 
       {/* Insight cards */}

@@ -266,24 +266,36 @@ function buildRecordatorios() {
 function estadoVenc(dia) {
   if (dia < N_HOY) return { k: 'vencido', label: 'Vencido', tone: 'danger', line: 'var(--gf-expense)' };
   if (dia === N_HOY) return { k: 'hoy', label: 'Hoy', tone: 'warning', line: 'var(--gf-out)' };
-  return { k: 'prox', label: `En ${dia - N_HOY} días`, tone: 'neutral', line: 'var(--gf-gray-300)' };
+  const n = dia - N_HOY;
+  return { k: 'prox', label: n === 1 ? 'En 1 día' : `En ${n} días`, tone: 'neutral', line: 'var(--gf-gray-300)' };
 }
 window.contarVencProximos = () => buildRecordatorios().filter((r) => r.dia <= N_HOY).length;
 
 function NotificacionesMobile() {
   const Icon = window.Icon;
   const recs = buildRecordatorios();
-  const urgentes = recs.filter((r) => r.dia <= N_HOY);
-  const proximos = recs.filter((r) => r.dia > N_HOY);
+  const vencidos = recs.filter((r) => r.dia < N_HOY);
+  // Ventana "próximos 14 días" (incluye hoy). En el vivo el conteo es esta ventana.
+  const ventana = recs.filter((r) => r.dia >= N_HOY && r.dia <= N_HOY + 14);
   const [calSync, setCalSync] = React.useState(true);
   const esAdmin = (window.M_MIEMBRO || {}).rol === 'admin';
-  const Toggle = ({ on, onToggle }) => (
-    <button onClick={onToggle} aria-pressed={on} style={{
-      width: 44, height: 26, borderRadius: 999, border: 'none', cursor: 'pointer', flexShrink: 0,
-      background: on ? 'var(--gf-ink)' : 'var(--gf-gray-300)', position: 'relative', transition: 'background .15s', padding: 0,
-    }}>
-      <span style={{ position: 'absolute', top: 3, left: on ? 21 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left .15s', boxShadow: 'var(--shadow-sm)' }} />
-    </button>
+  // Segmentado Inactivo/Activo (paridad con el vivo). Dependiente = read-only.
+  const Seg = ({ on, onToggle, disabled }) => (
+    <div style={{ display: 'inline-flex', background: 'var(--gf-gray-100)', borderRadius: 999, padding: 3, flexShrink: 0 }}>
+      {[['Inactivo', false], ['Activo', true]].map(([lab, val]) => {
+        const active = on === val;
+        return (
+          <button key={lab} onClick={() => !disabled && onToggle(val)} disabled={disabled} aria-pressed={active}
+            style={{ border: 'none', cursor: disabled ? 'default' : 'pointer', fontFamily: 'var(--font-base)',
+              fontSize: 13, fontWeight: active ? 700 : 500, padding: '6px 15px', borderRadius: 999,
+              background: active ? 'var(--color-surface)' : 'transparent',
+              color: active ? 'var(--color-text)' : 'var(--gf-gray-400)',
+              boxShadow: active ? 'var(--shadow-sm)' : 'none', transition: 'all .15s' }}>
+            {lab}
+          </button>
+        );
+      })}
+    </div>
   );
   const Row = ({ r, last }) => {
     const st = estadoVenc(r.dia);
@@ -308,6 +320,7 @@ function NotificacionesMobile() {
       </div>
     );
   };
+  const countTone = ventana.length > 0 ? 'var(--gf-out)' : 'var(--gf-gray-300)';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <SCard>
@@ -317,11 +330,9 @@ function NotificacionesMobile() {
           </span>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>Eventos en Google Calendar</span>
-            <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-sec)', marginTop: 1 }}>Crea los vencimientos en el calendario de pagos de la familia.</span>
+            <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-sec)', marginTop: 1 }}>Crea los vencimientos en el calendario compartido</span>
           </span>
-          {esAdmin
-            ? <Toggle on={calSync} onToggle={() => setCalSync((v) => !v)} />
-            : <SBadge tone={calSync ? 'success' : 'neutral'}>{calSync ? 'Activo' : 'Inactivo'}</SBadge>}
+          <Seg on={calSync} onToggle={setCalSync} disabled={!esAdmin} />
         </div>
         {!esAdmin && (
           <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--gf-gray-100)' }}>
@@ -329,18 +340,32 @@ function NotificacionesMobile() {
           </div>
         )}
       </SCard>
-      {urgentes.length > 0 && (
+
+      {vencidos.length > 0 && (
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8, padding: '0 2px' }}>Vencidos y de hoy · {urgentes.length}</div>
-          <SCard padding="0">{urgentes.map((r, i) => <Row key={r.id} r={r} last={i === urgentes.length - 1} />)}</SCard>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-expense)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8, padding: '0 2px' }}>Vencidos · {vencidos.length}</div>
+          <SCard padding="0">{vencidos.map((r, i) => <Row key={r.id} r={r} last={i === vencidos.length - 1} />)}</SCard>
         </div>
       )}
+
       <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8, padding: '0 2px' }}>Próximos</div>
-        {proximos.length === 0
-          ? <SCard><span style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>Sin vencimientos próximos.</span></SCard>
-          : <SCard padding="0">{proximos.map((r, i) => <Row key={r.id} r={r} last={i === proximos.length - 1} />)}</SCard>}
+        <SCard padding="0">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px' }}>
+            <Icon name="bell" size={18} color="var(--gf-gray-400)" />
+            <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>Vencimientos de los próximos 14 días</span>
+            <span style={{ minWidth: 26, height: 26, padding: '0 8px', borderRadius: 999, background: countTone, color: '#fff', fontSize: 13, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{ventana.length}</span>
+          </div>
+          {ventana.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--gf-gray-100)' }}>
+              {ventana.map((r, i) => <Row key={r.id} r={r} last={i === ventana.length - 1} />)}
+            </div>
+          )}
+        </SCard>
+        {ventana.length === 0 && (
+          <div style={{ fontSize: 14, color: 'var(--color-text-sec)', padding: '14px 4px 0' }}>Sin vencimientos próximos.</div>
+        )}
       </div>
+
       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'center', lineHeight: 1.5 }}>
         Los recordatorios se calculan de tus pagos esperados y tarjetas.<br />Los avisos push (por usuario) llegan cuando instalás la app.
       </div>

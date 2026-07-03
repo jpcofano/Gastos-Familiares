@@ -5,7 +5,7 @@ import { useItemsEsperados } from '../../contexto/ItemsEsperadosContext';
 import { useMovimientosDelMes } from '../../hooks/useMovimientosDelMes';
 import { useFamiliaConfig } from '../../hooks/useFamiliaConfig';
 import { useResumenesTarjeta } from '../../hooks/useResumenesTarjeta';
-import { calcularChecklist, cubierto, mesActualStr } from '../../datos/checklist';
+import { calcularChecklist, mesActualStr } from '../../datos/checklist';
 import { setCalendarSync } from '../../datos/configFamilia';
 import { Card, Badge } from '../../design-system/components';
 import { Icon } from '../../design-system/Icon';
@@ -30,11 +30,15 @@ interface Recordatorio {
   tipo: 'esperado' | 'tarjeta';
   titulo: string;
   sub?: string;
-  fecha: Date;
+  fecha: Date | null;   // null = sin diaVencimiento (esperado del mes)
   estado: EstadoRec;
   montos: Array<{ monto: number; moneda: 'ARS' | 'USD' }>;
   onTap: () => void;
 }
+
+// F9.88 — Para notificaciones del mes en curso excluimos no_registrado (meses pasados)
+// e incluimos parcial (no está en ACCIONABLE de checklist.ts pero es accionable aquí).
+const ACCIONABLE_NOTIF: string[] = ['pendiente', 'vencido', 'por_confirmar', 'parcial'];
 
 function diffDias(fecha: Date, hoy: Date): number {
   const f = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
@@ -52,12 +56,19 @@ function recordatoriosEsperados(items: ExpectedItem[], movs: Movement[], hoy: Da
   const checklist = calcularChecklist(items, movs, mesActualStr());
   const out: Recordatorio[] = [];
   for (const { item, estado } of checklist) {
-    if (item.tipo !== 'Gasto' || item.diaVencimiento == null) continue;
-    if (cubierto(estado) || estado === 'programado' || estado === 'no_registrado' || estado === 'no_aplica') continue;
-    const fecha = new Date(hoy.getFullYear(), hoy.getMonth(), item.diaVencimiento);
-    const dias = diffDias(fecha, hoy);
-    const estadoRec = estadoPorDias(dias);
-    if (estadoRec === 'proximo' && dias > DIAS_VENTANA) continue;
+    if (item.tipo !== 'Gasto') continue;
+    if (!ACCIONABLE_NOTIF.includes(estado)) continue;
+    let fecha: Date | null = null;
+    let estadoRec: EstadoRec;
+    if (item.diaVencimiento != null) {
+      fecha = new Date(hoy.getFullYear(), hoy.getMonth(), item.diaVencimiento);
+      const dias = diffDias(fecha, hoy);
+      estadoRec = estadoPorDias(dias);
+      if (estadoRec === 'proximo' && dias > DIAS_VENTANA) continue;
+    } else {
+      // Sin día: esperado del mes — siempre visible, no entra en la ventana de 14 días
+      estadoRec = estado === 'vencido' ? 'vencido' : 'proximo';
+    }
     out.push({
       id: `esp-${item.id}`,
       tipo: 'esperado' as const,
@@ -134,8 +145,17 @@ function RecordatorioRow({ r, last }: { r: Recordatorio; last: boolean }) {
     }}>
       <span style={{ width: 8, height: 8, borderRadius: 999, background: TINT[r.estado], flexShrink: 0 }} />
       <span style={{ width: 34, flexShrink: 0, textAlign: 'center' }}>
-        <span style={{ display: 'block', fontSize: 17, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{r.fecha.getDate()}</span>
-        <span style={{ fontSize: 9, color: 'var(--gf-gray-400)', textTransform: 'uppercase' }}>{MES_CORTO(r.fecha)}</span>
+        {r.fecha ? (
+          <>
+            <span style={{ display: 'block', fontSize: 17, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{r.fecha.getDate()}</span>
+            <span style={{ fontSize: 9, color: 'var(--gf-gray-400)', textTransform: 'uppercase' }}>{MES_CORTO(r.fecha)}</span>
+          </>
+        ) : (
+          <>
+            <span style={{ display: 'block', width: 8, height: 8, borderRadius: 999, background: TINT[r.estado], margin: '2px auto 3px' }} />
+            <span style={{ fontSize: 9, color: 'var(--gf-gray-400)' }}>Este mes</span>
+          </>
+        )}
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -169,9 +189,15 @@ export function useRecordatorios(): { recordatorios: Recordatorio[]; esAdmin: bo
 
   const recEsperados = esAdmin ? recordatoriosEsperados(items, movimientos, hoy, navigate) : [];
   const recTarjetas = recordatoriosTarjetas(resumenes, config, hoy, navigate);
-  const recordatorios = [...recEsperados, ...recTarjetas].sort((a, b) =>
-    ORDEN_ESTADO_REC[a.estado] - ORDEN_ESTADO_REC[b.estado] || a.fecha.getTime() - b.fecha.getTime(),
-  );
+  const recordatorios = [...recEsperados, ...recTarjetas].sort((a, b) => {
+    const eOrd = ORDEN_ESTADO_REC[a.estado] - ORDEN_ESTADO_REC[b.estado];
+    if (eOrd !== 0) return eOrd;
+    // Dentro del mismo estado: con fecha primero (por día), sin fecha al final
+    if (a.fecha && !b.fecha) return -1;
+    if (!a.fecha && b.fecha) return 1;
+    if (a.fecha && b.fecha) return a.fecha.getTime() - b.fecha.getTime();
+    return 0;
+  });
   return { recordatorios, esAdmin, config };
 }
 

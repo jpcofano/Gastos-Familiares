@@ -30,6 +30,19 @@ tarjetas y sus **ciclos de cierre/vencimiento** + titular + "Agregar tarjeta". D
 **visor** de resúmenes (que es solo lectura, vía Resumen). Logos de medios vía `BankLogo`
 (`assets/medios/<id>.svg`, fallback monograma).
 
+## Clasificación y aprendizaje · admin (`ClasificacionScreens.jsx`)
+Grupo admin-only en Perfil que edita las colecciones de aprendizaje de Firestore (paridad con
+`src/vistas/perfil/{Diccionario,Destinos,Normalizacion}.tsx`, F8.1–8.4):
+- **Diccionario** — reglas de prellenado (patrón → categoría/subcat/persona/moneda), match
+  `contiene`/`exacto`, toggle activo, chips de confianza.
+- **Destinos** — payees aprendidos → ítem esperado (rama-2) o categoría; chip ámbar de aviso
+  cuando `confianza < 0.7` (ignorado por el matcher); destino inmutable en edición.
+- **Normalización** — reglas `prefix/suffix/replace/regex` reordenables con **preview paso a
+  paso** en vivo (`gfNormalizar`, espejo de `datos/normalizador.ts`).
+
+Datos mock en `data.jsx`: `M_DICCIONARIO · M_DESTINOS · M_REGLAS_NORM · M_ETIQUETAS`. El
+backend real es callable admin-only; acá el CRUD es local (demo).
+
 ## Capture modals (hero + drawer + CTA)
 - **Confirmar comprobante** — `ComprobanteConfirm.jsx`. `StepIndicator`, datos extraídos
   (read-only), clasificación editable, match propuesto (`Message` + `StatusBadge`).

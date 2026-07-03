@@ -9,13 +9,22 @@ function ComprobanteConfirm({ onClose, onDone }) {
   const [desc, setDesc] = React.useState('Edenor — factura luz');
   const [confirmado, setConfirmado] = React.useState(false);
 
-  // Badge de destino (viene del splash de recepción): match con esperado o movimiento nuevo.
+  // Indicadores de destino (vienen del splash): pre-clasificado (ámbar) + match/nuevo (verde).
+  // Dos íconos compactos, sin texto largo — el detalle del match va en el mensaje de abajo.
   const destino = (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: '#d1fae5', borderRadius: 999, padding: '7px 14px', fontSize: 13, fontWeight: 600 }}>
-      <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--color-accent)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Icon name="git-compare" size={13} />
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span title="Pre-clasificado" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(217,119,6,.15)', border: '1px solid rgba(245,158,11,.55)', borderRadius: 999, padding: '6px 13px 6px 7px' }}>
+        <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(245,158,11,.9)', color: '#1a1205', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon name="sparkles" size={12} />
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>Pre-clasificado</span>
       </span>
-      Gasto esperado · <strong style={{ color: '#fff' }}>Edenor — luz</strong>
+      <span title="Coincide con un gasto esperado" style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', borderRadius: 999, padding: '6px 13px 6px 7px' }}>
+        <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--color-accent)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon name="git-compare" size={12} />
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>Gasto esperado</span>
+      </span>
     </span>
   );
 

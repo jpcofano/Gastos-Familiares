@@ -123,13 +123,27 @@ function PerfilMobile({ onNav }) {
         <Item icon="palette" title="Apariencia" desc="Tema claro" right={<PBadge tone="neutral">Pronto: oscuro</PBadge>} last />
       </Group>
 
+      {/* Gate real en la app: window.M_MIEMBRO.email === 'jpcofano@gmail.com'.
+          En el kit se muestra siempre (con chip "Solo vos") para poder revisar el diseño. */}
+      <Group title="Patrimonio · privado">
+        <Item icon="landmark" title="Patrimonio" desc="Portafolio de inversión · USD"
+          right={<PBadge tone="neutral">Solo vos</PBadge>} onClick={() => onNav && onNav('patrimonio')} last />
+      </Group>
+
       <Group title="Configuración familiar · admin">
         <Item icon="users-round" title="Miembros" desc="4 personas · 2 admin" onClick={() => onNav && onNav('miembros')} />
         <Item icon="list-checks" title="Pagos esperados" desc="9 ítems recurrentes" onClick={() => onNav && onNav('esperados')} />
         <Item icon="tags" title="Categorías" desc="11 categorías · con subcategorías" onClick={() => onNav && onNav('categorias')} />
         <Item icon="wallet" title="Medios de pago" desc="4 · bancos y billeteras" onClick={() => onNav && onNav('medios')} />
         <Item icon="credit-card" title="Tarjetas" desc="4 tarjetas · cierres y vencimientos" onClick={() => onNav && onNav('tarjetas-cfg')} />
-        <Item icon="repeat" title="Tipo de cambio" desc="Manual · $ 1.454 / USD" onClick={() => onNav && onNav('tc')} last />
+        <Item icon="repeat" title="Tipo de cambio" desc="Manual · $ 1.454 / USD" onClick={() => onNav && onNav('tc')} />
+        <Item icon="pencil" title="Buscar / editar movimiento" desc="Corregir o eliminar uno ya cargado" onClick={() => onNav && onNav('buscar-mov')} last />
+      </Group>
+
+      <Group title="Clasificación y aprendizaje · admin">
+        <Item icon="book-marked" title="Diccionario" desc="Reglas de prellenado de sugerencias" onClick={() => onNav && onNav('diccionario')} />
+        <Item icon="target" title="Destinos" desc="Payees aprendidos → ítem esperado" onClick={() => onNav && onNav('destinos')} />
+        <Item icon="wand-sparkles" title="Normalización" desc="Limpieza de descripciones al cargar" onClick={() => onNav && onNav('normalizacion')} last />
       </Group>
 
       <PBtn variant="secondary" size="cta">

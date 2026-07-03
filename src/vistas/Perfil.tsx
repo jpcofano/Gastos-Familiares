@@ -183,6 +183,12 @@ export default function Perfil() {
         </Group>
       )}
 
+      {esAdmin && miembro.emails.some(e => e === 'jpcofano@gmail.com') && (
+        <Group title="Portafolio">
+          <Item icon="landmark" title="Patrimonio" desc="Portafolio de inversiones · solo vos" onClick={() => navigate('/patrimonio')} last />
+        </Group>
+      )}
+
       {esAdmin && (
         <Group title="Clasificación y aprendizaje · admin">
           <Item icon="book-open" title="Diccionario" desc="Reglas de texto → categoría, persona, moneda" onClick={() => navigate('/perfil/diccionario')} />

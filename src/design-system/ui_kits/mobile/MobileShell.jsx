@@ -97,6 +97,36 @@ function BankLogo({ id, nombre, color, dominio, size = 34, radius = 9 }) {
   );
 }
 
+// MerchantLogo — logo del comercio de un movimiento. Resuelve nombre→dominio
+// (window.comercioDominio, mapa curado) y reusa la CDN de Brandfetch; si no hay
+// dominio (o falla) cae a un monograma con la inicial. Nunca dibuja marcas a mano.
+function MerchantLogo({ nombre, size = 30, radius = 8 }) {
+  const cid = window.BRANDFETCH_CLIENT_ID;
+  const dominio = window.comercioDominio ? window.comercioDominio(nombre) : null;
+  const sources = [];
+  if (cid && dominio) sources.push(`https://cdn.brandfetch.io/domain/${dominio}/w/120/h/120?c=${cid}`);
+  const [i, setI] = React.useState(0);
+  React.useEffect(() => { setI(0); }, [nombre]);
+  const failed = i >= sources.length;
+  if (failed || sources.length === 0) {
+    return (
+      <span style={{
+        width: size, height: size, borderRadius: radius, background: 'var(--gf-gray-100)', color: 'var(--gf-gray-500)',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        fontSize: Math.round(size * 0.4), fontWeight: 700,
+      }}>{(nombre || '?').trim().charAt(0).toUpperCase()}</span>
+    );
+  }
+  return (
+    <img
+      src={sources[i]}
+      alt={nombre || ''}
+      onError={() => setI((n) => n + 1)}
+      style={{ width: size, height: size, borderRadius: radius, objectFit: 'contain', background: '#fff', border: '1px solid var(--gf-gray-150)', flexShrink: 0 }}
+    />
+  );
+}
+
 // Sheet — bottom-sheet picker (reemplaza los <select> nativos del SO).
 // Se posiciona absolute dentro del Phone (position:relative) y desliza desde abajo.
 function Sheet({ open, onClose, title, options, value, onPick }) {
@@ -226,4 +256,4 @@ function CtaBar({ children }) {
   );
 }
 
-Object.assign(window, { Icon, BankLogo, Sheet, Phone, AppBar, Screen, BottomNav, FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar });
+Object.assign(window, { Icon, BankLogo, MerchantLogo, Sheet, Phone, AppBar, Screen, BottomNav, FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar });

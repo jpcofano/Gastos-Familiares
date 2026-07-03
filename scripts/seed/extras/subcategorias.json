@@ -1,1 +1,50 @@
-[]
+[
+  {
+    "id": "subcat-mr53j6bz-47f",
+    "categoriaPadre": "Alimentación cotidiana",
+    "valor": "Almuerzo Oficina",
+    "activo": true
+  },
+  {
+    "id": "subcat-mr1im3c4-2t2",
+    "categoriaPadre": "Alimentación cotidiana",
+    "valor": "Dietetica",
+    "activo": true
+  },
+  {
+    "id": "subcat-mqzu101j-43m",
+    "categoriaPadre": "Alimentación cotidiana",
+    "valor": "Kiosco",
+    "activo": true
+  },
+  {
+    "id": "subcat-mr2idc1a-5k4",
+    "categoriaPadre": "Auto",
+    "valor": "Abl",
+    "activo": true
+  },
+  {
+    "id": "subcat-mr2icvx0-ss",
+    "categoriaPadre": "Auto",
+    "valor": "Agua",
+    "activo": true
+  },
+  {
+    "id": "subcat-mqzu1civ-5zw",
+    "categoriaPadre": "Educación y chicos",
+    "valor": "Almuerzo",
+    "activo": true
+  },
+  {
+    "id": "subcat-mr3s6t4t-tx",
+    "categoriaPadre": "Educación y chicos",
+    "valor": "Profesores",
+    "activo": true
+  },
+  {
+    "id": "subcat-mr3s09we-5qd",
+    "categoriaPadre": "Educación y chicos",
+    "valor": "Ropa de colegio",
+    "activo": true
+  }
+]
