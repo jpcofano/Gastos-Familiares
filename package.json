@@ -14,6 +14,8 @@
     "colegio:dry": "tsx scripts/seed/reasignarPersonaColegio.ts",
     "colegio:apply": "tsx scripts/seed/reasignarPersonaColegio.ts --apply",
     "colegio:prod": "tsx scripts/seed/reasignarPersonaColegio.ts --target=production --apply --i-am-sure",
+    "export:subcats": "tsx scripts/seed/exportSubcategoriasExtras.ts",
+    "export:subcats:prod": "tsx scripts/seed/exportSubcategoriasExtras.ts --target=production",
     "backfill:cat": "tsx scripts/seed/backfillCategoriaCanonica.ts",
     "backfill:cat:apply": "tsx scripts/seed/backfillCategoriaCanonica.ts --apply",
     "backfill:cat:prod": "tsx scripts/seed/backfillCategoriaCanonica.ts --target=production --apply --i-am-sure",
