@@ -205,14 +205,16 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   const faltaCubrirUsd = c.tc > 0 ? (esperadosArsEq - c.pesosDisp) / c.tc : 0;
 
   // Total de hoy pendiente (ARS eq) para el header de Card HOY
+  // F9.76 — pendiente/pagado por estado real, no por presencia de match. Un por_confirmar sigue
+  // siendo deuda hasta que el pago real lo confirme.
   const hoyPendienteArsEq = hoyItems
-    .filter(ci => ci.matches.length === 0)
+    .filter(ci => !cubierto(ci.estado))
     .reduce((s, ci) => {
       const m = ci.item.montoEsperado;
       if (m == null) return s;
       return ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
     }, 0);
-  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(ci => ci.matches.length > 0);
+  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(ci => cubierto(ci.estado));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -243,7 +245,8 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {hoyItems.map((ci, i) => {
-              const pagado = ci.matches.length > 0;
+              const pagado       = cubierto(ci.estado); // pagado | automatico
+              const porConfirmar = !pagado && (ci.estado === 'por_confirmar' || ci.estado === 'parcial');
               const etiqueta = [ci.item.categoria, ci.item.subcategoria].filter(Boolean).join(' › ') || ci.item.notas || '(sin categoría)';
               const bancoPago = ci.matches[0]?.banco;
               const bancoInfo = bancoPago ? bancoDeNombre(bancoPago, config?.bancos) : undefined;
@@ -256,13 +259,19 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                     <BankLogo id={bancoInfo.id} nombre={bancoInfo.nombre} color={bancoInfo.color} dominio={bancoInfo.dominio} size={28} radius={7} />
                   ) : (
                     <span style={{ width: 28, height: 28, borderRadius: 7, background: pagado ? 'var(--gf-emerald)' : 'var(--gf-gray-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Icon name={pagado ? 'check' : 'clock'} size={14} color={pagado ? '#fff' : 'var(--gf-gray-400)'} />
+                      <Icon
+                        name={pagado ? 'check' : porConfirmar ? 'alert-circle' : 'clock'}
+                        size={14}
+                        color={pagado ? '#fff' : porConfirmar ? 'var(--gf-out)' : 'var(--gf-gray-400)'}
+                      />
                     </span>
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiqueta}</div>
                     <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
-                      {pagado ? `Conciliado${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}` : 'A pagar'}
+                      {pagado
+                        ? `Conciliado${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}`
+                        : porConfirmar ? 'Cargado · a confirmar' : 'A pagar'}
                     </div>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, color: pagado ? 'var(--gf-income)' : 'var(--color-text)' }}>

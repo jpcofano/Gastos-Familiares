@@ -150,6 +150,24 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.76 — Widget "Hoy" (Resumen) deriva pagado/pendiente de `cubierto(ci.estado)`, no de
+  `matches.length`. Un `por_confirmar` (recibo cargado, impago tras F9.75) ya no se pinta
+  "Conciliado/Todo pagado" ni se descuenta del total a pagar; muestra estado ámbar "a confirmar".
+  Filas del checklist principal y ShareLanding sin cambios.
+- F9.75 — Obligaciones (`recibo_servicio`, `factura_a/b/c`) no se marcan pagadas por vencimiento.
+  `cargarMovimientoDesdeComprobante` gatea `pagadoPorFecha` con `esObligacionDoc(tipoDoc)`; una
+  obligación crea el movimiento con `confirmadoPago=false` siempre y `estadoItem` la muestra
+  `por_confirmar` hasta que el pago real reconcilia por payee. Pagos/tickets/altas manuales sin
+  cambios. `esObligacionDoc` gemelo server (`index.ts`) + cliente (`comprobantes.ts`). Limitación
+  conocida: `mes < mesActual` sigue forzando `pagado` (vista histórica, fuera de alcance).
+- F9.74 — `matchTexto` case-insensitive. `evaluarMatchTexto` (server, `matchLogica.ts`) y
+  `checklist.ts` (cliente) bajaban a minúscula el texto objetivo pero NO el patrón de
+  `incluye`/`excluye`; `String.includes` es case-sensitive → un patrón con mayúsculas nunca
+  matcheaba (ej. Expensas `"Cons. Prop. Pje del Signo"` caía a rama 3). Fix: `p.trim().toLowerCase()`
+  en ambos lados, en los dos sitios (deuda gemela). `clasificador.ts` (diccionario legacy) ya
+  estaba OK, no se tocó. **Invariante:** los patrones de matchTexto se comparan siempre
+  normalizados a minúscula y trim; si el editor algún día normaliza on-write, esto sigue siendo
+  la fuente de verdad para datos viejos.
 - F9.73 — Logos de comercios vía Brand Search API (async).
   **`src/datos/comerciosLogos.ts`** (nuevo): reemplaza el lookup sync de `comerciosDominios.ts` con un resolver
   async de 3 capas: (a) override curado (`COMERCIOS_DOMINIOS`), (b) Brand Search API (`GET /v2/search/{nombre}?c=CID`,

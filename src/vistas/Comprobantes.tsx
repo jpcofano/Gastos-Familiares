@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmadoPagoPorFecha } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmadoPagoPorFecha, esObligacionDoc } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -246,9 +246,10 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
     subcategoria:        pm.subcategoriaPrellena ?? sugerenciaValida?.subcategoria ?? undefined,
     etiqueta:            pm.etiquetaPrellena     ?? sugerenciaValida?.etiqueta     ?? undefined,
     banco:               'Efectivo' as const,
-    // F9.63 — la regla de pago aplica a TODO comprobante (no solo esPago) y sobre la
-    // fecha resuelta (vencimiento ?? emisión), la misma que se usa para `fecha`.
-    confirmadoPago:      confirmadoPagoPorFecha(d.vencimientos?.[0]?.fecha ?? d.fecha),
+    // F9.75 — obligaciones (factura*, recibo_servicio) NO se pagan por vencimiento; el pago llega
+    // después. Solo pagos/tickets confirman por fecha. (El server recalcula; esto mantiene el
+    // preload coherente con lo que se va a guardar.)
+    confirmadoPago:      !esObligacionDoc(d.tipoDocumento) && confirmadoPagoPorFecha(d.vencimientos?.[0]?.fecha ?? d.fecha),
     // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
     destinoCbu:          d.destinoCbu    ?? null,
     destinoCuit:         d.destinoCuit   ?? null,

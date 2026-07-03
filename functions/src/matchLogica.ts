@@ -102,7 +102,7 @@ const VENTANA_MS       = 7 * 24 * 60 * 60 * 1000;
  */
 export function evaluarMatchTexto(texto: string, mt: MatchTexto): boolean {
   const t = texto.toLowerCase();
-  return mt.incluye.some(p => t.includes(p)) && !mt.excluye.some(p => t.includes(p));
+  return mt.incluye.some(p => t.includes(p.trim().toLowerCase())) && !mt.excluye.some(p => t.includes(p.trim().toLowerCase()));
 }
 
 function montoScore(montoMov: number, datos: DatosExtractosMin): number {

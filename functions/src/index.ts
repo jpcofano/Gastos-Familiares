@@ -30,6 +30,14 @@ function hoyArgentinaISO(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
+// F9.75 — obligaciones (facturas / recibos de servicio): definen el gasto pero NO se pagan por el
+// mero vencimiento. El pago llega después y lo confirma la reconciliación por payee. Ticket/otro/
+// pagos siguen la regla de fecha. `resumen_tarjeta` tiene su propia lógica y no entra acá.
+function esObligacionDoc(tipo?: string | null): boolean {
+  return tipo === 'recibo_servicio'
+      || tipo === 'factura_a' || tipo === 'factura_b' || tipo === 'factura_c';
+}
+
 function buildSystemPrompt(hoy: string): string {
   return `\
 Sos un extractor de datos de comprobantes argentinos (facturas, tickets, comprobantes de pago/transferencia, resúmenes de tarjeta, recibos de servicios).
@@ -1503,7 +1511,9 @@ export const cargarMovimientoDesdeComprobante = onCall(
     // F9.63 — estado de pago recalculado server-side desde la fecha final (fechaMs viene a
     // mediodía local, así que toISOString().slice(0,10) da el día calendario correcto).
     const fechaMovISO    = new Date(fechaMs).toISOString().slice(0, 10);
-    const pagadoPorFecha = fechaMovISO <= hoyArgentinaISO();
+    // F9.75 — una obligación NO se marca pagada por vencimiento; el pago real la confirma luego.
+    const tipoDoc        = comp.datosExtraidos?.tipoDocumento as string | undefined;
+    const pagadoPorFecha = !esObligacionDoc(tipoDoc) && fechaMovISO <= hoyArgentinaISO();
 
     batch.set(movRef, {
       fecha, mes,

@@ -126,16 +126,23 @@ function DashboardMensual({ cur }) {
         <div style={{ fontSize: 16, fontWeight: 800 }}>Top subcategorías</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>movimientos del mes</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {d.subcategorias.map((s) => (
-            <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ width: 96, flexShrink: 0, fontSize: 12.5, color: 'var(--color-text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{s.nombre}</span>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ height: 22, borderRadius: 5, background: s.color, width: `${s.pct * 2.6}%`, minWidth: 8 }} />
-                <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{s.valor}</span>
-                <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>{s.pct}%</span>
+          {(() => {
+            const maxSub = Math.max(...d.subcategorias.map((s) => s.valor), 1);
+            return d.subcategorias.map((s) => (
+              <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ width: 96, flexShrink: 0, fontSize: 12.5, color: 'var(--color-text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{s.nombre}</span>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <div style={{ flex: 1, height: 22, background: 'var(--gf-gray-100)', borderRadius: 5, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', background: s.color, width: `${Math.max((s.valor / maxSub) * 100, 5)}%`, borderRadius: 5 }} />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0, width: 116, justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{window.GFMoney.fromUSD(s.valor, cur)}</span>
+                    <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right' }}>{s.pct}%</span>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       </DCard>
 

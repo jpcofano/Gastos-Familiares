@@ -21,8 +21,8 @@ export function movimientosDelItem(item: ExpectedItem, movs: Movement[]): Moveme
     if (m.moneda !== item.moneda) return false;
     if (item.matchTexto) {
       const desc = (m.descripcion ?? '').toLowerCase();
-      const inc = item.matchTexto.incluye.some(t => desc.includes(t));
-      const exc = item.matchTexto.excluye.some(t => desc.includes(t));
+      const inc = item.matchTexto.incluye.some(t => desc.includes(t.trim().toLowerCase()));
+      const exc = item.matchTexto.excluye.some(t => desc.includes(t.trim().toLowerCase()));
       return inc && !exc;
     }
     if (item.categoria !== null && m.categoria !== item.categoria) return false;

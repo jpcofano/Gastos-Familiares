@@ -119,6 +119,12 @@ export function confirmadoPagoPorFecha(fechaISO: string | null | undefined): boo
   return fechaISO <= hoyArgentinaISO();
 }
 
+// F9.75 — twin de esObligacionDoc del server (matchLogica/index). Mantener en sync manual.
+export function esObligacionDoc(tipo?: string | null): boolean {
+  return tipo === 'recibo_servicio'
+      || tipo === 'factura_a' || tipo === 'factura_b' || tipo === 'factura_c';
+}
+
 // Rama 1: adjuntar hashPdf al movimiento existente + confirmar pago + marcar comprobante vinculado
 export async function confirmarRama1(
   comp: Comprobante,
@@ -130,7 +136,11 @@ export async function confirmarRama1(
     batch.update(doc(db, 'movimientos', movimientoId), {
       hashPdf:        comp.hashPdf,
       refStoragePdf:  comp.refStoragePdf,
-      confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.vencimientos?.[0]?.fecha ?? comp.datosExtraidos?.fecha),
+      // F9.75 — si es obligación, NO tocar confirmadoPago del movimiento existente (preservar el
+      // estado del pago real). Solo pagos/tickets confirman por fecha.
+      ...(esObligacionDoc(comp.datosExtraidos?.tipoDocumento)
+        ? {}
+        : { confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.vencimientos?.[0]?.fecha ?? comp.datosExtraidos?.fecha) }),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
       // F6.8 — propagar destino y vencimientos para que aprenderDestino() aprenda
       // seedImport: false — gradúa el mov de "seed pristino" a "tocado por usuario"
