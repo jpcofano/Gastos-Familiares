@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { cargarSubcategorias, cargarEtiquetas, type SubcategoriaItem, type EtiquetaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig } from '../familia';
 import { crearMovimiento, existeNumeroComprobante } from '../datos/movimientos';
@@ -69,6 +69,7 @@ interface Props {
   preload?: Preload;
   // F6.9.11 — ruteo a callable server-side (atómico, owner-scoped) en vez de crearMovimiento client-side
   onGuardarPayload?: (payload: Parameters<typeof crearMovimiento>[0]) => Promise<{ ok: boolean; error?: Error }>;
+  badgePropuesta?: ReactNode;
 }
 
 function hoyISO(): string {
@@ -76,7 +77,7 @@ function hoyISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload, onGuardarPayload }: Props) {
+export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload, onGuardarPayload, badgePropuesta }: Props) {
   const esAdmin = miembro.rol === 'admin';
   const { clasificar, cargando: cargandoDict } = useDiccionario();
 
@@ -266,6 +267,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
         eyebrow={tipo === 'Gasto' ? 'Gasto manual' : 'Ingreso manual'}
         amount={<Money value={montoNum} currency={moneda} tipo={tipo} />}
         desc={descripcion || categoria || undefined}
+        badge={badgePropuesta}
         tags={tags}
       />
       <form onSubmit={handleSubmit} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>

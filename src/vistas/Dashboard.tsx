@@ -249,18 +249,18 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
             <div style={{ fontSize: 16, fontWeight: 800 }}>Por categoría</div>
             <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>este mes</div>
           </div>
-          <div style={{ display: 'flex', gap: 2, background: 'var(--gf-gray-100)', borderRadius: 8, padding: 2, flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--gf-gray-100)', borderRadius: 10, padding: 3, flexShrink: 0 }}>
             {(['lista', 'dona', 'treemap'] as const).map(t => {
               const on = tipoGrafico === t;
               const iconName = t === 'lista' ? 'list' : t === 'dona' ? 'pie-chart' : 'layout-grid';
+              const label = t === 'lista' ? 'Lista' : t === 'dona' ? 'Dona' : 'Treemap';
               return (
-                <button key={t} onClick={() => setTipoGrafico(t)} title={t} style={{
-                  padding: '5px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                  background: on ? 'var(--color-surface)' : 'transparent',
-                  boxShadow: on ? 'var(--shadow-sm)' : 'none',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Icon name={iconName} size={14} color={on ? 'var(--color-text)' : 'var(--gf-gray-300)'} />
+                <button key={t} onClick={() => setTipoGrafico(t)} aria-label={label} title={label}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 9px', borderRadius: 8,
+                    border: 'none', cursor: 'pointer', fontSize: 11.5, fontWeight: on ? 700 : 600,
+                    background: on ? 'var(--color-surface)' : 'transparent', color: on ? 'var(--color-text)' : 'var(--color-text-sec)',
+                    boxShadow: on ? 'var(--shadow-sm)' : 'none', fontFamily: 'var(--font-base)' }}>
+                  <Icon name={iconName} size={14} />{label}
                 </button>
               );
             })}
@@ -353,18 +353,19 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
       <Card padding="var(--space-4)">
         <div style={{ fontSize: 16, fontWeight: 800 }}>Top subcategorías</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>movimientos del mes</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {d.subcategorias.map(s => (
-            <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ width: 96, flexShrink: 0, fontSize: 12.5, color: 'var(--color-text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'right' }}>{s.nombre}</span>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <div style={{ flex: 1, height: 22, background: 'var(--gf-gray-100)', borderRadius: 5, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', background: s.color, width: `${Math.max((s.valor / maxSubVal) * 100, 5)}%`, borderRadius: 5 }} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0, width: 116, justifyContent: 'flex-end' }}>
-                  <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{curBig(s.valor, cur, tc)}</span>
-                  <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right' }}>{s.pct}%</span>
-                </div>
+            <div key={s.nombre}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.nombre}</span>
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(s.valor, cur, tc)}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px', fontVariantNumeric: 'tabular-nums' }}>{s.pct}%</span>
+                </span>
+              </div>
+              <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${Math.max((s.valor / maxSubVal) * 100, 4)}%`, background: s.color, borderRadius: 3 }} />
               </div>
             </div>
           ))}

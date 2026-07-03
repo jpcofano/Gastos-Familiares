@@ -272,6 +272,35 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
       }
     : preloadBase;
 
+  // F9.79 — badge Pre-clasificado + Gasto esperado persiste del splash al Hero del confirm
+  const badgePropuesta = (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+      {(pm.categoriaPrellena || sugerenciaValida) && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(217,119,6,.15)',
+          border: '1px solid rgba(245,158,11,.55)', borderRadius: 999, padding: '6px 13px 6px 7px' }}>
+          <span style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(245,158,11,.9)', color: '#1a1205',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="sparkles" size={12} />
+          </span>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>Pre-clasificado</span>
+        </span>
+      )}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7,
+        background: pm.rama === 2 ? 'rgba(12,143,98,.2)' : 'rgba(255,255,255,.08)',
+        border: pm.rama === 2 ? '1px solid var(--gf-emerald-line)' : '1px solid rgba(255,255,255,.18)',
+        borderRadius: 999, padding: '6px 13px 6px 7px' }}>
+        <span style={{ width: 22, height: 22, borderRadius: '50%',
+          background: pm.rama === 2 ? 'var(--color-accent)' : 'var(--gf-gray-300)',
+          color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name={pm.rama === 2 ? 'git-compare' : 'plus'} size={12} />
+        </span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>
+          {pm.rama === 2 ? (pm.esAdicional ? 'Pago adicional' : 'Gasto esperado') : 'Movimiento nuevo'}
+        </span>
+      </span>
+    </span>
+  );
+
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -299,6 +328,7 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
           memberId={memberId}
           miembro={miembro}
           preload={preload}
+          badgePropuesta={badgePropuesta}
           onGuardarPayload={async (payload) => {
             const res = await cargarMovimientoDesdeComprobante(comp.id, payload);
             return { ok: res.ok, error: res.ok ? undefined : res.error };

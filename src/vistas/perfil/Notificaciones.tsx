@@ -27,6 +27,7 @@ type EstadoRec = 'vencido' | 'hoy' | 'proximo';
 
 interface Recordatorio {
   id: string;
+  tipo: 'esperado' | 'tarjeta';
   titulo: string;
   sub?: string;
   fecha: Date;
@@ -59,6 +60,7 @@ function recordatoriosEsperados(items: ExpectedItem[], movs: Movement[], hoy: Da
     if (estadoRec === 'proximo' && dias > DIAS_VENTANA) continue;
     out.push({
       id: `esp-${item.id}`,
+      tipo: 'esperado' as const,
       titulo: [item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || '(sin categoría)',
       sub: estado === 'por_confirmar' ? 'Pago detectado — falta confirmar' : estado === 'parcial' ? 'Pago parcial detectado' : undefined,
       fecha, estado: estadoRec,
@@ -82,6 +84,7 @@ function recordatoriosTarjetas(resumenes: CardStatement[], config: FamiliaConfig
     if (r.totalUSD > 0) montos.push({ monto: r.totalUSD, moneda: 'USD' });
     out.push({
       id: `tar-${r.id}`,
+      tipo: 'tarjeta' as const,
       titulo: r.tarjeta || r.banco,
       sub: r.tarjeta ? r.banco : undefined,
       fecha: r.fechaVencimiento, estado: estadoRec,
@@ -101,6 +104,7 @@ function recordatoriosTarjetas(resumenes: CardStatement[], config: FamiliaConfig
     if (estadoRec === 'proximo' && dias > DIAS_VENTANA) continue;
     out.push({
       id: `tarcfg-${t.codigo}`,
+      tipo: 'tarjeta' as const,
       titulo: `${t.banco} — ${t.tipo}`,
       sub: 'Estimado · sin resumen cargado todavía',
       fecha, estado: estadoRec,
@@ -114,35 +118,38 @@ function recordatoriosTarjetas(resumenes: CardStatement[], config: FamiliaConfig
 const ORDEN_ESTADO_REC: Record<EstadoRec, number> = { vencido: 0, hoy: 1, proximo: 2 };
 const TINT: Record<EstadoRec, string> = { vencido: 'var(--gf-expense)', hoy: 'var(--gf-emerald)', proximo: 'var(--gf-gray-300)' };
 const LABEL: Record<EstadoRec, string> = { vencido: 'Vencido', hoy: 'Hoy', proximo: 'Próximo' };
-
-function fmtFechaCorta(d: Date): string {
-  return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', weekday: 'short' });
-}
+const MES_CORTO = (d: Date) => d.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '');
+const ICONO_REC = (id: string) => id.startsWith('esp-') ? 'receipt' : 'credit-card';
 
 export function contarVencProximos(recordatorios: Recordatorio[]): number {
   return recordatorios.filter(r => r.estado === 'vencido' || r.estado === 'hoy').length;
 }
 
-function RecordatorioRow({ r }: { r: Recordatorio }) {
+function RecordatorioRow({ r, last }: { r: Recordatorio; last: boolean }) {
   return (
     <button onClick={r.onTap} style={{
-      width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px',
-      background: 'var(--color-surface)', border: '1px solid var(--gf-gray-150)', borderRadius: 14,
+      width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+      background: 'none', border: 'none', borderBottom: last ? 'none' : '1px solid var(--gf-gray-100)',
       cursor: 'pointer', fontFamily: 'var(--font-base)', textAlign: 'left',
     }}>
       <span style={{ width: 8, height: 8, borderRadius: 999, background: TINT[r.estado], flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>{r.titulo}</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>
-          {fmtFechaCorta(r.fecha)}{r.sub ? ` · ${r.sub}` : ''}
-        </div>
-      </div>
-      <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+      <span style={{ width: 34, flexShrink: 0, textAlign: 'center' }}>
+        <span style={{ display: 'block', fontSize: 17, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{r.fecha.getDate()}</span>
+        <span style={{ fontSize: 9, color: 'var(--gf-gray-400)', textTransform: 'uppercase' }}>{MES_CORTO(r.fecha)}</span>
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name={ICONO_REC(r.id)} size={13} color="var(--gf-gray-400)" />
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.titulo}</span>
+        </span>
+        {r.sub && <span style={{ display: 'block', fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{r.sub}</span>}
+      </span>
+      <span style={{ textAlign: 'right', flexShrink: 0 }}>
         {r.montos.map(m => (
-          <span key={m.moneda} style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}</span>
+          <span key={m.moneda} style={{ display: 'block', fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}</span>
         ))}
-        <Badge tone={r.estado === 'vencido' ? 'danger' : r.estado === 'hoy' ? 'success' : 'neutral'}>{LABEL[r.estado]}</Badge>
-      </div>
+        <Badge tone={r.estado === 'vencido' ? 'danger' : r.estado === 'hoy' ? 'warning' : 'neutral'}>{LABEL[r.estado]}</Badge>
+      </span>
     </button>
   );
 }
@@ -178,9 +185,8 @@ function CalendarSyncRow({ esAdmin, activo }: { esAdmin: boolean; activo: boolea
 
   useEffect(() => setValor(activo), [activo]);
 
-  async function toggle() {
-    if (!esAdmin || guardando) return;
-    const nuevo = !valor;
+  async function toggle(nuevo: boolean) {
+    if (!esAdmin || guardando || nuevo === valor) return;
     setValor(nuevo);
     setGuardando(true);
     setError(null);
@@ -198,24 +204,24 @@ function CalendarSyncRow({ esAdmin, activo }: { esAdmin: boolean; activo: boolea
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>Eventos en Google Calendar</div>
           <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
-            {esAdmin ? 'Crea los vencimientos en el calendario compartido' : 'Lo activa o desactiva un admin'}
+            {esAdmin ? 'Crea los vencimientos en el calendario compartido' : 'Calendario compartido · lo activa un administrador.'}
           </div>
         </div>
         {esAdmin ? (
-          <button onClick={toggle} disabled={guardando} style={{
-            display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3, border: 'none', cursor: guardando ? 'default' : 'pointer',
-          }}>
+          <div style={{ display: 'inline-flex', background: 'var(--gf-gray-100)', borderRadius: 999, padding: 3 }}>
             {(['Inactivo', 'Activo'] as const).map((label, i) => {
               const on = (i === 1) === valor;
               return (
-                <span key={label} style={{
-                  padding: '5px 10px', borderRadius: 999, fontFamily: 'var(--font-base)', fontSize: 11, fontWeight: 700,
-                  background: on ? 'var(--color-surface)' : 'transparent', color: on ? 'var(--color-text)' : 'var(--color-text-sec)',
-                  boxShadow: on ? 'var(--shadow-sm)' : 'none',
-                }}>{label}</span>
+                <button key={label} onClick={() => toggle(i === 1)} disabled={guardando} aria-pressed={on}
+                  style={{ border: 'none', cursor: guardando ? 'default' : 'pointer', fontSize: 13, fontWeight: on ? 700 : 500,
+                    padding: '6px 15px', borderRadius: 999, background: on ? 'var(--color-surface)' : 'transparent',
+                    color: on ? 'var(--color-text)' : 'var(--gf-gray-400)', boxShadow: on ? 'var(--shadow-sm)' : 'none',
+                    fontFamily: 'var(--font-base)' }}>
+                  {label}
+                </button>
               );
             })}
-          </button>
+          </div>
         ) : (
           <Badge tone={valor ? 'success' : 'neutral'}>{valor ? 'Activo' : 'Inactivo'}</Badge>
         )}
@@ -227,28 +233,40 @@ function CalendarSyncRow({ esAdmin, activo }: { esAdmin: boolean; activo: boolea
 
 export default function Notificaciones() {
   const { recordatorios, esAdmin, config } = useRecordatorios();
+  const vencidos = recordatorios.filter(r => r.estado === 'vencido');
+  const ventana  = recordatorios.filter(r => r.estado === 'hoy' || r.estado === 'proximo');
+  const countTone = ventana.length > 0 ? 'var(--gf-out)' : 'var(--gf-gray-300)';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <CalendarSyncRow esAdmin={esAdmin} activo={config?.calendarSync === true} />
 
-      <Card variant="flat" padding="var(--space-3)" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Icon name="bell" size={17} color="var(--gf-gray-400)" />
-        <span style={{ flex: 1, fontSize: 13, color: 'var(--color-text-sec)' }}>
-          Vencimientos de los próximos {DIAS_VENTANA} días{!esAdmin ? ' · solo tarjetas' : ''}
-        </span>
-        <span style={{ minWidth: 22, height: 22, borderRadius: 999, background: 'var(--gf-out)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>
-          {contarVencProximos(recordatorios)}
-        </span>
-      </Card>
-
-      {recordatorios.length === 0 ? (
-        <p style={{ fontSize: 13, color: 'var(--color-text-sec)', margin: '0 4px' }}>Sin vencimientos próximos.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {recordatorios.map(r => <RecordatorioRow key={r.id} r={r} />)}
+      {vencidos.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-expense)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8, padding: '0 2px' }}>Vencidos · {vencidos.length}</div>
+          <Card padding="0">{vencidos.map((r, i) => <RecordatorioRow key={r.id} r={r} last={i === vencidos.length - 1} />)}</Card>
         </div>
       )}
+
+      <div>
+        <Card padding="0">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px' }}>
+            <Icon name="bell" size={18} color="var(--gf-gray-400)" />
+            <span style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 600, color: 'var(--color-text)' }}>
+              Vencimientos de los próximos {DIAS_VENTANA} días{!esAdmin ? ' · solo tarjetas' : ''}
+            </span>
+            <span style={{ minWidth: 26, height: 26, padding: '0 8px', borderRadius: 999, background: countTone, color: '#fff', fontSize: 13, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{ventana.length}</span>
+          </div>
+          {ventana.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--gf-gray-100)' }}>
+              {ventana.map((r, i) => <RecordatorioRow key={r.id} r={r} last={i === ventana.length - 1} />)}
+            </div>
+          )}
+        </Card>
+        {ventana.length === 0 && (
+          <div style={{ fontSize: 14, color: 'var(--color-text-sec)', padding: '14px 4px 0' }}>Sin vencimientos próximos.</div>
+        )}
+      </div>
       <div style={{ height: 4 }} />
     </div>
   );

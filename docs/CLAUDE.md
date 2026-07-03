@@ -150,6 +150,29 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      espacio 100×60 con `paddingBottom:60%` para relación de aspecto fija sin ResizeObserver.
      Nueva pantalla `src/vistas/perfil/GraficosConfig.tsx` con el selector de paleta
      accesible desde Perfil › Personal › "Gráficos" → `/perfil/graficos`.
+- F9.80 — Notificaciones (repo) al diseño del kit: grupo "Vencidos · N" con header rojo uppercase
+  FUERA de la Card (antes adentro con estilo interno); card "Próximos 14 días" con badge de conteo
+  ámbar si ≥1 / gris si 0, filtrando `ventana = hoy + proximo` (antes `estado !== 'vencido'` que
+  coincide pero es menos explícito). `RecordatorioRow` reescrita como `<button>` con prop `last`
+  (sin border-bottom en la última fila); helpers `MES_CORTO`/`ICONO_REC`/`LABEL` por id-prefix y
+  estado; layout rico: punto de estado (8×8) + número de día grande (17px bold) + mes (9px) +
+  icono tipo (13px) + título + sub + montos + Badge. `flexShrink:0` en el badge de conteo.
+- F9.79 — Confirmar comprobante: badges Pre-clasificado/Gasto esperado persisten del splash al Hero.
+  `Hero` en `CaptureModal.tsx` gana prop `badge?: ReactNode` (entre desc y tags).
+  `AltaMovimiento` gana prop `badgePropuesta?: ReactNode` pasada al Hero.
+  `PropuestaCard` en `Comprobantes.tsx` construye el par de píldoras inline (ámbar sparkles
+  Pre-clasificado + verde/neutral git-compare/plus Gasto esperado/Movimiento nuevo) y las pasa
+  como `badgePropuesta` al `<AltaMovimiento>`.
+- F9.78 — Inicio: fix toggle "Por categoría" (Dona/Treemap no renderizaban: `pie-chart` y
+  `layout-grid` faltaban en el mapa curado de `Icon.tsx`; agregados `PieChart`+`LayoutGrid`).
+  Botones del segmentado muestran icono+label. Top subcategorías rediseñado a estilo lista de
+  categorías: punto+nombre izquierda, monto+% derecha, barra full-width debajo escalada al máximo.
+- F9.77 — Notificaciones a paridad del kit: segmentado Inactivo/Activo con botones separados
+  (div+buttons en vez de button+spans); grupo "Vencidos · N" con header rojo aparece cuando hay
+  vencidos; card "14 días" con badge ámbar/gris (≥1/0) + filas dentro de la card; row rediseñada:
+  día-número + ícono tipo (credit-card/receipt) + badge "En N días"/"En 1 día"/"Hoy"/"VENCIDO".
+  CalendarSyncRow no-admin: copy "Calendario compartido · lo activa un administrador.".
+  `toggle` acepta valor explícito (no-op si ya activo). `LABEL`/`fmtFechaCorta` removidos.
 - F9.76 — Widget "Hoy" (Resumen) deriva pagado/pendiente de `cubierto(ci.estado)`, no de
   `matches.length`. Un `por_confirmar` (recibo cargado, impago tras F9.75) ya no se pinta
   "Conciliado/Todo pagado" ni se descuenta del total a pagar; muestra estado ámbar "a confirmar".
