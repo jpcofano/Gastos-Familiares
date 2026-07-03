@@ -157,6 +157,11 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   con `--apply`; (2) Revisión manual — subcat sin match en taxonomía, loguear para decidir; (3) Sin
   subcategoría ni categoría — no tocar. Batches ≤ 450, idempotente.
   Uso: `tsx scripts/seed/backfillCategoriaCanonica.ts` (dry-run) → `--apply` → prod con `--target=production --apply --i-am-sure`.
+- F9.82.1 — Hotfix pase débil: índice compuesto `destinos (tipo ASC, confianza ASC)` agregado a
+  `firestore.indexes.json`; `cargarNombresDestinoAprendidos()` envuelta en try/catch fail-soft —
+  si el índice aún no existe o hay error de permisos, el pase débil continúa sin alias en vez de
+  abortar todo el match. Deploy: `firebase deploy --only firestore:indexes` → `npm run build` en
+  functions → `firebase deploy --only functions`.
 - F9.82 — Conciliación pago↔obligación: pase débil + picker + alias-learning.
   **Bloqueos resueltos en `reconciliarPorPayee` (`matchLogica.ts`):** (1) ya no corta con `return []`
   si no hay CUIT/CBU/alias — ahora llama al nuevo pase débil por nombre; (2) comparación de monto

@@ -380,7 +380,14 @@ export const matchComprobante = onDocumentUpdated(
         return;
       }
       // F9.82 — 0 candidatos fuerte: pase débil por nombre (nunca auto-confirma)
-      const nombresAprendidos = await cargarNombresDestinoAprendidos();
+      // F9.82.1 — fail-soft: si la query de alias falla (índice, permisos, etc.),
+      // degradar a pase débil sin alias en vez de abortar todo el match
+      let nombresAprendidos: Map<string, string> | null = null;
+      try {
+        nombresAprendidos = await cargarNombresDestinoAprendidos();
+      } catch (e) {
+        console.error('[matchComprobante] cargarNombresDestinoAprendidos falló, sigo sin alias:', e);
+      }
       const reconcDebil = reconciliarPorNombre(datos, movs, nombresAprendidos);
       if (reconcDebil.length > 0) {
         await ref.update({

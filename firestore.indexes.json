@@ -43,6 +43,10 @@
     { "collectionGroup": "comprobantes", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "subidoPor", "order": "ASCENDING" },
       { "fieldPath": "subidoEn",  "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "destinos", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "tipo",      "order": "ASCENDING" },
+      { "fieldPath": "confianza", "order": "ASCENDING" }
     ]}
   ],
   "fieldOverrides": []
