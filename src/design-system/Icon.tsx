@@ -7,7 +7,7 @@ import {
   Store, FileText, GitCompare, List, CalendarCheck, Clock,
   Search, Trash2, Pencil, Download,
   BookOpen, Sparkles, PieChart, LayoutGrid, Landmark,
-  FlaskConical, Zap, ToggleLeft, ToggleRight,
+  FlaskConical, Zap, ToggleLeft, ToggleRight, Settings2,
   type LucideProps,
 } from 'lucide-react';
 
@@ -70,6 +70,7 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   zap: Zap,
   'toggle-left': ToggleLeft,
   'toggle-right': ToggleRight,
+  'settings-2': Settings2,
 };
 
 interface IconProps {

@@ -159,7 +159,8 @@ Nunca legibles por dependientes. Nunca referencian colecciones de gastos.
 3. **Rebalanceo** — menú de opciones medidas + riesgos de cada una
    (no una recomendación única).
 4. **Research sectorial** — informe de juicio (nacional + internacional).
-5. **Benchmark vs CAFCI** — al final (fase diferida).
+5. **Configuración** — posiciones manuales, activos fijos, toggle IA; futuras: actualización de precios de referencia (capa informativa, nunca pisa la corrida) y ajustes manuales trazables entre corridas.
+6. **Benchmark vs CAFCI** — al final (fase diferida).
 
 ---
 
@@ -262,6 +263,7 @@ Implementación en cadena (cada una depende de la anterior):
 - **F9.92** — Informe PDF completo bajo demanda + archivado *(cerrado)*
 - **F9.93** — Análisis IA por posición + sectorial (toggle, caché, lote) *(cerrado)*
 - **F9.93.1** — Wording condicional: `queHariaEnCadaCaso` en prompts + UI mini-cards *(cerrado)*
+- **F9.93.2** — Solapa Configuración + cosmética Resumen/hero + fix Storage *(cerrado)*
 
 Fases posteriores (en orden):
 - **F9.94 — Diario de decisiones:** registrar decisión (fecha, razón, opción

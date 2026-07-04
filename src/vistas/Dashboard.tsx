@@ -230,15 +230,17 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
               <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
               <Icon name="pencil" size={12} color="var(--gf-gray-300)" />
             </div>
-            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
-            <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2, textAlign: 'center' }}>{d.movMasAlto.desc}</div>
           </Card>
         </button>
       ) : (
         <Card variant="flat" padding="var(--space-3)">
-          <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
-          <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
-          <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
+          <div style={{ textAlign: 'center' }}>
+            <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
+            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
+          </div>
         </Card>
       )}
 
@@ -286,7 +288,6 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                     >
                       <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
                       <span style={{ fontWeight: 600 }}>{c.nombre}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{c.count}</span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 6px' }}>{c.pct === 0 && c.usd > 0 ? '<1%' : `${c.pct}%`}</span>
                       <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
                       {canDrill && <Icon name={isOpenMes ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />}
@@ -424,7 +425,6 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
               <span style={{ width: 18, fontSize: 12, fontWeight: 700, color: 'var(--gf-gray-400)' }}>{i + 1}</span>
               <MerchantLogo nombre={x.desc} size={30} radius={8} />
               <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.desc}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{x.count}</span>
               <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: 13 }}>{curBig(x.usd, cur, tc)}</span>
             </div>
           ))}

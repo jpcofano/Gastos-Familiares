@@ -64,6 +64,8 @@ const SECTOR_COL: Record<string, string> = {
 };
 function sectorColor(disp: string): string { return SECTOR_COL[disp] ?? '#8b8b8b'; }
 
+const UMBRAL_OTROS = 0.019;
+
 // ── Labels ────────────────────────────────────────────────────────────────────
 const TIPO_LABEL: Record<string, string> = {
   accion: 'Acción', bono: 'Bono', on: 'ON', cedear: 'CEDEAR',
@@ -312,7 +314,11 @@ function simularOpcion(posiciones: Posicion[], opcion: OpcionConfig) {
 
 // ── Barra apilada ─────────────────────────────────────────────────────────────
 function CompBar({ M }: { M: PatMetrics }) {
+  const [mostrarOtros, setMostrarOtros] = useState(false);
   const segs = Object.entries(M.bySector).sort((a, b) => b[1] - a[1]);
+  const mayores = segs.filter(([, v]) => v / M.total >= UMBRAL_OTROS);
+  const menores = segs.filter(([, v]) => v / M.total < UMBRAL_OTROS);
+  const otrosUsd = menores.reduce((s, [, v]) => s + v, 0);
   return (
     <div>
       <div style={{ display: 'flex', height: 12, borderRadius: 999, overflow: 'hidden', marginBottom: 14, background: 'var(--gf-gray-100)' }}>
@@ -321,7 +327,7 @@ function CompBar({ M }: { M: PatMetrics }) {
         ))}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {segs.map(([k, v]) => (
+        {mayores.map(([k, v]) => (
           <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <span style={{ width: 9, height: 9, borderRadius: 3, background: sectorColor(k), flexShrink: 0 }} />
             <span style={{ fontWeight: 600 }}>{k}</span>
@@ -329,6 +335,28 @@ function CompBar({ M }: { M: PatMetrics }) {
             <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
           </div>
         ))}
+        {menores.length > 0 && (
+          <>
+            <div
+              onClick={() => setMostrarOtros(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}
+            >
+              <span style={{ width: 9, height: 9, borderRadius: 3, background: 'var(--gf-gray-300)', flexShrink: 0 }} />
+              <span style={{ fontWeight: 600, color: 'var(--color-text-sec)' }}>Otros ({menores.length})</span>
+              <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{fmtUsd(otrosUsd)}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(otrosUsd / M.total)}</span>
+              <Icon name={mostrarOtros ? 'chevron-up' : 'chevron-down'} size={13} color="var(--gf-gray-400)" />
+            </div>
+            {mostrarOtros && menores.map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, paddingLeft: 17 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 3, background: sectorColor(k), flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, color: 'var(--color-text-sec)' }}>{k}</span>
+                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{fmtUsd(v)}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
+              </div>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -641,17 +669,12 @@ function OpcionCard({ opcion, posiciones }: { opcion: OpcionConfig; posiciones: 
 }
 
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, informes, generandoInforme, onEditFijo, onAddFijo, onEditManual, onAddManual, onGenerarInforme }: {
+function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, informes, generandoInforme, onGenerarInforme }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
-  manuales: PosicionManual[];
   historial: SnapshotResumen[];
   informes: InformeAnterior[];
   generandoInforme: boolean;
-  onEditFijo: (af: ActivoFijo) => void;
-  onAddFijo: () => void;
-  onEditManual: (pm: PosicionManual) => void;
-  onAddManual: () => void;
   onGenerarInforme: () => void;
 }) {
   const fijosUsd   = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
@@ -667,44 +690,45 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, in
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* 1. Hero negro — lente total */}
-      <div style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 20, padding: '22px 20px', textAlign: 'center' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', opacity: .7 }}>
-          Patrimonio total
+      {/* 1. Hero negro */}
+      <div style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 20, padding: '22px 20px' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', opacity: .6 }}>
+            Portfolio invertible
+          </div>
+          <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', margin: '4px 0 2px', fontVariantNumeric: 'tabular-nums' }}>
+            {fmtUsd(M.total)}
+          </div>
+          <div style={{ fontSize: 12, opacity: .5, fontVariantNumeric: 'tabular-nums', marginBottom: 8 }}>
+            {fmtArs(M.total, tc)}
+          </div>
+          {deltaInv !== null && corrPrev && (
+            <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ color: deltaInv >= 0 ? '#4ade80' : '#f87171', fontWeight: 700 }}>
+                {deltaInv >= 0 ? '+' : ''}{fmtUsd(deltaInv)}
+              </span>
+              <span style={{ opacity: .55, marginLeft: 5 }}>
+                ({deltaInv >= 0 ? '+' : ''}{pct(deltaInv / (corrPrev.totalInvertibleUsd || 1))}) · vs {fmtFecha(corrPrev.fechaCorrida)}
+              </span>
+            </div>
+          )}
         </div>
-        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', margin: '4px 0 2px', fontVariantNumeric: 'tabular-nums' }}>
-          {fmtUsd(patrimTotal)}
+        <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', margin: '14px 0 12px' }} />
+        <div style={{ textAlign: 'center', opacity: .65 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', marginBottom: 3 }}>
+            Patrimonio total
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
+            {fmtUsd(patrimTotal)}
+          </div>
+          <div style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+            {fmtArs(patrimTotal, tc)} · al {fmtFecha(fechaCorrida)}
+          </div>
         </div>
-        <div style={{ fontSize: 12.5, opacity: .65, fontVariantNumeric: 'tabular-nums' }}>
-          {fmtArs(patrimTotal, tc)} · al {fmtFecha(fechaCorrida)}
+        <div style={{ textAlign: 'center', fontSize: 10, opacity: .35, marginTop: 10 }}>
+          TC ${Math.round(tc).toLocaleString('es-AR')}
         </div>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.12)', flexWrap: 'wrap' }}>
-          {[
-            { label: 'Invertible', val: fmtUsd(M.total) },
-            { label: 'Fijos', val: fmtUsd(fijosUsd) },
-            { label: 'Cripto ¹', val: pct(M.cripto) },
-            { label: 'Arg. ¹', val: pct(M.paisAr) },
-          ].map(({ label, val }) => (
-            <span key={label}>
-              <span style={{ display: 'block', fontSize: 10.5, opacity: .6 }}>{label}</span>
-              <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{val}</span>
-            </span>
-          ))}
-        </div>
-        <div style={{ fontSize: 10, opacity: .4, marginTop: 8 }}>¹ sobre portfolio invertible</div>
       </div>
-
-      {/* 1b. Variación vs corrida anterior */}
-      {deltaInv !== null && corrPrev && (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>
-          <span style={{ color: deltaInv >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontWeight: 700 }}>
-            {deltaInv >= 0 ? '+' : ''}{fmtUsd(deltaInv)}
-          </span>
-          <span style={{ color: 'var(--gf-gray-400)' }}>
-            ({deltaInv >= 0 ? '+' : ''}{pct(deltaInv / (corrPrev.totalInvertibleUsd || 1))}) · vs corrida {fmtFecha(corrPrev.fechaCorrida)}
-          </span>
-        </div>
-      )}
 
       {/* 2. Riesgos */}
       <Card>
@@ -724,6 +748,12 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, in
             </div>
           ))}
         </div>
+      </Card>
+
+      {/* 3. Composición por sector */}
+      <Card>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Composición por sector</div>
+        <CompBar M={M} />
       </Card>
 
       {/* 4. Evolución entre corridas */}
@@ -752,13 +782,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, in
         </Card>
       )}
 
-      {/* 5. Posiciones manuales */}
-      <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
-
-      {/* 6. Activos fijos */}
-      <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
-
-      {/* 7. Informe PDF */}
+      {/* 5. Informe PDF */}
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: informes.length > 0 ? 10 : 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700 }}>Informe PDF</span>
@@ -1185,14 +1209,13 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
 }
 
 // ── Solapa Research ───────────────────────────────────────────────────────────
-function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onToggleIA, onGenerarSectorial, onAnalizarLote }: {
+function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote }: {
   M: PatMetrics;
   configIA: ConfigIA;
   sectorial: AnalisisSectorial | null;
   generandoSectorial: boolean;
   analizandoLote: boolean;
   loteProgreso: { actual: number; total: number; errores: string[] } | null;
-  onToggleIA: (val: boolean) => void;
   onGenerarSectorial: () => void;
   onAnalizarLote: () => void;
 }) {
@@ -1204,53 +1227,35 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Toggle IA */}
+      {/* Analizar lote */}
       <Card>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Análisis IA</div>
-            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
-              {configIA.habilitado ? 'Habilitado · consume API de Anthropic' : 'Deshabilitado · no llama a la API'}
-            </div>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>Analizar toda la cartera</span>
           <button
-            onClick={() => onToggleIA(!configIA.habilitado)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: configIA.habilitado ? 'var(--color-accent)' : 'var(--gf-gray-400)' }}
+            onClick={onAnalizarLote}
+            disabled={!configIA.habilitado || analizandoLote}
+            style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: (!configIA.habilitado || analizandoLote) ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: (!configIA.habilitado || analizandoLote) ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || analizandoLote) ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
           >
-            <Icon name={configIA.habilitado ? 'toggle-right' : 'toggle-left'} size={28} color={configIA.habilitado ? 'var(--color-accent)' : 'var(--gf-gray-400)'} />
+            {analizandoLote ? 'Analizando…' : 'Analizar lote'}
           </button>
         </div>
-
-        {configIA.habilitado && (
-          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--gf-gray-100)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 700 }}>Analizar toda la cartera</span>
-              <button
-                onClick={onAnalizarLote}
-                disabled={analizandoLote}
-                style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: analizandoLote ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: analizandoLote ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: analizandoLote ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
-              >
-                {analizandoLote ? 'Analizando…' : 'Analizar lote'}
-              </button>
-            </div>
-            {loteProgreso && (
-              <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
-                {loteProgreso.actual} / {loteProgreso.total} tickers
-                {loteProgreso.errores.length > 0 && (
-                  <span style={{ color: 'var(--gf-expense)', marginLeft: 8 }}>· {loteProgreso.errores.length} errores</span>
-                )}
-              </div>
+        {loteProgreso && (
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
+            {loteProgreso.actual} / {loteProgreso.total} tickers
+            {loteProgreso.errores.length > 0 && (
+              <span style={{ color: 'var(--gf-expense)', marginLeft: 8 }}>· {loteProgreso.errores.length} errores</span>
             )}
-            {loteProgreso && loteProgreso.errores.length > 0 && (
-              <div style={{ fontSize: 10.5, color: 'var(--gf-expense)', marginTop: 4 }}>
-                {loteProgreso.errores.join(' · ')}
-              </div>
-            )}
-            <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
-              ~{Object.keys(M.bySector).length * 2} tickers · puede tardar varios minutos · consume API
-            </div>
           </div>
         )}
+        {loteProgreso && loteProgreso.errores.length > 0 && (
+          <div style={{ fontSize: 10.5, color: 'var(--gf-expense)', marginTop: 4 }}>
+            {loteProgreso.errores.join(' · ')}
+          </div>
+        )}
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
+          ~{Object.keys(M.bySector).length * 2} tickers · puede tardar varios minutos · consume API
+          {!configIA.habilitado && <span style={{ marginLeft: 5 }}>· activar IA en Configuración</span>}
+        </div>
       </Card>
 
       {/* Panorama sectorial */}
@@ -1293,6 +1298,63 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
   );
 }
 
+// ── Solapa Configuración ──────────────────────────────────────────────────────
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA }: {
+  activosFijos: ActivoFijo[];
+  manuales: PosicionManual[];
+  configIA: ConfigIA;
+  fechaCorrida: string;
+  onEditFijo: (af: ActivoFijo) => void;
+  onAddFijo: () => void;
+  onEditManual: (pm: PosicionManual) => void;
+  onAddManual: () => void;
+  onToggleIA: (val: boolean) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
+      <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Análisis IA</div>
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
+              {configIA.habilitado ? 'Habilitado · consume API de Anthropic' : 'Deshabilitado · no llama a la API'}
+            </div>
+          </div>
+          <button
+            onClick={() => onToggleIA(!configIA.habilitado)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+          >
+            <Icon name={configIA.habilitado ? 'toggle-right' : 'toggle-left'} size={28} color={configIA.habilitado ? 'var(--color-accent)' : 'var(--gf-gray-400)'} />
+          </button>
+        </div>
+      </Card>
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Actualización de precios</div>
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>Próximamente</div>
+          </div>
+          <Icon name="toggle-left" size={28} color="var(--gf-gray-300)" />
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginTop: 10, lineHeight: 1.5 }}>
+          Traerá cotizaciones de referencia (cripto y NYSE) con un botón manual. Los precios de referencia NUNCA
+          modifican la corrida: se muestran como línea informativa junto al valor oficial. Métricas, semáforos
+          e informes siguen calculando sobre la corrida documentada.
+        </div>
+      </Card>
+      <Card>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>Edición manual del portafolio</div>
+        <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2, marginBottom: 10 }}>Próximamente</div>
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', lineHeight: 1.5 }}>
+          Permitirá registrar ajustes manuales trazables (alta/baja/corrección) entre corridas, sin editar la corrida original.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ── Vista principal ───────────────────────────────────────────────────────────
 const TABS = [
   ['resumen',   'Resumen'],
@@ -1300,6 +1362,7 @@ const TABS = [
   ['riesgo',    'Riesgo'],
   ['plan',      'Plan'],
   ['research',  'Research'],
+  ['config',    'Config'],
 ] as const;
 type TabId = typeof TABS[number][0];
 
@@ -1499,13 +1562,18 @@ export default function Patrimonio() {
           const on = tab === id;
           return (
             <button key={id} onClick={() => setTab(id)} style={{
-              flex: 1, padding: '8px 4px', borderRadius: 9, border: 'none', cursor: 'pointer',
+              flex: id === 'config' ? 'none' : 1,
+              padding: id === 'config' ? '8px 10px' : '8px 4px',
+              borderRadius: 9, border: 'none', cursor: 'pointer',
               fontFamily: 'var(--font-base)', fontSize: 12.5, fontWeight: on ? 700 : 600,
               background: on ? 'var(--color-surface)' : 'transparent',
               color: on ? 'var(--color-text)' : 'var(--color-text-sec)',
               boxShadow: on ? 'var(--shadow-sm)' : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              {label}
+              {id === 'config'
+                ? <Icon name="settings-2" size={15} color={on ? 'var(--color-text)' : 'var(--color-text-sec)'} />
+                : label}
             </button>
           );
         })}
@@ -1534,14 +1602,10 @@ export default function Patrimonio() {
           {tab === 'resumen' && (
             <ResumenTab
               M={M} tc={tc} fechaCorrida={fechaCorrida}
-              activosFijos={activosFijos} manuales={posicionesManuales}
+              activosFijos={activosFijos}
               historial={historial}
               informes={informes}
               generandoInforme={generandoInforme}
-              onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
-              onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
-              onEditManual={pm => { setEditManual(pm); setShowModalManual(true); }}
-              onAddManual={() => { setEditManual(null); setShowModalManual(true); }}
               onGenerarInforme={handleGenerarInforme}
             />
           )}
@@ -1563,9 +1627,21 @@ export default function Patrimonio() {
               generandoSectorial={generandoSectorial}
               analizandoLote={analizandoLote}
               loteProgreso={loteProgreso}
-              onToggleIA={handleToggleIA}
               onGenerarSectorial={handleGenerarSectorial}
               onAnalizarLote={handleAnalizarLote}
+            />
+          )}
+          {tab === 'config' && (
+            <ConfigTab
+              activosFijos={activosFijos}
+              manuales={posicionesManuales}
+              configIA={configIA}
+              fechaCorrida={fechaCorrida}
+              onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
+              onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
+              onEditManual={pm => { setEditManual(pm); setShowModalManual(true); }}
+              onAddManual={() => { setEditManual(null); setShowModalManual(true); }}
+              onToggleIA={handleToggleIA}
             />
           )}
         </>
