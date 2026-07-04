@@ -5,10 +5,12 @@ import { Card, MerchantLogo } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import {
   cargarPosicionesVigentes, cargarActivosFijos, cargarPosicionesManuales,
+  cargarHistorialSnapshots,
   guardarActivoFijo, eliminarActivoFijo,
   guardarPosicionManual, eliminarPosicionManual,
+  type SnapshotResumen,
 } from '../datos/patrimonio';
-import type { Posicion, ActivoFijo, PosicionManual } from '../types/patrimonio';
+import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo } from '../types/patrimonio';
 import PatrimonioIngesta from './PatrimonioIngesta';
 
 // ── Sector crudo → display ────────────────────────────────────────────────────
@@ -154,6 +156,160 @@ const SEM = {
   amarillo: { dot: 'var(--gf-out)',      bg: 'var(--gf-gray-100)' },
   rojo:     { dot: 'var(--gf-expense)',  bg: 'var(--gf-gray-100)' },
 } as const;
+
+// ── Escenarios de estrés ──────────────────────────────────────────────────────
+const STABLECOINS = new Set(['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD']);
+type ShockFn = (p: Posicion) => number;
+
+const STRESS_ESCENARIOS: { id: string; nombre: string; shock: ShockFn }[] = [
+  {
+    id: 'energia_ar',
+    nombre: 'Corrección energía AR',
+    shock: p => (p.sector === 'energia' && p.pais_riesgo === 'AR' && p.tipo === 'accion' ? -0.30 : 0),
+  },
+  {
+    id: 'cripto',
+    nombre: 'Invierno cripto',
+    shock: p => (p.tipo === 'cripto' && !STABLECOINS.has(p.ticker) ? -0.50 : 0),
+  },
+  {
+    id: 'soberano_ar',
+    nombre: 'Evento soberano AR',
+    shock: p => {
+      if (p.pais_riesgo !== 'AR') return 0;
+      if (p.tipo === 'accion' || p.tipo === 'cedear') return -0.40;
+      if (p.tipo === 'bono' || p.tipo === 'on') return -0.25;
+      if (p.tipo === 'fci') return -0.30;
+      return 0;
+    },
+  },
+  {
+    id: 'tormenta',
+    nombre: 'Tormenta perfecta',
+    shock: p => {
+      let s = 0;
+      if (p.pais_riesgo === 'AR') {
+        if (p.tipo === 'accion' || p.tipo === 'cedear') s = -0.40;
+        else if (p.tipo === 'bono' || p.tipo === 'on') s = -0.25;
+        else if (p.tipo === 'fci') s = -0.30;
+      }
+      if (p.tipo === 'cripto' && !STABLECOINS.has(p.ticker)) s = -0.50;
+      return s;
+    },
+  },
+];
+
+function calcStress(posiciones: Posicion[], shockFn: ShockFn) {
+  const total = posiciones.reduce((s, p) => s + p.valorUsd, 0);
+  const perdidaUsd = posiciones.reduce((s, p) => s + p.valorUsd * shockFn(p), 0);
+  return { perdidaUsd, totalResultante: total + perdidaUsd, total };
+}
+
+// ── Simulación de opciones de rebalanceo ──────────────────────────────────────
+type Corte = { tipo: 'ticker' | 'sector'; key: string; targetPct: number };
+type Redespliegue = { ticker: string; tipo: PosicionTipo; sector: string; pais_riesgo: 'AR' | 'global'; fraccion: number };
+type OpcionConfig = {
+  id: 'A' | 'B' | 'C';
+  titulo: string;
+  descripcion: string;
+  cortes: Corte[];
+  redespliegues: Redespliegue[];
+  riesgos: string[];
+};
+
+const OPCIONES_CONFIG: OpcionConfig[] = [
+  {
+    id: 'A',
+    titulo: 'Recorte mínimo',
+    descripcion: 'TRAN al 8% y PAMP al 6%; liberado → RV global',
+    cortes: [
+      { tipo: 'ticker', key: 'TRAN', targetPct: 0.08 },
+      { tipo: 'ticker', key: 'PAMP', targetPct: 0.06 },
+    ],
+    redespliegues: [
+      { ticker: 'RV Global', tipo: 'accion', sector: 'global', pais_riesgo: 'global', fraccion: 1.0 },
+    ],
+    riesgos: [
+      'Costo impositivo: TRAN y PAMP son ganadoras en USD.',
+      'Upside resignado si energía AR continúa subiendo.',
+      'Nuevo riesgo: exposición a mercado global.',
+    ],
+  },
+  {
+    id: 'B',
+    titulo: 'Diversificar dentro de AR',
+    descripcion: 'Energía AR al 35%; liberado mitad a otros sectores AR, mitad a RV global',
+    cortes: [
+      { tipo: 'sector', key: 'Energía AR', targetPct: 0.35 },
+    ],
+    redespliegues: [
+      { ticker: 'RV AR otros', tipo: 'accion', sector: 'consumo', pais_riesgo: 'AR', fraccion: 0.5 },
+      { ticker: 'RV Global',   tipo: 'accion', sector: 'global',  pais_riesgo: 'global', fraccion: 0.5 },
+    ],
+    riesgos: [
+      'Costo impositivo: posiciones de energía AR son ganadoras.',
+      'Diversificación intra-AR no elimina el riesgo soberano.',
+      'Complejidad operativa: algunas posiciones en cuentas conjuntas.',
+    ],
+  },
+  {
+    id: 'C',
+    titulo: 'Giro global',
+    descripcion: 'Energía AR al 25% y cripto al 15%; liberado → RV global',
+    cortes: [
+      { tipo: 'sector', key: 'Energía AR', targetPct: 0.25 },
+      { tipo: 'sector', key: 'Cripto',     targetPct: 0.15 },
+    ],
+    redespliegues: [
+      { ticker: 'RV Global', tipo: 'accion', sector: 'global', pais_riesgo: 'global', fraccion: 1.0 },
+    ],
+    riesgos: [
+      'Costo impositivo alto: múltiples posiciones ganadoras.',
+      'Upside resignado en energía AR y cripto.',
+      'Mayor exposición a riesgo de mercado global y divisa.',
+    ],
+  },
+];
+
+function simularOpcion(posiciones: Posicion[], opcion: OpcionConfig) {
+  const total = posiciones.reduce((s, p) => s + p.valorUsd, 0);
+  const antes = calcMetrics(posiciones);
+  const ajustadas = posiciones.map(p => ({ ...p }));
+  let liberadoUsd = 0;
+  const movimientos: { desc: string; deltaUsd: number }[] = [];
+
+  for (const c of opcion.cortes) {
+    const targets = ajustadas.filter(p =>
+      c.tipo === 'ticker'
+        ? p.ticker === c.key
+        : sectorDisplay(p.sector, p.pais_riesgo) === c.key
+    );
+    const actualUsd = targets.reduce((s, p) => s + p.valorUsd, 0);
+    const targetUsd = c.targetPct * total;
+    if (actualUsd > targetUsd) {
+      const delta = actualUsd - targetUsd;
+      const factor = targetUsd / actualUsd;
+      targets.forEach(p => { p.valorUsd = p.valorUsd * factor; });
+      liberadoUsd += delta;
+      movimientos.push({ desc: c.key, deltaUsd: -delta });
+    }
+  }
+
+  for (const r of opcion.redespliegues) {
+    const monto = liberadoUsd * r.fraccion;
+    if (monto > 0) {
+      ajustadas.push({
+        ticker: r.ticker, tipo: r.tipo, sector: r.sector, pais_riesgo: r.pais_riesgo,
+        cuenta: 'Redespliegue', titular: null, moneda_origen: 'USD', valor_origen: monto,
+        cantidad: null, fuente: 'simulacion', revisar: false,
+        valorUsd: monto, tcUsado: null, fechaCorrida: '',
+      });
+      movimientos.push({ desc: r.ticker, deltaUsd: monto });
+    }
+  }
+
+  return { liberadoUsd, movimientos, antes, despues: calcMetrics(ajustadas), total };
+}
 
 // ── Barra apilada ─────────────────────────────────────────────────────────────
 function CompBar({ M }: { M: PatMetrics }) {
@@ -405,19 +561,92 @@ function ActivosFijosCard({ activosFijos, onEdit, onAdd }: {
   );
 }
 
-// ── Palancas (Plan) ───────────────────────────────────────────────────────────
-const PAT_PALANCAS = [
-  { n: 1, titulo: 'Recortar los nombres únicos más grandes',  texto: 'TRAN y PAMP concentran el mayor riesgo por dólar. Recortarlos primero saca varianza sin bajar el retorno esperado.' },
-  { n: 2, titulo: 'Separar reguladas de productoras',         texto: 'Dentro de energía: reguladas (TRAN, TGS) vs productoras (YPF, VIST, PAMP). Son dos riesgos distintos hoy mezclados.' },
-  { n: 3, titulo: 'Redesplegar a otros sectores AR',          texto: 'Consumo, agro, real estate, materiales — sectores que hoy casi no tenés, para diversificar dentro de Argentina.' },
-  { n: 4, titulo: 'Sumar renta variable global',              texto: 'Podés operar afuera y tenés cuenta en USD. Mismo nivel de RV, menos riesgo-país. Probablemente la palanca de mayor impacto.' },
-];
+// ── Card de opción de rebalanceo ──────────────────────────────────────────────
+function OpcionCard({ opcion, posiciones }: { opcion: OpcionConfig; posiciones: Posicion[] }) {
+  const { liberadoUsd, movimientos, antes, despues, total } = simularOpcion(posiciones, opcion);
+  const metricas: { label: string; av: number; dv: number; b: BandaNombre | null }[] = [
+    { label: 'Energía AR',             av: (antes.bySector['Energía AR'] ?? 0) / (antes.total || 1),   dv: (despues.bySector['Energía AR'] ?? 0) / (despues.total || 1),  b: 'sector' },
+    { label: 'País AR',                av: antes.paisAr,  dv: despues.paisAr,  b: 'pais'   },
+    { label: 'Cripto',                 av: antes.cripto,  dv: despues.cripto,  b: 'cripto' },
+    { label: `Top-1 (${despues.nombreTop.ticker})`, av: antes.top1,   dv: despues.top1,   b: 'nombre' },
+    { label: 'HHI',                    av: antes.hhi,     dv: despues.hhi,     b: 'hhi'    },
+    { label: '% RV',                   av: antes.rvPct,   dv: despues.rvPct,   b: null     },
+  ];
+  return (
+    <Card>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+        <span style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--gf-ink)', color: '#fff', fontSize: 13, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {opcion.id}
+        </span>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.3 }}>{opcion.titulo}</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.4, marginTop: 2 }}>{opcion.descripcion}</div>
+        </div>
+      </div>
+
+      {/* Movimientos */}
+      {liberadoUsd > 0 ? (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 5 }}>Movimientos</div>
+          {movimientos.map((m, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, padding: '2px 0', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ color: m.deltaUsd < 0 ? 'var(--gf-expense)' : 'var(--gf-income)' }}>
+                {m.deltaUsd < 0 ? '↓' : '↑'} {m.desc}
+              </span>
+              <span style={{ color: m.deltaUsd < 0 ? 'var(--gf-expense)' : 'var(--gf-income)', fontWeight: 700 }}>
+                {m.deltaUsd < 0 ? '−' : '+'}{fmtUsd(Math.abs(m.deltaUsd))} · {pct(Math.abs(m.deltaUsd) / total)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--gf-gray-400)', marginBottom: 10 }}>
+          Todas las posiciones ya están bajo el target.
+        </div>
+      )}
+
+      {/* Métricas antes → después */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 5 }}>Métricas</div>
+        {metricas.map(m => {
+          const bA = m.b ? banda(m.b, m.av) : null;
+          const bD = m.b ? banda(m.b, m.dv) : null;
+          const mejoró = m.b && bA && bD && (
+            bD === 'verde' && bA !== 'verde' ||
+            bD === 'amarillo' && bA === 'rojo'
+          );
+          return (
+            <div key={m.label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 12.5 }}>
+              <span style={{ flex: 1, color: 'var(--color-text-sec)' }}>{m.label}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {bA && <span style={{ color: SEM[bA].dot }}>●</span>} {pct(m.av)}
+              </span>
+              <span style={{ color: 'var(--gf-gray-400)', fontSize: 11 }}>→</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: mejoró ? 700 : 400 }}>
+                {bD && <span style={{ color: SEM[bD].dot }}>●</span>} {pct(m.dv)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Riesgos */}
+      <div style={{ background: 'var(--gf-gray-50)', borderRadius: 10, padding: '10px 12px' }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>Riesgos de esta opción</div>
+        {opcion.riesgos.map((r, i) => (
+          <div key={i} style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.4, padding: '1px 0' }}>· {r}</div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, onEditFijo, onAddFijo, onEditManual, onAddManual }: {
+function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, onEditFijo, onAddFijo, onEditManual, onAddManual }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
+  historial: SnapshotResumen[];
   onEditFijo: (af: ActivoFijo) => void;
   onAddFijo: () => void;
   onEditManual: (pm: PosicionManual) => void;
@@ -425,6 +654,8 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, onEditFijo, o
 }) {
   const fijosUsd   = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
   const patrimTotal = M.total + fijosUsd;
+  const corrPrev = historial.length > 1 ? historial[1] : null;
+  const deltaInv = corrPrev ? M.total - corrPrev.totalInvertibleUsd : null;
 
   const riesgos: { k: string; v: number; b: ReturnType<typeof banda>; extra?: string }[] = [
     { k: 'Nombre más grande', v: M.top1, b: banda('nombre', M.top1), extra: M.nombreTop.ticker },
@@ -461,6 +692,18 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, onEditFijo, o
         <div style={{ fontSize: 10, opacity: .4, marginTop: 8 }}>¹ sobre portfolio invertible</div>
       </div>
 
+      {/* 1b. Variación vs corrida anterior */}
+      {deltaInv !== null && corrPrev && (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, fontSize: 12.5, fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: deltaInv >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontWeight: 700 }}>
+            {deltaInv >= 0 ? '+' : ''}{fmtUsd(deltaInv)}
+          </span>
+          <span style={{ color: 'var(--gf-gray-400)' }}>
+            ({deltaInv >= 0 ? '+' : ''}{pct(deltaInv / (corrPrev.totalInvertibleUsd || 1))}) · vs corrida {fmtFecha(corrPrev.fechaCorrida)}
+          </span>
+        </div>
+      )}
+
       {/* 2. Riesgos */}
       <Card>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
@@ -481,10 +724,36 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, onEditFijo, o
         </div>
       </Card>
 
-      {/* 4. Posiciones manuales */}
+      {/* 4. Evolución entre corridas */}
+      {historial.length > 1 && (
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Evolución</div>
+          {historial.map((s, i) => {
+            const prev = historial[i + 1];
+            const delta = prev ? s.totalInvertibleUsd - prev.totalInvertibleUsd : null;
+            return (
+              <div key={s.fechaCorrida} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 13 }}>
+                <span style={{ color: 'var(--gf-gray-400)', minWidth: 54, fontSize: 12 }}>{fmtFecha(s.fechaCorrida)}</span>
+                <span style={{ flex: 1, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(s.totalInvertibleUsd)}</span>
+                {delta !== null && (
+                  <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: delta >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontWeight: 600 }}>
+                    {delta >= 0 ? '+' : ''}{pct(delta / (prev!.totalInvertibleUsd || 1))}
+                  </span>
+                )}
+                {i === 0 && <span style={{ fontSize: 10, background: 'var(--gf-gray-100)', borderRadius: 4, padding: '2px 5px', color: 'var(--gf-gray-400)', fontWeight: 700 }}>HOY</span>}
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 8, lineHeight: 1.4 }}>
+            La variación refleja cambio de valor, no retorno: no descuenta aportes ni retiros entre corridas.
+          </div>
+        </Card>
+      )}
+
+      {/* 5. Posiciones manuales */}
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
 
-      {/* 5. Activos fijos */}
+      {/* 6. Activos fijos */}
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
     </div>
   );
@@ -621,12 +890,40 @@ function RiesgoTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] })
         El <strong style={{ color: 'var(--color-text-sec)' }}>% en renta variable ({pct(M.rvPct)})</strong> es informativo, sin semáforo:<br />
         la postura busca RV alta, no es un límite a controlar.
       </div>
+
+      {/* Escenarios de estrés */}
+      <Card>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>¿Qué pasa si...?</div>
+        {STRESS_ESCENARIOS.map((e, i) => {
+          const { perdidaUsd, totalResultante, total } = calcStress(posiciones, e.shock);
+          return (
+            <div key={e.id} style={{ padding: '10px 0', borderTop: i === 0 ? '1px solid var(--gf-gray-100)' : '1px solid var(--gf-gray-100)', marginTop: i === 0 ? 10 : 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5 }}>{e.nombre}</div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12.5 }}>
+                <span>
+                  <span style={{ color: 'var(--gf-gray-400)' }}>Pérdida </span>
+                  <strong style={{ color: 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtUsd(perdidaUsd)} ({pct(perdidaUsd / (total || 1))})
+                  </strong>
+                </span>
+                <span>
+                  <span style={{ color: 'var(--gf-gray-400)' }}>Resultante </span>
+                  <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(totalResultante)}</strong>
+                </span>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 10, lineHeight: 1.4 }}>
+          Escenarios ilustrativos con shocks fijos; no son predicciones ni probabilidades.
+        </div>
+      </Card>
     </div>
   );
 }
 
 // ── Solapa Plan ───────────────────────────────────────────────────────────────
-function PlanTab({ M }: { M: PatMetrics }) {
+function PlanTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card>
@@ -639,21 +936,14 @@ function PlanTab({ M }: { M: PatMetrics }) {
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '2px 2px 0' }}>
         Opciones
       </div>
-      {PAT_PALANCAS.map(p => (
-        <Card key={p.n}>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <span style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--gf-ink)', color: '#fff', fontSize: 13, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              {p.n}
-            </span>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.35 }}>{p.titulo}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--color-text-sec)', marginTop: 4, lineHeight: 1.45 }}>{p.texto}</div>
-            </div>
-          </div>
-        </Card>
+      {OPCIONES_CONFIG.map(o => (
+        <OpcionCard key={o.id} opcion={o} posiciones={posiciones} />
       ))}
       <div style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--gf-gray-100)', fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
-        No es asesoramiento matriculado. Son ganadores en USD → vender tiene costo impositivo, conviene pensar gradual. Parte está en cuentas conjuntas.
+        Estas opciones miden direcciones posibles, no son recomendaciones. Podés combinarlas o ignorarlas.
+      </div>
+      <div style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--gf-gray-100)', fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
+        No es asesoramiento matriculado. Las posiciones ganadoras en USD tienen costo impositivo al vender; conviene pensar gradual. Parte está en cuentas conjuntas.
       </div>
     </div>
   );
@@ -676,6 +966,7 @@ export default function Patrimonio() {
   const [activosFijos,      setActivosFijos]      = useState<ActivoFijo[]>([]);
   const [posicionesManuales, setPosicionesManuales] = useState<PosicionManual[]>([]);
   const [fechaCorrida,      setFechaCorrida]      = useState('');
+  const [historial,         setHistorial]         = useState<SnapshotResumen[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [showIngesta,      setShowIngesta]      = useState(false);
@@ -690,11 +981,17 @@ export default function Patrimonio() {
 
   function cargar() {
     setLoading(true);
-    Promise.all([cargarPosicionesVigentes(), cargarActivosFijos(), cargarPosicionesManuales()])
-      .then(([pos, fijos, manuales]) => {
+    Promise.all([
+      cargarPosicionesVigentes(),
+      cargarActivosFijos(),
+      cargarPosicionesManuales(),
+      cargarHistorialSnapshots(10),
+    ])
+      .then(([pos, fijos, manuales, hist]) => {
         setPosiciones(pos);
         setActivosFijos(fijos);
         setPosicionesManuales(manuales);
+        setHistorial(hist);
         if (pos.length > 0) setFechaCorrida(pos[0].fechaCorrida);
       })
       .finally(() => setLoading(false));
@@ -801,6 +1098,7 @@ export default function Patrimonio() {
             <ResumenTab
               M={M} tc={tc} fechaCorrida={fechaCorrida}
               activosFijos={activosFijos} manuales={posicionesManuales}
+              historial={historial}
               onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
               onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
               onEditManual={pm => { setEditManual(pm); setShowModalManual(true); }}
@@ -809,7 +1107,7 @@ export default function Patrimonio() {
           )}
           {tab === 'tenencias' && <TenenciasTab M={M} posiciones={posiciones} manuales={posicionesManuales} fechaCorrida={fechaCorrida} />}
           {tab === 'riesgo'    && <RiesgoTab M={M} posiciones={todasPosiciones} />}
-          {tab === 'plan'      && <PlanTab M={M} />}
+          {tab === 'plan'      && <PlanTab M={M} posiciones={todasPosiciones} />}
         </>
       )}
 

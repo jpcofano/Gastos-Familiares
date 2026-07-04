@@ -86,6 +86,28 @@ export async function eliminarPosicionManual(id: string): Promise<void> {
   await deleteDoc(doc(db, 'posicionesManuales', id));
 }
 
+export type SnapshotResumen = {
+  fechaCorrida: string;
+  totalInvertibleUsd: number;
+  totalFijosUsd: number;
+  totalPatrimonioUsd: number;
+};
+
+export async function cargarHistorialSnapshots(limite = 10): Promise<SnapshotResumen[]> {
+  const snap = await getDocs(
+    query(collection(db, 'snapshotsPortafolio'), orderBy('fechaCorrida', 'desc'), limit(limite))
+  );
+  return snap.docs.map(d => {
+    const data = d.data();
+    return {
+      fechaCorrida: data.fechaCorrida as string,
+      totalInvertibleUsd: (data.totalInvertibleUsd ?? 0) as number,
+      totalFijosUsd: (data.totalFijosUsd ?? 0) as number,
+      totalPatrimonioUsd: (data.totalPatrimonioUsd ?? 0) as number,
+    };
+  });
+}
+
 export async function confirmarIngesta(
   posiciones: Posicion[],
   meta: MetaCorrida,
