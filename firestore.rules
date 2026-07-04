@@ -17,6 +17,11 @@ service cloud.firestore {
       let d = authDoc();
       return d != null ? d.data.memberId : null;
     }
+    // Dueño: admin cuyo email es jpcofano@gmail.com.
+    // Se usa request.auth.token.email.lower() igual que authDoc() para consistencia.
+    function esDueno() {
+      return esAdmin() && request.auth.token.email.lower() == 'jpcofano@gmail.com';
+    }
 
     // config/familia: legible por cualquier signed-in (necesario para bootstrap)
     match /config/{doc} {
@@ -115,6 +120,23 @@ service cloud.firestore {
     match /destinos/{id} {
       allow read:  if esAdmin();
       allow write: if false;
+    }
+
+    // Patrimonio — aislado, solo dueño (jpcofano@gmail.com)
+    match /posicionesPatrimonio/{id} {
+      allow read, write: if esDueno();
+    }
+    match /snapshotsPortafolio/{id} {
+      allow read, write: if esDueno();
+    }
+    match /activosFijos/{id} {
+      allow read, write: if esDueno();
+    }
+    match /posicionesManuales/{id} {
+      allow read, write: if esDueno();
+    }
+    match /informesPortafolio/{id} {
+      allow read, write: if esDueno();
     }
   }
 }

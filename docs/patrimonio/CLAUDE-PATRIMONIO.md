@@ -250,6 +250,40 @@ contradiría la postura. Va como número informativo, sin color.
 
 ---
 
+## Roadmap de fases (estado al 04/07/2026)
+
+Implementación en cadena (cada una depende de la anterior):
+- **F9.90** — Ingesta `.txt` + activos fijos + doble lente *(en curso)*
+- **F9.90.1** — Posiciones manuales ACN/GLOB (planes de empleado)
+- **F9.91** — Opciones medidas + escenarios de estrés + evolución
+- **F9.92** — Informe PDF completo (bajo demanda + archivado)
+- **F9.93** — Análisis IA por posición + sectorial (toggle, caché, lote manual)
+
+Fases posteriores (en orden):
+- **F9.94 — Diario de decisiones:** registrar decisión (fecha, razón, opción
+  de referencia) y revisión a 30/90 días contra la evolución de las métricas.
+- **F9.95 — Calendario de eventos:** agregación de `proximosEventos` de los
+  análisis IA cacheados en una línea de tiempo única.
+- **F9.96 — Registro de aportes/retiros → retorno real (TWR):** recién con
+  3-4 snapshots acumulados; corrige el límite "cambio de valor ≠ retorno".
+- **F9.97 — Benchmark CAFCI:** comparación vs carteras de fondos
+  ACCIONES_AR / BONOS_SOBERANOS_AR (diseño previo ya existente).
+- **F9.98 — Optimización formal de portafolio (POST-CAFCI, decidido):**
+  correlaciones históricas y optimización (mínima varianza / risk parity /
+  frontera). Alcance previsto: obtener series de precios (Yahoo Finance para
+  ACN/GLOB/CEDEARs y cripto; BYMA/Rava para tickers AR), dolarizarlas,
+  calcular matriz de correlaciones y carteras óptimas como UNA VISTA MÁS
+  (propone y mide, no prescribe). **Advertencias documentadas para el
+  implementador:** (a) series AR cortas/sucias y la dolarización mete el
+  ruido del TC en la serie — definir TC de conversión diario (CCL) y
+  ventana; (b) correlaciones inestables en crisis (todo AR → 1): la
+  optimización complementa, NO reemplaza, los escenarios de estrés de F9.91;
+  (c) la frontera con retornos esperados históricos sobrepondera lo que ya
+  subió — preferir métodos sin retornos esperados (mín. varianza / risk
+  parity) o tratar los esperados como input manual del dueño.
+
+---
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.
