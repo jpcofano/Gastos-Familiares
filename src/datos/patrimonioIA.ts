@@ -16,6 +16,7 @@ export type AnalisisPosicion = {
     riesgos?: string[];
     rolEnCartera?: string;
     proximosEventos?: string[];
+    queHariaEnCadaCaso?: { caso: string; acciones: string[]; costo: string }[];
     senalesAVigilar?: string[];
     fuentes?: string[];
   };

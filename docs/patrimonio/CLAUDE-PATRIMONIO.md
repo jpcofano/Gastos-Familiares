@@ -38,7 +38,8 @@ nunca ordena ni dispara alarmas. Las decisiones las toma el usuario.
 - **Postura:** crecer aunque oscile (apetito por renta variable alta).
 - **Unidad medida:** la **familia como una sola entidad**. Se mide el total,
   sin separar la parte personal de las cuentas conjuntas.
-- **Filosofía:** proponer, medir y mostrar riesgos. Nada prescriptivo.
+- **Filosofía:** proponer, medir y mostrar riesgos. Nunca prescribir **incondicionalmente**.
+  La guía por casos (condición → opciones → costo) es el formato permitido de acción; la decisión la toma siempre el titular.
   Los semáforos son resumen visual de dónde se concentra el riesgo, no alarmas.
 
 ---
@@ -260,6 +261,7 @@ Implementación en cadena (cada una depende de la anterior):
 - **F9.91.1** — Tenencias consolidadas por ticker con desglose *(cerrado)*
 - **F9.92** — Informe PDF completo bajo demanda + archivado *(cerrado)*
 - **F9.93** — Análisis IA por posición + sectorial (toggle, caché, lote) *(cerrado)*
+- **F9.93.1** — Wording condicional: `queHariaEnCadaCaso` en prompts + UI mini-cards *(cerrado)*
 
 Fases posteriores (en orden):
 - **F9.94 — Diario de decisiones:** registrar decisión (fecha, razón, opción

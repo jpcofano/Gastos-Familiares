@@ -1152,6 +1152,24 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
               ))}
             </div>
           )}
+          {analisis.resultado.queHariaEnCadaCaso && analisis.resultado.queHariaEnCadaCaso.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 4 }}>Qué haría en cada caso</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {analisis.resultado.queHariaEnCadaCaso.map((c, i) => (
+                  <div key={i} style={{ background: 'var(--gf-gray-50)', border: '1px solid var(--gf-gray-100)', borderRadius: 6, padding: '6px 10px' }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 2 }}>{c.caso}</div>
+                    {c.acciones.map((a, j) => (
+                      <div key={j} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {a}</div>
+                    ))}
+                    {c.costo && (
+                      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>{c.costo}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {analisis.resultado.senalesAVigilar && analisis.resultado.senalesAVigilar.length > 0 && (
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 2 }}>Señales a vigilar</div>

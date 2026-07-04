@@ -2752,15 +2752,24 @@ Respondé ÚNICAMENTE con un JSON válido (sin markdown, sin texto antes ni desp
   "riesgos": ["3 a 5 riesgos específicos de ESTE papel, concretos"],
   "rolEnCartera": "1-3 frases usando el contexto provisto: peso, con qué otras posiciones comparte driver, qué le aporta o concentra",
   "proximosEventos": ["cupones, vencimientos, resultados, revisiones tarifarias con fecha aproximada si se conoce"],
-  "senalesAVigilar": ["2-4 señales observables que indicarían que la tesis del papel cambió"],
+  "queHariaEnCadaCaso": [
+    {
+      "caso": "condición observable y concreta (ej: 'si la revisión tarifaria sale desfavorable')",
+      "acciones": ["2-3 opciones de acción posibles para ese escenario"],
+      "costo": "el trade-off principal de actuar (impositivo, upside resignado, timing)"
+    }
+  ],
   "fuentes": ["urls o medios consultados"]
 }
 
 REGLAS INNEGOCIABLES:
 - Español rioplatense.
-- PROHIBIDO recomendar acciones: NO usar "comprar", "vender", "conviene", "recomiendo", "deberías".
+- PROHIBIDO: imperativos sin condición ("vendé", "comprá", "recomiendo salir/entrar"), precios objetivo como certeza.
+- PERMITIDO: condicionales con opciones ("si X, convendría evaluar A o B porque…"), siempre con el costo/trade-off explícito.
+- 2 a 4 casos en queHariaEnCadaCaso, del más probable al menos. Los casos deben ser observables (un dato, un evento, un precio), no vaguedades.
+- La decisión es del titular: cada caso presenta opciones, nunca una única salida obligada.
 - Si no hay información confiable de algo, decirlo en vez de inventar.
-- Máx ~250 palabras en total.`;
+- Máx ~300 palabras en total.`;
 }
 
 function buildPromptSectorial(contexto: Record<string, unknown>): string {
@@ -2769,10 +2778,15 @@ function buildPromptSectorial(contexto: Record<string, unknown>): string {
 COMPOSICIÓN DE LA CARTERA:
 ${JSON.stringify(contexto, null, 2)}
 
-Escribí un panorama sectorial en texto libre (no JSON), en español rioplatense. Estructura sugerida: un bloque por sector relevante de la cartera (energía AR, macro/CER AR, soberano AR, cripto, tech global). Para cada uno: situación actual, riesgos y próximos eventos.
+Escribí un panorama sectorial en texto libre (no JSON), en español rioplatense. Estructura: un bloque por sector relevante de la cartera (energía AR, macro/CER AR, soberano AR, cripto, tech global). Para cada sector incluí:
+1. Situación actual y riesgos relevantes.
+2. Próximos eventos con fecha aproximada.
+3. "Qué haría en cada caso" — 2 a 3 escenarios observables para ESE sector con la forma: "Si [condición concreta] → las opciones serían [A / B], con el trade-off [X]". Uno por línea, breve.
 
 REGLAS INNEGOCIABLES:
-- PROHIBIDO recomendar acciones: NO usar "comprar", "vender", "conviene".
+- PROHIBIDO: imperativos sin condición ("vendé", "comprá", "conviene salir").
+- PERMITIDO: condicionales con opciones, siempre con trade-off explícito.
+- La decisión es del titular: cada caso presenta opciones, nunca una salida obligada.
 - Usá web_search para información reciente.
 - Si no hay info confiable, decirlo.`;
 }

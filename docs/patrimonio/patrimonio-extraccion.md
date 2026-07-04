@@ -34,6 +34,7 @@ TC_REFERENCIA_ARS_USD: 1522.03   # informativo; la app usa su propio tcDiario
 | **PPI / Portfolio Personal** — "Estado de Cuenta" | PDF | **ARS** | columna **Valor Corriente ($)** por especie |
 | **Nexo** — "Account balance" | PDF | **USD** | columna **Fiat equivalent (USD)** por activo |
 | **Bitfinex** — captura de "Carteras" | Imagen | **USD** | columna **USD EQUIVALENTE** por activo |
+| **Globant ESPP** — captura del Dashboard (Acct 0000010348) | Imagen | **USD** | "Portfolio Value" total; cantidad = total ÷ cotización GLOB mostrada |
 
 Reglas por fuente:
 - **Balanz:** el N° de Comitente identifica la cuenta (ej. 402665, 1120830). El
@@ -83,12 +84,13 @@ Mapping de tickers conocidos (extender acá cuando aparezca uno nuevo):
 | GGAL, BMA | accion | bancos | AR |
 | TRAN, PAMP, YPFD, TGSU2, CEPU, ECOG | accion | energia | AR |
 | TXAR | accion | materiales | AR |
-| VIST | cedear | energia | AR *(revisar: Vaca Muerta, listada afuera)* |
+| VIST | cedear | energia | AR *(criterio fijo: Vaca Muerta, cuenta como riesgo AR)* |
 | B (Barrick) | cedear | materiales | global |
 | CVX (Chevron) | cedear | energia | global |
-| GLOB (Globant) | cedear | tech | global |
+| GLOB (Globant, CEDEAR) | cedear | tech | global |
+| GLOB (Globant ESPP, acciones NYSE) | accion | tech | global |
 | VZ (Verizon) | cedear | telecom | global |
-| BIOX (Bioceres) | cedear | agro | global *(revisar: agtech AR)* |
+| BIOX (Bioceres) | cedear | agro | AR *(criterio fijo: agtech argentina, riesgo AR)* |
 | DICP, TX26, TZXM7 | bono | cer_pesos | AR |
 | GD30, GD35, GD38 | bono | soberano_usd | AR |
 | BPOC7, BPOD7 (Bopreal) | bono | soberano_usd | AR |
