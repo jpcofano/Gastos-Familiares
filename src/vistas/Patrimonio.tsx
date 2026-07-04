@@ -151,8 +151,8 @@ function banda(m: BandaNombre, v: number): 'verde' | 'amarillo' | 'rojo' {
 }
 const SEM = {
   verde:    { dot: 'var(--gf-emerald)',  bg: 'var(--gf-emerald-50)' },
-  amarillo: { dot: 'var(--gf-out)',      bg: 'rgba(245,158,11,.12)' },
-  rojo:     { dot: 'var(--gf-expense)',  bg: 'rgba(220,38,38,.10)'  },
+  amarillo: { dot: 'var(--gf-out)',      bg: 'var(--gf-gray-100)' },
+  rojo:     { dot: 'var(--gf-expense)',  bg: 'var(--gf-gray-100)' },
 } as const;
 
 // ── Barra apilada ─────────────────────────────────────────────────────────────
@@ -481,28 +481,6 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, onEditFijo, o
         </div>
       </Card>
 
-      {/* 3. Palancas */}
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '0 2px 8px' }}>
-          Recomendaciones
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {PAT_PALANCAS.slice(0, 3).map(p => (
-            <Card key={p.n}>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <span style={{ width: 26, height: 26, borderRadius: 999, background: 'var(--gf-ink)', color: '#fff', fontSize: 13, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  {p.n}
-                </span>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.35 }}>{p.titulo}</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--color-text-sec)', marginTop: 4, lineHeight: 1.45 }}>{p.texto}</div>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-
       {/* 4. Posiciones manuales */}
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
 
@@ -659,7 +637,7 @@ function PlanTab({ M }: { M: PatMetrics }) {
         </div>
       </Card>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '2px 2px 0' }}>
-        Palancas de rebalanceo
+        Opciones
       </div>
       {PAT_PALANCAS.map(p => (
         <Card key={p.n}>
