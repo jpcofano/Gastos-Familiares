@@ -1,7 +1,7 @@
 import {
   House, ListChecks, Upload, UserRound, ChevronLeft, X, Plus, CreditCard,
   Calendar, UsersRound, CalendarDays, Check,
-  FileUp, CheckCheck, Loader, TriangleAlert, CircleX, ChevronRight, ChevronDown,
+  FileUp, CheckCheck, Loader, TriangleAlert, CircleX, ChevronRight, ChevronDown, ChevronUp,
   Bell, Palette, Tags, Wallet, Repeat, LogOut,
   Receipt, BarChart3, Tag, TrendingUp, Share2, AlertCircle, Moon, Sun, Layers,
   Store, FileText, GitCompare, List, CalendarCheck, Clock,
@@ -34,6 +34,7 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   'circle-x': CircleX,
   'chevron-right': ChevronRight,
   'chevron-down': ChevronDown,
+  'chevron-up': ChevronUp,
   bell: Bell,
   palette: Palette,
   tags: Tags,

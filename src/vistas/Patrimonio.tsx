@@ -759,95 +759,165 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, on
   );
 }
 
-// ── Solapa Tenencias ──────────────────────────────────────────────────────────
+// ── Solapa Tenencias (consolidada por ticker, desglose por cuenta al tap) ─────
 type FilaTenencia =
   | { origen: 'corrida'; pos: Posicion }
   | { origen: 'manual'; pm: PosicionManual };
 
+type ConsolidadoTicker = {
+  ticker: string;
+  sectorDisp: string;
+  totalUsd: number;
+  filas: FilaTenencia[];
+  tieneManual: boolean;
+  tieneRevisar: boolean;
+  tieneStale: boolean;
+};
+
 function TenenciasTab({ M, posiciones, manuales, fechaCorrida }: {
   M: PatMetrics; posiciones: Posicion[]; manuales: PosicionManual[]; fechaCorrida: string;
 }) {
-  const segs = Object.entries(M.bySector).sort((a, b) => b[1] - a[1]);
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
 
-  // Filas mezcladas por sector
-  function filasEnSector(sec: string): FilaTenencia[] {
-    const corrida: FilaTenencia[] = posiciones
-      .filter(p => sectorDisplay(p.sector, p.pais_riesgo) === sec)
-      .map(pos => ({ origen: 'corrida' as const, pos }));
-    const manual: FilaTenencia[] = manuales
-      .filter(pm => sectorDisplay(pm.sector, pm.pais_riesgo) === sec)
-      .map(pm => ({ origen: 'manual' as const, pm }));
-    return [...corrida, ...manual].sort((a, b) => {
-      const va = a.origen === 'corrida' ? a.pos.valorUsd : a.pm.valorUsd;
-      const vb = b.origen === 'corrida' ? b.pos.valorUsd : b.pm.valorUsd;
-      return vb - va;
+  // Consolidar por ticker usando valorUsd ya calculado (no re-suma)
+  const byTickerMap = new Map<string, ConsolidadoTicker>();
+  const todasFilas: FilaTenencia[] = [
+    ...posiciones.map(pos => ({ origen: 'corrida' as const, pos })),
+    ...manuales.map(pm  => ({ origen: 'manual'  as const, pm  })),
+  ];
+  for (const fila of todasFilas) {
+    const ticker = fila.origen === 'corrida' ? fila.pos.ticker : fila.pm.ticker;
+    const val    = fila.origen === 'corrida' ? fila.pos.valorUsd : fila.pm.valorUsd;
+    const sec    = fila.origen === 'corrida'
+      ? sectorDisplay(fila.pos.sector, fila.pos.pais_riesgo)
+      : sectorDisplay(fila.pm.sector, fila.pm.pais_riesgo);
+    if (!byTickerMap.has(ticker)) {
+      byTickerMap.set(ticker, { ticker, sectorDisp: sec, totalUsd: 0, filas: [], tieneManual: false, tieneRevisar: false, tieneStale: false });
+    }
+    const entry = byTickerMap.get(ticker)!;
+    entry.totalUsd += val;
+    entry.filas.push(fila);
+    if (fila.origen === 'manual') entry.tieneManual = true;
+    if (fila.origen === 'corrida' && fila.pos.revisar) entry.tieneRevisar = true;
+    if (fila.origen === 'manual' && fechaCorrida && fila.pm.fechaValuacion < fechaCorrida) entry.tieneStale = true;
+  }
+  const consolidados = Array.from(byTickerMap.values()).sort((a, b) => b.totalUsd - a.totalUsd);
+  const totalInvertible = consolidados.reduce((s, c) => s + c.totalUsd, 0);
+
+  function toggle(ticker: string) {
+    setExpandidos(prev => {
+      const next = new Set(prev);
+      next.has(ticker) ? next.delete(ticker) : next.add(ticker);
+      return next;
     });
   }
 
-  const totalFilas = posiciones.length + manuales.length;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Composición por sector */}
       <Card>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Composición por sector</div>
         <CompBar M={M} />
       </Card>
-      {segs.map(([sec, secTotal]) => {
-        const filas = filasEnSector(sec);
-        if (filas.length === 0) return null;
-        return (
-          <div key={sec}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '0 2px' }}>
-              <span style={{ width: 9, height: 9, borderRadius: 3, background: sectorColor(sec), flexShrink: 0 }} />
-              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--color-text-strong)' }}>{sec}</span>
-              <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>
-                {fmtUsd(secTotal)} · {pct(secTotal / M.total)}
-              </span>
-            </div>
-            <Card padding="0">
-              {filas.map((fila, i) => {
-                const key  = fila.origen === 'corrida' ? fila.pos.ticker + fila.pos.cuenta : fila.pm.id;
-                const tk   = fila.origen === 'corrida' ? fila.pos.ticker  : fila.pm.ticker;
-                const val  = fila.origen === 'corrida' ? fila.pos.valorUsd : fila.pm.valorUsd;
-                const tipo = fila.origen === 'corrida' ? fila.pos.tipo    : fila.pm.tipo;
-                const pais = fila.origen === 'corrida' ? fila.pos.pais_riesgo : fila.pm.pais_riesgo;
-                const cta  = fila.origen === 'corrida' ? fila.pos.cuenta  : fila.pm.cuenta;
-                const rev  = fila.origen === 'corrida' && fila.pos.revisar;
-                const stale = fila.origen === 'manual' && fechaCorrida && fila.pm.fechaValuacion < fechaCorrida;
-                return (
-                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 14px', borderBottom: i < filas.length - 1 ? '1px solid var(--gf-gray-100)' : 'none' }}>
-                    <MerchantLogo nombre={tk} size={40} radius={8} />
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 14, fontWeight: 600 }}>{tk}</span>
-                        {fila.origen === 'manual' && (
-                          <span style={{ fontSize: 9, fontWeight: 700, background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', borderRadius: 4, padding: '2px 5px' }}>MANUAL</span>
-                        )}
-                        {rev && <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(245,158,11,.2)', color: 'var(--gf-out)', borderRadius: 4, padding: '2px 5px' }}>REV</span>}
-                      </span>
-                      <span style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
-                        {TIPO_LABEL[tipo]} · {pais === 'AR' ? 'Argentina' : 'Global'} · {cta}
-                        {fila.origen === 'manual' && ` · valuado ${fmtFecha(fila.pm.fechaValuacion)}`}
-                      </span>
-                      {stale && (
-                        <span style={{ display: 'block', fontSize: 10.5, color: 'var(--gf-out)', marginTop: 2 }}>
-                          Valuación anterior a la última corrida
+
+      {/* Lista consolidada por ticker */}
+      <Card padding="0">
+        {consolidados.map((c, idx) => {
+          const exp    = expandidos.has(c.ticker);
+          const cuentas = new Set(c.filas.map(f => f.origen === 'corrida' ? f.pos.cuenta : f.pm.cuenta)).size;
+          const isLast = idx === consolidados.length - 1;
+          return (
+            <div key={c.ticker}>
+              {/* Fila consolidada */}
+              <div
+                onClick={() => toggle(c.ticker)}
+                style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 14px',
+                  borderBottom: (!isLast || exp) ? '1px solid var(--gf-gray-100)' : 'none',
+                  cursor: 'pointer' }}
+              >
+                <MerchantLogo nombre={c.ticker} size={40} radius={8} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>{c.ticker}</span>
+                    {c.tieneManual && (
+                      <span style={{ fontSize: 9, fontWeight: 700, background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', borderRadius: 4, padding: '2px 5px' }}>MANUAL</span>
+                    )}
+                    {(c.tieneRevisar || c.tieneStale) && (
+                      <span style={{ width: 7, height: 7, borderRadius: 999, background: 'var(--gf-out)', flexShrink: 0, display: 'inline-block' }} />
+                    )}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: 'var(--color-text-sec)', display: 'flex', gap: 5, alignItems: 'center' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 3, background: sectorColor(c.sectorDisp), flexShrink: 0, display: 'inline-block' }} />
+                    {c.sectorDisp}
+                    {cuentas > 1 && <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)' }}>· {cuentas} cuentas</span>}
+                  </span>
+                </span>
+                <span style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(c.totalUsd)}</span>
+                  <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{pct(c.totalUsd / M.total)}</span>
+                </span>
+                <Icon name={exp ? 'chevron-up' : 'chevron-down'} size={14} color="var(--gf-gray-400)" />
+              </div>
+
+              {/* Acordeón: desglose por cuenta */}
+              {exp && (
+                <div style={{ background: 'var(--gf-gray-50)', borderBottom: !isLast ? '1px solid var(--gf-gray-100)' : 'none' }}>
+                  {c.filas.map((fila, fi) => {
+                    const fkey   = fila.origen === 'corrida'
+                      ? `${fila.pos.ticker}-${fila.pos.cuenta}-${fi}`
+                      : fila.pm.id;
+                    const val    = fila.origen === 'corrida' ? fila.pos.valorUsd : fila.pm.valorUsd;
+                    const cta    = fila.origen === 'corrida' ? fila.pos.cuenta   : fila.pm.cuenta;
+                    const titular = fila.origen === 'corrida' ? fila.pos.titular  : null;
+                    const cant   = fila.origen === 'corrida' ? fila.pos.cantidad  : fila.pm.cantidad;
+                    const rev    = fila.origen === 'corrida' && fila.pos.revisar;
+                    const stale  = fila.origen === 'manual' && fechaCorrida && fila.pm.fechaValuacion < fechaCorrida;
+                    const fechaVal = fila.origen === 'manual' ? fila.pm.fechaValuacion : null;
+                    return (
+                      <div key={fkey} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 14px 9px 22px', borderTop: fi > 0 ? '1px solid var(--gf-gray-100)' : 'none' }}>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600 }}>{cta}</span>
+                          {titular && <span style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginLeft: 5 }}>{titular}</span>}
+                          <span style={{ display: 'flex', gap: 5, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
+                            {cant != null && (
+                              <span style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>{cant.toLocaleString('es-AR')} nom.</span>
+                            )}
+                            {fila.origen === 'manual' && (
+                              <span style={{ fontSize: 9.5, fontWeight: 700, background: 'var(--gf-gray-200)', color: 'var(--color-text-sec)', borderRadius: 4, padding: '1px 5px' }}>
+                                MANUAL · {fmtFecha(fechaVal!)}
+                              </span>
+                            )}
+                            {rev && (
+                              <span style={{ fontSize: 9.5, fontWeight: 700, background: 'rgba(245,158,11,.15)', color: 'var(--gf-out)', borderRadius: 4, padding: '1px 5px' }}>REVISAR</span>
+                            )}
+                            {stale && (
+                              <span style={{ fontSize: 9.5, color: 'var(--gf-out)' }}>val. anterior a corrida</span>
+                            )}
+                          </span>
                         </span>
-                      )}
-                    </span>
-                    <span style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <span style={{ display: 'block', fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(val)}</span>
-                      <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{pct(val / M.total)}</span>
-                    </span>
-                  </div>
-                );
-              })}
-            </Card>
-          </div>
-        );
-      })}
+                        <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, paddingTop: 2 }}>
+                          {fmtUsd(val)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {/* Gancho F9.93: ancla de análisis IA por ticker */}
+                  <div data-f993-ticker={c.ticker} style={{ display: 'none' }} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </Card>
+
+      {/* Pie: total invertible (debe cuadrar con el hero) */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, padding: '0 4px', fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ color: 'var(--gf-gray-400)' }}>Total invertible</span>
+        <span>{fmtUsd(totalInvertible)}</span>
+      </div>
+
       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'center' }}>
-        {posiciones.length} posiciones corrida · {manuales.length} manuales · {totalFilas} total · foto al {fmtFecha(fechaCorrida)}
+        {posiciones.length} posiciones corrida · {manuales.length} manuales · {consolidados.length} tickers · foto al {fmtFecha(fechaCorrida)}
       </div>
     </div>
   );

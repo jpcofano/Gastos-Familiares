@@ -153,7 +153,7 @@ Nunca legibles por dependientes. Nunca referencian colecciones de gastos.
 
 ## Solapas / informes (decisión cerrada)
 
-1. **Tenencias** — todas las posiciones, sin agrupar (cada papel su línea).
+1. **Tenencias** — consolidadas por ticker, con desglose por cuenta al expandir; ninguna tenencia queda oculta (regla: agrupación visible, nunca agrupación que esconde).
 2. **Concentración / foto** — con semáforos (ver bandas).
 3. **Rebalanceo** — menú de opciones medidas + riesgos de cada una
    (no una recomendación única).
