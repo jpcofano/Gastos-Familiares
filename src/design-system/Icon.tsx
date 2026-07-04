@@ -7,6 +7,7 @@ import {
   Store, FileText, GitCompare, List, CalendarCheck, Clock,
   Search, Trash2, Pencil, Download,
   BookOpen, Sparkles, PieChart, LayoutGrid, Landmark,
+  FlaskConical, Zap, ToggleLeft, ToggleRight,
   type LucideProps,
 } from 'lucide-react';
 
@@ -65,6 +66,10 @@ const ICONS: Record<string, React.ComponentType<LucideProps>> = {
   'pie-chart': PieChart,
   'layout-grid': LayoutGrid,
   landmark: Landmark,
+  'flask-conical': FlaskConical,
+  zap: Zap,
+  'toggle-left': ToggleLeft,
+  'toggle-right': ToggleRight,
 };
 
 interface IconProps {

@@ -62,3 +62,15 @@ export type PosicionManual = {
   cuenta: string;
   notas: string;
 };
+
+// Métricas calculadas sobre un conjunto de posiciones (output de calcMetrics)
+export type PatMetrics = {
+  total: number;
+  bySector: Record<string, number>;
+  byTipo: Record<string, number>;
+  byPais: { AR: number; global: number };
+  nombreTop: { ticker: string };
+  top1: number; top3: number; top5: number; hhi: number;
+  sectorTop: { nombre: string; pct: number };
+  paisAr: number; cripto: number; rvPct: number;
+};

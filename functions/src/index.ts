@@ -2735,3 +2735,131 @@ export const eliminarDestino = onCall(
     return { ok: true };
   },
 );
+
+// ── F9.93 — Análisis IA de patrimonio (por posición y sectorial) ──────────────
+const DUENO_EMAIL = 'jpcofano@gmail.com';
+
+function buildPromptPosicion(contexto: Record<string, unknown>): string {
+  return `Sos un analista financiero especialista en mercados argentinos e internacionales. Analizás una posición de una cartera familiar.
+
+POSICIÓN A ANALIZAR:
+${JSON.stringify(contexto, null, 2)}
+
+Respondé ÚNICAMENTE con un JSON válido (sin markdown, sin texto antes ni después) con este shape exacto:
+{
+  "queEs": "1-2 frases: qué es el instrumento/empresa y de qué depende su valor",
+  "situacionActual": "3-5 frases con lo relevante HOY (resultados, regulación, precio vs historia) — usá web_search para información reciente",
+  "riesgos": ["3 a 5 riesgos específicos de ESTE papel, concretos"],
+  "rolEnCartera": "1-3 frases usando el contexto provisto: peso, con qué otras posiciones comparte driver, qué le aporta o concentra",
+  "proximosEventos": ["cupones, vencimientos, resultados, revisiones tarifarias con fecha aproximada si se conoce"],
+  "senalesAVigilar": ["2-4 señales observables que indicarían que la tesis del papel cambió"],
+  "fuentes": ["urls o medios consultados"]
+}
+
+REGLAS INNEGOCIABLES:
+- Español rioplatense.
+- PROHIBIDO recomendar acciones: NO usar "comprar", "vender", "conviene", "recomiendo", "deberías".
+- Si no hay información confiable de algo, decirlo en vez de inventar.
+- Máx ~250 palabras en total.`;
+}
+
+function buildPromptSectorial(contexto: Record<string, unknown>): string {
+  return `Sos un analista financiero especialista en mercados argentinos e internacionales. Analizás el panorama sectorial de una cartera familiar.
+
+COMPOSICIÓN DE LA CARTERA:
+${JSON.stringify(contexto, null, 2)}
+
+Escribí un panorama sectorial en texto libre (no JSON), en español rioplatense. Estructura sugerida: un bloque por sector relevante de la cartera (energía AR, macro/CER AR, soberano AR, cripto, tech global). Para cada uno: situación actual, riesgos y próximos eventos.
+
+REGLAS INNEGOCIABLES:
+- PROHIBIDO recomendar acciones: NO usar "comprar", "vender", "conviene".
+- Usá web_search para información reciente.
+- Si no hay info confiable, decirlo.`;
+}
+
+export const analizarConIA = onCall(
+  {
+    region:         'southamerica-east1',
+    secrets:        [anthropicKey],
+    timeoutSeconds: 120,
+    memory:         '256MiB',
+  },
+  async (request) => {
+    // Auth: solo dueño
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Acceso restringido al dueño');
+
+    // Toggle: verificar que IA esté habilitada
+    const toggleSnap = await db.collection('configPatrimonio').doc('ia').get();
+    const habilitado = toggleSnap.exists ? (toggleSnap.data()?.habilitado as boolean) : false;
+    if (!habilitado) {
+      throw new HttpsError('failed-precondition', 'El análisis IA está deshabilitado. Activarlo desde la solapa Research.');
+    }
+
+    const { modo, ticker, contexto } = (request.data ?? {}) as {
+      modo?: 'posicion' | 'sectorial';
+      ticker?: string;
+      contexto?: Record<string, unknown>;
+    };
+
+    if (!modo || !['posicion', 'sectorial'].includes(modo)) {
+      throw new HttpsError('invalid-argument', 'modo debe ser "posicion" o "sectorial"');
+    }
+    if (modo === 'posicion' && !ticker) {
+      throw new HttpsError('invalid-argument', 'ticker requerido para modo posicion');
+    }
+    if (!contexto || typeof contexto !== 'object') {
+      throw new HttpsError('invalid-argument', 'contexto requerido');
+    }
+
+    const client = new Anthropic({ apiKey: anthropicKey.value() });
+    const modeloUsado = 'claude-sonnet-4-6';
+
+    const systemPrompt = modo === 'posicion'
+      ? buildPromptPosicion(contexto)
+      : buildPromptSectorial(contexto);
+
+    const response = await client.messages.create({
+      model: modeloUsado,
+      max_tokens: modo === 'posicion' ? 1500 : 3000,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] as any,
+      messages: [{ role: 'user', content: systemPrompt }],
+    });
+
+    const rawText = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map(b => b.text)
+      .join('')
+      .trim();
+
+    let resultado: unknown;
+    if (modo === 'posicion') {
+      const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
+      const rawMatch = rawText.match(/(\{[\s\S]*\})/);
+      const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
+      if (!jsonStr) throw new HttpsError('internal', `Sin JSON en respuesta: ${rawText.slice(0, 200)}`);
+      try { resultado = JSON.parse(jsonStr); }
+      catch { throw new HttpsError('internal', `JSON inválido: ${jsonStr.slice(0, 200)}`); }
+    } else {
+      resultado = rawText;
+    }
+
+    const generadoEn = FieldValue.serverTimestamp();
+
+    if (modo === 'posicion') {
+      await db.collection('analisisPosiciones').doc(ticker!).set({
+        ticker, generadoEn, modeloUsado, resultado,
+      });
+      console.log(`[analizarConIA] posicion ${ticker} analizada`);
+    } else {
+      await db.collection('analisisSectorial').add({
+        generadoEn, modeloUsado, resultado,
+      });
+      console.log('[analizarConIA] sectorial generado');
+    }
+
+    return { ok: true, resultado };
+  },
+);

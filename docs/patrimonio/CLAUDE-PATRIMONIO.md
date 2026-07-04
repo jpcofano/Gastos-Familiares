@@ -253,11 +253,13 @@ contradiría la postura. Va como número informativo, sin color.
 ## Roadmap de fases (estado al 04/07/2026)
 
 Implementación en cadena (cada una depende de la anterior):
-- **F9.90** — Ingesta `.txt` + activos fijos + doble lente *(en curso)*
-- **F9.90.1** — Posiciones manuales ACN/GLOB (planes de empleado)
-- **F9.91** — Opciones medidas + escenarios de estrés + evolución
-- **F9.92** — Informe PDF completo (bajo demanda + archivado)
-- **F9.93** — Análisis IA por posición + sectorial (toggle, caché, lote manual)
+- **F9.90** — Ingesta `.txt` + activos fijos + doble lente *(cerrado)*
+- **F9.90.1** — Posiciones manuales ACN/GLOB (planes de empleado) *(cerrado)*
+- **F9.90.2** — Resumen sin Recomendaciones + chips neutros *(cerrado)*
+- **F9.91** — Opciones medidas + escenarios de estrés + evolución *(cerrado)*
+- **F9.91.1** — Tenencias consolidadas por ticker con desglose *(cerrado)*
+- **F9.92** — Informe PDF completo bajo demanda + archivado *(cerrado)*
+- **F9.93** — Análisis IA por posición + sectorial (toggle, caché, lote) *(cerrado)*
 
 Fases posteriores (en orden):
 - **F9.94 — Diario de decisiones:** registrar decisión (fecha, razón, opción

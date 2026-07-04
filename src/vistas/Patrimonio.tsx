@@ -10,7 +10,16 @@ import {
   guardarPosicionManual, eliminarPosicionManual,
   type SnapshotResumen,
 } from '../datos/patrimonio';
-import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo } from '../types/patrimonio';
+import {
+  generarYArchivarInforme, cargarInformesAnteriores,
+  type InformeAnterior, type StressResult, type OpcionResult,
+} from '../datos/patrimonioInforme';
+import {
+  analizarPosicion, analizarSectorial,
+  cargarAnalisisPosicion, cargarUltimoSectorial, cargarConfigIA, guardarConfigIA,
+  type AnalisisPosicion, type AnalisisSectorial, type ConfigIA,
+} from '../datos/patrimonioIA';
+import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics } from '../types/patrimonio';
 import PatrimonioIngesta from './PatrimonioIngesta';
 
 // ── Sector crudo → display ────────────────────────────────────────────────────
@@ -71,16 +80,6 @@ function fmtFecha(iso: string): string {
 const pct = (x: number) => Math.round(x * 100) + '%';
 
 // ── Motor de métricas (lente invertible, agrega manuales) ────────────────────
-type PatMetrics = {
-  total: number;
-  bySector: Record<string, number>;
-  byTipo: Record<string, number>;
-  byPais: { AR: number; global: number };
-  nombreTop: { ticker: string };   // top no-cripto agregado por ticker
-  top1: number; top3: number; top5: number; hhi: number;
-  sectorTop: { nombre: string; pct: number };
-  paisAr: number; cripto: number; rvPct: number;
-};
 
 // Convierte PosicionManual a Posicion para métricas
 function manualToPosicion(m: PosicionManual): Posicion {
@@ -642,15 +641,18 @@ function OpcionCard({ opcion, posiciones }: { opcion: OpcionConfig; posiciones: 
 }
 
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, onEditFijo, onAddFijo, onEditManual, onAddManual }: {
+function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, informes, generandoInforme, onEditFijo, onAddFijo, onEditManual, onAddManual, onGenerarInforme }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
   historial: SnapshotResumen[];
+  informes: InformeAnterior[];
+  generandoInforme: boolean;
   onEditFijo: (af: ActivoFijo) => void;
   onAddFijo: () => void;
   onEditManual: (pm: PosicionManual) => void;
   onAddManual: () => void;
+  onGenerarInforme: () => void;
 }) {
   const fijosUsd   = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
   const patrimTotal = M.total + fijosUsd;
@@ -755,6 +757,45 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, manuales, historial, on
 
       {/* 6. Activos fijos */}
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
+
+      {/* 7. Informe PDF */}
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: informes.length > 0 ? 10 : 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>Informe PDF</span>
+          <button
+            onClick={onGenerarInforme}
+            disabled={generandoInforme}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', background: generandoInforme ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: generandoInforme ? 'var(--gf-gray-400)' : '#fff', fontSize: 12.5, fontWeight: 700, cursor: generandoInforme ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+          >
+            <Icon name="download" size={13} color={generandoInforme ? 'var(--gf-gray-400)' : '#fff'} />
+            {generandoInforme ? 'Generando…' : 'Generar informe PDF'}
+          </button>
+        </div>
+        {informes.length > 0 && (
+          <>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>Anteriores</div>
+            {informes.map((inf, i) => {
+              const fecha = inf.generadoEnISO ? fmtFecha(inf.generadoEnISO.slice(0, 10)) : '—';
+              return (
+                <div key={inf.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 12.5 }}>
+                  <span style={{ flex: 1 }}>
+                    <span style={{ fontWeight: 700 }}>Corrida {fmtFecha(inf.fechaCorrida)}</span>
+                    <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6, fontSize: 11 }}>· {fecha}</span>
+                  </span>
+                  {inf.downloadURL && (
+                    <a href={inf.downloadURL} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 700, color: 'var(--color-accent)', textDecoration: 'none' }}>
+                      <Icon name="download" size={12} color="var(--color-accent)" /> Descargar
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
+        <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: informes.length > 0 ? 8 : 4, lineHeight: 1.4 }}>
+          Bajo demanda · incluye análisis IA cacheados
+        </div>
+      </Card>
     </div>
   );
 }
@@ -774,10 +815,14 @@ type ConsolidadoTicker = {
   tieneStale: boolean;
 };
 
-function TenenciasTab({ M, posiciones, manuales, fechaCorrida }: {
+function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, configIA, onAnalizar }: {
   M: PatMetrics; posiciones: Posicion[]; manuales: PosicionManual[]; fechaCorrida: string;
+  analisisCache: Record<string, AnalisisPosicion>;
+  configIA: ConfigIA;
+  onAnalizar: (ticker: string, contexto: Record<string, unknown>) => void;
 }) {
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
+  const [analizando, setAnalizando] = useState<Set<string>>(new Set());
 
   // Consolidar por ticker usando valorUsd ya calculado (no re-suma)
   const byTickerMap = new Map<string, ConsolidadoTicker>();
@@ -901,8 +946,23 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida }: {
                       </div>
                     );
                   })}
-                  {/* Gancho F9.93: ancla de análisis IA por ticker */}
-                  <div data-f993-ticker={c.ticker} style={{ display: 'none' }} />
+                  {/* F9.93: Análisis IA por ticker */}
+                  <AnalisisIASection
+                    ticker={c.ticker}
+                    totalUsd={c.totalUsd}
+                    totalPortafolio={M.total}
+                    sectorDisp={c.sectorDisp}
+                    analisis={analisisCache[c.ticker] ?? null}
+                    analizando={analizando.has(c.ticker)}
+                    configIA={configIA}
+                    onAnalizar={(ctx) => {
+                      if (analizando.has(c.ticker)) return;
+                      setAnalizando(prev => { const n = new Set(prev); n.add(c.ticker); return n; });
+                      onAnalizar(c.ticker, ctx);
+                      // clear spinner after parent updates cache
+                      setTimeout(() => setAnalizando(prev => { const n = new Set(prev); n.delete(c.ticker); return n; }), 30000);
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -1019,12 +1079,209 @@ function PlanTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] }) {
   );
 }
 
+// ── Análisis IA por ticker (dentro del acordeón de Tenencias) ────────────────
+function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, analisis, analizando, configIA, onAnalizar }: {
+  ticker: string; totalUsd: number; totalPortafolio: number; sectorDisp: string;
+  analisis: AnalisisPosicion | null;
+  analizando: boolean;
+  configIA: ConfigIA;
+  onAnalizar: (contexto: Record<string, unknown>) => void;
+}) {
+  const pct = (x: number) => Math.round(x * 100) + '%';
+  const contexto = { ticker, sector: sectorDisp, pesoEnCartera: pct(totalUsd / (totalPortafolio || 1)), valorUsd: Math.round(totalUsd) };
+
+  const diasAntiguo = analisis
+    ? Math.floor((Date.now() - new Date(analisis.generadoEnISO).getTime()) / 86400000)
+    : null;
+
+  return (
+    <div style={{ borderTop: '1px solid var(--gf-gray-100)', padding: '10px 14px 10px 22px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: analisis ? 8 : 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.3px' }}>
+          Análisis IA
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {analisis && diasAntiguo !== null && (
+            <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)' }}>hace {diasAntiguo}d</span>
+          )}
+          <button
+            onClick={() => onAnalizar(contexto)}
+            disabled={analizando || !configIA.habilitado}
+            title={!configIA.habilitado ? 'IA deshabilitada — activar en Research' : undefined}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 11.5, fontWeight: 700, cursor: (analizando || !configIA.habilitado) ? 'default' : 'pointer', color: !configIA.habilitado ? 'var(--gf-gray-400)' : 'var(--color-accent)', fontFamily: 'var(--font-base)' }}
+          >
+            <Icon name={analizando ? 'loader' : 'zap'} size={11} color={!configIA.habilitado ? 'var(--gf-gray-400)' : 'var(--color-accent)'} />
+            {analizando ? 'Analizando…' : analisis ? 'Regenerar' : 'Generar análisis'}
+          </button>
+        </div>
+      </div>
+
+      {analisis && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {analisis.resultado.queEs && (
+            <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+              <span style={{ fontWeight: 700 }}>Qué es: </span>
+              {analisis.resultado.queEs}
+            </div>
+          )}
+          {analisis.resultado.situacionActual && (
+            <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+              <span style={{ fontWeight: 700 }}>Hoy: </span>
+              {analisis.resultado.situacionActual}
+            </div>
+          )}
+          {analisis.resultado.riesgos && analisis.resultado.riesgos.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 2 }}>Riesgos</div>
+              {analisis.resultado.riesgos.map((r, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {r}</div>
+              ))}
+            </div>
+          )}
+          {analisis.resultado.rolEnCartera && (
+            <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+              <span style={{ fontWeight: 700 }}>En cartera: </span>
+              {analisis.resultado.rolEnCartera}
+            </div>
+          )}
+          {analisis.resultado.proximosEventos && analisis.resultado.proximosEventos.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 2 }}>Próximos eventos</div>
+              {analisis.resultado.proximosEventos.map((e, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {e}</div>
+              ))}
+            </div>
+          )}
+          {analisis.resultado.senalesAVigilar && analisis.resultado.senalesAVigilar.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 2 }}>Señales a vigilar</div>
+              {analisis.resultado.senalesAVigilar.map((s, i) => (
+                <div key={i} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {s}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Solapa Research ───────────────────────────────────────────────────────────
+function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onToggleIA, onGenerarSectorial, onAnalizarLote }: {
+  M: PatMetrics;
+  configIA: ConfigIA;
+  sectorial: AnalisisSectorial | null;
+  generandoSectorial: boolean;
+  analizandoLote: boolean;
+  loteProgreso: { actual: number; total: number; errores: string[] } | null;
+  onToggleIA: (val: boolean) => void;
+  onGenerarSectorial: () => void;
+  onAnalizarLote: () => void;
+}) {
+  const fmtFechaISO = (iso: string) => {
+    const d = iso.slice(0, 10);
+    const [y,m,dd] = d.split('-');
+    return `${dd}/${m}/${y}`;
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Toggle IA */}
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Análisis IA</div>
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
+              {configIA.habilitado ? 'Habilitado · consume API de Anthropic' : 'Deshabilitado · no llama a la API'}
+            </div>
+          </div>
+          <button
+            onClick={() => onToggleIA(!configIA.habilitado)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: configIA.habilitado ? 'var(--color-accent)' : 'var(--gf-gray-400)' }}
+          >
+            <Icon name={configIA.habilitado ? 'toggle-right' : 'toggle-left'} size={28} color={configIA.habilitado ? 'var(--color-accent)' : 'var(--gf-gray-400)'} />
+          </button>
+        </div>
+
+        {configIA.habilitado && (
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--gf-gray-100)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Analizar toda la cartera</span>
+              <button
+                onClick={onAnalizarLote}
+                disabled={analizandoLote}
+                style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: analizandoLote ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: analizandoLote ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: analizandoLote ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+              >
+                {analizandoLote ? 'Analizando…' : 'Analizar lote'}
+              </button>
+            </div>
+            {loteProgreso && (
+              <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
+                {loteProgreso.actual} / {loteProgreso.total} tickers
+                {loteProgreso.errores.length > 0 && (
+                  <span style={{ color: 'var(--gf-expense)', marginLeft: 8 }}>· {loteProgreso.errores.length} errores</span>
+                )}
+              </div>
+            )}
+            {loteProgreso && loteProgreso.errores.length > 0 && (
+              <div style={{ fontSize: 10.5, color: 'var(--gf-expense)', marginTop: 4 }}>
+                {loteProgreso.errores.join(' · ')}
+              </div>
+            )}
+            <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
+              ~{Object.keys(M.bySector).length * 2} tickers · puede tardar varios minutos · consume API
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Panorama sectorial */}
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: sectorial ? 10 : 0 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Panorama sectorial</div>
+            {sectorial && (
+              <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
+                {fmtFechaISO(sectorial.generadoEnISO)} · {sectorial.modeloUsado}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onGenerarSectorial}
+            disabled={generandoSectorial || !configIA.habilitado}
+            title={!configIA.habilitado ? 'Habilitar IA primero' : undefined}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 9, border: 'none', background: (!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: (!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || generandoSectorial) ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+          >
+            <Icon name="sparkles" size={13} color={(!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-400)' : '#fff'} />
+            {generandoSectorial ? 'Generando…' : sectorial ? 'Regenerar' : 'Generar panorama'}
+          </button>
+        </div>
+        {sectorial ? (
+          <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--color-text-sec)', whiteSpace: 'pre-wrap' }}>
+            {sectorial.resultado}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--gf-gray-400)' }}>
+            Sin panorama sectorial generado. Activar IA y presionar "Generar panorama".
+          </div>
+        )}
+      </Card>
+
+      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'center', lineHeight: 1.5 }}>
+        Solo el dueño puede generar análisis IA · el modelo describe, contextualiza y muestra riesgos
+        · nunca recomienda comprar, vender ni mantener
+      </div>
+    </div>
+  );
+}
+
 // ── Vista principal ───────────────────────────────────────────────────────────
 const TABS = [
   ['resumen',   'Resumen'],
   ['tenencias', 'Tenencias'],
   ['riesgo',    'Riesgo'],
   ['plan',      'Plan'],
+  ['research',  'Research'],
 ] as const;
 type TabId = typeof TABS[number][0];
 
@@ -1039,6 +1296,16 @@ export default function Patrimonio() {
   const [historial,         setHistorial]         = useState<SnapshotResumen[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [informes,          setInformes]         = useState<InformeAnterior[]>([]);
+  const [generandoInforme, setGenerandoInforme] = useState(false);
+
+  const [configIA,           setConfigIA]          = useState<ConfigIA>({ habilitado: false });
+  const [analisisCache,      setAnalisisCache]      = useState<Record<string, AnalisisPosicion>>({});
+  const [sectorial,          setSectorial]          = useState<AnalisisSectorial | null>(null);
+  const [generandoSectorial, setGenerandoSectorial] = useState(false);
+  const [analizandoLote,     setAnalizandoLote]     = useState(false);
+  const [loteProgreso,       setLoteProgreso]       = useState<{ actual: number; total: number; errores: string[] } | null>(null);
+
   const [showIngesta,      setShowIngesta]      = useState(false);
   const [showModalFijo,    setShowModalFijo]    = useState(false);
   const [editFijo,         setEditFijo]         = useState<ActivoFijo | null>(null);
@@ -1047,6 +1314,8 @@ export default function Patrimonio() {
 
   useEffect(() => {
     cargarTCReciente(1).then(h => { if (h[0]) setTc(h[0].tcUsdArs); });
+    cargarConfigIA().then(setConfigIA);
+    cargarUltimoSectorial().then(setSectorial);
   }, []);
 
   function cargar() {
@@ -1056,12 +1325,14 @@ export default function Patrimonio() {
       cargarActivosFijos(),
       cargarPosicionesManuales(),
       cargarHistorialSnapshots(10),
+      cargarInformesAnteriores(5),
     ])
-      .then(([pos, fijos, manuales, hist]) => {
+      .then(([pos, fijos, manuales, hist, infs]) => {
         setPosiciones(pos);
         setActivosFijos(fijos);
         setPosicionesManuales(manuales);
         setHistorial(hist);
+        setInformes(infs);
         if (pos.length > 0) setFechaCorrida(pos[0].fechaCorrida);
       })
       .finally(() => setLoading(false));
@@ -1103,6 +1374,84 @@ export default function Patrimonio() {
 
   // Manuales fusionadas con corrida para métricas (lente invertible incluye manuales)
   const todasPosiciones = [...posiciones, ...posicionesManuales.map(manualToPosicion)];
+
+  async function handleAnalizarPosicion(ticker: string, contexto: Record<string, unknown>) {
+    try {
+      const result = await analizarPosicion(ticker, contexto);
+      setAnalisisCache(prev => ({ ...prev, [ticker]: result }));
+    } catch (e) {
+      console.error('[analizarPosicion]', e);
+    }
+  }
+
+  async function handleAnalizarLote() {
+    if (!M || analizandoLote) return;
+    // Collect tickers from consolidated list
+    const byTickerMap: Record<string, { totalUsd: number; sectorDisp: string }> = {};
+    for (const p of todasPosiciones) {
+      const sec = (() => { const base = SECTOR_DISPLAY[p.sector] ?? p.sector; if (p.sector === 'cripto' || p.sector === 'cash' || p.sector === 'global') return base; return base + (p.pais_riesgo === 'AR' ? ' AR' : ' Global'); })();
+      if (!byTickerMap[p.ticker]) byTickerMap[p.ticker] = { totalUsd: 0, sectorDisp: sec };
+      byTickerMap[p.ticker].totalUsd += p.valorUsd;
+    }
+    const tickers = Object.keys(byTickerMap);
+    setAnalizandoLote(true);
+    setLoteProgreso({ actual: 0, total: tickers.length, errores: [] });
+    const errores: string[] = [];
+    for (let i = 0; i < tickers.length; i++) {
+      const t = tickers[i];
+      const { totalUsd, sectorDisp } = byTickerMap[t];
+      try {
+        const result = await analizarPosicion(t, { ticker: t, sector: sectorDisp, pesoEnCartera: pct(totalUsd / (M.total || 1)), valorUsd: Math.round(totalUsd) });
+        setAnalisisCache(prev => ({ ...prev, [t]: result }));
+      } catch {
+        errores.push(t);
+      }
+      setLoteProgreso({ actual: i + 1, total: tickers.length, errores: [...errores] });
+    }
+    setAnalizandoLote(false);
+  }
+
+  async function handleGenerarSectorial() {
+    if (generandoSectorial) return;
+    setGenerandoSectorial(true);
+    try {
+      const result = await analizarSectorial({ bySector: M?.bySector ?? {}, byTipo: M?.byTipo ?? {}, paisAr: pct(M?.paisAr ?? 0), total: M?.total ?? 0 });
+      setSectorial(result);
+    } catch (e) {
+      console.error('[generarSectorial]', e);
+    } finally {
+      setGenerandoSectorial(false);
+    }
+  }
+
+  async function handleToggleIA(val: boolean) {
+    const next = { habilitado: val };
+    setConfigIA(next);
+    await guardarConfigIA(next);
+  }
+
+  async function handleGenerarInforme() {
+    if (!M || generandoInforme) return;
+    setGenerandoInforme(true);
+    try {
+      const stressResults: StressResult[] = STRESS_ESCENARIOS.map(e => {
+        const { perdidaUsd, totalResultante, total } = calcStress(todasPosiciones, e.shock);
+        return { nombre: e.nombre, perdidaUsd, perdidaPct: total > 0 ? perdidaUsd / total : 0, totalResultante, total };
+      });
+      const opcionResults: OpcionResult[] = OPCIONES_CONFIG.map(o => {
+        const { liberadoUsd, movimientos, antes, despues, total } = simularOpcion(todasPosiciones, o);
+        return { id: o.id, titulo: o.titulo, descripcion: o.descripcion, liberadoUsd, total, riesgos: o.riesgos, movimientos, antes, despues };
+      });
+      const nuevo = await generarYArchivarInforme({
+        posiciones, activosFijos, manuales: posicionesManuales,
+        historial, tc, fechaCorrida, M,
+        stressResults, opcionResults,
+      });
+      setInformes(prev => [nuevo, ...prev].slice(0, 5));
+    } finally {
+      setGenerandoInforme(false);
+    }
+  }
   const totalManualesUsd = posicionesManuales.reduce((s, m) => s + m.valorUsd, 0);
 
   const M = todasPosiciones.length > 0 ? calcMetrics(todasPosiciones) : null;
@@ -1169,15 +1518,38 @@ export default function Patrimonio() {
               M={M} tc={tc} fechaCorrida={fechaCorrida}
               activosFijos={activosFijos} manuales={posicionesManuales}
               historial={historial}
+              informes={informes}
+              generandoInforme={generandoInforme}
               onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
               onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
               onEditManual={pm => { setEditManual(pm); setShowModalManual(true); }}
               onAddManual={() => { setEditManual(null); setShowModalManual(true); }}
+              onGenerarInforme={handleGenerarInforme}
             />
           )}
-          {tab === 'tenencias' && <TenenciasTab M={M} posiciones={posiciones} manuales={posicionesManuales} fechaCorrida={fechaCorrida} />}
+          {tab === 'tenencias' && (
+            <TenenciasTab
+              M={M} posiciones={posiciones} manuales={posicionesManuales} fechaCorrida={fechaCorrida}
+              analisisCache={analisisCache}
+              configIA={configIA}
+              onAnalizar={handleAnalizarPosicion}
+            />
+          )}
           {tab === 'riesgo'    && <RiesgoTab M={M} posiciones={todasPosiciones} />}
           {tab === 'plan'      && <PlanTab M={M} posiciones={todasPosiciones} />}
+          {tab === 'research'  && (
+            <ResearchTab
+              M={M}
+              configIA={configIA}
+              sectorial={sectorial}
+              generandoSectorial={generandoSectorial}
+              analizandoLote={analizandoLote}
+              loteProgreso={loteProgreso}
+              onToggleIA={handleToggleIA}
+              onGenerarSectorial={handleGenerarSectorial}
+              onAnalizarLote={handleAnalizarLote}
+            />
+          )}
         </>
       )}
 

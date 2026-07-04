@@ -138,5 +138,14 @@ service cloud.firestore {
     match /informesPortafolio/{id} {
       allow read, write: if esDueno();
     }
+    match /analisisPosiciones/{ticker} {
+      allow read, write: if esDueno();
+    }
+    match /analisisSectorial/{id} {
+      allow read, write: if esDueno();
+    }
+    match /configPatrimonio/{id} {
+      allow read, write: if esDueno();
+    }
   }
 }
