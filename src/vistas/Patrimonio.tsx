@@ -15,11 +15,18 @@ import {
   type InformeAnterior, type StressResult, type OpcionResult,
 } from '../datos/patrimonioInforme';
 import {
-  analizarPosicion, analizarSectorial,
-  cargarAnalisisPosicion, cargarUltimoSectorial, cargarConfigIA, guardarConfigIA,
+  analizarPosicion, analizarSectorial, generarAgenda,
+  cargarAnalisisPosicion, cargarTodosLosAnalisis, cargarUltimoSectorial, cargarUltimaAgenda,
+  cargarConfigIA, guardarConfigIA,
+  normalizarEventoProximo,
   type AnalisisPosicion, type AnalisisSectorial, type ConfigIA,
+  type AgendaMacro, type EventoAgenda,
 } from '../datos/patrimonioIA';
 import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics } from '../types/patrimonio';
+import {
+  cargarDecisiones, crearDecision, agregarRevision, revisionPendiente,
+  type DecisionPatrimonio, type NuevaDecision, type MetricasSnap,
+} from '../datos/patrimonioDecisiones';
 import PatrimonioIngesta from './PatrimonioIngesta';
 
 // ── Sector crudo → display ────────────────────────────────────────────────────
@@ -63,6 +70,22 @@ const SECTOR_COL: Record<string, string> = {
   'FCI AR':           '#14b8a6',
 };
 function sectorColor(disp: string): string { return SECTOR_COL[disp] ?? '#8b8b8b'; }
+
+// ── Snapshot de métricas para decisiones ──────────────────────────────────────
+function buildMetricasSnap(M: PatMetrics, todasPosiciones: Posicion[]): MetricasSnap {
+  const byTicker: Record<string, number> = {};
+  for (const p of todasPosiciones) byTicker[p.ticker] = (byTicker[p.ticker] ?? 0) + p.valorUsd;
+  return {
+    totalInvertibleUsd: Math.round(M.total),
+    energiaArPct: (M.bySector['Energía AR'] ?? 0) / (M.total || 1),
+    paisArPct: M.paisAr,
+    criptoPct: M.cripto,
+    top1Ticker: M.nombreTop.ticker,
+    top1Pct: M.top1,
+    hhi: M.hhi,
+    valoresTickers: Object.fromEntries(Object.entries(byTicker).map(([k, v]) => [k, Math.round(v)])),
+  };
+}
 
 const UMBRAL_OTROS = 0.019;
 
@@ -589,7 +612,7 @@ function ActivosFijosCard({ activosFijos, onEdit, onAdd }: {
 }
 
 // ── Card de opción de rebalanceo ──────────────────────────────────────────────
-function OpcionCard({ opcion, posiciones }: { opcion: OpcionConfig; posiciones: Posicion[] }) {
+function OpcionCard({ opcion, posiciones, onRegistrarDecision }: { opcion: OpcionConfig; posiciones: Posicion[]; onRegistrarDecision: () => void }) {
   const { liberadoUsd, movimientos, antes, despues, total } = simularOpcion(posiciones, opcion);
   const metricas: { label: string; av: number; dv: number; b: BandaNombre | null }[] = [
     { label: 'Energía AR',             av: (antes.bySector['Energía AR'] ?? 0) / (antes.total || 1),   dv: (despues.bySector['Energía AR'] ?? 0) / (despues.total || 1),  b: 'sector' },
@@ -664,6 +687,14 @@ function OpcionCard({ opcion, posiciones }: { opcion: OpcionConfig; posiciones: 
           <div key={i} style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.4, padding: '1px 0' }}>· {r}</div>
         ))}
       </div>
+
+      {/* Registrar decisión */}
+      <button
+        onClick={onRegistrarDecision}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 10, padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+      >
+        <Icon name="book-open" size={13} color="var(--color-text-sec)" /> Registrar decisión
+      </button>
     </Card>
   );
 }
@@ -1076,8 +1107,338 @@ function RiesgoTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] })
   );
 }
 
+// ── Modal: registrar decisión ─────────────────────────────────────────────────
+function ModalRegistrarDecision({
+  preload, metricasActuales, onGuardar, onClose,
+}: {
+  preload?: { opcionReferencia: 'A' | 'B' | 'C' | null; tickers: string[] } | null;
+  metricasActuales: MetricasSnap;
+  onGuardar: (d: NuevaDecision) => void;
+  onClose: () => void;
+}) {
+  const [titulo, setTitulo] = useState('');
+  const [razon, setRazon] = useState('');
+  const [tickersStr, setTickersStr] = useState((preload?.tickers ?? []).join(', '));
+
+  const tickers = tickersStr.split(',').map(t => t.trim().toUpperCase()).filter(Boolean);
+  const valid = titulo.trim().length > 0;
+
+  function guardar() {
+    if (!valid) return;
+    const filteredValores = Object.fromEntries(tickers.map(t => [t, metricasActuales.valoresTickers[t] ?? 0]));
+    const snap: MetricasSnap = { ...metricasActuales, valoresTickers: filteredValores };
+    onGuardar({ titulo: titulo.trim(), razon: razon.trim(), tickers, opcionReferencia: preload?.opcionReferencia ?? null, metricasAlCrear: snap });
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end' }}>
+      <div style={{ width: '100%', background: 'var(--color-surface)', borderRadius: '20px 20px 0 0', padding: '22px 18px 36px', maxHeight: '90dvh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <span style={{ fontSize: 16, fontWeight: 800 }}>Registrar decisión</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <Icon name="x" size={20} color="var(--color-text)" />
+          </button>
+        </div>
+
+        {preload?.opcionReferencia && (
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--color-accent)', background: 'rgba(6,95,70,.08)', borderRadius: 8, padding: '6px 10px', marginBottom: 14 }}>
+            Desde Opción {preload.opcionReferencia}
+          </div>
+        )}
+
+        {([
+          { label: 'Título', val: titulo, set: setTitulo, placeholder: 'Recorte TRAN a ~10%', required: true },
+          { label: 'Razón (texto libre)', val: razon, set: setRazon, placeholder: 'Por qué la tomás', required: false },
+          { label: 'Tickers involucrados (opcional, separados por coma)', val: tickersStr, set: setTickersStr, placeholder: 'TRAN, PAMP', required: false },
+        ]).map(f => (
+          <div key={f.label} style={{ marginBottom: 13 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', marginBottom: 5 }}>
+              {f.label}{f.required && <span style={{ color: 'var(--gf-expense)' }}> *</span>}
+            </div>
+            <input
+              type="text" value={f.val} placeholder={f.placeholder}
+              onChange={e => f.set(e.target.value)}
+              style={{ width: '100%', padding: '11px 13px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', fontSize: 14, fontFamily: 'var(--font-base)', background: 'var(--gf-gray-50)', boxSizing: 'border-box' }}
+            />
+          </div>
+        ))}
+
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginBottom: 16, lineHeight: 1.4 }}>
+          Foto de métricas actuales: {fmtUsd(metricasActuales.totalInvertibleUsd)} total · HHI {metricasActuales.hhi.toFixed(2)} · Cripto {pct(metricasActuales.criptoPct)}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '12px 14px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+            Cancelar
+          </button>
+          <button onClick={guardar} disabled={!valid} style={{ flex: 2, padding: '12px 14px', borderRadius: 11, border: 'none', background: valid ? 'var(--color-accent)' : 'var(--gf-gray-200)', color: valid ? '#fff' : 'var(--gf-gray-400)', fontSize: 14, fontWeight: 700, cursor: valid ? 'pointer' : 'default', fontFamily: 'var(--font-base)' }}>
+            Registrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal: revisar decisión (30d / 90d) ───────────────────────────────────────
+function ModalRevision({
+  decision, tipo, metricasActuales, onGuardar, onClose,
+}: {
+  decision: DecisionPatrimonio;
+  tipo: '30d' | '90d';
+  metricasActuales: MetricasSnap;
+  onGuardar: (notas: string, metricas: MetricasSnap) => void;
+  onClose: () => void;
+}) {
+  const [quePaso, setQuePaso] = useState('');
+  const [laVolveria, setLaVolveria] = useState('');
+  const valid = quePaso.trim().length > 0;
+
+  const entonces = decision.metricasAlCrear;
+  const ahora: MetricasSnap = {
+    ...metricasActuales,
+    valoresTickers: Object.fromEntries(
+      decision.tickers.map(t => [t, metricasActuales.valoresTickers[t] ?? 0])
+    ),
+  };
+
+  function fmtDelta(a: number, b: number, kind: 'usd' | 'pct') {
+    const d = b - a;
+    const sign = d >= 0 ? '+' : '';
+    return kind === 'usd' ? `${sign}${fmtUsd(d)}` : `${sign}${(d * 100).toFixed(1)} pp`;
+  }
+
+  const metricas: { label: string; ent: string; hoy: string; delta: string }[] = [
+    { label: 'Total invertible', ent: fmtUsd(entonces.totalInvertibleUsd), hoy: fmtUsd(ahora.totalInvertibleUsd), delta: fmtDelta(entonces.totalInvertibleUsd, ahora.totalInvertibleUsd, 'usd') },
+    { label: 'Energía AR', ent: pct(entonces.energiaArPct), hoy: pct(ahora.energiaArPct), delta: fmtDelta(entonces.energiaArPct, ahora.energiaArPct, 'pct') },
+    { label: 'País AR', ent: pct(entonces.paisArPct), hoy: pct(ahora.paisArPct), delta: fmtDelta(entonces.paisArPct, ahora.paisArPct, 'pct') },
+    { label: 'Cripto', ent: pct(entonces.criptoPct), hoy: pct(ahora.criptoPct), delta: fmtDelta(entonces.criptoPct, ahora.criptoPct, 'pct') },
+    { label: `Top-1 (${entonces.top1Ticker})`, ent: pct(entonces.top1Pct), hoy: pct(ahora.top1Pct), delta: fmtDelta(entonces.top1Pct, ahora.top1Pct, 'pct') },
+    { label: 'HHI', ent: entonces.hhi.toFixed(2), hoy: ahora.hhi.toFixed(2), delta: `${(ahora.hhi - entonces.hhi >= 0 ? '+' : '')}${(ahora.hhi - entonces.hhi).toFixed(2)}` },
+  ];
+
+  function guardar() {
+    if (!valid) return;
+    const notas = laVolveria.trim()
+      ? `${quePaso.trim()}\n\n¿La volvería a tomar?\n${laVolveria.trim()}`
+      : quePaso.trim();
+    onGuardar(notas, ahora);
+  }
+
+  const celStyle = (align?: string): React.CSSProperties => ({
+    padding: '5px 8px', fontSize: 11, fontVariantNumeric: 'tabular-nums',
+    textAlign: (align as React.CSSProperties['textAlign']) ?? 'left',
+  });
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end' }}>
+      <div style={{ width: '100%', background: 'var(--color-surface)', borderRadius: '20px 20px 0 0', padding: '22px 18px 36px', maxHeight: '93dvh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span style={{ fontSize: 16, fontWeight: 800 }}>Revisión {tipo}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <Icon name="x" size={20} color="var(--color-text)" />
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 16 }}>{decision.titulo}</div>
+
+        {/* Tabla entonces → hoy (colores neutros, sin semáforos) */}
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 6 }}>Entonces → hoy</div>
+        <div style={{ border: '1px solid var(--gf-gray-200)', borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', background: 'var(--gf-gray-100)', fontSize: 9.5, fontWeight: 700, color: 'var(--gf-gray-500)' }}>
+            {['Métrica', 'Entonces', 'Hoy', 'Δ'].map((h, i) => (
+              <div key={h} style={{ ...celStyle(i > 0 ? 'right' : undefined), padding: '6px 8px' }}>{h}</div>
+            ))}
+          </div>
+          {metricas.map((m, i) => (
+            <div key={m.label} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', borderTop: '1px solid var(--gf-gray-100)', background: i % 2 ? 'var(--gf-gray-50)' : 'transparent' }}>
+              <div style={{ ...celStyle(), color: 'var(--color-text-sec)', fontSize: 10.5 }}>{m.label}</div>
+              <div style={celStyle('right')}>{m.ent}</div>
+              <div style={celStyle('right')}>{m.hoy}</div>
+              <div style={{ ...celStyle('right'), color: 'var(--color-text-sec)' }}>{m.delta}</div>
+            </div>
+          ))}
+          {decision.tickers.map((t, i) => {
+            const valA = entonces.valoresTickers[t] ?? 0;
+            const valH = ahora.valoresTickers[t] ?? 0;
+            return (
+              <div key={t} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', borderTop: '1px solid var(--gf-gray-100)', background: (metricas.length + i) % 2 ? 'var(--gf-gray-50)' : 'transparent' }}>
+                <div style={{ ...celStyle(), fontWeight: 700 }}>{t}</div>
+                <div style={celStyle('right')}>{fmtUsd(valA)}</div>
+                <div style={celStyle('right')}>{fmtUsd(valH)}</div>
+                <div style={{ ...celStyle('right'), color: 'var(--color-text-sec)' }}>{fmtDelta(valA, valH, 'usd')}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Preguntas de reflexión */}
+        <div style={{ marginBottom: 13 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', marginBottom: 5 }}>
+            ¿Qué pasó desde entonces?<span style={{ color: 'var(--gf-expense)' }}> *</span>
+          </div>
+          <textarea
+            value={quePaso} onChange={e => setQuePaso(e.target.value)}
+            placeholder="Describí brevemente qué ocurrió con la posición y el mercado"
+            rows={3}
+            style={{ width: '100%', padding: '11px 13px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', fontSize: 13, fontFamily: 'var(--font-base)', background: 'var(--gf-gray-50)', boxSizing: 'border-box', resize: 'vertical' }}
+          />
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', marginBottom: 5 }}>
+            ¿La volverías a tomar? ¿Por qué?
+          </div>
+          <textarea
+            value={laVolveria} onChange={e => setLaVolveria(e.target.value)}
+            placeholder="Reflexión sobre el proceso de decisión"
+            rows={3}
+            style={{ width: '100%', padding: '11px 13px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', fontSize: 13, fontFamily: 'var(--font-base)', background: 'var(--gf-gray-50)', boxSizing: 'border-box', resize: 'vertical' }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '12px 14px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+            Cancelar
+          </button>
+          <button onClick={guardar} disabled={!valid} style={{ flex: 2, padding: '12px 14px', borderRadius: 11, border: 'none', background: valid ? 'var(--color-accent)' : 'var(--gf-gray-200)', color: valid ? '#fff' : 'var(--gf-gray-400)', fontSize: 14, fontWeight: 700, cursor: valid ? 'pointer' : 'default', fontFamily: 'var(--font-base)' }}>
+            Guardar revisión
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Diario de decisiones (sección dentro de PlanTab) ──────────────────────────
+function DiarioDecisiones({ decisiones, onNueva, onIniciarRevision }: {
+  decisiones: DecisionPatrimonio[];
+  onNueva: () => void;
+  onIniciarRevision: (d: DecisionPatrimonio, tipo: '30d' | '90d') => void;
+}) {
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
+
+  function toggle(id: string) {
+    setExpandidos(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function fmtTs(ts: { toDate(): Date }) {
+    const d = ts.toDate();
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear().toString().slice(2)}`;
+  }
+
+  const ESTADO_LABEL: Record<string, string> = {
+    abierta: 'abierta', revisada30: 'revisada 30d', revisada90: 'revisada 90d', cerrada: 'cerrada',
+  };
+
+  return (
+    <Card padding="0">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 14px', borderBottom: decisiones.length > 0 ? '1px solid var(--gf-gray-100)' : 'none' }}>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>Diario de decisiones</span>
+        <button onClick={onNueva} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, border: 'none', background: 'var(--gf-gray-100)', fontSize: 12, fontWeight: 700, color: 'var(--color-text)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+          <Icon name="plus" size={13} color="var(--color-text)" /> Decisión
+        </button>
+      </div>
+
+      {decisiones.length === 0 && (
+        <div style={{ padding: '20px 14px', fontSize: 12, color: 'var(--gf-gray-400)', textAlign: 'center', lineHeight: 1.5 }}>
+          Sin decisiones registradas.{'\n'}Usá "+ Decisión" o el botón en cada Opción.
+        </div>
+      )}
+
+      {decisiones.map((d, idx) => {
+        const exp = expandidos.has(d.id);
+        const pendiente = revisionPendiente(d);
+        const isLast = idx === decisiones.length - 1;
+        return (
+          <div key={d.id}>
+            <div onClick={() => toggle(d.id)} style={{ padding: '10px 14px', borderBottom: (!isLast || exp) ? '1px solid var(--gf-gray-100)' : 'none', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{d.titulo}</span>
+                    {d.opcionReferencia && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, background: 'var(--gf-ink)', color: '#fff', borderRadius: 4, padding: '1px 5px' }}>Op. {d.opcionReferencia}</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)' }}>{fmtTs(d.creadaEn)}</span>
+                    {d.tickers.map(t => (
+                      <span key={t} style={{ fontSize: 9.5, fontWeight: 700, background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', borderRadius: 4, padding: '1px 5px' }}>{t}</span>
+                    ))}
+                    <span style={{ fontSize: 9.5, fontWeight: 700, background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', borderRadius: 4, padding: '1px 5px' }}>
+                      {ESTADO_LABEL[d.estado] ?? d.estado}
+                    </span>
+                    {pendiente && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, background: 'rgba(245,158,11,.15)', color: '#b45309', borderRadius: 4, padding: '1px 5px', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Icon name="clock" size={9} color="#b45309" /> revisión {pendiente}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Icon name={exp ? 'chevron-up' : 'chevron-down'} size={14} color="var(--gf-gray-400)" />
+              </div>
+            </div>
+
+            {exp && (
+              <div style={{ background: 'var(--gf-gray-50)', padding: '12px 14px', borderBottom: !isLast ? '1px solid var(--gf-gray-100)' : 'none' }}>
+                {d.razon && (
+                  <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 10, lineHeight: 1.5 }}>{d.razon}</div>
+                )}
+
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>Al registrar</div>
+                <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', marginBottom: 10, lineHeight: 1.7 }}>
+                  {fmtUsd(d.metricasAlCrear.totalInvertibleUsd)} total · HHI {d.metricasAlCrear.hhi.toFixed(2)} · Cripto {pct(d.metricasAlCrear.criptoPct)} · País AR {pct(d.metricasAlCrear.paisArPct)}
+                  {Object.entries(d.metricasAlCrear.valoresTickers).map(([t, v]) => (
+                    <span key={t}> · {t} {fmtUsd(v as number)}</span>
+                  ))}
+                </div>
+
+                {/* Revisiones previas */}
+                {!d.revisiones.some(r => r.tipo === '30d') && d.revisiones.some(r => r.tipo === '90d') && (
+                  <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', fontStyle: 'italic', marginBottom: 6 }}>Revisión 30d omitida</div>
+                )}
+                {d.revisiones.map((r, ri) => (
+                  <div key={ri} style={{ marginBottom: 8, padding: '8px 10px', background: 'var(--color-surface)', borderRadius: 8, border: '1px solid var(--gf-gray-200)' }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 3 }}>
+                      Revisión {r.tipo} · {fmtTs(r.fecha)}
+                    </div>
+                    {r.notas && (
+                      <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{r.notas}</div>
+                    )}
+                    <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtUsd(r.metricasAlRevisar.totalInvertibleUsd)} total al revisar · Δ {r.metricasAlRevisar.totalInvertibleUsd - d.metricasAlCrear.totalInvertibleUsd >= 0 ? '+' : ''}{fmtUsd(r.metricasAlRevisar.totalInvertibleUsd - d.metricasAlCrear.totalInvertibleUsd)}
+                    </div>
+                  </div>
+                ))}
+
+                {pendiente && (
+                  <button
+                    onClick={() => onIniciarRevision(d, pendiente)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 4, padding: '8px 14px', borderRadius: 9, border: '1px solid rgba(245,158,11,.4)', background: 'rgba(245,158,11,.1)', fontSize: 12, fontWeight: 700, color: '#b45309', cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+                  >
+                    <Icon name="clock" size={12} color="#b45309" /> Iniciar revisión {pendiente}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
 // ── Solapa Plan ───────────────────────────────────────────────────────────────
-function PlanTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] }) {
+function PlanTab({ M, posiciones, decisiones, onRegistrarLibre, onRegistrarDesdeOpcion, onIniciarRevision }: {
+  M: PatMetrics; posiciones: Posicion[];
+  decisiones: DecisionPatrimonio[];
+  onRegistrarLibre: () => void;
+  onRegistrarDesdeOpcion: (opcionId: 'A' | 'B' | 'C', tickers: string[]) => void;
+  onIniciarRevision: (decision: DecisionPatrimonio, tipo: '30d' | '90d') => void;
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card>
@@ -1090,15 +1451,28 @@ function PlanTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] }) {
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '2px 2px 0' }}>
         Opciones
       </div>
-      {OPCIONES_CONFIG.map(o => (
-        <OpcionCard key={o.id} opcion={o} posiciones={posiciones} />
-      ))}
+      {OPCIONES_CONFIG.map(o => {
+        const tickersPreload = o.cortes.filter(c => c.tipo === 'ticker').map(c => c.key);
+        return (
+          <OpcionCard
+            key={o.id}
+            opcion={o}
+            posiciones={posiciones}
+            onRegistrarDecision={() => onRegistrarDesdeOpcion(o.id, tickersPreload)}
+          />
+        );
+      })}
       <div style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--gf-gray-100)', fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
         Estas opciones miden direcciones posibles, no son recomendaciones. Podés combinarlas o ignorarlas.
       </div>
       <div style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--gf-gray-100)', fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
         No es asesoramiento matriculado. Las posiciones ganadoras en USD tienen costo impositivo al vender; conviene pensar gradual. Parte está en cuentas conjuntas.
       </div>
+      <DiarioDecisiones
+        decisiones={decisiones}
+        onNueva={onRegistrarLibre}
+        onIniciarRevision={onIniciarRevision}
+      />
     </div>
   );
 }
@@ -1208,8 +1582,186 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
   );
 }
 
+// ── Helpers de calendario ──────────────────────────────────────────────────────
+const DRIVER_CHIP: Record<string, string> = {
+  cer_pesos: 'CER', soberano: 'Soberano', tasas_ar: 'Tasas AR',
+  tasas_global: 'Fed', cripto: 'Cripto', energia_ar: 'Tarifas',
+  tech_global: 'Tech', resultados: 'Earnings', impositivo: 'Fiscal', otro: 'Macro',
+};
+
+type EventoCal = {
+  cuandoMs: number | null;
+  cuandoDisplay: string;
+  texto: string;
+  chip: string;
+  subtitulo?: string;
+  isPast: boolean;
+  analisisISO?: string; // antigüedad para eventos de posición
+};
+
+function parseCuando(cuando: string | null): { ms: number | null; display: string } {
+  if (!cuando) return { ms: null, display: 'Sin fecha' };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cuando)) {
+    const ms = new Date(cuando + 'T12:00:00').getTime();
+    const [y, m, d] = cuando.split('-');
+    return { ms, display: `${d}/${m}/${y}` };
+  }
+  if (/^\d{4}-\d{2}$/.test(cuando)) {
+    const ms = new Date(cuando + '-01T12:00:00').getTime();
+    const [y, m] = cuando.split('-');
+    const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    return { ms, display: `~${meses[parseInt(m) - 1]} ${y}` };
+  }
+  return { ms: null, display: cuando };
+}
+
+function buildEventosCal(
+  analisisCache: Record<string, AnalisisPosicion>,
+  agenda: AgendaMacro | null,
+): EventoCal[] {
+  const ahora = Date.now();
+  const hace30 = ahora - 30 * 86400000;
+  const eventos: EventoCal[] = [];
+
+  // Eventos de posición
+  for (const a of Object.values(analisisCache)) {
+    for (const raw of a.resultado.proximosEventos ?? []) {
+      const { cuando, evento } = normalizarEventoProximo(raw);
+      const { ms, display } = parseCuando(cuando);
+      eventos.push({
+        cuandoMs: ms,
+        cuandoDisplay: display,
+        texto: evento,
+        chip: a.ticker,
+        isPast: ms !== null && ms < hace30,
+        analisisISO: a.generadoEnISO,
+      });
+    }
+  }
+
+  // Eventos macro
+  if (agenda) {
+    for (const e of agenda.eventos) {
+      const { ms, display } = parseCuando(e.fecha);
+      eventos.push({
+        cuandoMs: ms,
+        cuandoDisplay: display,
+        texto: e.evento,
+        chip: DRIVER_CHIP[e.driver] ?? 'Macro',
+        subtitulo: e.porQueImporta,
+        isPast: ms !== null && ms < hace30,
+      });
+    }
+  }
+
+  // Sort: pasados (atenuados) al final, luego por fecha asc, sin fecha al final del bloque futuro
+  eventos.sort((a, b) => {
+    if (a.isPast !== b.isPast) return a.isPast ? 1 : -1;
+    if (a.cuandoMs === null && b.cuandoMs === null) return 0;
+    if (a.cuandoMs === null) return 1;
+    if (b.cuandoMs === null) return -1;
+    return a.cuandoMs - b.cuandoMs;
+  });
+
+  return eventos;
+}
+
+// ── Card Calendario de eventos ──────────────────────────────────────────────────
+function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGenerarAgenda }: {
+  analisisCache: Record<string, AnalisisPosicion>;
+  agenda: AgendaMacro | null;
+  configIA: ConfigIA;
+  generandoAgenda: boolean;
+  onGenerarAgenda: () => void;
+}) {
+  const fmtFechaISO = (iso: string) => {
+    const d = iso.slice(0, 10).split('-');
+    return `${d[2]}/${d[1]}/${d[0]}`;
+  };
+  const fmtDiasAntig = (iso: string) => {
+    const dias = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    return `análisis hace ${dias}d`;
+  };
+
+  const eventos = buildEventosCal(analisisCache, agenda);
+  const tieneEventos = eventos.length > 0;
+
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: tieneEventos ? 10 : 6, gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Calendario de eventos</div>
+          {agenda && (
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
+              agenda del {fmtFechaISO(agenda.generadoEnISO)} · {agenda.horizonteDias}d
+            </div>
+          )}
+        </div>
+        <button
+          onClick={onGenerarAgenda}
+          disabled={generandoAgenda || !configIA.habilitado}
+          title={!configIA.habilitado ? 'Habilitar IA primero' : undefined}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px',
+            borderRadius: 9, border: 'none', flexShrink: 0,
+            background: (!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-200)' : 'var(--color-accent)',
+            color: (!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-400)' : '#fff',
+            fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || generandoAgenda) ? 'default' : 'pointer',
+            fontFamily: 'var(--font-base)',
+          }}
+        >
+          <Icon name="sparkles" size={13} color={(!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-400)' : '#fff'} />
+          {generandoAgenda ? 'Generando…' : agenda ? 'Actualizar agenda' : 'Actualizar agenda macro'}
+        </button>
+      </div>
+
+      {!tieneEventos && (
+        <div style={{ fontSize: 12, color: 'var(--gf-gray-400)' }}>
+          Generá análisis de posiciones para poblar el calendario.
+        </div>
+      )}
+
+      {tieneEventos && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {eventos.map((ev, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+                padding: '7px 0',
+                borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : undefined,
+                opacity: ev.isPast ? 0.45 : 1,
+              }}
+            >
+              <div style={{ minWidth: 54, fontSize: 10.5, color: 'var(--gf-gray-400)', paddingTop: 1, textAlign: 'right', flexShrink: 0 }}>
+                {ev.cuandoDisplay}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, lineHeight: 1.4 }}>{ev.texto}</span>
+                  <span style={{
+                    fontSize: 10, padding: '1px 6px', borderRadius: 99,
+                    background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)',
+                    fontWeight: 700, flexShrink: 0,
+                  }}>{ev.chip}</span>
+                </div>
+                {ev.subtitulo && (
+                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2, lineHeight: 1.4 }}>{ev.subtitulo}</div>
+                )}
+                {ev.analisisISO && (
+                  <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 1 }}>{fmtDiasAntig(ev.analisisISO)}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // ── Solapa Research ───────────────────────────────────────────────────────────
-function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote }: {
+function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda }: {
   M: PatMetrics;
   configIA: ConfigIA;
   sectorial: AnalisisSectorial | null;
@@ -1218,6 +1770,10 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
   loteProgreso: { actual: number; total: number; errores: string[] } | null;
   onGenerarSectorial: () => void;
   onAnalizarLote: () => void;
+  analisisCache: Record<string, AnalisisPosicion>;
+  agenda: AgendaMacro | null;
+  generandoAgenda: boolean;
+  onGenerarAgenda: () => void;
 }) {
   const fmtFechaISO = (iso: string) => {
     const d = iso.slice(0, 10);
@@ -1227,6 +1783,15 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Calendario de eventos */}
+      <CalendarioCard
+        analisisCache={analisisCache}
+        agenda={agenda}
+        configIA={configIA}
+        generandoAgenda={generandoAgenda}
+        onGenerarAgenda={onGenerarAgenda}
+      />
+
       {/* Analizar lote */}
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -1386,6 +1951,13 @@ export default function Patrimonio() {
   const [generandoSectorial, setGenerandoSectorial] = useState(false);
   const [analizandoLote,     setAnalizandoLote]     = useState(false);
   const [loteProgreso,       setLoteProgreso]       = useState<{ actual: number; total: number; errores: string[] } | null>(null);
+  const [agenda,             setAgenda]             = useState<AgendaMacro | null>(null);
+  const [generandoAgenda,    setGenerandoAgenda]    = useState(false);
+
+  const [decisiones,          setDecisiones]          = useState<DecisionPatrimonio[]>([]);
+  const [showModalDecision,   setShowModalDecision]   = useState(false);
+  const [preloadDecision,     setPreloadDecision]     = useState<{ opcionReferencia: 'A' | 'B' | 'C' | null; tickers: string[] } | null>(null);
+  const [showModalRevision,   setShowModalRevision]   = useState<{ decision: DecisionPatrimonio; tipo: '30d' | '90d' } | null>(null);
 
   const [showIngesta,      setShowIngesta]      = useState(false);
   const [showModalFijo,    setShowModalFijo]    = useState(false);
@@ -1397,6 +1969,12 @@ export default function Patrimonio() {
     cargarTCReciente(1).then(h => { if (h[0]) setTc(h[0].tcUsdArs); });
     cargarConfigIA().then(setConfigIA);
     cargarUltimoSectorial().then(setSectorial);
+    cargarUltimaAgenda().then(setAgenda);
+    cargarTodosLosAnalisis().then(lista => {
+      const cache: Record<string, AnalisisPosicion> = {};
+      for (const a of lista) cache[a.ticker] = a;
+      setAnalisisCache(cache);
+    });
   }, []);
 
   function cargar() {
@@ -1407,13 +1985,15 @@ export default function Patrimonio() {
       cargarPosicionesManuales(),
       cargarHistorialSnapshots(10),
       cargarInformesAnteriores(5),
+      cargarDecisiones(),
     ])
-      .then(([pos, fijos, manuales, hist, infs]) => {
+      .then(([pos, fijos, manuales, hist, infs, decs]) => {
         setPosiciones(pos);
         setActivosFijos(fijos);
         setPosicionesManuales(manuales);
         setHistorial(hist);
         setInformes(infs);
+        setDecisiones(decs);
         if (pos.length > 0) setFechaCorrida(pos[0].fechaCorrida);
       })
       .finally(() => setLoading(false));
@@ -1505,6 +2085,39 @@ export default function Patrimonio() {
     }
   }
 
+  async function handleGenerarAgenda() {
+    if (!M || generandoAgenda) return;
+    setGenerandoAgenda(true);
+    try {
+      // Arma exposición por driver desde bySector normalizado a %
+      const exposicion: Record<string, string> = {};
+      for (const [sector, val] of Object.entries(M.bySector)) {
+        exposicion[sector] = pct(val / (M.total || 1));
+      }
+      const result = await generarAgenda({ exposicion, total: Math.round(M.total), paisAr: pct(M.paisAr), cripto: pct(M.cripto) });
+      setAgenda(result);
+    } catch (e) {
+      console.error('[generarAgenda]', e);
+    } finally {
+      setGenerandoAgenda(false);
+    }
+  }
+
+  async function handleCrearDecision(nueva: NuevaDecision) {
+    const d = await crearDecision(nueva);
+    setDecisiones(prev => [d, ...prev]);
+    setShowModalDecision(false);
+  }
+
+  async function handleAgregarRevision(decisionId: string, tipo: '30d' | '90d', notas: string, metricas: MetricasSnap) {
+    const estadoNuevo: DecisionPatrimonio['estado'] = tipo === '90d' ? 'revisada90' : 'revisada30';
+    const rev = await agregarRevision(decisionId, tipo, notas, metricas, estadoNuevo);
+    setDecisiones(prev => prev.map(d =>
+      d.id === decisionId ? { ...d, revisiones: [...d.revisiones, rev], estado: estadoNuevo } : d
+    ));
+    setShowModalRevision(null);
+  }
+
   async function handleToggleIA(val: boolean) {
     const next = { habilitado: val };
     setConfigIA(next);
@@ -1534,6 +2147,8 @@ export default function Patrimonio() {
     }
   }
   const totalManualesUsd = posicionesManuales.reduce((s, m) => s + m.valorUsd, 0);
+
+  const pendingReviewCount = decisiones.filter(d => revisionPendiente(d) !== null).length;
 
   const M = todasPosiciones.length > 0 ? calcMetrics(todasPosiciones) : null;
   const metricasJson: Record<string, unknown> = M
@@ -1573,7 +2188,12 @@ export default function Patrimonio() {
             }}>
               {id === 'config'
                 ? <Icon name="settings-2" size={15} color={on ? 'var(--color-text)' : 'var(--color-text-sec)'} />
-                : label}
+                : id === 'plan' && pendingReviewCount > 0
+                  ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {label}
+                      <span style={{ width: 6, height: 6, borderRadius: 999, background: '#f59e0b', flexShrink: 0 }} />
+                    </span>
+                  : label}
             </button>
           );
         })}
@@ -1618,7 +2238,15 @@ export default function Patrimonio() {
             />
           )}
           {tab === 'riesgo'    && <RiesgoTab M={M} posiciones={todasPosiciones} />}
-          {tab === 'plan'      && <PlanTab M={M} posiciones={todasPosiciones} />}
+          {tab === 'plan' && (
+            <PlanTab
+              M={M} posiciones={todasPosiciones}
+              decisiones={decisiones}
+              onRegistrarLibre={() => { setPreloadDecision(null); setShowModalDecision(true); }}
+              onRegistrarDesdeOpcion={(opcionId, tickers) => { setPreloadDecision({ opcionReferencia: opcionId, tickers }); setShowModalDecision(true); }}
+              onIniciarRevision={(decision, tipo) => setShowModalRevision({ decision, tipo })}
+            />
+          )}
           {tab === 'research'  && (
             <ResearchTab
               M={M}
@@ -1629,6 +2257,10 @@ export default function Patrimonio() {
               loteProgreso={loteProgreso}
               onGenerarSectorial={handleGenerarSectorial}
               onAnalizarLote={handleAnalizarLote}
+              analisisCache={analisisCache}
+              agenda={agenda}
+              generandoAgenda={generandoAgenda}
+              onGenerarAgenda={handleGenerarAgenda}
             />
           )}
           {tab === 'config' && (
@@ -1675,6 +2307,27 @@ export default function Patrimonio() {
           onGuardar={handleGuardarManual}
           onEliminar={editManual ? handleEliminarManual : undefined}
           onClose={() => setShowModalManual(false)}
+        />
+      )}
+
+      {showModalDecision && M && (
+        <ModalRegistrarDecision
+          preload={preloadDecision}
+          metricasActuales={buildMetricasSnap(M, todasPosiciones)}
+          onGuardar={handleCrearDecision}
+          onClose={() => setShowModalDecision(false)}
+        />
+      )}
+
+      {showModalRevision && M && (
+        <ModalRevision
+          decision={showModalRevision.decision}
+          tipo={showModalRevision.tipo}
+          metricasActuales={buildMetricasSnap(M, todasPosiciones)}
+          onGuardar={(notas, metricas) =>
+            handleAgregarRevision(showModalRevision.decision.id, showModalRevision.tipo, notas, metricas)
+          }
+          onClose={() => setShowModalRevision(null)}
         />
       )}
     </div>

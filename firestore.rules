@@ -123,6 +123,12 @@ service cloud.firestore {
     }
 
     // Patrimonio — aislado, solo dueño (jpcofano@gmail.com)
+    match /decisionesPatrimonio/{id} {
+      allow read, write: if esDueno();
+    }
+    match /agendaMacro/{id} {
+      allow read, write: if esDueno();
+    }
     match /posicionesPatrimonio/{id} {
       allow read, write: if esDueno();
     }

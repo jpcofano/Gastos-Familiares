@@ -2,6 +2,8 @@ import {
   collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp,
   type Timestamp,
 } from 'firebase/firestore';
+import { cargarDecisiones, revisionPendiente, type DecisionPatrimonio } from './patrimonioDecisiones';
+import { cargarUltimaAgenda, type AgendaMacro } from './patrimonioIA';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import type { Posicion, ActivoFijo, PosicionManual, PatMetrics } from '../types/patrimonio';
@@ -137,10 +139,12 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
   const deltaInv = corrPrev ? M.total - corrPrev.totalInvertibleUsd : null;
   const generadoEn = new Date().toISOString();
 
-  // Cargar análisis IA cacheados
-  const [analisisSnap, sectorialSnap] = await Promise.all([
+  // Cargar análisis IA cacheados, decisiones y agenda macro
+  const [analisisSnap, sectorialSnap, decisiones, agendaMacro] = await Promise.all([
     getDocs(collection(db, 'analisisPosiciones')),
     getDocs(query(collection(db, 'analisisSectorial'), orderBy('generadoEn', 'desc'), limit(1))),
+    cargarDecisiones(),
+    cargarUltimaAgenda(),
   ]);
   type AnalisisDoc = { resultado?: Record<string, unknown>; generadoEn?: Timestamp | null; modeloUsado?: string };
   const analisisList = analisisSnap.docs.map(d => ({ ticker: d.id, ...(d.data() as AnalisisDoc) }));
@@ -391,8 +395,45 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
     content.push({ ul: o.riesgos, fontSize: 8, color: '#475569', margin: [0, 0, 0, 4] });
   }
 
+  // 9. Decisiones registradas (abiertas + revisadas en últimos 90 días)
+  const ahora90ms = Date.now() - 90 * 86400000;
+  const decisionesInforme = (decisiones as DecisionPatrimonio[]).filter(d => {
+    if (d.estado === 'abierta') return true;
+    return d.revisiones.some(r => r.fecha.toMillis() >= ahora90ms);
+  });
+  if (decisionesInforme.length > 0) {
+    content.push(pageBreak(), h1('9. Decisiones registradas'));
+    content.push({ text: 'Decisiones abiertas y revisadas en los últimos 90 días.', italics: true, margin: [0, 0, 0, 8] });
+    for (const d of decisionesInforme) {
+      const fechaDec = d.creadaEn.toDate().toISOString().slice(0, 10);
+      const etiquetas = [fmtFecha(fechaDec), d.estado, ...(d.opcionReferencia ? [`Opción ${d.opcionReferencia}`] : []), ...d.tickers].join(' · ');
+      content.push({ text: d.titulo, bold: true, fontSize: 10, margin: [0, 10, 0, 1] });
+      content.push({ text: etiquetas, style: 'note', margin: [0, 0, 0, 3] });
+      if (d.razon) {
+        const r = d.razon.length > 200 ? d.razon.slice(0, 200) + '…' : d.razon;
+        content.push({ text: r, fontSize: 8, color: '#475569', margin: [0, 0, 0, 4] });
+      }
+      for (const rev of d.revisiones) {
+        const fechaRev = rev.fecha.toDate().toISOString().slice(0, 10);
+        const deltaUsd = rev.metricasAlRevisar.totalInvertibleUsd - d.metricasAlCrear.totalInvertibleUsd;
+        const sign = deltaUsd >= 0 ? '+' : '';
+        content.push({
+          text: `Revisión ${rev.tipo} (${fmtFecha(fechaRev)}): Δ Total ${sign}${fmtUsd(deltaUsd)}`,
+          bold: true, fontSize: 8, margin: [0, 2, 0, 1],
+        });
+        if (rev.notas) {
+          const n = rev.notas.length > 300 ? rev.notas.slice(0, 300) + '…' : rev.notas;
+          content.push({ text: n, fontSize: 8, color: '#475569', margin: [0, 0, 0, 4] });
+        }
+      }
+      if (revisionPendiente(d)) {
+        content.push({ text: `Revisión pendiente: ${revisionPendiente(d)}`, fontSize: 8, color: '#D97706', margin: [0, 0, 0, 4] });
+      }
+    }
+  }
+
   // 10. Análisis IA por posición
-  content.push(pageBreak(), h1('9. Análisis por posición (IA)'));
+  content.push(pageBreak(), h1('10. Análisis por posición (IA)'));
   if (analisisList.length === 0) {
     content.push({ text: 'Sin análisis IA generados a la fecha. Generarlos desde la solapa Tenencias.', style: 'note' });
   } else {
@@ -407,13 +448,116 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
       if (Array.isArray(res.riesgos) && res.riesgos.length > 0)
         content.push({ text: 'Riesgos:', bold: true, fontSize: 8 }, { ul: res.riesgos as string[], fontSize: 8, margin: [0, 0, 0, 2] });
       if (res.rolEnCartera) content.push({ text: [{ text: 'Rol en cartera: ', bold: true }, String(res.rolEnCartera)], fontSize: 8, margin: [0, 2, 0, 2] });
-      if (Array.isArray(res.proximosEventos) && res.proximosEventos.length > 0)
-        content.push({ text: 'Próximos eventos:', bold: true, fontSize: 8 }, { ul: res.proximosEventos as string[], fontSize: 8, margin: [0, 0, 0, 2] });
+      if (Array.isArray(res.proximosEventos) && res.proximosEventos.length > 0) {
+        const evStrs = (res.proximosEventos as Array<unknown>).map(e =>
+          typeof e === 'string' ? e : `${(e as { cuando: string | null; evento: string }).cuando ?? '?'}: ${(e as { cuando: string | null; evento: string }).evento}`
+        );
+        content.push({ text: 'Próximos eventos:', bold: true, fontSize: 8 }, { ul: evStrs, fontSize: 8, margin: [0, 0, 0, 2] });
+      }
     }
   }
 
-  // 11. Panorama sectorial
-  content.push(pageBreak(), h1('10. Panorama sectorial (IA)'));
+  // 11. Calendario de eventos
+  {
+    const DRIVER_CHIP_PDF: Record<string, string> = {
+      cer_pesos: 'CER', soberano: 'Soberano', tasas_ar: 'Tasas AR',
+      tasas_global: 'Fed', cripto: 'Cripto', energia_ar: 'Tarifas',
+      tech_global: 'Tech', resultados: 'Earnings', impositivo: 'Fiscal', otro: 'Macro',
+    };
+    type FilaCal = { cuandoMs: number | null; cuandoDisplay: string; texto: string; chip: string; subtitulo?: string };
+    const filas: FilaCal[] = [];
+    const hace30 = Date.now() - 30 * 86400000;
+
+    // Eventos de posición
+    for (const a of analisisList) {
+      const res = a.resultado as Record<string, unknown> ?? {};
+      for (const raw of (res.proximosEventos as Array<unknown> ?? [])) {
+        const { cuando, evento } = typeof raw === 'string'
+          ? { cuando: null, evento: raw }
+          : raw as { cuando: string | null; evento: string };
+        let ms: number | null = null;
+        let display = 'Sin fecha';
+        if (cuando && /^\d{4}-\d{2}-\d{2}$/.test(cuando)) {
+          ms = new Date(cuando + 'T12:00:00').getTime();
+          const [y, m, d] = cuando.split('-');
+          display = `${d}/${m}/${y}`;
+        } else if (cuando && /^\d{4}-\d{2}$/.test(cuando)) {
+          ms = new Date(cuando + '-01T12:00:00').getTime();
+          const [y, m2] = cuando.split('-');
+          const mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][parseInt(m2)-1];
+          display = `~${mes} ${y}`;
+        } else if (cuando) {
+          display = cuando;
+        }
+        if (ms !== null && ms < hace30) continue; // omitir pasados > 30d
+        filas.push({ cuandoMs: ms, cuandoDisplay: display, texto: evento, chip: a.ticker as string });
+      }
+    }
+
+    // Eventos macro
+    if (agendaMacro) {
+      const agendaData = agendaMacro as AgendaMacro;
+      for (const e of agendaData.eventos) {
+        let ms: number | null = null;
+        let display = 'Sin fecha';
+        if (e.fecha && /^\d{4}-\d{2}-\d{2}$/.test(e.fecha)) {
+          ms = new Date(e.fecha + 'T12:00:00').getTime();
+          const [y, m, d] = e.fecha.split('-');
+          display = `${d}/${m}/${y}`;
+        } else if (e.fecha) {
+          display = e.fecha;
+        }
+        if (ms !== null && ms < hace30) continue;
+        filas.push({ cuandoMs: ms, cuandoDisplay: display, texto: e.evento, chip: DRIVER_CHIP_PDF[e.driver] ?? 'Macro', subtitulo: e.porQueImporta });
+      }
+    }
+
+    // Sort: sin fecha al final, luego por fecha asc
+    filas.sort((a, b) => {
+      if (a.cuandoMs === null && b.cuandoMs === null) return 0;
+      if (a.cuandoMs === null) return 1;
+      if (b.cuandoMs === null) return -1;
+      return a.cuandoMs - b.cuandoMs;
+    });
+
+    if (filas.length > 0) {
+      content.push(pageBreak(), h1('11. Calendario de eventos'));
+      if (agendaMacro) {
+        const agd = agendaMacro as AgendaMacro;
+        const agFecha = agd.generadoEnISO.slice(0, 10).split('-');
+        content.push({ text: `Agenda macro generada el ${agFecha[2]}/${agFecha[1]}/${agFecha[0]} · ${agd.horizonteDias} días`, style: 'note', margin: [0, 0, 0, 6] });
+      }
+      content.push({
+        table: {
+          headerRows: 1,
+          widths: [50, '*', 48],
+          body: [
+            [
+              { text: 'Fecha', bold: true, fontSize: 7.5, fillColor: '#f1f5f9' },
+              { text: 'Evento', bold: true, fontSize: 7.5, fillColor: '#f1f5f9' },
+              { text: 'Origen', bold: true, fontSize: 7.5, fillColor: '#f1f5f9' },
+            ],
+            ...filas.map(f => [
+              { text: f.cuandoDisplay, fontSize: 7.5, color: '#475569' },
+              {
+                stack: [
+                  { text: f.texto, fontSize: 7.5 },
+                  ...(f.subtitulo ? [{ text: f.subtitulo, fontSize: 7, color: '#64748b', italics: true }] : []),
+                ],
+              },
+              { text: f.chip, fontSize: 7.5, color: '#475569' },
+            ]),
+          ],
+        },
+        layout: 'lightHorizontalLines',
+        margin: [0, 0, 0, 8],
+      });
+    }
+  }
+
+  // 12. Panorama sectorial
+  content.push(pageBreak(), h1('12. Panorama sectorial (IA)'));
+
   if (!sectorial) {
     content.push({ text: 'Sin panorama sectorial generado a la fecha. Generarlo desde la solapa Research.', style: 'note' });
   } else {
@@ -424,8 +568,8 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
     content.push({ text: res, fontSize: 8, lineHeight: 1.4 });
   }
 
-  // 12. Metodología y límites
-  content.push(pageBreak(), h1('11. Metodología y límites'));
+  // 13. Metodología y límites
+  content.push(pageBreak(), h1('13. Metodología y límites'));
   const fuentesCorrida = [...new Set(posiciones.map(p => p.fuente).filter(Boolean))];
   content.push({
     ul: [
