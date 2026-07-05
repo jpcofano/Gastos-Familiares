@@ -77,6 +77,7 @@ function PorCategoria({ d, cur }) {
   const set = (t) => { setTipo(t); try { localStorage.setItem('gf-chart-tipo', t); } catch (e) {} };
   const [openCat, setOpenCat] = React.useState(null);   // lista: categoría expandida
   const [zoomCat, setZoomCat] = React.useState(null);   // treemap: categoría en drill
+  const [openOtras, setOpenOtras] = React.useState(false);
   const cats = d.categorias;
   const topCats = cats.slice(0, 6), restCats = cats.slice(6);
   const otras = restCats.reduce((s, c) => ({ usd: s.usd + c.usd, count: s.count + c.count, pct: s.pct + c.pct }), { usd: 0, count: 0, pct: 0 });
@@ -218,14 +219,64 @@ function PorCategoria({ d, cur }) {
           );
         })}
         {restCats.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, paddingTop: 4, borderTop: '1px solid var(--gf-gray-100)' }}>
-            <span style={{ width: 9, height: 9, borderRadius: 3, background: 'var(--gf-gray-300)', flexShrink: 0 }} />
-            <span style={{ fontWeight: 600, color: 'var(--color-text-sec)' }}>Otras</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{restCats.length}</span>
-            <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{curBig(otras.usd, cur)}</span>
-              {pctChip(otras.usd)}
-            </span>
+          <div style={{ paddingTop: 4, borderTop: '1px solid var(--gf-gray-100)' }}>
+            <button onClick={() => setOpenOtras(v => !v)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 3, background: 'var(--gf-gray-300)', flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, color: 'var(--color-text-sec)' }}>Otras</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{restCats.length}</span>
+                <Ic name={openOtras ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{curBig(otras.usd, cur)}</span>
+                  {pctChip(otras.usd)}
+                </span>
+              </div>
+            </button>
+            {openOtras && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 11, margin: '9px 0 4px 17px', paddingLeft: 11, borderLeft: '2px solid var(--gf-gray-100)' }}>
+                {restCats.map((c, idx) => {
+                  const i = 6 + idx;
+                  const subs = c.subs || [];
+                  const abierta = openCat === c.nombre;
+                  const maxSub = subs.length ? Math.max(...subs.map((s) => s.usd)) : 1;
+                  return (
+                    <div key={c.nombre}>
+                      <button onClick={() => subs.length && setOpenCat(abierta ? null : c.nombre)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: subs.length ? 'pointer' : 'default', fontFamily: 'var(--font-base)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 3, background: catColorVar(i, c.color), flexShrink: 0 }} />
+                          <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{c.count}</span>
+                          {subs.length > 0 && <Ic name={abierta ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />}
+                          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur)}</span>
+                            {pctChip(c.usd)}
+                          </span>
+                        </div>
+                        <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${c.pct}%`, background: catColorVar(i, c.color), borderRadius: 3 }} />
+                        </div>
+                      </button>
+                      {abierta && subs.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, margin: '9px 0 4px 17px', paddingLeft: 11, borderLeft: '2px solid var(--gf-gray-100)' }}>
+                          {subs.map((s) => (
+                            <div key={s.nombre}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 3 }}>
+                                <span style={{ color: 'var(--color-text-sec)' }}>{s.nombre}</span>
+                                <span style={{ marginLeft: 'auto', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-strong)' }}>{curBig(s.usd, cur)}</span>
+                                <span style={{ width: 34, textAlign: 'right', fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{pctTot(s.usd)}%</span>
+                              </div>
+                              <div style={{ height: 4, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${(s.usd / maxSub) * 100}%`, background: catColorVar(i, c.color), borderRadius: 3, opacity: 0.55 }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
