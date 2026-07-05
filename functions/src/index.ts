@@ -2928,3 +2928,138 @@ export const analizarConIA = onCall(
     return { ok: true, resultado };
   },
 );
+
+// ── F9.97 — Sincronización CAFCI (benchmark vs fondos) ───────────────────────
+function normalizarEspecie(s: string): string {
+  return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Parser fail-soft de un elemento de carteras[]
+// Estructura confirmada: { fechaDatos } + campos internos a confirmar
+function parsePosicionCafci(item: Record<string, unknown>): {
+  especieRaw: string;
+  pesoPct: number;
+  incompleto: boolean;
+} {
+  const especieRaw = String(
+    item['especie'] ?? item['nombreEspecie'] ?? item['instrumento'] ?? item['descripcion'] ?? ''
+  );
+  const pesoRaw =
+    item['porcentaje'] ?? item['peso'] ?? item['porcentajeFondo'] ?? item['participacion'] ?? item['pct'];
+  const pesoPct = typeof pesoRaw === 'number' ? pesoRaw : parseFloat(String(pesoRaw ?? '0')) || 0;
+  const incompleto = !especieRaw || pesoPct === 0;
+  return { especieRaw: especieRaw || '(sin especie)', pesoPct, incompleto };
+}
+
+// Mapeos obvios: si la especie ya es un ticker conocido (letras mayúsculas, sin espacios)
+const TICKER_REGEX = /^[A-Z0-9]{2,6}(\.BA|\.D)?$/;
+function autoTickerMapping(especieRaw: string): string | null {
+  const norm = especieRaw.trim().toUpperCase();
+  if (TICKER_REGEX.test(norm)) return norm;
+  return null;
+}
+
+export const sincronizarCafci = onCall(
+  {
+    region: 'southamerica-east1',
+    memory: '512MiB',
+    timeoutSeconds: 120,
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token?.email ?? '';
+    if (email.toLowerCase() !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+
+    const db = getFirestore();
+    const configSnap = await db.collection('configPatrimonio').doc('cafci').get();
+    if (!configSnap.exists) throw new HttpsError('not-found', 'Configuración CAFCI no existe. Agregá al menos un fondo en Configuración.');
+
+    const config = configSnap.data() as { fondos?: Array<{ fondoId: string; claseId: string; nombre: string }> };
+    const fondos = config.fondos ?? [];
+    if (fondos.length === 0) throw new HttpsError('failed-precondition', 'No hay fondos configurados');
+
+    let sincronizados = 0;
+    const pendientesMapeo: string[] = [];
+    const fechaFetch = new Date().toISOString();
+
+    for (const fondo of fondos) {
+      try {
+        const url = `https://api.pub.cafci.org.ar/fondo/${fondo.fondoId}/clase/${fondo.claseId}/ficha`;
+        const res = await fetch(url, {
+          headers: {
+            'Origin': 'https://cafci.org.ar',
+            'Referer': 'https://cafci.org.ar/',
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (compatible)',
+          },
+        });
+        if (!res.ok) {
+          console.warn(`[sincronizarCafci] ${fondo.nombre}: HTTP ${res.status}`);
+          continue;
+        }
+        const json = await res.json() as Record<string, unknown>;
+        const infoSemanal = (json as any)?.data?.info?.semanal;
+        const carteras: unknown[] = Array.isArray(infoSemanal?.carteras) ? infoSemanal.carteras : [];
+        if (carteras.length === 0) {
+          console.warn(`[sincronizarCafci] ${fondo.nombre}: carteras[] vacío o no encontrado`);
+          continue;
+        }
+
+        // Tomar la corrida más reciente (primer elemento del array)
+        const carteraMasReciente = carteras[0] as Record<string, unknown>;
+        const fechaDatos = String(carteraMasReciente['fechaDatos'] ?? fechaFetch.slice(0, 10));
+        const items: unknown[] = Array.isArray(carteraMasReciente['posiciones'] ?? carteraMasReciente['tenencias'] ?? carteraMasReciente['items'])
+          ? (carteraMasReciente['posiciones'] ?? carteraMasReciente['tenencias'] ?? carteraMasReciente['items']) as unknown[]
+          : [];
+
+        // Si no hay sub-array de posiciones, intentar parsear el propio objeto como posición (algunos fondos vienen aplanados)
+        const posicionesRaw: Record<string, unknown>[] = items.length > 0
+          ? items as Record<string, unknown>[]
+          : [carteraMasReciente];
+
+        const posiciones: Array<{ especieRaw: string; ticker: string | null; pesoPct: number; incompleto?: boolean }> = [];
+        let totalPct = 0;
+
+        for (const item of posicionesRaw) {
+          const { especieRaw, pesoPct, incompleto } = parsePosicionCafci(item as Record<string, unknown>);
+          // Buscar mapping existente
+          const norm = normalizarEspecie(especieRaw);
+          const mappingSnap = await db.collection('cafciMapping').doc(norm).get();
+          let ticker: string | null = null;
+
+          if (mappingSnap.exists) {
+            ticker = (mappingSnap.data() as { ticker: string | null }).ticker;
+          } else {
+            // Auto-mapping: si la especie ya parece un ticker
+            const auto = autoTickerMapping(especieRaw);
+            ticker = auto;
+            // Guardar en cafciMapping para que quede registrado
+            await db.collection('cafciMapping').doc(norm).set({ ticker: auto });
+            if (!auto && !incompleto) {
+              pendientesMapeo.push(especieRaw);
+            }
+          }
+
+          posiciones.push({ especieRaw, ticker, pesoPct, ...(incompleto ? { incompleto: true } : {}) });
+          totalPct += pesoPct;
+        }
+
+        const docId = `${fondo.fondoId}_${fechaDatos}`;
+        await db.collection('cafciCarteras').doc(docId).set({
+          fondoId: fondo.fondoId,
+          nombre: fondo.nombre,
+          fechaDatos,
+          fechaFetch,
+          posiciones,
+          totalPct,
+        });
+        sincronizados++;
+        console.log(`[sincronizarCafci] ${fondo.nombre} sincronizado: ${posiciones.length} posiciones`);
+      } catch (err) {
+        console.error(`[sincronizarCafci] Error en ${fondo.nombre}:`, err);
+      }
+    }
+
+    return { sincronizados, pendientesMapeo: [...new Set(pendientesMapeo)].slice(0, 20) };
+  },
+);

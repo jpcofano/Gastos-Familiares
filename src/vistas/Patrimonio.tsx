@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Timestamp } from 'firebase/firestore';
 import { cargarTCReciente } from '../datos/tcDiario';
 import { TC_DEFAULT } from '../datos/money';
 import { Card, MerchantLogo } from '../design-system/components';
@@ -24,9 +25,18 @@ import {
 } from '../datos/patrimonioIA';
 import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics } from '../types/patrimonio';
 import {
+  cargarFlujos, crearFlujo, actualizarFlujo, eliminarFlujo, calcRetorno,
+  type FlujoPatrimonio, type NuevoFlujo,
+} from '../datos/patrimonioFlujos';
+import {
   cargarDecisiones, crearDecision, agregarRevision, revisionPendiente,
   type DecisionPatrimonio, type NuevaDecision, type MetricasSnap,
 } from '../datos/patrimonioDecisiones';
+import {
+  cargarConfigCafci, guardarConfigCafci, cargarUltimasCarteras, cargarMappings,
+  sincronizarCafci as sincronizarCafciCallable, calcBenchmark,
+  type ConfigCafci, type CafciCartera, type CafciFondoConfig,
+} from '../datos/patrimonioCafci';
 import PatrimonioIngesta from './PatrimonioIngesta';
 
 // ── Sector crudo → display ────────────────────────────────────────────────────
@@ -700,10 +710,11 @@ function OpcionCard({ opcion, posiciones, onRegistrarDecision }: { opcion: Opcio
 }
 
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, informes, generandoInforme, onGenerarInforme }: {
+function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
   historial: SnapshotResumen[];
+  flujos: FlujoPatrimonio[];
   informes: InformeAnterior[];
   generandoInforme: boolean;
   onGenerarInforme: () => void;
@@ -788,30 +799,52 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, informes, ge
       </Card>
 
       {/* 4. Evolución entre corridas */}
-      {historial.length > 1 && (
-        <Card>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Evolución</div>
-          {historial.map((s, i) => {
-            const prev = historial[i + 1];
-            const delta = prev ? s.totalInvertibleUsd - prev.totalInvertibleUsd : null;
-            return (
-              <div key={s.fechaCorrida} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 13 }}>
-                <span style={{ color: 'var(--gf-gray-400)', minWidth: 54, fontSize: 12 }}>{fmtFecha(s.fechaCorrida)}</span>
-                <span style={{ flex: 1, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(s.totalInvertibleUsd)}</span>
-                {delta !== null && (
-                  <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: delta >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontWeight: 600 }}>
-                    {delta >= 0 ? '+' : ''}{pct(delta / (prev!.totalInvertibleUsd || 1))}
-                  </span>
-                )}
-                {i === 0 && <span style={{ fontSize: 10, background: 'var(--gf-gray-100)', borderRadius: 4, padding: '2px 5px', color: 'var(--gf-gray-400)', fontWeight: 700 }}>HOY</span>}
-              </div>
-            );
-          })}
-          <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 8, lineHeight: 1.4 }}>
-            La variación refleja cambio de valor, no retorno: no descuenta aportes ni retiros entre corridas.
-          </div>
-        </Card>
-      )}
+      {historial.length > 1 && (() => {
+        const retorno = flujos.length > 0 ? calcRetorno(historial, flujos) : null;
+        // Mapa: fechaHasta → retorno del período (periodos van de antiguo a reciente)
+        const retornoMap = new Map<string, number>(
+          retorno?.periodos.map(p => [p.fechaHasta, p.retornoPct]) ?? []
+        );
+        return (
+          <Card>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Evolución</div>
+              {retorno && (
+                <div style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>
+                  Acumulado: <span style={{ fontWeight: 700, color: 'var(--color-text)' }}>{retorno.acumulado >= 0 ? '+' : ''}{pct(retorno.acumulado)}</span>
+                </div>
+              )}
+            </div>
+            {historial.map((s, i) => {
+              const prev = historial[i + 1];
+              const delta = prev ? s.totalInvertibleUsd - prev.totalInvertibleUsd : null;
+              const rPct = retornoMap.get(s.fechaCorrida);
+              return (
+                <div key={s.fechaCorrida} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 13 }}>
+                  <span style={{ color: 'var(--gf-gray-400)', minWidth: 54, fontSize: 12 }}>{fmtFecha(s.fechaCorrida)}</span>
+                  <span style={{ flex: 1, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(s.totalInvertibleUsd)}</span>
+                  {delta !== null && (
+                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: delta >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontWeight: 600 }}>
+                      {delta >= 0 ? '+' : ''}{pct(delta / (prev!.totalInvertibleUsd || 1))}
+                    </span>
+                  )}
+                  {rPct !== undefined && (
+                    <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)', background: 'var(--gf-gray-100)', borderRadius: 6, padding: '2px 6px', fontWeight: 600 }}>
+                      {rPct >= 0 ? '+' : ''}{pct(rPct)} aprox.
+                    </span>
+                  )}
+                  {i === 0 && <span style={{ fontSize: 10, background: 'var(--gf-gray-100)', borderRadius: 4, padding: '2px 5px', color: 'var(--gf-gray-400)', fontWeight: 700 }}>HOY</span>}
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 8, lineHeight: 1.4 }}>
+              {flujos.length > 0
+                ? 'Retorno (aprox.) descuenta los flujos registrados en Configuración (Modified Dietz, peso 0,5). Δ% = variación de valor bruta.'
+                : 'La variación refleja cambio de valor, no retorno: no descuenta aportes ni retiros. Registrá flujos en Configuración para ver el retorno real.'}
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* 5. Informe PDF */}
       <Card>
@@ -1863,22 +1896,333 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
   );
 }
 
+// ── Modal: registrar/editar flujo (aporte o retiro) ──────────────────────────
+function ModalFlujo({
+  flujo, onGuardar, onEliminar, onClose,
+}: {
+  flujo: FlujoPatrimonio | null;
+  onGuardar: (data: NuevoFlujo) => void;
+  onEliminar?: () => void;
+  onClose: () => void;
+}) {
+  const [fecha, setFecha] = useState(
+    flujo ? flujo.fecha.toDate().toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)
+  );
+  const [tipo, setTipo] = useState<'aporte' | 'retiro'>(flujo?.tipo ?? 'aporte');
+  const [montoStr, setMontoStr] = useState(flujo ? String(flujo.montoUsd) : '');
+  const [cuenta, setCuenta] = useState(flujo?.cuenta ?? '');
+  const [nota, setNota] = useState(flujo?.nota ?? '');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const monto = parseFloat(montoStr.replace(',', '.'));
+  const valid = fecha.length === 10 && !isNaN(monto) && monto > 0;
+
+  function guardar() {
+    if (!valid) return;
+    const ts = Timestamp.fromDate(new Date(fecha + 'T12:00:00'));
+    onGuardar({ fecha: ts, tipo, montoUsd: monto, cuenta: cuenta.trim() || null, nota: nota.trim() });
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end' }}>
+      <div style={{ width: '100%', background: 'var(--color-surface)', borderRadius: '20px 20px 0 0', padding: '22px 18px 36px', maxHeight: '90dvh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+          <span style={{ fontSize: 16, fontWeight: 800 }}>{flujo ? 'Editar flujo' : 'Registrar flujo'}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <Icon name="x" size={20} color="var(--color-text)" />
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+          {(['aporte', 'retiro'] as const).map(t => (
+            <button key={t} onClick={() => setTipo(t)} style={{ flex: 1, padding: '9px 0', borderRadius: 10, border: tipo === t ? '2px solid var(--color-accent)' : '1px solid var(--gf-gray-200)', background: tipo === t ? 'rgba(6,95,70,.06)' : 'var(--gf-gray-50)', fontSize: 13, fontWeight: 700, color: tipo === t ? 'var(--color-accent)' : 'var(--color-text-sec)', cursor: 'pointer', fontFamily: 'var(--font-base)', textTransform: 'capitalize' }}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {[
+          { label: 'Fecha', val: fecha, set: setFecha, type: 'date', placeholder: '' },
+          { label: 'Monto (USD)', val: montoStr, set: setMontoStr, type: 'text', placeholder: '1000' },
+          { label: 'Cuenta (opcional)', val: cuenta, set: setCuenta, type: 'text', placeholder: 'IOL, Balanz…' },
+          { label: 'Nota (opcional)', val: nota, set: setNota, type: 'text', placeholder: 'descripción libre' },
+        ].map(f => (
+          <div key={f.label} style={{ marginBottom: 13 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', marginBottom: 5 }}>{f.label}</div>
+            <input type={f.type} value={f.val} placeholder={f.placeholder} onChange={e => f.set(e.target.value)}
+              style={{ width: '100%', padding: '11px 13px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', fontSize: 14, fontFamily: 'var(--font-base)', background: 'var(--gf-gray-50)', boxSizing: 'border-box' }} />
+          </div>
+        ))}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '12px 14px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+            Cancelar
+          </button>
+          <button onClick={guardar} disabled={!valid} style={{ flex: 2, padding: '12px 14px', borderRadius: 11, border: 'none', background: valid ? 'var(--color-accent)' : 'var(--gf-gray-200)', color: valid ? '#fff' : 'var(--gf-gray-400)', fontSize: 14, fontWeight: 700, cursor: valid ? 'pointer' : 'default', fontFamily: 'var(--font-base)' }}>
+            {flujo ? 'Guardar cambios' : 'Registrar'}
+          </button>
+        </div>
+
+        {flujo && onEliminar && (
+          <div style={{ marginTop: 16, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 14 }}>
+            {!confirmDelete
+              ? <button onClick={() => setConfirmDelete(true)} style={{ width: '100%', padding: '11px', borderRadius: 11, border: '1px solid #fca5a5', background: 'none', fontSize: 13, fontWeight: 700, color: 'var(--gf-expense)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}>Eliminar flujo</button>
+              : <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setConfirmDelete(false)} style={{ flex: 1, padding: '11px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', background: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>No</button>
+                  <button onClick={onEliminar} style={{ flex: 2, padding: '11px', borderRadius: 11, border: 'none', background: 'var(--gf-expense)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>Confirmar eliminación</button>
+                </div>
+            }
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Card: aportes y retiros ───────────────────────────────────────────────────
+function AportesRetirosCard({ flujos, onAdd, onEdit }: {
+  flujos: FlujoPatrimonio[];
+  onAdd: () => void;
+  onEdit: (f: FlujoPatrimonio) => void;
+}) {
+  const fmtFechaTs = (ts: Timestamp) => { const d = ts.toDate(); const y = d.getFullYear(), m = d.getMonth()+1, dd = d.getDate(); return `${String(dd).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`; };
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: flujos.length > 0 ? 10 : 0 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Aportes y retiros</div>
+          {flujos.length === 0 && <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>Sin flujos registrados — el retorno de la evolución no descuenta aportes</div>}
+        </div>
+        <button onClick={onAdd} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'none', fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+          <Icon name="plus" size={13} color="var(--color-text-sec)" /> Agregar
+        </button>
+      </div>
+      {flujos.map((f, i) => (
+        <button key={f.id} onClick={() => onEdit(f)} style={{ width: '100%', textAlign: 'left', background: 'none', border: 'none', padding: '8px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-base)' }}>
+          <span style={{ width: 8, height: 8, borderRadius: 999, background: f.tipo === 'aporte' ? 'var(--gf-income)' : 'var(--gf-expense)', flexShrink: 0 }} />
+          <span style={{ fontSize: 12, color: 'var(--gf-gray-400)', minWidth: 52 }}>{fmtFechaTs(f.fecha)}</span>
+          <span style={{ fontSize: 13, fontWeight: 600, flex: 1, textTransform: 'capitalize' }}>{f.tipo}{f.cuenta ? ` · ${f.cuenta}` : ''}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: f.tipo === 'aporte' ? 'var(--gf-income)' : 'var(--gf-expense)' }}>{f.tipo === 'aporte' ? '+' : '−'}U$S {f.montoUsd.toLocaleString('es-AR')}</span>
+          <Icon name="chevron-right" size={14} color="var(--gf-gray-300)" />
+        </button>
+      ))}
+    </Card>
+  );
+}
+
+// ── Card de fondos CAFCI ──────────────────────────────────────────────────────
+function CafciFondosCard({ configCafci, sincronizando, onSincronizar, onGuardar }: {
+  configCafci: ConfigCafci;
+  sincronizando: boolean;
+  onSincronizar: () => void;
+  onGuardar: (c: ConfigCafci) => void;
+}) {
+  const [nombre, setNombre] = useState('');
+  const [fondoId, setFondoId] = useState('');
+  const [claseId, setClaseId] = useState('');
+  const [agregando, setAgregando] = useState(false);
+
+  function addFondo() {
+    if (!nombre.trim() || !fondoId.trim() || !claseId.trim()) return;
+    const nuevo: CafciFondoConfig = { fondoId: fondoId.trim(), claseId: claseId.trim(), nombre: nombre.trim() };
+    onGuardar({ fondos: [...configCafci.fondos, nuevo] });
+    setNombre(''); setFondoId(''); setClaseId(''); setAgregando(false);
+  }
+
+  const inp: React.CSSProperties = {
+    padding: '8px 10px', borderRadius: 8, border: '1px solid var(--gf-gray-200)',
+    fontSize: 12.5, fontFamily: 'var(--font-base)', width: '100%', boxSizing: 'border-box',
+  };
+
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Fondos CAFCI (benchmark)</div>
+          <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
+            {configCafci.fondos.length} fondo{configCafci.fondos.length !== 1 ? 's' : ''} configurado{configCafci.fondos.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+        <button
+          onClick={onSincronizar}
+          disabled={sincronizando || configCafci.fondos.length === 0}
+          style={{
+            padding: '7px 13px', borderRadius: 9, border: 'none',
+            cursor: sincronizando || configCafci.fondos.length === 0 ? 'not-allowed' : 'pointer',
+            background: sincronizando || configCafci.fondos.length === 0 ? 'var(--gf-gray-100)' : 'var(--color-accent)',
+            color: sincronizando || configCafci.fondos.length === 0 ? 'var(--gf-gray-400)' : '#fff',
+            fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-base)',
+          }}
+        >
+          {sincronizando ? 'Sincronizando…' : 'Sincronizar'}
+        </button>
+      </div>
+      {configCafci.fondos.length === 0 && !agregando && (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginBottom: 10, lineHeight: 1.5 }}>
+          Agregá fondos para comparar tu cartera con carteras de fondos CAFCI.
+          Necesitás el <strong>fondoId</strong> y <strong>claseId</strong> de la URL de cafci.org.ar.
+        </div>
+      )}
+      {configCafci.fondos.map((f, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < configCafci.fondos.length - 1 ? '1px solid var(--gf-gray-100)' : 'none' }}>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{f.nombre}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 1 }}>fondo {f.fondoId} · clase {f.claseId}</div>
+          </div>
+          <button onClick={() => onGuardar({ fondos: configCafci.fondos.filter((_, j) => j !== i) })}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <Icon name="x" size={14} color="var(--gf-gray-400)" />
+          </button>
+        </div>
+      ))}
+      {agregando ? (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <input placeholder="Nombre del fondo" value={nombre} onChange={e => setNombre(e.target.value)} style={inp} />
+          <div style={{ display: 'flex', gap: 7 }}>
+            <input placeholder="fondoId" value={fondoId} onChange={e => setFondoId(e.target.value)} style={{ ...inp, width: undefined, flex: 1, minWidth: 0 }} />
+            <input placeholder="claseId" value={claseId} onChange={e => setClaseId(e.target.value)} style={{ ...inp, width: undefined, flex: 1, minWidth: 0 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={addFondo} disabled={!nombre.trim() || !fondoId.trim() || !claseId.trim()}
+              style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', cursor: 'pointer', background: 'var(--color-accent)', color: '#fff', fontSize: 12.5, fontWeight: 700, fontFamily: 'var(--font-base)' }}>
+              Agregar
+            </button>
+            <button onClick={() => setAgregando(false)}
+              style={{ flex: 1, padding: '8px 0', borderRadius: 9, border: 'none', cursor: 'pointer', background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--font-base)' }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setAgregando(true)} style={{ marginTop: configCafci.fondos.length > 0 ? 10 : 0, width: '100%', padding: '8px 0', borderRadius: 9, border: '1.5px dashed var(--gf-gray-200)', background: 'transparent', color: 'var(--gf-gray-400)', fontSize: 12.5, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+          + Agregar fondo
+        </button>
+      )}
+    </Card>
+  );
+}
+
+// ── Solapa Benchmark ──────────────────────────────────────────────────────────
+function BenchmarkTab({ posiciones, carteras, mappings }: {
+  posiciones: Posicion[];
+  carteras: CafciCartera[];
+  mappings: Record<string, string | null>;
+}) {
+  if (carteras.length === 0) {
+    return (
+      <Card>
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Sin datos de fondos</div>
+          <div style={{ fontSize: 12.5, color: 'var(--gf-gray-400)', lineHeight: 1.5 }}>
+            Configurá al menos un fondo CAFCI en la solapa Config y tocá "Sincronizar" para cargar sus carteras.
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  const possPropias = posiciones.map(p => ({ ticker: p.ticker, valorUsd: p.valorUsd }));
+  const { filas, soloenFondos, soloEnPropio } = calcBenchmark(possPropias, carteras, mappings);
+  const filasEnAmbos = filas.filter(f => f.propioPct !== null && f.fondosAvgPct > 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Card>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
+          Divergencia vs fondos — {carteras.length} fondo{carteras.length !== 1 ? 's' : ''}
+        </div>
+        {filasEnAmbos.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--gf-gray-400)', lineHeight: 1.5 }}>
+            Sin tickers en común con los fondos. Revisá los mappings de especies en Config una vez que la sincronización corra.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 58px 68px 50px', gap: 4, fontSize: 10, color: 'var(--gf-gray-400)', fontWeight: 700, marginBottom: 6 }}>
+              <div>Ticker</div>
+              <div style={{ textAlign: 'right' }}>Propio</div>
+              <div style={{ textAlign: 'right' }}>Fondos avg</div>
+              <div style={{ textAlign: 'right' }}>Δ</div>
+            </div>
+            {filasEnAmbos.map(f => {
+              const delta = (f.propioPct ?? 0) - f.fondosAvgPct;
+              const col = Math.abs(delta) > 0.05 ? 'var(--gf-expense)' : Math.abs(delta) > 0.02 ? '#f59e0b' : 'var(--gf-gray-400)';
+              return (
+                <div key={f.ticker} style={{ display: 'grid', gridTemplateColumns: '1fr 58px 68px 50px', gap: 4, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', fontSize: 12.5, alignItems: 'center' }}>
+                  <div style={{ fontWeight: 700 }}>{f.ticker}</div>
+                  <div style={{ textAlign: 'right' }}>{(Math.round((f.propioPct ?? 0) * 1000) / 10).toFixed(1)}%</div>
+                  <div style={{ textAlign: 'right', color: 'var(--gf-gray-500)' }}>
+                    {(Math.round(f.fondosAvgPct * 1000) / 10).toFixed(1)}%
+                    {f.fondosMinPct !== f.fondosMaxPct && (
+                      <div style={{ fontSize: 9, color: 'var(--gf-gray-300)' }}>
+                        {(Math.round(f.fondosMinPct * 1000) / 10).toFixed(1)}–{(Math.round(f.fondosMaxPct * 1000) / 10).toFixed(1)}%
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right', color: col, fontWeight: 700 }}>
+                    {delta > 0 ? '+' : ''}{(Math.round(delta * 1000) / 10).toFixed(1)}%
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </Card>
+
+      {soloenFondos.length > 0 && (
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>En fondos, no en tu cartera</div>
+          {soloenFondos.map(f => (
+            <div key={f.ticker} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', fontSize: 12.5 }}>
+              <span style={{ fontWeight: 600 }}>{f.ticker}</span>
+              <span style={{ color: 'var(--gf-gray-500)', fontSize: 11.5 }}>{(Math.round(f.avgPct * 1000) / 10).toFixed(1)}% avg</span>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {soloEnPropio.length > 0 && (
+        <Card>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>En tu cartera, no en fondos</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {soloEnPropio.map(t => (
+              <span key={t} style={{ padding: '3px 9px', borderRadius: 20, background: 'var(--gf-gray-100)', fontSize: 11.5, fontWeight: 600, color: 'var(--color-text-sec)' }}>{t}</span>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'center', padding: '4px 0' }}>
+        {carteras.map(c => c.nombre).join(' · ')} · {carteras[0]?.fechaDatos ?? '—'}
+      </div>
+    </div>
+  );
+}
+
 // ── Solapa Configuración ──────────────────────────────────────────────────────
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA }: {
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, sincronizandoCafci, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci }: {
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
   configIA: ConfigIA;
   fechaCorrida: string;
+  flujos: FlujoPatrimonio[];
+  configCafci: ConfigCafci;
+  sincronizandoCafci: boolean;
   onEditFijo: (af: ActivoFijo) => void;
   onAddFijo: () => void;
   onEditManual: (pm: PosicionManual) => void;
   onAddManual: () => void;
   onToggleIA: (val: boolean) => void;
+  onAddFlujo: () => void;
+  onEditFlujo: (f: FlujoPatrimonio) => void;
+  onSincronizarCafci: () => void;
+  onGuardarConfigCafci: (c: ConfigCafci) => void;
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
+      <AportesRetirosCard flujos={flujos} onAdd={onAddFlujo} onEdit={onEditFlujo} />
+      <CafciFondosCard configCafci={configCafci} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} />
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -1926,6 +2270,7 @@ const TABS = [
   ['tenencias', 'Tenencias'],
   ['riesgo',    'Riesgo'],
   ['plan',      'Plan'],
+  ['benchmark', 'Bench'],
   ['research',  'Research'],
   ['config',    'Config'],
 ] as const;
@@ -1959,6 +2304,15 @@ export default function Patrimonio() {
   const [preloadDecision,     setPreloadDecision]     = useState<{ opcionReferencia: 'A' | 'B' | 'C' | null; tickers: string[] } | null>(null);
   const [showModalRevision,   setShowModalRevision]   = useState<{ decision: DecisionPatrimonio; tipo: '30d' | '90d' } | null>(null);
 
+  const [flujos,             setFlujos]             = useState<FlujoPatrimonio[]>([]);
+  const [showModalFlujo,   setShowModalFlujo]   = useState(false);
+  const [editFlujo,        setEditFlujo]        = useState<FlujoPatrimonio | null>(null);
+
+  const [configCafci,        setConfigCafci]        = useState<ConfigCafci>({ fondos: [] });
+  const [cafciCarteras,      setCafciCarteras]      = useState<CafciCartera[]>([]);
+  const [cafciMappings,      setCafciMappings]      = useState<Record<string, string | null>>({});
+  const [sincronizandoCafci, setSincronizandoCafci] = useState(false);
+
   const [showIngesta,      setShowIngesta]      = useState(false);
   const [showModalFijo,    setShowModalFijo]    = useState(false);
   const [editFijo,         setEditFijo]         = useState<ActivoFijo | null>(null);
@@ -1975,6 +2329,9 @@ export default function Patrimonio() {
       for (const a of lista) cache[a.ticker] = a;
       setAnalisisCache(cache);
     });
+    cargarConfigCafci().then(setConfigCafci);
+    cargarUltimasCarteras().then(setCafciCarteras);
+    cargarMappings().then(setCafciMappings);
   }, []);
 
   function cargar() {
@@ -1986,14 +2343,16 @@ export default function Patrimonio() {
       cargarHistorialSnapshots(10),
       cargarInformesAnteriores(5),
       cargarDecisiones(),
+      cargarFlujos(),
     ])
-      .then(([pos, fijos, manuales, hist, infs, decs]) => {
+      .then(([pos, fijos, manuales, hist, infs, decs, flujos]) => {
         setPosiciones(pos);
         setActivosFijos(fijos);
         setPosicionesManuales(manuales);
         setHistorial(hist);
         setInformes(infs);
         setDecisiones(decs);
+        setFlujos(flujos);
         if (pos.length > 0) setFechaCorrida(pos[0].fechaCorrida);
       })
       .finally(() => setLoading(false));
@@ -2031,6 +2390,44 @@ export default function Patrimonio() {
     await eliminarPosicionManual(id);
     setPosicionesManuales(prev => prev.filter(x => x.id !== id));
     setShowModalManual(false);
+  }
+
+  async function handleGuardarFlujo(data: NuevoFlujo) {
+    if (editFlujo) {
+      await actualizarFlujo(editFlujo.id, data);
+      setFlujos(prev => prev.map(f => f.id === editFlujo.id ? { ...f, ...data } : f));
+    } else {
+      const nuevo = await crearFlujo(data);
+      setFlujos(prev => [nuevo, ...prev].sort((a, b) => b.fecha.toMillis() - a.fecha.toMillis()));
+    }
+    setShowModalFlujo(false);
+  }
+
+  async function handleEliminarFlujo(id: string) {
+    await eliminarFlujo(id);
+    setFlujos(prev => prev.filter(f => f.id !== id));
+    setShowModalFlujo(false);
+  }
+
+  async function handleGuardarConfigCafci(c: ConfigCafci) {
+    await guardarConfigCafci(c);
+    setConfigCafci(c);
+  }
+
+  async function handleSincronizarCafci() {
+    if (sincronizandoCafci) return;
+    setSincronizandoCafci(true);
+    try {
+      await sincronizarCafciCallable();
+      // Recargar carteras tras sincronizar
+      const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(), cargarMappings()]);
+      setCafciCarteras(carteras);
+      setCafciMappings(mappings);
+    } catch (e) {
+      console.error('[sincronizarCafci]', e);
+    } finally {
+      setSincronizandoCafci(false);
+    }
   }
 
   // Manuales fusionadas con corrida para métricas (lente invertible incluye manuales)
@@ -2180,7 +2577,7 @@ export default function Patrimonio() {
               flex: id === 'config' ? 'none' : 1,
               padding: id === 'config' ? '8px 10px' : '8px 4px',
               borderRadius: 9, border: 'none', cursor: 'pointer',
-              fontFamily: 'var(--font-base)', fontSize: 12.5, fontWeight: on ? 700 : 600,
+              fontFamily: 'var(--font-base)', fontSize: 11, fontWeight: on ? 700 : 600,
               background: on ? 'var(--color-surface)' : 'transparent',
               color: on ? 'var(--color-text)' : 'var(--color-text-sec)',
               boxShadow: on ? 'var(--shadow-sm)' : 'none',
@@ -2224,6 +2621,7 @@ export default function Patrimonio() {
               M={M} tc={tc} fechaCorrida={fechaCorrida}
               activosFijos={activosFijos}
               historial={historial}
+              flujos={flujos}
               informes={informes}
               generandoInforme={generandoInforme}
               onGenerarInforme={handleGenerarInforme}
@@ -2238,6 +2636,9 @@ export default function Patrimonio() {
             />
           )}
           {tab === 'riesgo'    && <RiesgoTab M={M} posiciones={todasPosiciones} />}
+          {tab === 'benchmark' && (
+            <BenchmarkTab posiciones={todasPosiciones} carteras={cafciCarteras} mappings={cafciMappings} />
+          )}
           {tab === 'plan' && (
             <PlanTab
               M={M} posiciones={todasPosiciones}
@@ -2269,11 +2670,18 @@ export default function Patrimonio() {
               manuales={posicionesManuales}
               configIA={configIA}
               fechaCorrida={fechaCorrida}
+              flujos={flujos}
+              configCafci={configCafci}
+              sincronizandoCafci={sincronizandoCafci}
               onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
               onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
               onEditManual={pm => { setEditManual(pm); setShowModalManual(true); }}
               onAddManual={() => { setEditManual(null); setShowModalManual(true); }}
               onToggleIA={handleToggleIA}
+              onAddFlujo={() => { setEditFlujo(null); setShowModalFlujo(true); }}
+              onEditFlujo={f => { setEditFlujo(f); setShowModalFlujo(true); }}
+              onSincronizarCafci={handleSincronizarCafci}
+              onGuardarConfigCafci={handleGuardarConfigCafci}
             />
           )}
         </>
@@ -2307,6 +2715,15 @@ export default function Patrimonio() {
           onGuardar={handleGuardarManual}
           onEliminar={editManual ? handleEliminarManual : undefined}
           onClose={() => setShowModalManual(false)}
+        />
+      )}
+
+      {showModalFlujo && (
+        <ModalFlujo
+          flujo={editFlujo}
+          onGuardar={handleGuardarFlujo}
+          onEliminar={editFlujo ? () => handleEliminarFlujo(editFlujo.id) : undefined}
+          onClose={() => setShowModalFlujo(false)}
         />
       )}
 

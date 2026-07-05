@@ -4,6 +4,8 @@ import {
 } from 'firebase/firestore';
 import { cargarDecisiones, revisionPendiente, type DecisionPatrimonio } from './patrimonioDecisiones';
 import { cargarUltimaAgenda, type AgendaMacro } from './patrimonioIA';
+import { cargarFlujos, calcRetorno, type FlujoPatrimonio } from './patrimonioFlujos';
+import { cargarUltimasCarteras, cargarMappings, calcBenchmark } from './patrimonioCafci';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import type { Posicion, ActivoFijo, PosicionManual, PatMetrics } from '../types/patrimonio';
@@ -139,12 +141,15 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
   const deltaInv = corrPrev ? M.total - corrPrev.totalInvertibleUsd : null;
   const generadoEn = new Date().toISOString();
 
-  // Cargar análisis IA cacheados, decisiones y agenda macro
-  const [analisisSnap, sectorialSnap, decisiones, agendaMacro] = await Promise.all([
+  // Cargar análisis IA cacheados, decisiones, agenda macro, flujos y carteras CAFCI
+  const [analisisSnap, sectorialSnap, decisiones, agendaMacro, flujos, cafciCarteras, cafciMappings] = await Promise.all([
     getDocs(collection(db, 'analisisPosiciones')),
     getDocs(query(collection(db, 'analisisSectorial'), orderBy('generadoEn', 'desc'), limit(1))),
     cargarDecisiones(),
     cargarUltimaAgenda(),
+    cargarFlujos(),
+    cargarUltimasCarteras(),
+    cargarMappings(),
   ]);
   type AnalisisDoc = { resultado?: Record<string, unknown>; generadoEn?: Timestamp | null; modeloUsado?: string };
   const analisisList = analisisSnap.docs.map(d => ({ ticker: d.id, ...(d.data() as AnalisisDoc) }));
@@ -222,20 +227,33 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
   // 3. Evolución
   content.push(h2('2. Evolución entre corridas'));
   if (historial.length > 1) {
-    content.push(tableOf(['Fecha', 'Total invertible', 'Δ%'],
+    const retorno = (flujos as FlujoPatrimonio[]).length > 0 ? calcRetorno(historial, flujos as FlujoPatrimonio[]) : null;
+    const retornoMap = new Map<string, number>(
+      retorno?.periodos.map(p => [p.fechaHasta, p.retornoPct]) ?? []
+    );
+    const headers = retorno ? ['Fecha', 'Total invertible', 'Δ%', 'Retorno aprox.'] : ['Fecha', 'Total invertible', 'Δ%'];
+    content.push(tableOf(headers,
       historial.map((s, i) => {
         const prev = historial[i + 1];
         const delta = prev ? s.totalInvertibleUsd - prev.totalInvertibleUsd : null;
         const deltaPct = delta !== null && prev!.totalInvertibleUsd > 0
           ? delta / prev!.totalInvertibleUsd : null;
-        return [
+        const rPct = retornoMap.get(s.fechaCorrida);
+        const row: Content[] = [
           { text: fmtFecha(s.fechaCorrida) + (i === 0 ? ' (hoy)' : ''), fontSize: 9 },
           { text: fmtUsd(s.totalInvertibleUsd), fontSize: 9, alignment: 'right' },
-          delta !== null ? { text: (delta >= 0 ? '+' : '') + pct(deltaPct!), color: delta >= 0 ? '#059669' : '#DC2626', fontSize: 9 } : { text: '—', fontSize: 9 },
+          delta !== null ? { text: (delta >= 0 ? '+' : '') + pct(deltaPct!), fontSize: 9, alignment: 'right' } : { text: '—', fontSize: 9 },
         ];
+        if (retorno) row.push(rPct !== undefined ? { text: (rPct >= 0 ? '+' : '') + pct(rPct), fontSize: 9, alignment: 'right' } : { text: '—', fontSize: 9 });
+        return row;
       })
     ));
-    content.push(note('La variación refleja cambio de valor, no retorno: no descuenta aportes ni retiros entre corridas.'));
+    if (retorno) {
+      content.push({ text: `Retorno acumulado (aprox.): ${retorno.acumulado >= 0 ? '+' : ''}${pct(retorno.acumulado)}`, bold: true, fontSize: 9, margin: [0, 2, 0, 2] });
+      content.push(note('Retorno aprox. = Modified Dietz con peso 0,5 (flujo a mitad del período). Δ% = variación de valor bruta.'));
+    } else {
+      content.push(note('La variación refleja cambio de valor, no retorno: no descuenta aportes ni retiros entre corridas.'));
+    }
   } else {
     content.push({ text: 'Solo una corrida registrada. Próxima corrida mostrará evolución.', style: 'note' });
   }
@@ -568,8 +586,42 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
     content.push({ text: res, fontSize: 8, lineHeight: 1.4 });
   }
 
-  // 13. Metodología y límites
-  content.push(pageBreak(), h1('13. Metodología y límites'));
+  // 13. Benchmark vs fondos CAFCI
+  if (cafciCarteras.length > 0) {
+    content.push(pageBreak(), h1('13. Benchmark vs fondos CAFCI'));
+    content.push({ text: `${cafciCarteras.length} fondo${cafciCarteras.length !== 1 ? 's' : ''} · corrida ${cafciCarteras[0]?.fechaDatos ?? '—'}`, style: 'note', margin: [0, 0, 0, 6] });
+    const possPropias = [...posiciones, ...manuales.map(m => ({ ticker: m.ticker, valorUsd: m.valorUsd }))];
+    const { filas, soloenFondos, soloEnPropio } = calcBenchmark(possPropias, cafciCarteras, cafciMappings);
+    const filasEnAmbos = filas.filter(f => f.propioPct !== null && f.fondosAvgPct > 0);
+    if (filasEnAmbos.length > 0) {
+      const fmtPct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%';
+      content.push(tableOf(
+        ['Ticker', 'Propio %', 'Fondos avg %', 'Rango', 'Δ'],
+        filasEnAmbos.map(f => {
+          const delta = (f.propioPct ?? 0) - f.fondosAvgPct;
+          return [
+            { text: f.ticker, fontSize: 9, bold: true },
+            { text: fmtPct(f.propioPct ?? 0), fontSize: 9, alignment: 'right' },
+            { text: fmtPct(f.fondosAvgPct), fontSize: 9, alignment: 'right' },
+            { text: f.fondosMinPct !== f.fondosMaxPct ? `${fmtPct(f.fondosMinPct)}–${fmtPct(f.fondosMaxPct)}` : '—', fontSize: 8, alignment: 'right', color: '#64748b' },
+            { text: (delta > 0 ? '+' : '') + fmtPct(delta), fontSize: 9, alignment: 'right', bold: true, color: Math.abs(delta) > 0.05 ? '#DC2626' : Math.abs(delta) > 0.02 ? '#D97706' : '#64748b' },
+          ];
+        })
+      ));
+    }
+    if (soloenFondos.length > 0) {
+      content.push(h2('En fondos, no en tu cartera'));
+      content.push({ text: soloenFondos.map(f => `${f.ticker} (${(Math.round(f.avgPct * 1000) / 10).toFixed(1)}%)`).join('  ·  '), fontSize: 8.5, margin: [0, 2, 0, 4] });
+    }
+    if (soloEnPropio.length > 0) {
+      content.push(h2('En tu cartera, no en fondos'));
+      content.push({ text: soloEnPropio.join('  ·  '), fontSize: 8.5, margin: [0, 2, 0, 4] });
+    }
+    content.push(note(`Fondos: ${cafciCarteras.map(c => c.nombre).join(', ')}. La divergencia muestra sub/sobrexposición relativa a esos fondos. No es asesoramiento.`));
+  }
+
+  // 14. Metodología y límites
+  content.push(pageBreak(), h1('14. Metodología y límites'));
   const fuentesCorrida = [...new Set(posiciones.map(p => p.fuente).filter(Boolean))];
   content.push({
     ul: [

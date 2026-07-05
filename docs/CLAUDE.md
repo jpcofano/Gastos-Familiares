@@ -130,6 +130,14 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      del banco) o pendiente (reloj / "A pagar"). Sin ítems → "Nada que pagar hoy". Para meses distintos al
      actual → "Ver mes actual para pagos de hoy". `PorDiaSeccion` recibe `checklist: CheckItem[]` y
      `mes: string` como props nuevas desde `ResumenVisual`.
+- F9.55.1 — Dashboard Inicio: "Otras" en "Por categoría" expandible. Tap en "Otras"
+  despliega las categorías agrupadas (las que quedan fuera del top 6), cada una con su
+  estilo normal (barra, monto, %). Cada categoría dentro de "Otras" es a su vez expandible
+  y muestra sus subcategorías, replicando exactamente el patrón de las categorías top.
+  Implementación: `esOtras` flag; `canDrill` de "Otras" usa `catResto.length > 0`;
+  nuevo estado `openOtrasCat: string | null` para la sub-expansión interna; al cerrar
+  "Otras" se resetea `openOtrasCat`. Solo modo Lista — Dona y Treemap sin cambios.
+  Frontend puro. Deploy: `--only hosting`.
 - F9.55 — Dos mejoras: KPIs del Resumen y gráficos del Dashboard.
   1. **KPIs Resumen:** Renombradas "Pesos disponibles" (antes "Disponible (ARS)") y "Falta
      cubrir (USD)" (antes "Resultado (USD)"). La segunda cambia de semántica: ya no es
