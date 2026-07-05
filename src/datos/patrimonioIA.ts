@@ -14,6 +14,7 @@ export type AnalisisPosicion = {
   ticker: string;
   generadoEnISO: string;
   modeloUsado: string;
+  origen?: 'api' | 'chat';
   resultado: {
     queEs?: string;
     situacionActual?: string;
@@ -30,6 +31,7 @@ export type AnalisisSectorial = {
   id: string;
   generadoEnISO: string;
   modeloUsado: string;
+  origen?: 'api' | 'chat';
   resultado: string;
 };
 
@@ -46,6 +48,7 @@ export type AgendaMacro = {
   id: string;
   generadoEnISO: string;
   horizonteDias: number;
+  origen?: 'api' | 'chat';
   eventos: EventoAgenda[];
 };
 
@@ -67,15 +70,23 @@ export async function guardarConfigIA(cfg: ConfigIA): Promise<void> {
 }
 
 // ── Caché de análisis ─────────────────────────────────────────────────────────
+function toISO(data: Record<string, unknown>): string {
+  // Prefiere generadoEnISO (string, escrito por ambos caminos). Fallback a Timestamp.
+  const iso = data.generadoEnISO;
+  if (typeof iso === 'string' && iso) return iso;
+  const ts = data.generadoEn as Timestamp | null;
+  return ts?.toDate?.()?.toISOString() ?? '';
+}
+
 export async function cargarAnalisisPosicion(ticker: string): Promise<AnalisisPosicion | null> {
   const snap = await getDoc(doc(db, 'analisisPosiciones', ticker));
   if (!snap.exists()) return null;
   const data = snap.data();
-  const ts = data.generadoEn as Timestamp | null;
   return {
     ticker,
-    generadoEnISO: ts?.toDate?.()?.toISOString() ?? '',
+    generadoEnISO: toISO(data),
     modeloUsado: (data.modeloUsado as string) ?? '',
+    origen: (data.origen as 'api' | 'chat') ?? undefined,
     resultado: (data.resultado as AnalisisPosicion['resultado']) ?? {},
   };
 }
@@ -84,11 +95,11 @@ export async function cargarTodosLosAnalisis(): Promise<AnalisisPosicion[]> {
   const snap = await getDocs(collection(db, 'analisisPosiciones'));
   return snap.docs.map(d => {
     const data = d.data();
-    const ts = data.generadoEn as Timestamp | null;
     return {
       ticker: d.id,
-      generadoEnISO: ts?.toDate?.()?.toISOString() ?? '',
+      generadoEnISO: toISO(data),
       modeloUsado: (data.modeloUsado as string) ?? '',
+      origen: (data.origen as 'api' | 'chat') ?? undefined,
       resultado: (data.resultado as AnalisisPosicion['resultado']) ?? {},
     };
   });
@@ -101,11 +112,11 @@ export async function cargarUltimoSectorial(): Promise<AnalisisSectorial | null>
   if (snap.empty) return null;
   const d = snap.docs[0];
   const data = d.data();
-  const ts = data.generadoEn as Timestamp | null;
   return {
     id: d.id,
-    generadoEnISO: ts?.toDate?.()?.toISOString() ?? '',
+    generadoEnISO: toISO(data),
     modeloUsado: (data.modeloUsado as string) ?? '',
+    origen: (data.origen as 'api' | 'chat') ?? undefined,
     resultado: (data.resultado as string) ?? '',
   };
 }
@@ -117,11 +128,11 @@ export async function cargarUltimaAgenda(): Promise<AgendaMacro | null> {
   if (snap.empty) return null;
   const d = snap.docs[0];
   const data = d.data();
-  const ts = data.generadoEn as Timestamp | null;
   return {
     id: d.id,
-    generadoEnISO: ts?.toDate?.()?.toISOString() ?? '',
+    generadoEnISO: toISO(data),
     horizonteDias: (data.horizonteDias as number) ?? 45,
+    origen: (data.origen as 'api' | 'chat') ?? undefined,
     eventos: (data.eventos as EventoAgenda[]) ?? [],
   };
 }
@@ -158,4 +169,47 @@ export async function generarAgenda(
   const result = await cargarUltimaAgenda();
   if (!result) throw new Error('Agenda no encontrada tras generación');
   return result;
+}
+
+// ── F9.99: callables chat path ────────────────────────────────────────────────
+export type ModoIA = 'posicion' | 'sectorial' | 'agenda';
+
+export type PromptGenerado = {
+  prompt: string;
+  modo: ModoIA;
+  ticker?: string;
+  generadoEn: string;
+};
+
+export type ImportarResult = {
+  ok: boolean;
+  resumen: string;
+};
+
+const _generarPromptIA = httpsCallable<
+  { modo: ModoIA; ticker?: string; contexto: Record<string, unknown> },
+  PromptGenerado
+>(functions, 'generarPromptIA');
+
+const _importarAnalisisIA = httpsCallable<
+  { modo: ModoIA; ticker?: string; contenido: string },
+  ImportarResult
+>(functions, 'importarAnalisisIA');
+
+export async function generarPromptIA(
+  modo: ModoIA,
+  contexto: Record<string, unknown>,
+  ticker?: string,
+): Promise<PromptGenerado> {
+  const r = await _generarPromptIA({ modo, contexto, ...(ticker ? { ticker } : {}) });
+  return r.data;
+}
+
+export async function importarAnalisisIA(
+  modo: ModoIA,
+  contenido: string,
+  ticker?: string,
+): Promise<ImportarResult> {
+  const r = await _importarAnalisisIA({ modo, contenido, ...(ticker ? { ticker } : {}) });
+  return r.data;
 }

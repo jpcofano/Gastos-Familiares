@@ -162,5 +162,11 @@ service cloud.firestore {
     match /cafciMapping/{id} {
       allow read, write: if esDueno();
     }
+    match /seriesPrecios/{simbolo} {
+      allow read, write: if esDueno();
+    }
+    match /optimizacionPortafolio/{id} {
+      allow read, write: if esDueno();
+    }
   }
 }

@@ -2892,35 +2892,31 @@ export const analizarConIA = onCall(
       .join('')
       .trim();
 
-    let resultado: unknown;
-    if (modo === 'sectorial') {
-      resultado = rawText;
-    } else {
-      // posicion y agenda: JSON esperado
-      const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
-      const rawMatch = rawText.match(/(\{[\s\S]*\})/);
-      const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
-      if (!jsonStr) throw new HttpsError('internal', `Sin JSON en respuesta: ${rawText.slice(0, 200)}`);
-      try { resultado = JSON.parse(jsonStr); }
-      catch { throw new HttpsError('internal', `JSON inválido: ${jsonStr.slice(0, 200)}`); }
+    // extraerResultado: helper compartido con importarAnalisisIA (F9.99)
+    // Se define más abajo en el archivo; se usa aquí por hoisting de function declarations.
+    const resultado = extraerResultado(modo, rawText);
+    if (resultado === null) {
+      throw new HttpsError('internal', `Sin JSON válido en respuesta: ${rawText.slice(0, 200)}`);
     }
 
     const generadoEn = FieldValue.serverTimestamp();
+    const generadoEnISO = new Date().toISOString();
+    const origen = 'api';
 
     if (modo === 'posicion') {
       await db.collection('analisisPosiciones').doc(ticker!).set({
-        ticker, generadoEn, modeloUsado, resultado,
+        ticker, generadoEn, generadoEnISO, modeloUsado, origen, resultado,
       });
       console.log(`[analizarConIA] posicion ${ticker} analizada`);
     } else if (modo === 'agenda') {
       await db.collection('agendaMacro').add({
-        generadoEn, modeloUsado, horizonteDias: 45,
+        generadoEn, generadoEnISO, modeloUsado, origen, horizonteDias: 45,
         eventos: (resultado as { eventos: unknown[] }).eventos ?? [],
       });
       console.log('[analizarConIA] agenda macro generada');
     } else {
       await db.collection('analisisSectorial').add({
-        generadoEn, modeloUsado, resultado,
+        generadoEn, generadoEnISO, modeloUsado, origen, resultado,
       });
       console.log('[analizarConIA] sectorial generado');
     }
@@ -3061,5 +3057,290 @@ export const sincronizarCafci = onCall(
     }
 
     return { sincronizados, pendientesMapeo: [...new Set(pendientesMapeo)].slice(0, 20) };
+  },
+);
+
+// ── F9.98 — Series de precios para optimización de portafolio ─────────────────
+// onCall: obtiene series semanales desde Yahoo Finance y las cachea en
+// seriesPrecios/{simbolo}. Fail-soft por símbolo.
+
+type PuntoPrecio = { fecha: string; cierre: number };
+type SeriePrecios = {
+  simbolo: string;
+  fuente: 'yahoo';
+  moneda: 'USD' | 'ARS';
+  puntos: PuntoPrecio[];
+  actualizadoEn: string;
+};
+
+function semanasARango(semanas: number): string {
+  if (semanas <= 52)  return '1y';
+  if (semanas <= 104) return '2y';
+  return '5y';
+}
+
+async function fetchYahooSerie(simbolo: string, semanas: number): Promise<SeriePrecios | null> {
+  const range = semanasARango(semanas);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?interval=1wk&range=${range}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible)' } });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+
+  let json: Record<string, unknown>;
+  try { json = await res.json() as Record<string, unknown>; }
+  catch { return null; }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = (json as any)?.chart?.result?.[0];
+    if (!result) return null;
+    const timestamps: number[] = result.timestamp ?? [];
+    const adjclose: number[] | undefined = result.indicators?.adjclose?.[0]?.adjclose;
+    const closes: number[] = adjclose ?? result.indicators?.quote?.[0]?.close ?? [];
+    const currency: string = (result.meta?.currency as string) ?? 'USD';
+    const moneda: 'USD' | 'ARS' = currency === 'ARS' ? 'ARS' : 'USD';
+
+    const puntos: PuntoPrecio[] = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      const cierre = closes[i];
+      if (cierre == null || isNaN(cierre) || cierre <= 0) continue;
+      const fecha = new Date(timestamps[i] * 1000).toISOString().slice(0, 10);
+      puntos.push({ fecha, cierre });
+    }
+    if (puntos.length === 0) return null;
+
+    return {
+      simbolo,
+      fuente: 'yahoo',
+      moneda,
+      puntos,
+      actualizadoEn: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export const obtenerSeriesPrecios = onCall(
+  {
+    region: 'southamerica-east1',
+    memory: '256MiB',
+    timeoutSeconds: 120,
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+
+    const { simbolos, semanas } = (request.data ?? {}) as {
+      simbolos?: unknown;
+      semanas?: unknown;
+    };
+
+    if (!Array.isArray(simbolos) || simbolos.length === 0) {
+      throw new HttpsError('invalid-argument', 'simbolos debe ser un array no vacío');
+    }
+    if (simbolos.length > 30) {
+      throw new HttpsError('invalid-argument', 'Máximo 30 símbolos por llamada');
+    }
+    const semanasNum = typeof semanas === 'number' && semanas > 0 ? semanas : 104;
+
+    const db2 = getFirestore();
+    const series: Record<string, SeriePrecios> = {};
+    const faltantes: string[] = [];
+    const ahora = new Date();
+    const SIETE_DIAS_MS = 7 * 24 * 60 * 60 * 1000;
+
+    for (const simbolo of simbolos as string[]) {
+      try {
+        // Verificar caché
+        const cacheDoc = await db2.collection('seriesPrecios').doc(simbolo).get();
+        if (cacheDoc.exists) {
+          const cached = cacheDoc.data() as SeriePrecios;
+          const edad = ahora.getTime() - new Date(cached.actualizadoEn).getTime();
+          if (edad < SIETE_DIAS_MS && cached.puntos?.length > 0) {
+            series[simbolo] = cached;
+            continue;
+          }
+        }
+
+        // Fetch desde Yahoo Finance
+        const serie = await fetchYahooSerie(simbolo, semanasNum);
+        if (!serie) {
+          faltantes.push(simbolo);
+          console.warn(`[obtenerSeriesPrecios] ${simbolo}: sin datos de Yahoo`);
+          continue;
+        }
+
+        // Guardar en caché
+        await db2.collection('seriesPrecios').doc(simbolo).set(serie);
+        series[simbolo] = serie;
+        console.log(`[obtenerSeriesPrecios] ${simbolo}: ${serie.puntos.length} pts (${serie.moneda})`);
+      } catch (err) {
+        faltantes.push(simbolo);
+        console.error(`[obtenerSeriesPrecios] ${simbolo} falló:`, err);
+      }
+    }
+
+    return { series, faltantes };
+  },
+);
+
+// ── F9.99 — Análisis IA vía chat (prompt sin costo, importar respuesta) ────────
+
+// Helper compartido: extrae JSON/markdown de un rawText (usado por analizarConIA y importarAnalisisIA)
+function extraerResultado(modo: 'posicion' | 'sectorial' | 'agenda', rawText: string): unknown {
+  if (modo === 'sectorial') return rawText;
+  // posicion y agenda: JSON esperado
+  const mdJson = rawText.match(/```json\s*([\s\S]*?)\s*```/);
+  const rawJson = rawText.match(/(\{[\s\S]*\})/);
+  const jsonStr = mdJson ? mdJson[1] : (rawJson ? rawJson[1] : null);
+  if (!jsonStr) return null;
+  try { return JSON.parse(jsonStr); }
+  catch { return null; }
+}
+
+export const generarPromptIA = onCall(
+  { region: 'southamerica-east1', memory: '256MiB' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+
+    const { modo, ticker, contexto } = (request.data ?? {}) as {
+      modo?: 'posicion' | 'sectorial' | 'agenda';
+      ticker?: string;
+      contexto?: Record<string, unknown>;
+    };
+
+    if (!modo || !['posicion', 'sectorial', 'agenda'].includes(modo)) {
+      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial" o "agenda"');
+    }
+    if (modo === 'posicion' && !ticker) {
+      throw new HttpsError('invalid-argument', 'ticker requerido para modo posicion');
+    }
+    if (!contexto || typeof contexto !== 'object') {
+      throw new HttpsError('invalid-argument', 'contexto requerido');
+    }
+
+    const promptBase = modo === 'posicion'
+      ? buildPromptPosicion(contexto)
+      : modo === 'agenda'
+        ? buildPromptAgenda(contexto)
+        : buildPromptSectorial(contexto);
+
+    const instrucciones = modo === 'sectorial'
+      ? `\n\n---\nINSTRUCCIONES DE FORMATO (para uso en chat):\n- Usá búsqueda web para verificar datos actuales antes de responder.\n- Respondé ÚNICAMENTE con el análisis dentro de un bloque \`\`\`markdown.\n- Sin texto antes ni después del bloque. Si algún dato no se puede verificar, aclaralo dentro del bloque.`
+      : `\n\n---\nINSTRUCCIONES DE FORMATO (para uso en chat):\n- Usá búsqueda web para verificar datos actuales antes de responder.\n- Respondé ÚNICAMENTE con el JSON pedido, dentro de un bloque \`\`\`json.\n- Sin texto antes ni después del bloque. Sin comentarios dentro del JSON.\n- Si algún dato no se puede verificar, usá null en ese campo; no inventes.`;
+
+    return {
+      prompt: promptBase + instrucciones,
+      modo,
+      ...(ticker ? { ticker } : {}),
+      generadoEn: new Date().toISOString(),
+    };
+  },
+);
+
+// Validación de esquema fail-soft por modo
+function validarResultadoImportado(
+  modo: 'posicion' | 'sectorial' | 'agenda',
+  resultado: unknown
+): string | null {
+  if (modo === 'sectorial') {
+    if (typeof resultado !== 'string' || resultado.length < 200) {
+      return 'El análisis sectorial debe ser un texto de al menos 200 caracteres';
+    }
+    return null;
+  }
+  if (typeof resultado !== 'object' || resultado === null) {
+    return 'Se esperaba un objeto JSON';
+  }
+  const r = resultado as Record<string, unknown>;
+  if (modo === 'posicion') {
+    const reqs = ['queEs', 'situacionActual', 'riesgos', 'rolEnCartera'];
+    const faltantes = reqs.filter(k => !(k in r));
+    if (faltantes.length > 0) return `Campos faltantes: ${faltantes.join(', ')}`;
+  }
+  if (modo === 'agenda') {
+    if (!Array.isArray(r['eventos']) || (r['eventos'] as unknown[]).length === 0) {
+      return 'Se esperaba { eventos: [...] } con al menos un evento';
+    }
+    const evento = (r['eventos'] as Record<string, unknown>[])[0];
+    const reqEv = ['fecha', 'evento', 'driver', 'porQueImporta'];
+    const fEv = reqEv.filter(k => !(k in evento));
+    if (fEv.length > 0) return `Evento sin campos: ${fEv.join(', ')}`;
+  }
+  return null;
+}
+
+export const importarAnalisisIA = onCall(
+  { region: 'southamerica-east1', memory: '256MiB' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+
+    const { modo, ticker, contenido } = (request.data ?? {}) as {
+      modo?: 'posicion' | 'sectorial' | 'agenda';
+      ticker?: string;
+      contenido?: string;
+    };
+
+    if (!modo || !['posicion', 'sectorial', 'agenda'].includes(modo)) {
+      throw new HttpsError('invalid-argument', 'modo inválido');
+    }
+    if (modo === 'posicion' && !ticker) {
+      throw new HttpsError('invalid-argument', 'ticker requerido para modo posicion');
+    }
+    if (typeof contenido !== 'string' || !contenido.trim()) {
+      throw new HttpsError('invalid-argument', 'contenido requerido');
+    }
+
+    const resultado = extraerResultado(modo, contenido);
+    if (resultado === null) {
+      throw new HttpsError('invalid-argument', modo === 'sectorial'
+        ? 'No se encontró bloque ```markdown en el contenido'
+        : 'No se encontró bloque ```json ni objeto JSON en el contenido'
+      );
+    }
+
+    const errorValidacion = validarResultadoImportado(modo, resultado);
+    if (errorValidacion) {
+      throw new HttpsError('invalid-argument', `Validación fallida: ${errorValidacion}`);
+    }
+
+    const db2 = getFirestore();
+    const modeloUsado = 'chat-manual';
+    const origen = 'chat';
+    const generadoEnISO = new Date().toISOString();
+    const generadoEn = FieldValue.serverTimestamp(); // para que orderBy('generadoEn') funcione igual que el camino API
+
+    let resumen: string;
+    if (modo === 'posicion') {
+      await db2.collection('analisisPosiciones').doc(ticker!).set({
+        ticker, generadoEn, generadoEnISO, modeloUsado, origen, resultado,
+      });
+      resumen = `Análisis de ${ticker} importado`;
+    } else if (modo === 'agenda') {
+      const eventos = (resultado as { eventos: unknown[] }).eventos;
+      await db2.collection('agendaMacro').add({
+        generadoEn, generadoEnISO, modeloUsado, origen, horizonteDias: 45,
+        eventos,
+      });
+      resumen = `Agenda con ${eventos.length} eventos importada`;
+    } else {
+      await db2.collection('analisisSectorial').add({
+        generadoEn, generadoEnISO, modeloUsado, origen, resultado,
+      });
+      resumen = `Análisis sectorial importado (${(resultado as string).length} chars)`;
+    }
+
+    console.log(`[importarAnalisisIA] ${modo} ${ticker ?? ''} importado vía chat`);
+    return { ok: true, resumen };
   },
 );

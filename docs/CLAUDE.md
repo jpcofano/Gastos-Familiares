@@ -1045,5 +1045,4 @@ Resumen de sesión de diseño: `docs/patrimonio/RESUMEN-SESION.md`.
 Prompt de extracción: `docs/patrimonio/patrimonio-extraccion.md`.
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
-**Implementado (F9.84):** esqueleto UI (`src/vistas/Patrimonio.tsx`) + motor de métricas determinístico
-en front con datos mock de la foto real. Ingesta .txt, Firestore rules y Functions van en prompts aparte.
+**Implementado hasta F9.99.** Detalle completo en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.

@@ -271,25 +271,24 @@ Implementación en cadena (cada una depende de la anterior):
 - **F9.94** — Diario de decisiones: registro + revisión 30/90 d *(cerrado)*
 - **F9.95** — Calendario de eventos: `proximosEventos` estructurados + `CalendarioCard` en Research + sección 11 PDF *(cerrado)*
 - **F9.95.1** — Agenda macro día por día: modo `agenda` en `analizarConIA`, colección `agendaMacro`, fusión en calendario *(cerrado)*
+- **F9.96** — Aportes/retiros (`flujosPatrimonio`) + retorno real Modified Dietz *(cerrado)*
+- **F9.97** — Benchmark CAFCI: comparación vs fondos ACCIONES_AR / BONOS_SOBERANOS_AR vía `cafciCarteras` *(cerrado)*
+- **F9.98** — Optimización formal de portafolio *(cerrado)*
+  - Yahoo Finance weekly (`query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1wk&range=2y`), caché 7d en `seriesPrecios`
+  - TC: MEP de `tcDiario` como proxy CCL (diferencia <2%); activos AR excluidos con <40 puntos dolarizables
+  - Ledoit-Wolf α=0.2 fijo → mínima varianza (gradiente proyectado) + risk parity (Newton cíclico MRT-2010)
+  - Nueva colección `optimizacionPortafolio`; solapa "Optimización" en Patrimonio.tsx
+  - Funciones: `obtenerSeriesPrecios` onCall; módulo `src/datos/patrimonioOptimizacion.ts` con 4 tests unitarios analíticos
+  - Exploración de fuentes: `docs/patrimonio/f998-fuentes-series.md`
+- **F9.99** — Análisis IA vía chat (sin costo API) *(cerrado)*
+  - `generarPromptIA` onCall: reutiliza builders de `analizarConIA`, agrega instrucciones de formato, sin toggle ni API key
+  - `importarAnalisisIA` onCall: valida esquema, persiste con `origen: 'chat'` + `generadoEn: FieldValue.serverTimestamp()`
+  - Frontend: `ModalPromptChat` (2 pasos: Prompt → Importar); botón "Chat" en `AnalisisIASection` y en Research (sectorial + agenda)
+  - Chip "vía chat" en sectorial y en análisis de posición cuando `origen === 'chat'`
+  - `analizarConIA` refactorizado: `extraerResultado` helper (function declaration, hoisted); escribe `origen: 'api'`
 
-Fases posteriores (en orden):
-- **F9.96 — Registro de aportes/retiros → retorno real (TWR):** recién con
-  3-4 snapshots acumulados; corrige el límite "cambio de valor ≠ retorno".
-- **F9.97 — Benchmark CAFCI:** comparación vs carteras de fondos
-  ACCIONES_AR / BONOS_SOBERANOS_AR (diseño previo ya existente).
-- **F9.98 — Optimización formal de portafolio (POST-CAFCI, decidido):**
-  correlaciones históricas y optimización (mínima varianza / risk parity /
-  frontera). Alcance previsto: obtener series de precios (Yahoo Finance para
-  ACN/GLOB/CEDEARs y cripto; BYMA/Rava para tickers AR), dolarizarlas,
-  calcular matriz de correlaciones y carteras óptimas como UNA VISTA MÁS
-  (propone y mide, no prescribe). **Advertencias documentadas para el
-  implementador:** (a) series AR cortas/sucias y la dolarización mete el
-  ruido del TC en la serie — definir TC de conversión diario (CCL) y
-  ventana; (b) correlaciones inestables en crisis (todo AR → 1): la
-  optimización complementa, NO reemplaza, los escenarios de estrés de F9.91;
-  (c) la frontera con retornos esperados históricos sobrepondera lo que ya
-  subió — preferir métodos sin retornos esperados (mín. varianza / risk
-  parity) o tratar los esperados como input manual del dueño.
+Fases pendientes:
+- Ninguna definida al 05/07/2026. Agregar en la próxima sesión.
 
 ---
 

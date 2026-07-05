@@ -20,9 +20,15 @@ import {
   cargarAnalisisPosicion, cargarTodosLosAnalisis, cargarUltimoSectorial, cargarUltimaAgenda,
   cargarConfigIA, guardarConfigIA,
   normalizarEventoProximo,
+  generarPromptIA, importarAnalisisIA,
   type AnalisisPosicion, type AnalisisSectorial, type ConfigIA,
-  type AgendaMacro, type EventoAgenda,
+  type AgendaMacro, type EventoAgenda, type ModoIA,
 } from '../datos/patrimonioIA';
+import {
+  obtenerSeriesPrecios, calcularOptimizacion, cargarTCRango, dolarizarSerie, correrTests,
+  cargarUltimaOptimizacion, guardarOptimizacion,
+  type ResultadoOptimizacion, type PuntoPrecio,
+} from '../datos/patrimonioOptimizacion';
 import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics } from '../types/patrimonio';
 import {
   cargarFlujos, crearFlujo, actualizarFlujo, eliminarFlujo, calcRetorno,
@@ -1047,8 +1053,13 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
                       if (analizando.has(c.ticker)) return;
                       setAnalizando(prev => { const n = new Set(prev); n.add(c.ticker); return n; });
                       onAnalizar(c.ticker, ctx);
-                      // clear spinner after parent updates cache
                       setTimeout(() => setAnalizando(prev => { const n = new Set(prev); n.delete(c.ticker); return n; }), 30000);
+                    }}
+                    onAbrirChat={(ctx) => {
+                      const onDone = () => cargarAnalisisPosicion(c.ticker).then(a => {
+                        if (a) setAnalisisCache(prev => ({ ...prev, [c.ticker]: a }));
+                      });
+                      setModalPromptChat({ modo: 'posicion', ticker: c.ticker, contexto: ctx, onDone });
                     }}
                   />
                 </div>
@@ -1511,12 +1522,13 @@ function PlanTab({ M, posiciones, decisiones, onRegistrarLibre, onRegistrarDesde
 }
 
 // ── Análisis IA por ticker (dentro del acordeón de Tenencias) ────────────────
-function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, analisis, analizando, configIA, onAnalizar }: {
+function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, analisis, analizando, configIA, onAnalizar, onAbrirChat }: {
   ticker: string; totalUsd: number; totalPortafolio: number; sectorDisp: string;
   analisis: AnalisisPosicion | null;
   analizando: boolean;
   configIA: ConfigIA;
   onAnalizar: (contexto: Record<string, unknown>) => void;
+  onAbrirChat: (contexto: Record<string, unknown>) => void;
 }) {
   const pct = (x: number) => Math.round(x * 100) + '%';
   const contexto = { ticker, sector: sectorDisp, pesoEnCartera: pct(totalUsd / (totalPortafolio || 1)), valorUsd: Math.round(totalUsd) };
@@ -1528,13 +1540,25 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
   return (
     <div style={{ borderTop: '1px solid var(--gf-gray-100)', padding: '10px 14px 10px 22px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: analisis ? 8 : 0 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.3px' }}>
-          Análisis IA
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.3px' }}>
+            Análisis IA
+          </span>
+          {analisis?.origen === 'chat' && (
+            <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--gf-gray-500)', background: 'var(--gf-gray-100)', borderRadius: 4, padding: '1px 5px' }}>vía chat</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {analisis && diasAntiguo !== null && (
             <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)' }}>hace {diasAntiguo}d</span>
           )}
+          <button
+            onClick={() => onAbrirChat(contexto)}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 9px', borderRadius: 8, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 11, fontWeight: 700, cursor: 'pointer', color: 'var(--color-text-sec)', fontFamily: 'var(--font-base)' }}
+          >
+            <Icon name="message-circle" size={10} color="var(--color-text-sec)" />
+            Chat
+          </button>
           <button
             onClick={() => onAnalizar(contexto)}
             disabled={analizando || !configIA.habilitado}
@@ -1700,12 +1724,13 @@ function buildEventosCal(
 }
 
 // ── Card Calendario de eventos ──────────────────────────────────────────────────
-function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGenerarAgenda }: {
+function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGenerarAgenda, onAbrirChatAgenda }: {
   analisisCache: Record<string, AnalisisPosicion>;
   agenda: AgendaMacro | null;
   configIA: ConfigIA;
   generandoAgenda: boolean;
   onGenerarAgenda: () => void;
+  onAbrirChatAgenda?: () => void;
 }) {
   const fmtFechaISO = (iso: string) => {
     const d = iso.slice(0, 10).split('-');
@@ -1730,22 +1755,31 @@ function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGe
             </div>
           )}
         </div>
-        <button
-          onClick={onGenerarAgenda}
-          disabled={generandoAgenda || !configIA.habilitado}
-          title={!configIA.habilitado ? 'Habilitar IA primero' : undefined}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px',
-            borderRadius: 9, border: 'none', flexShrink: 0,
-            background: (!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-200)' : 'var(--color-accent)',
-            color: (!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-400)' : '#fff',
-            fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || generandoAgenda) ? 'default' : 'pointer',
-            fontFamily: 'var(--font-base)',
-          }}
-        >
-          <Icon name="sparkles" size={13} color={(!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-400)' : '#fff'} />
-          {generandoAgenda ? 'Generando…' : agenda ? 'Actualizar agenda' : 'Actualizar agenda macro'}
-        </button>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {onAbrirChatAgenda && (
+            <button onClick={onAbrirChatAgenda}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: 'var(--color-text-sec)', fontFamily: 'var(--font-base)' }}>
+              <Icon name="message-circle" size={12} color="var(--color-text-sec)" />
+              Chat
+            </button>
+          )}
+          <button
+            onClick={onGenerarAgenda}
+            disabled={generandoAgenda || !configIA.habilitado}
+            title={!configIA.habilitado ? 'Habilitar IA primero' : undefined}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px',
+              borderRadius: 9, border: 'none',
+              background: (!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-200)' : 'var(--color-accent)',
+              color: (!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-400)' : '#fff',
+              fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || generandoAgenda) ? 'default' : 'pointer',
+              fontFamily: 'var(--font-base)',
+            }}
+          >
+            <Icon name="sparkles" size={13} color={(!configIA.habilitado || generandoAgenda) ? 'var(--gf-gray-400)' : '#fff'} />
+            {generandoAgenda ? 'Generando…' : agenda ? 'Actualizar agenda' : 'Actualizar agenda macro'}
+          </button>
+        </div>
       </div>
 
       {!tieneEventos && (
@@ -1794,7 +1828,7 @@ function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGe
 }
 
 // ── Solapa Research ───────────────────────────────────────────────────────────
-function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda }: {
+function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda, onAbrirChat }: {
   M: PatMetrics;
   configIA: ConfigIA;
   sectorial: AnalisisSectorial | null;
@@ -1807,12 +1841,20 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
   agenda: AgendaMacro | null;
   generandoAgenda: boolean;
   onGenerarAgenda: () => void;
+  onAbrirChat: (modo: ModoIA, ticker: string | undefined, contexto: Record<string, unknown>) => void;
 }) {
   const fmtFechaISO = (iso: string) => {
     const d = iso.slice(0, 10);
     const [y,m,dd] = d.split('-');
     return `${dd}/${m}/${y}`;
   };
+  const pctStr = (x: number) => Math.round(x * 100) + '%';
+  const ctxSectorial = { bySector: M.bySector, byTipo: M.byTipo, paisAr: pctStr(M.paisAr), total: M.total };
+  const ctxAgenda = (() => {
+    const exp: Record<string, string> = {};
+    for (const [s, v] of Object.entries(M.bySector)) exp[s] = pctStr(v / (M.total || 1));
+    return { exposicion: exp, total: Math.round(M.total), paisAr: pctStr(M.paisAr), cripto: pctStr(M.cripto) };
+  })();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1823,6 +1865,7 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
         configIA={configIA}
         generandoAgenda={generandoAgenda}
         onGenerarAgenda={onGenerarAgenda}
+        onAbrirChatAgenda={() => onAbrirChat('agenda', undefined, ctxAgenda)}
       />
 
       {/* Analizar lote */}
@@ -1860,22 +1903,34 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: sectorial ? 10 : 0 }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Panorama sectorial</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>Panorama sectorial</div>
+              {sectorial?.origen === 'chat' && (
+                <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--gf-gray-500)', background: 'var(--gf-gray-100)', borderRadius: 4, padding: '1px 5px' }}>vía chat</span>
+              )}
+            </div>
             {sectorial && (
               <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
                 {fmtFechaISO(sectorial.generadoEnISO)} · {sectorial.modeloUsado}
               </div>
             )}
           </div>
-          <button
-            onClick={onGenerarSectorial}
-            disabled={generandoSectorial || !configIA.habilitado}
-            title={!configIA.habilitado ? 'Habilitar IA primero' : undefined}
-            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 9, border: 'none', background: (!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: (!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || generandoSectorial) ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
-          >
-            <Icon name="sparkles" size={13} color={(!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-400)' : '#fff'} />
-            {generandoSectorial ? 'Generando…' : sectorial ? 'Regenerar' : 'Generar panorama'}
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => onAbrirChat('sectorial', undefined, ctxSectorial)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: 'var(--color-text-sec)', fontFamily: 'var(--font-base)' }}>
+              <Icon name="message-circle" size={12} color="var(--color-text-sec)" />
+              Chat
+            </button>
+            <button
+              onClick={onGenerarSectorial}
+              disabled={generandoSectorial || !configIA.habilitado}
+              title={!configIA.habilitado ? 'Habilitar IA primero' : undefined}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 9, border: 'none', background: (!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: (!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || generandoSectorial) ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              <Icon name="sparkles" size={13} color={(!configIA.habilitado || generandoSectorial) ? 'var(--gf-gray-400)' : '#fff'} />
+              {generandoSectorial ? 'Generando…' : sectorial ? 'Regenerar' : 'Generar panorama'}
+            </button>
+          </div>
         </div>
         {sectorial ? (
           <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--color-text-sec)', whiteSpace: 'pre-wrap' }}>
@@ -1883,7 +1938,7 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
           </div>
         ) : (
           <div style={{ fontSize: 12, color: 'var(--gf-gray-400)' }}>
-            Sin panorama sectorial generado. Activar IA y presionar "Generar panorama".
+            Sin panorama sectorial generado. Activar IA o usar "Chat".
           </div>
         )}
       </Card>
@@ -2264,15 +2319,387 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
   );
 }
 
+// ── Helper: ticker de portfolio → símbolo Yahoo Finance ──────────────────────
+function toYahooTicker(ticker: string, tipo: string, pais_riesgo: string, _moneda: string): string {
+  if (ticker.includes('-USD') || ticker.endsWith('.BA')) return ticker;
+  if (tipo === 'cripto') return ticker + '-USD';
+  if (pais_riesgo === 'AR') return ticker + '.BA';
+  return ticker;
+}
+
+// ── Solapa Optimización (F9.98) ───────────────────────────────────────────────
+function OptimizacionTab({
+  posiciones, resultado, calculando, error, onCalcular,
+}: {
+  posiciones: Array<{ ticker: string; tipo: string; pais_riesgo: string; moneda_origen: string; valorUsd: number }>;
+  resultado: ResultadoOptimizacion | null;
+  calculando: boolean;
+  error: string | null;
+  onCalcular: (semanas: number, pesoMax: number) => void;
+}) {
+  const [semanas, setSemanas] = useState(104);
+  const [pesoMax, setPesoMax] = useState(0.15);
+  const [showTests, setShowTests] = useState(false);
+  const [testResults, setTestResults] = useState<ReturnType<typeof correrTests> | null>(null);
+
+  const aptas = posiciones.filter(p => ['accion', 'cedear', 'cripto'].includes(p.tipo));
+  const totalUsd = posiciones.reduce((s, p) => s + p.valorUsd, 0) || 1;
+
+  const btn = { padding: '8px 14px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-base)' } as const;
+  const secH = { fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase' as const, letterSpacing: '.4px', marginBottom: 6 };
+  const chip = (text: string, col: string, bg: string) => (
+    <span style={{ fontSize: 10.5, fontWeight: 700, color: col, background: bg, borderRadius: 5, padding: '2px 6px' }}>{text}</span>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+      {/* Advertencias (siempre visible) */}
+      <Card>
+        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={secH}>Límites de esta optimización</div>
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
+            · <strong>Series AR cortas:</strong> el tipo de cambio (MEP) solo cubre ~6 meses. Los activos AR se excluyen hasta acumular ≥40 semanas de TC.
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
+            · <strong>Correlaciones en crisis:</strong> todos los activos AR colapsan a 1 simultáneamente. Esta optimización complementa — no reemplaza — los escenarios de estrés de la solapa Plan.
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
+            · <strong>Sin retornos esperados históricos:</strong> métodos usados (mín. varianza y risk parity) no requieren estimarlos — así se evita sobreponderar lo que ya subió.
+          </div>
+        </div>
+      </Card>
+
+      {/* Parámetros + botón */}
+      <Card>
+        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={secH}>Parámetros</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
+              Ventana:
+              <select value={semanas} onChange={e => setSemanas(Number(e.target.value))}
+                style={{ marginLeft: 6, fontSize: 12, borderRadius: 6, border: '1px solid var(--gf-gray-200)', padding: '3px 6px', background: 'var(--color-surface)', fontFamily: 'var(--font-base)' }}>
+                <option value={52}>52 sem (1 año)</option>
+                <option value={104}>104 sem (2 años)</option>
+                <option value={156}>156 sem (3 años)</option>
+              </select>
+            </label>
+            <label style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
+              Peso máx.:
+              <select value={pesoMax} onChange={e => setPesoMax(Number(e.target.value))}
+                style={{ marginLeft: 6, fontSize: 12, borderRadius: 6, border: '1px solid var(--gf-gray-200)', padding: '3px 6px', background: 'var(--color-surface)', fontFamily: 'var(--font-base)' }}>
+                <option value={0.10}>10%</option>
+                <option value={0.15}>15%</option>
+                <option value={0.20}>20%</option>
+                <option value={0.25}>25%</option>
+                <option value={1.0}>Sin límite</option>
+              </select>
+            </label>
+            <button onClick={() => onCalcular(semanas, pesoMax)} disabled={calculando || aptas.length === 0}
+              style={{ ...btn, background: calculando ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: calculando ? 'var(--gf-gray-400)' : '#fff' }}>
+              <Icon name={calculando ? 'loader' : 'zap'} size={12} color={calculando ? 'var(--gf-gray-400)' : '#fff'} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+              {calculando ? 'Calculando…' : resultado ? 'Recalcular' : 'Calcular optimización'}
+            </button>
+          </div>
+          {error && <div style={{ fontSize: 11.5, color: 'var(--gf-expense)', marginTop: 4 }}>{error}</div>}
+        </div>
+      </Card>
+
+      {/* Posiciones incluibles */}
+      <Card>
+        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={secH}>Posiciones elegibles</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {aptas.map(p => {
+              const sym = toYahooTicker(p.ticker, p.tipo, p.pais_riesgo, p.moneda_origen);
+              const sinSerie = resultado?.sinSerieSuficiente?.includes(sym);
+              return (
+                <span key={p.ticker} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, background: sinSerie ? 'var(--gf-gray-100)' : 'var(--gf-emerald-50, #d1fae5)', borderRadius: 6, padding: '3px 8px', color: sinSerie ? 'var(--gf-gray-400)' : 'var(--gf-emerald)' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: sinSerie ? 'var(--gf-gray-300)' : 'var(--gf-emerald)', flexShrink: 0 }} />
+                  {sym}
+                  {sinSerie && <span style={{ fontSize: 10, color: 'var(--gf-gray-400)' }}>sin serie</span>}
+                </span>
+              );
+            })}
+            {aptas.length === 0 && <span style={{ fontSize: 12, color: 'var(--gf-gray-400)' }}>Sin posiciones elegibles</span>}
+          </div>
+        </div>
+      </Card>
+
+      {resultado && (
+        <>
+          {/* Heatmap de correlaciones */}
+          <Card>
+            <div style={{ padding: '12px 14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={secH}>Matriz de correlaciones</div>
+                <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)' }}>{resultado.semanas} sem · shrinkage α=0.2</span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 40 }} />
+                      {resultado.correlacion.simbolos.map(s => (
+                        <th key={s} style={{ padding: '0 4px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 10, maxWidth: 50, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultado.correlacion.simbolos.map((rowSym, i) => (
+                      <tr key={rowSym}>
+                        <td style={{ fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 10, paddingRight: 6, whiteSpace: 'nowrap' }}>{rowSym}</td>
+                        {resultado.correlacion.matriz[i].map((v, j) => {
+                          const abs = Math.abs(v);
+                          const bg = i === j
+                            ? 'var(--gf-gray-200)'
+                            : `rgba(100,100,100,${(abs * 0.5).toFixed(2)})`;
+                          return (
+                            <td key={j} style={{ background: bg, padding: '4px 6px', textAlign: 'center', borderRadius: 3, border: '1px solid var(--gf-gray-100)' }}>
+                              {i === j ? '—' : v.toFixed(2)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+
+          {/* Carteras propuestas */}
+          <Card>
+            <div style={{ padding: '12px 14px' }}>
+              <div style={secH}>Carteras calculadas vs actual</div>
+              <div style={{ overflowX: 'auto', marginTop: 6 }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--gf-gray-200)' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 11 }}>Activo</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 11 }}>Actual</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 11 }}>Mín. var.</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 11 }}>Risk P.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultado.deltasMinVarianza.map(row => {
+                      const rpPeso = resultado.riskParity.pesos[row.simbolo] ?? 0;
+                      const rpDelta = rpPeso - row.pesoActual;
+                      return (
+                        <tr key={row.simbolo} style={{ borderBottom: '1px solid var(--gf-gray-100)' }}>
+                          <td style={{ padding: '5px 8px', fontWeight: 700 }}>{row.simbolo}</td>
+                          <td style={{ padding: '5px 8px', textAlign: 'right', color: 'var(--color-text-sec)' }}>{(row.pesoActual * 100).toFixed(1)}%</td>
+                          <td style={{ padding: '5px 8px', textAlign: 'right' }}>
+                            <span>{(row.pesoOptimo * 100).toFixed(1)}%</span>
+                            <span style={{ fontSize: 10, marginLeft: 4, color: row.delta > 0.01 ? 'var(--gf-emerald)' : row.delta < -0.01 ? 'var(--color-text-sec)' : 'var(--gf-gray-400)' }}>
+                              {row.delta > 0 ? '+' : ''}{(row.delta * 100).toFixed(1)}pp
+                            </span>
+                          </td>
+                          <td style={{ padding: '5px 8px', textAlign: 'right' }}>
+                            <span>{(rpPeso * 100).toFixed(1)}%</span>
+                            <span style={{ fontSize: 10, marginLeft: 4, color: rpDelta > 0.01 ? 'var(--gf-emerald)' : rpDelta < -0.01 ? 'var(--color-text-sec)' : 'var(--gf-gray-400)' }}>
+                              {rpDelta > 0 ? '+' : ''}{(rpDelta * 100).toFixed(1)}pp
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: '1px solid var(--gf-gray-200)' }}>
+                      <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--gf-gray-400)' }}>Volatilidad (sem.)</td>
+                      <td />
+                      <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 11, color: 'var(--gf-gray-400)' }}>{(resultado.minVarianza.volatilidad * 100).toFixed(2)}%</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 11, color: 'var(--gf-gray-400)' }}>{(resultado.riskParity.volatilidad * 100).toFixed(2)}%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              {resultado.sinSerieSuficiente.length > 0 && (
+                <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {resultado.sinSerieSuficiente.map(s => chip(s + ' sin serie', 'var(--gf-gray-400)', 'var(--gf-gray-100)'))}
+                </div>
+              )}
+              <div style={{ marginTop: 8, fontSize: 10.5, color: 'var(--gf-gray-400)' }}>
+                Cartera calculada (no prescriptiva) · {new Date(resultado.fechaCalculo).toLocaleDateString('es-AR')}
+              </div>
+            </div>
+          </Card>
+
+          {/* Tests unitarios */}
+          <div>
+            <button onClick={() => { setShowTests(!showTests); if (!testResults) setTestResults(correrTests()); }}
+              style={{ ...btn, background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', width: '100%' }}>
+              {showTests ? 'Ocultar tests matemáticos' : 'Verificar tests unitarios del motor'}
+            </button>
+            {showTests && testResults && (
+              <Card>
+                <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {testResults.map(t => (
+                    <div key={t.nombre} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <span style={{ fontSize: 13, lineHeight: 1, marginTop: 1 }}>{t.ok ? '✓' : '✗'}</span>
+                      <div>
+                        <div style={{ fontSize: 11.5, fontWeight: 700 }}>{t.nombre}</div>
+                        <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>{t.detalle}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Modal chat path (F9.99) ────────────────────────────────────────────────────
+function ModalPromptChat({
+  modo, ticker, contexto, onDone, onClose,
+}: {
+  modo: ModoIA;
+  ticker?: string;
+  contexto: Record<string, unknown>;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const [paso, setPaso] = useState<1 | 2>(1);
+  const [promptText, setPromptText] = useState('');
+  const [copiado, setCopiado] = useState(false);
+  const [cargando, setCargando] = useState(false);
+  const [contenido, setContenido] = useState('');
+  const [validando, setValidando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [importado, setImportado] = useState(false);
+  const nombreModo = modo === 'posicion' ? `Posición ${ticker}` : modo === 'sectorial' ? 'Sectorial' : 'Agenda macro';
+
+  useEffect(() => {
+    setCargando(true);
+    setError(null);
+    generarPromptIA(modo, contexto, ticker)
+      .then(r => setPromptText(r.prompt))
+      .catch(e => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setCargando(false));
+  }, []);
+
+  const copiar = () => {
+    navigator.clipboard.writeText(promptText);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
+  };
+
+  const descargar = () => {
+    const nombre = `prompt-ia-${modo}-${ticker || 'general'}-${new Date().toISOString().slice(0, 10)}.txt`;
+    const blob = new Blob([promptText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const validarEImportar = async () => {
+    setValidando(true);
+    setError(null);
+    try {
+      await importarAnalisisIA(modo, contenido, ticker);
+      setImportado(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setValidando(false);
+    }
+  };
+
+  const btn = { padding: '9px 16px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 700, fontFamily: 'var(--font-base)' } as const;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.55)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div style={{ background: 'var(--color-surface)', borderRadius: '18px 18px 0 0', width: '100%', maxWidth: 480, padding: '20px 16px 32px', display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '90dvh', overflow: 'auto' }}>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Analizar vía chat · {nombreModo}</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+            <Icon name="x" size={18} color="var(--color-text-sec)" />
+          </button>
+        </div>
+
+        {/* Selector de paso */}
+        <div style={{ display: 'flex', gap: 4, background: 'var(--gf-gray-100)', borderRadius: 9, padding: 3 }}>
+          {([1, 2] as const).map(p => (
+            <button key={p} onClick={() => setPaso(p)} style={{ flex: 1, padding: '7px 4px', borderRadius: 7, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, background: paso === p ? 'var(--color-surface)' : 'transparent', color: paso === p ? 'var(--color-text)' : 'var(--gf-gray-400)', fontFamily: 'var(--font-base)' }}>
+              Paso {p} · {p === 1 ? 'Prompt' : 'Importar'}
+            </button>
+          ))}
+        </div>
+
+        {paso === 1 && (
+          <>
+            <div style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
+              Pegá este prompt en un chat de Claude (claude.ai). Luego volvé al Paso 2 con la respuesta.
+            </div>
+            {cargando && <div style={{ fontSize: 12, color: 'var(--gf-gray-400)', textAlign: 'center', padding: 16 }}>Generando prompt…</div>}
+            {error && <div style={{ fontSize: 12, color: 'var(--gf-expense)' }}>{error}</div>}
+            {promptText && (
+              <textarea readOnly value={promptText} rows={8}
+                style={{ fontSize: 11.5, borderRadius: 8, border: '1px solid var(--gf-gray-200)', padding: '8px 10px', resize: 'vertical', background: 'var(--gf-gray-50)', fontFamily: 'var(--font-base)', color: 'var(--color-text)' }} />
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={copiar} disabled={!promptText} style={{ ...btn, flex: 1, background: copiado ? 'var(--gf-emerald)' : 'var(--gf-gray-100)', color: copiado ? '#fff' : 'var(--color-text)' }}>
+                <Icon name={copiado ? 'check' : 'copy'} size={12} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                {copiado ? 'Copiado' : 'Copiar'}
+              </button>
+              <button onClick={descargar} disabled={!promptText} style={{ ...btn, flex: 1, background: 'var(--gf-gray-100)', color: 'var(--color-text)' }}>
+                <Icon name="download" size={12} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                Descargar .txt
+              </button>
+            </div>
+            <button onClick={() => setPaso(2)} disabled={!promptText} style={{ ...btn, background: 'var(--color-accent)', color: '#fff' }}>
+              Ir al Paso 2 →
+            </button>
+          </>
+        )}
+
+        {paso === 2 && (
+          <>
+            {importado ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', padding: '12px 0' }}>
+                <span style={{ fontSize: 28 }}>✓</span>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>Análisis importado</div>
+                <button onClick={onDone} style={{ ...btn, background: 'var(--color-accent)', color: '#fff', width: '100%' }}>Cerrar</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
+                  Pegá la respuesta de Claude. Puede incluir los fences {modo === 'sectorial' ? '```markdown' : '```json'} o no.
+                </div>
+                <textarea value={contenido} onChange={e => { setContenido(e.target.value); setError(null); }} rows={8} placeholder={modo === 'sectorial' ? 'Pegar texto aquí…' : 'Pegar JSON aquí…'}
+                  style={{ fontSize: 11.5, borderRadius: 8, border: `1px solid ${error ? 'var(--gf-expense)' : 'var(--gf-gray-200)'}`, padding: '8px 10px', resize: 'vertical', fontFamily: 'var(--font-base)', color: 'var(--color-text)', background: 'var(--color-surface)' }} />
+                {error && <div style={{ fontSize: 11.5, color: 'var(--gf-expense)' }}>{error}</div>}
+                <button onClick={validarEImportar} disabled={!contenido.trim() || validando}
+                  style={{ ...btn, background: validando ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: validando ? 'var(--gf-gray-400)' : '#fff' }}>
+                  {validando ? 'Validando…' : 'Validar e importar'}
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Vista principal ───────────────────────────────────────────────────────────
 const TABS = [
-  ['resumen',   'Resumen'],
-  ['tenencias', 'Tenencias'],
-  ['riesgo',    'Riesgo'],
-  ['plan',      'Plan'],
-  ['benchmark', 'Bench'],
-  ['research',  'Research'],
-  ['config',    'Config'],
+  ['resumen',      'Resumen'],
+  ['tenencias',    'Tenencias'],
+  ['riesgo',       'Riesgo'],
+  ['plan',         'Plan'],
+  ['benchmark',    'Bench'],
+  ['optimizacion', 'Optim'],
+  ['research',     'Research'],
+  ['config',       'Config'],
 ] as const;
 type TabId = typeof TABS[number][0];
 
@@ -2313,6 +2740,19 @@ export default function Patrimonio() {
   const [cafciMappings,      setCafciMappings]      = useState<Record<string, string | null>>({});
   const [sincronizandoCafci, setSincronizandoCafci] = useState(false);
 
+  // F9.98 — Optimización
+  const [optimizacion,          setOptimizacion]          = useState<ResultadoOptimizacion | null>(null);
+  const [calculandoOptimizacion, setCalculandoOptimizacion] = useState(false);
+  const [errorOptimizacion,     setErrorOptimizacion]     = useState<string | null>(null);
+
+  // F9.99 — Modal chat path
+  const [modalPromptChat, setModalPromptChat] = useState<{
+    modo: ModoIA;
+    ticker?: string;
+    contexto: Record<string, unknown>;
+    onDone: () => void;
+  } | null>(null);
+
   const [showIngesta,      setShowIngesta]      = useState(false);
   const [showModalFijo,    setShowModalFijo]    = useState(false);
   const [editFijo,         setEditFijo]         = useState<ActivoFijo | null>(null);
@@ -2332,6 +2772,7 @@ export default function Patrimonio() {
     cargarConfigCafci().then(setConfigCafci);
     cargarUltimasCarteras().then(setCafciCarteras);
     cargarMappings().then(setCafciMappings);
+    cargarUltimaOptimizacion().then(setOptimizacion);
   }, []);
 
   function cargar() {
@@ -2648,6 +3089,70 @@ export default function Patrimonio() {
               onIniciarRevision={(decision, tipo) => setShowModalRevision({ decision, tipo })}
             />
           )}
+          {tab === 'optimizacion' && (
+            <OptimizacionTab
+              posiciones={todasPosiciones}
+              resultado={optimizacion}
+              calculando={calculandoOptimizacion}
+              error={errorOptimizacion}
+              onCalcular={async (semanas, pesoMax) => {
+                setCalculandoOptimizacion(true);
+                setErrorOptimizacion(null);
+                try {
+                  // Derivar símbolos y pesos actuales
+                  const sym = todasPosiciones
+                    .filter(p => ['accion', 'cedear', 'cripto'].includes(p.tipo))
+                    .map(p => toYahooTicker(p.ticker, p.tipo, p.pais_riesgo, p.moneda_origen));
+                  const totalUsd = todasPosiciones.reduce((s, p) => s + p.valorUsd, 0) || 1;
+                  const pesosActuales: Record<string, number> = {};
+                  for (const p of todasPosiciones.filter(p => ['accion','cedear','cripto'].includes(p.tipo))) {
+                    const sym2 = toYahooTicker(p.ticker, p.tipo, p.pais_riesgo, p.moneda_origen);
+                    pesosActuales[sym2] = (pesosActuales[sym2] ?? 0) + (p.valorUsd / totalUsd);
+                  }
+                  const uniqueSym = [...new Set(sym)];
+
+                  const { series: rawSeries, faltantes } = await obtenerSeriesPrecios(uniqueSym, semanas);
+
+                  // Dolarizar series ARS usando tcDiario
+                  const MIN_OBS = 40;
+                  const seriesDolar: Record<string, PuntoPrecio[]> = {};
+                  const excluidos: string[] = [...faltantes];
+
+                  // Calcular rango de fechas necesario
+                  const hasta = new Date().toISOString().slice(0, 10);
+                  const desde = new Date(Date.now() - semanas * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                  let tcByDate: Record<string, number> = {};
+
+                  const tieneARS = Object.values(rawSeries).some(s => s.moneda === 'ARS');
+                  if (tieneARS) {
+                    tcByDate = await cargarTCRango(desde, hasta);
+                  }
+
+                  for (const [s, serie] of Object.entries(rawSeries)) {
+                    if (serie.moneda === 'USD') {
+                      seriesDolar[s] = serie.puntos;
+                    } else {
+                      const { puntos: dolarizados, excluir } = dolarizarSerie(serie.puntos, tcByDate, MIN_OBS);
+                      if (excluir) {
+                        excluidos.push(s);
+                      } else {
+                        seriesDolar[s] = dolarizados;
+                      }
+                    }
+                  }
+
+                  const resultado = calcularOptimizacion(seriesDolar, pesosActuales, semanas, pesoMax, MIN_OBS);
+                  resultado.sinSerieSuficiente = [...new Set([...resultado.sinSerieSuficiente, ...excluidos])];
+                  await guardarOptimizacion(resultado);
+                  setOptimizacion(resultado);
+                } catch (e) {
+                  setErrorOptimizacion(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setCalculandoOptimizacion(false);
+                }
+              }}
+            />
+          )}
           {tab === 'research'  && (
             <ResearchTab
               M={M}
@@ -2662,6 +3167,18 @@ export default function Patrimonio() {
               agenda={agenda}
               generandoAgenda={generandoAgenda}
               onGenerarAgenda={handleGenerarAgenda}
+              onAbrirChat={(modo, ticker, contexto) => {
+                const onDone = () => {
+                  if (modo === 'sectorial') cargarUltimoSectorial().then(setSectorial);
+                  if (modo === 'agenda') cargarUltimaAgenda().then(setAgenda);
+                  if (modo === 'posicion' && ticker) {
+                    cargarAnalisisPosicion(ticker).then(a => {
+                      if (a) setAnalisisCache(prev => ({ ...prev, [ticker]: a }));
+                    });
+                  }
+                };
+                setModalPromptChat({ modo, ticker, contexto, onDone });
+              }}
             />
           )}
           {tab === 'config' && (
@@ -2745,6 +3262,16 @@ export default function Patrimonio() {
             handleAgregarRevision(showModalRevision.decision.id, showModalRevision.tipo, notas, metricas)
           }
           onClose={() => setShowModalRevision(null)}
+        />
+      )}
+
+      {modalPromptChat && (
+        <ModalPromptChat
+          modo={modalPromptChat.modo}
+          ticker={modalPromptChat.ticker}
+          contexto={modalPromptChat.contexto}
+          onDone={() => { modalPromptChat.onDone(); setModalPromptChat(null); }}
+          onClose={() => setModalPromptChat(null)}
         />
       )}
     </div>
