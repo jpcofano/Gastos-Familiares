@@ -41,6 +41,7 @@ nunca ordena ni dispara alarmas. Las decisiones las toma el usuario.
 - **Filosofía:** proponer, medir y mostrar riesgos. Nunca prescribir **incondicionalmente**.
   La guía por casos (condición → opciones → costo) es el formato permitido de acción; la decisión la toma siempre el titular.
   Los semáforos son resumen visual de dónde se concentra el riesgo, no alarmas.
+  El diario registra y contrasta decisiones; nunca las puntúa — la revisión es del dueño.
 
 ---
 
@@ -156,9 +157,12 @@ Nunca legibles por dependientes. Nunca referencian colecciones de gastos.
 
 1. **Tenencias** — consolidadas por ticker, con desglose por cuenta al expandir; ninguna tenencia queda oculta (regla: agrupación visible, nunca agrupación que esconde).
 2. **Concentración / foto** — con semáforos (ver bandas).
-3. **Rebalanceo** — menú de opciones medidas + riesgos de cada una
-   (no una recomendación única).
-4. **Research sectorial** — informe de juicio (nacional + internacional).
+3. **Rebalanceo / Plan** — menú de opciones medidas + riesgos de cada una
+   (no una recomendación única); incluye **Diario de decisiones** (F9.94):
+   registro con snapshot de métricas al crear, revisión a 30/90 días con
+   tabla entonces→hoy. El diario registra y contrasta; nunca puntúa —
+   la revisión es del dueño.
+4. **Research sectorial** — informe de juicio (nacional + internacional); incluye **Calendario de eventos** (F9.95/F9.95.1): línea de tiempo fusionada con eventos por posición (chip ticker) + agenda macro día por día (chip driver: CER/Tarifas/Fed/etc.) generada por IA con botón manual. Análisis con caché cargado al montar.
 5. **Configuración** — posiciones manuales, activos fijos, toggle IA; futuras: actualización de precios de referencia (capa informativa, nunca pisa la corrida) y ajustes manuales trazables entre corridas.
 6. **Benchmark vs CAFCI** — al final (fase diferida).
 
@@ -264,12 +268,11 @@ Implementación en cadena (cada una depende de la anterior):
 - **F9.93** — Análisis IA por posición + sectorial (toggle, caché, lote) *(cerrado)*
 - **F9.93.1** — Wording condicional: `queHariaEnCadaCaso` en prompts + UI mini-cards *(cerrado)*
 - **F9.93.2** — Solapa Configuración + cosmética Resumen/hero + fix Storage *(cerrado)*
+- **F9.94** — Diario de decisiones: registro + revisión 30/90 d *(cerrado)*
+- **F9.95** — Calendario de eventos: `proximosEventos` estructurados + `CalendarioCard` en Research + sección 11 PDF *(cerrado)*
+- **F9.95.1** — Agenda macro día por día: modo `agenda` en `analizarConIA`, colección `agendaMacro`, fusión en calendario *(cerrado)*
 
 Fases posteriores (en orden):
-- **F9.94 — Diario de decisiones:** registrar decisión (fecha, razón, opción
-  de referencia) y revisión a 30/90 días contra la evolución de las métricas.
-- **F9.95 — Calendario de eventos:** agregación de `proximosEventos` de los
-  análisis IA cacheados en una línea de tiempo única.
 - **F9.96 — Registro de aportes/retiros → retorno real (TWR):** recién con
   3-4 snapshots acumulados; corrige el límite "cambio de valor ≠ retorno".
 - **F9.97 — Benchmark CAFCI:** comparación vs carteras de fondos
@@ -294,7 +297,7 @@ Fases posteriores (en orden):
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.
 - Unidad = familia como una entidad; se mide el total.
-- Filosofía proponer/medir/mostrar, no alarmas.
+- Filosofía proponer/medir/mostrar, no alarmas. El diario registra y contrasta; nunca puntúa.
 - Vista privada dentro de la app; datos aislados; sin puente con gastos.
 - Ingesta: ventana de chat → `.txt` JSON → app valida/carga. No auto-ingesta,
   no parser por bróker, no online en la app.
