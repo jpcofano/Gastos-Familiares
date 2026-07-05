@@ -156,6 +156,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
   const tc = d.tc;
   const [compartirInfo, setCompartirInfo] = useState(false);
   const [openCatMes, setOpenCatMes] = useState<string | null>(null);
+  const [openOtrasCat, setOpenOtrasCat] = useState<string | null>(null);
   const [zoomCat, setZoomCat] = useState<string | null>(null);
   // F9.55 — tipo de gráfico persiste en localStorage
   const [tipoGrafico, setTipoGraficoState] = useState<'lista' | 'dona' | 'treemap'>(() =>
@@ -278,12 +279,16 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
               {catLista.map(c => {
                 const isOpenMes = openCatMes === c.nombre;
-                const canDrill = (c.subs?.length ?? 0) > 0;
-                const maxSubUsd = canDrill ? Math.max(...c.subs.map(x => x.usd)) : 1;
+                const esOtras = c.nombre === 'Otras';
+                const canDrill = esOtras ? catResto.length > 0 : (c.subs?.length ?? 0) > 0;
+                const maxSubUsd = canDrill && !esOtras ? Math.max(...c.subs.map(x => x.usd)) : 1;
                 return (
                   <div key={c.nombre}>
                     <div
-                      onClick={canDrill ? () => setOpenCatMes(isOpenMes ? null : c.nombre) : undefined}
+                      onClick={canDrill ? () => {
+                        if (esOtras && isOpenMes) setOpenOtrasCat(null);
+                        setOpenCatMes(isOpenMes ? null : c.nombre);
+                      } : undefined}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4, cursor: canDrill ? 'pointer' : 'default' }}
                     >
                       <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
@@ -295,7 +300,52 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                     <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${c.pct}%`, background: c.color, borderRadius: 3 }} />
                     </div>
-                    {isOpenMes && canDrill && (
+                    {/* Expansión de "Otras": muestra cada categoría del resto con su propio drill */}
+                    {isOpenMes && esOtras && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 9, margin: '8px 0 2px 17px' }}>
+                        {catResto.map(cat => {
+                          const isCatOpen = openOtrasCat === cat.nombre;
+                          const catCanDrill = (cat.subs?.length ?? 0) > 0;
+                          const catMaxSubUsd = catCanDrill ? Math.max(...cat.subs.map(x => x.usd)) : 1;
+                          return (
+                            <div key={cat.nombre}>
+                              <div
+                                onClick={catCanDrill ? () => setOpenOtrasCat(isCatOpen ? null : cat.nombre) : undefined}
+                                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4, cursor: catCanDrill ? 'pointer' : 'default' }}
+                              >
+                                <span style={{ width: 9, height: 9, borderRadius: 3, background: cat.color, flexShrink: 0 }} />
+                                <span style={{ fontWeight: 600 }}>{cat.nombre}</span>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 6px' }}>{cat.pct === 0 && cat.usd > 0 ? '<1%' : `${cat.pct}%`}</span>
+                                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(cat.usd, cur, tc)}</span>
+                                {catCanDrill && <Icon name={isCatOpen ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />}
+                              </div>
+                              <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${cat.pct}%`, background: cat.color, borderRadius: 3 }} />
+                              </div>
+                              {isCatOpen && catCanDrill && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 7, margin: '8px 0 2px 17px' }}>
+                                  {cat.subs.map(s => {
+                                    const sPct = d.salidasUsd > 0 ? Math.round((s.usd / d.salidasUsd) * 100) : 0;
+                                    return (
+                                      <div key={s.nombre} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ width: 84, flexShrink: 0, fontSize: 11.5, color: 'var(--color-text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.nombre}</span>
+                                        <div style={{ flex: 1, height: 5, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
+                                          <div style={{ height: '100%', width: `${Math.max((s.usd / catMaxSubUsd) * 100, 5)}%`, background: cat.color, opacity: 0.6, borderRadius: 3 }} />
+                                        </div>
+                                        <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc)}</span>
+                                        <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{sPct === 0 && s.usd > 0 ? '<1%' : `${sPct}%`}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Expansión normal de categorías top: muestra subcategorías */}
+                    {isOpenMes && !esOtras && canDrill && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 7, margin: '8px 0 2px 17px' }}>
                         {c.subs.map(s => {
                           const sPct = d.salidasUsd > 0 ? Math.round((s.usd / d.salidasUsd) * 100) : 0;
