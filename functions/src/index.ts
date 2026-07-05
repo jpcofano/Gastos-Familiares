@@ -2751,7 +2751,9 @@ Respondé ÚNICAMENTE con un JSON válido (sin markdown, sin texto antes ni desp
   "situacionActual": "3-5 frases con lo relevante HOY (resultados, regulación, precio vs historia) — usá web_search para información reciente",
   "riesgos": ["3 a 5 riesgos específicos de ESTE papel, concretos"],
   "rolEnCartera": "1-3 frases usando el contexto provisto: peso, con qué otras posiciones comparte driver, qué le aporta o concentra",
-  "proximosEventos": ["cupones, vencimientos, resultados, revisiones tarifarias con fecha aproximada si se conoce"],
+  "proximosEventos": [
+    { "cuando": "YYYY-MM-DD o YYYY-MM (null si no hay fecha conocida)", "evento": "descripción corta del evento" }
+  ],
   "queHariaEnCadaCaso": [
     {
       "caso": "condición observable y concreta (ej: 'si la revisión tarifaria sale desfavorable')",
@@ -2791,6 +2793,43 @@ REGLAS INNEGOCIABLES:
 - Si no hay info confiable, decirlo.`;
 }
 
+function buildPromptAgenda(contexto: Record<string, unknown>): string {
+  return `Sos un analista financiero especialista en mercados argentinos e internacionales. Armás la agenda de eventos macro y de mercado de los próximos 45 días relevantes PARA ESTA CARTERA.
+
+COMPOSICIÓN DE LA CARTERA (exposición por driver):
+${JSON.stringify(contexto, null, 2)}
+
+Devolvé EXCLUSIVAMENTE un JSON con esta estructura:
+{
+  "eventos": [
+    {
+      "fecha": "YYYY-MM-DD",
+      "evento": "descripción corta (max 80 chars)",
+      "driver": "cer_pesos|soberano|tasas_ar|tasas_global|cripto|energia_ar|tech_global|resultados|impositivo|otro",
+      "porQueImporta": "1 frase ligada a la cartera"
+    }
+  ]
+}
+
+CHECKLIST DE COBERTURA — barré estas categorías según la exposición:
+- cer_pesos: IPC INDEC (mensual ~día 10-14), REM BCRA (inicios de mes), IPC-CABA como anticipo.
+- tasas_ar: decisiones de tasa BCRA; licitaciones del Tesoro (quincenales).
+- soberano: cupones de Globales GD (9-ene / 9-jul), Bopreales; dato fiscal mensual; vencimientos relevantes.
+- energia_ar: audiencias/resoluciones tarifarias ENRE-ENARGAS; ajustes mensuales; producción Vaca Muerta; reuniones OPEP+.
+- resultados: earnings de empresas EN CARTERA (AR: PAMP, YPFD, VIST, TRAN, TGSU2, CEPU, BMA, GGAL, TXAR; global: ACN, GLOB, CVX, VZ, B) — fecha confirmada o estimada.
+- tasas_global: FOMC (+dot plot), CPI EE.UU.; empleo como secundario.
+- cripto: upgrades programados de Ethereum; hitos regulatorios con fecha; vencimientos trimestrales de derivados.
+- impositivo: vencimientos y anticipos de Bienes Personales y Ganancias (AR).
+
+REGLAS INNEGOCIABLES:
+- Español rioplatense.
+- Usá web_search para verificar fechas reales del calendario económico. Máx 5 búsquedas.
+- Si no podés confirmar la fecha, poné "fecha": null y aclaralo en el evento — NO inventar fechas.
+- Sin recomendaciones de compra/venta.
+- Solo los próximos 45 días desde hoy.
+- Priorizá por exposición: los drivers con mayor % en cartera van primero.`;
+}
+
 export const analizarConIA = onCall(
   {
     region:         'southamerica-east1',
@@ -2812,13 +2851,13 @@ export const analizarConIA = onCall(
     }
 
     const { modo, ticker, contexto } = (request.data ?? {}) as {
-      modo?: 'posicion' | 'sectorial';
+      modo?: 'posicion' | 'sectorial' | 'agenda';
       ticker?: string;
       contexto?: Record<string, unknown>;
     };
 
-    if (!modo || !['posicion', 'sectorial'].includes(modo)) {
-      throw new HttpsError('invalid-argument', 'modo debe ser "posicion" o "sectorial"');
+    if (!modo || !['posicion', 'sectorial', 'agenda'].includes(modo)) {
+      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial" o "agenda"');
     }
     if (modo === 'posicion' && !ticker) {
       throw new HttpsError('invalid-argument', 'ticker requerido para modo posicion');
@@ -2832,13 +2871,18 @@ export const analizarConIA = onCall(
 
     const systemPrompt = modo === 'posicion'
       ? buildPromptPosicion(contexto)
-      : buildPromptSectorial(contexto);
+      : modo === 'agenda'
+        ? buildPromptAgenda(contexto)
+        : buildPromptSectorial(contexto);
+
+    const maxWebSearch = modo === 'agenda' ? 5 : 3;
+    const maxTokens    = modo === 'posicion' ? 1500 : modo === 'agenda' ? 4000 : 3000;
 
     const response = await client.messages.create({
       model: modeloUsado,
-      max_tokens: modo === 'posicion' ? 1500 : 3000,
+      max_tokens: maxTokens,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }] as any,
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: maxWebSearch }] as any,
       messages: [{ role: 'user', content: systemPrompt }],
     });
 
@@ -2849,15 +2893,16 @@ export const analizarConIA = onCall(
       .trim();
 
     let resultado: unknown;
-    if (modo === 'posicion') {
+    if (modo === 'sectorial') {
+      resultado = rawText;
+    } else {
+      // posicion y agenda: JSON esperado
       const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
       const rawMatch = rawText.match(/(\{[\s\S]*\})/);
       const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
       if (!jsonStr) throw new HttpsError('internal', `Sin JSON en respuesta: ${rawText.slice(0, 200)}`);
       try { resultado = JSON.parse(jsonStr); }
       catch { throw new HttpsError('internal', `JSON inválido: ${jsonStr.slice(0, 200)}`); }
-    } else {
-      resultado = rawText;
     }
 
     const generadoEn = FieldValue.serverTimestamp();
@@ -2867,6 +2912,12 @@ export const analizarConIA = onCall(
         ticker, generadoEn, modeloUsado, resultado,
       });
       console.log(`[analizarConIA] posicion ${ticker} analizada`);
+    } else if (modo === 'agenda') {
+      await db.collection('agendaMacro').add({
+        generadoEn, modeloUsado, horizonteDias: 45,
+        eventos: (resultado as { eventos: unknown[] }).eventos ?? [],
+      });
+      console.log('[analizarConIA] agenda macro generada');
     } else {
       await db.collection('analisisSectorial').add({
         generadoEn, modeloUsado, resultado,

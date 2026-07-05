@@ -6,6 +6,10 @@ import {
 import { db, functions } from '../firebase';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
+export type EventoProximo =
+  | { cuando: string | null; evento: string }  // formato estructurado (F9.95+)
+  | string;                                     // retrocompat: string suelto
+
 export type AnalisisPosicion = {
   ticker: string;
   generadoEnISO: string;
@@ -15,7 +19,7 @@ export type AnalisisPosicion = {
     situacionActual?: string;
     riesgos?: string[];
     rolEnCartera?: string;
-    proximosEventos?: string[];
+    proximosEventos?: EventoProximo[];
     queHariaEnCadaCaso?: { caso: string; acciones: string[]; costo: string }[];
     senalesAVigilar?: string[];
     fuentes?: string[];
@@ -30,6 +34,26 @@ export type AnalisisSectorial = {
 };
 
 export type ConfigIA = { habilitado: boolean };
+
+export type EventoAgenda = {
+  fecha: string | null;
+  evento: string;
+  driver: string;
+  porQueImporta: string;
+};
+
+export type AgendaMacro = {
+  id: string;
+  generadoEnISO: string;
+  horizonteDias: number;
+  eventos: EventoAgenda[];
+};
+
+// Helper: normaliza un EventoProximo al formato estructurado
+export function normalizarEventoProximo(e: EventoProximo): { cuando: string | null; evento: string } {
+  if (typeof e === 'string') return { cuando: null, evento: e };
+  return e;
+}
 
 // ── Config ────────────────────────────────────────────────────────────────────
 export async function cargarConfigIA(): Promise<ConfigIA> {
@@ -86,9 +110,25 @@ export async function cargarUltimoSectorial(): Promise<AnalisisSectorial | null>
   };
 }
 
+export async function cargarUltimaAgenda(): Promise<AgendaMacro | null> {
+  const snap = await getDocs(
+    query(collection(db, 'agendaMacro'), orderBy('generadoEn', 'desc'), limit(1))
+  );
+  if (snap.empty) return null;
+  const d = snap.docs[0];
+  const data = d.data();
+  const ts = data.generadoEn as Timestamp | null;
+  return {
+    id: d.id,
+    generadoEnISO: ts?.toDate?.()?.toISOString() ?? '',
+    horizonteDias: (data.horizonteDias as number) ?? 45,
+    eventos: (data.eventos as EventoAgenda[]) ?? [],
+  };
+}
+
 // ── Callable wrapper ──────────────────────────────────────────────────────────
 const _analizarConIA = httpsCallable<
-  { modo: 'posicion' | 'sectorial'; ticker?: string; contexto: Record<string, unknown> },
+  { modo: 'posicion' | 'sectorial' | 'agenda'; ticker?: string; contexto: Record<string, unknown> },
   { ok: boolean; resultado: unknown }
 >(functions, 'analizarConIA');
 
@@ -108,5 +148,14 @@ export async function analizarSectorial(
   await _analizarConIA({ modo: 'sectorial', contexto });
   const result = await cargarUltimoSectorial();
   if (!result) throw new Error('Sectorial no encontrado tras generación');
+  return result;
+}
+
+export async function generarAgenda(
+  contexto: Record<string, unknown>,
+): Promise<AgendaMacro> {
+  await _analizarConIA({ modo: 'agenda', contexto });
+  const result = await cargarUltimaAgenda();
+  if (!result) throw new Error('Agenda no encontrada tras generación');
   return result;
 }
