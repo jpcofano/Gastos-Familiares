@@ -1008,6 +1008,226 @@ const TIPOLINEA_VALIDOS = new Set([
   'consumo', 'cuota', 'impuesto', 'reintegro_percepcion', 'bonificacion', 'reverso',
 ]);
 
+// F9.99.5 — infra = fallos de red/API/Storage; parsing = respuesta malformada del modelo.
+function clasificarTipoError(msg: string): 'infra' | 'parsing' {
+  if (
+    msg.includes('stop_reason') ||
+    msg.includes('Sin JSON') ||
+    msg.includes('JSON inv') ||
+    msg.includes('Estructura incompleta')
+  ) return 'parsing';
+  return 'infra';
+}
+
+async function procesarResumenTarjeta(
+  snapId: string,
+  ref: FirebaseFirestore.DocumentReference,
+  data: FirebaseFirestore.DocumentData,
+): Promise<void> {
+  try {
+    const refStorage = data.refStoragePdf as string;
+    if (!refStorage) throw new Error('refStoragePdf ausente');
+
+    const [fileBytes] = await storage.bucket().file(refStorage).download();
+    if (!fileBytes || fileBytes.length === 0) throw new Error('Archivo vacío en Storage');
+
+    const base64  = fileBytes.toString('base64');
+    const banco   = (data.banco   as string) || '';
+    const tarjeta = (data.tarjeta as string) || '';
+    const prompt  = buildResumenTarjetaPrompt(banco, tarjeta);
+
+    const client = new Anthropic({ apiKey: anthropicKey.value() });
+    const stream = client.messages.stream({
+      model:      'claude-sonnet-4-6',
+      max_tokens: 32000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 } },
+          { type: 'text'     as const, text: prompt },
+        ],
+      }],
+    });
+
+    const finalMessage = await stream.finalMessage();
+    if (finalMessage.stop_reason !== 'end_turn') {
+      throw new Error(
+        `Respuesta incompleta (stop_reason: ${finalMessage.stop_reason}) — JSON truncado; ` +
+        `tokens usados: ${finalMessage.usage?.output_tokens ?? '?'}`,
+      );
+    }
+
+    const rawText = finalMessage.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map(b => b.text)
+      .join('')
+      .trim();
+
+    const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
+    const rawMatch = rawText.match(/(\{[\s\S]*\})/);
+    const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
+    if (!jsonStr) throw new Error(`Sin JSON en la respuesta (500c): ${rawText.slice(0, 500)}`);
+
+    let parsed: { resumen: Record<string, unknown>; movimientos: MovimientoRaw[] };
+    try {
+      parsed = JSON.parse(sanitizarJson(jsonStr));
+    } catch {
+      throw new Error(`JSON inválido (500c): ${jsonStr.slice(0, 500)}`);
+    }
+
+    if (!parsed.resumen || !Array.isArray(parsed.movimientos)) {
+      throw new Error('Estructura incompleta: falta resumen o movimientos');
+    }
+
+    const resumen    = parsed.resumen;
+    const movsBrutos = parsed.movimientos;
+
+    // Resolver tarjetaCodigo en capas (cada capa necesita match único; si hay ambigüedad baja)
+    const configSnap   = await db.collection('config').doc('familia').get();
+    const tarjetasConf = ((configSnap.data()?.tarjetas ?? []) as Array<{
+      codigo: string; banco: string; tipo: string; titular?: string;
+      numeroCuenta?: string; ultimos4?: string[];
+    }>);
+    const numeroCuentaExtraido = (resumen.numeroCuenta as string | null) ?? null;
+    const ultimos4Extraido      = (resumen.ultimos4     as string | null) ?? null;
+    const bancoRes              = (resumen.banco         as string) || banco;
+    const tarjetaRes            = (resumen.tarjeta       as string) || tarjeta;
+    const titularExtraido       = (resumen.titular       as string | null) ?? null;
+
+    let tarjetaCodigoResuelto: string | null = null;
+
+    // Capa 1: numeroCuenta exacto (único match)
+    if (!tarjetaCodigoResuelto && numeroCuentaExtraido) {
+      const m = tarjetasConf.filter(t => t.numeroCuenta === numeroCuentaExtraido);
+      if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
+    }
+    // Capa 2: ultimos4 exacto (único match) — ancla fallback; el array cubre titular + adicionales
+    if (!tarjetaCodigoResuelto && ultimos4Extraido) {
+      const m = tarjetasConf.filter(t => t.ultimos4?.includes(ultimos4Extraido));
+      if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
+    }
+    // Capa 3: banco + tipo (solo si EXACTAMENTE una tarjeta)
+    if (!tarjetaCodigoResuelto) {
+      const m = tarjetasConf.filter(t => t.banco === bancoRes && t.tipo === tarjetaRes);
+      if (m.length === 1) {
+        tarjetaCodigoResuelto = m[0].codigo;
+      } else if (m.length > 1 && titularExtraido) {
+        // Capa 4: desempate por titular (nombre del PDF vs titular en config)
+        const normStr = (s: string) =>
+          s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+        const normTitular = normStr(titularExtraido);
+        const byTitular = m.filter(t => t.titular && normTitular.includes(normStr(t.titular)));
+        if (byTitular.length === 1) tarjetaCodigoResuelto = byTitular[0].codigo;
+      }
+    }
+
+    const estadoFinal = tarjetaCodigoResuelto ? 'parseado' : 'requiere_tarjeta';
+
+    const movimientosParseados = movsBrutos.map((m, i) => ({
+      seq:               typeof m.seq === 'number' ? m.seq : i + 1,
+      tipoLinea:         TIPOLINEA_VALIDOS.has(m.tipoLinea ?? '') ? m.tipoLinea : 'consumo',
+      fechaConsumo:      m.fechaConsumo  ?? null,
+      descripcionRaw:    m.descripcionRaw ?? '',
+      nroCupon:          m.nroCupon      ?? '',
+      cuotaActual:       m.cuotaActual   ?? 1,
+      cuotaTotal:        m.cuotaTotal    ?? 1,
+      moneda:            m.moneda === 'USD' ? 'USD' : 'ARS',
+      monto:             Math.abs(m.monto ?? 0),
+      personaDetectada:  m.personaDetectada ?? '',
+      esBonificacion:    m.esBonificacion   ?? false,
+      esReverso:         m.esReverso         ?? false,
+      esImpuesto:        m.esImpuesto        ?? false,
+      personaConfirmada: null,
+      categoria:         null,
+      subcategoria:      null,
+      incluir:           true,
+    }));
+
+    const fechaCierreStr = resumen.fechaCierre as string | null;
+    const periodo = fechaCierreStr ? fechaCierreStr.slice(0, 7) : (data.periodo as string) || '';
+
+    // Guard de duplicados: buscar otro doc confirmado/parseado con el mismo nroResumen
+    // (fallback: misma tarjeta + fechaCierre). Un reintento tardío nunca duplica en silencio.
+    const nroRes: string | null = (resumen.nroResumen as string | null) ?? null;
+    let duplicadoDe: string | null = null;
+    {
+      let dupDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+      if (nroRes) {
+        const s = await db.collection('resumenesTarjeta')
+          .where('nroResumen', '==', nroRes)
+          .limit(5)
+          .get();
+        dupDocs = s.docs.filter(d =>
+          d.id !== snapId &&
+          (d.data().estado === 'parseado' || d.data().estado === 'confirmado'),
+        );
+      } else if (tarjetaCodigoResuelto && fechaCierreStr) {
+        const s = await db.collection('resumenesTarjeta')
+          .where('tarjetaCodigo', '==', tarjetaCodigoResuelto)
+          .where('fechaCierre', '==', fechaCierreStr)
+          .limit(5)
+          .get();
+        dupDocs = s.docs.filter(d =>
+          d.id !== snapId &&
+          (d.data().estado === 'parseado' || d.data().estado === 'confirmado'),
+        );
+      }
+      if (dupDocs.length > 0) duplicadoDe = dupDocs[0].id;
+    }
+
+    if (duplicadoDe) {
+      await ref.update({
+        estado:        'duplicado',
+        duplicadoDe,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      console.log(`[procesarResumenTarjeta] ${snapId} → duplicado de ${duplicadoDe}`);
+      return;
+    }
+
+    await ref.update({
+      estado:              estadoFinal,
+      tarjetaCodigo:       tarjetaCodigoResuelto,
+      nroResumen:          resumen.nroResumen         ?? null,
+      titular:             resumen.titular             ?? null,
+      banco:               resumen.banco               || banco,
+      tarjeta:             resumen.tarjeta             || tarjeta,
+      periodo,
+      fechaCierre:         fechaCierreStr              ?? null,
+      fechaVencimiento:    resumen.fechaVencimiento    ?? null,
+      totalARS:            Number(resumen.totalARS     ?? 0),
+      totalUSD:            Number(resumen.totalUSD     ?? 0),
+      pagoMinimoARS:       Number(resumen.pagoMinimoARS ?? 0),
+      cuentaDebito:        resumen.cuentaDebito        ?? null,
+      numeroCuenta:        numeroCuentaExtraido,
+      ultimos4:            ultimos4Extraido,
+      ajustesConsolidado:  Array.isArray(resumen.ajustesConsolidado)
+        ? resumen.ajustesConsolidado
+        : [],
+      movimientosParseados,
+      parseadoEn:          FieldValue.serverTimestamp(),
+      errorExtraccion:     FieldValue.delete(),
+      tipoError:           FieldValue.delete(),
+      intentos:            FieldValue.delete(),
+      actualizadoEn:       FieldValue.serverTimestamp(),
+    });
+
+    console.log(`[procesarResumenTarjeta] ${snapId} → ${estadoFinal} (${movimientosParseados.length} movs)`);
+
+  } catch (e) {
+    const mensaje = e instanceof Error ? e.message : String(e);
+    const tipoError = clasificarTipoError(mensaje);
+    console.error(`[procesarResumenTarjeta] error en ${snapId} (${tipoError}):`, mensaje);
+    await ref.update({
+      estado:          'error',
+      errorExtraccion: mensaje,
+      tipoError,
+      intentos:        FieldValue.increment(1),
+      actualizadoEn:   FieldValue.serverTimestamp(),
+    });
+  }
+}
+
 export const extraerResumenTarjeta = onDocumentCreated(
   {
     document:       'resumenesTarjeta/{id}',
@@ -1019,169 +1239,27 @@ export const extraerResumenTarjeta = onDocumentCreated(
     const snap = event.data;
     if (!snap) return;
     const data = snap.data();
-
     if (data.estado !== 'subido') return;
-
     const ref = db.collection('resumenesTarjeta').doc(snap.id);
+    await procesarResumenTarjeta(snap.id, ref, data);
+  },
+);
 
-    try {
-      const refStorage = data.refStoragePdf as string;
-      if (!refStorage) throw new Error('refStoragePdf ausente');
-
-      const [fileBytes] = await storage.bucket().file(refStorage).download();
-      if (!fileBytes || fileBytes.length === 0) throw new Error('Archivo vacío en Storage');
-
-      const base64  = fileBytes.toString('base64');
-      const banco   = (data.banco   as string) || '';
-      const tarjeta = (data.tarjeta as string) || '';
-      const prompt  = buildResumenTarjetaPrompt(banco, tarjeta);
-
-      const client = new Anthropic({ apiKey: anthropicKey.value() });
-      const stream = client.messages.stream({
-        model:      'claude-sonnet-4-6',
-        max_tokens: 32000,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 } },
-            { type: 'text'     as const, text: prompt },
-          ],
-        }],
-      });
-
-      const finalMessage = await stream.finalMessage();
-      if (finalMessage.stop_reason !== 'end_turn') {
-        throw new Error(
-          `Respuesta incompleta (stop_reason: ${finalMessage.stop_reason}) — JSON truncado; ` +
-          `tokens usados: ${finalMessage.usage?.output_tokens ?? '?'}`,
-        );
-      }
-
-      const rawText = finalMessage.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map(b => b.text)
-        .join('')
-        .trim();
-
-      const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
-      const rawMatch = rawText.match(/(\{[\s\S]*\})/);
-      const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
-      if (!jsonStr) throw new Error(`Sin JSON en la respuesta (500c): ${rawText.slice(0, 500)}`);
-
-      let parsed: { resumen: Record<string, unknown>; movimientos: MovimientoRaw[] };
-      try {
-        parsed = JSON.parse(sanitizarJson(jsonStr));
-      } catch {
-        throw new Error(`JSON inválido (500c): ${jsonStr.slice(0, 500)}`);
-      }
-
-      if (!parsed.resumen || !Array.isArray(parsed.movimientos)) {
-        throw new Error('Estructura incompleta: falta resumen o movimientos');
-      }
-
-      const resumen    = parsed.resumen;
-      const movsBrutos = parsed.movimientos;
-
-      // Resolver tarjetaCodigo en capas (cada capa necesita match único; si hay ambigüedad baja)
-      const configSnap   = await db.collection('config').doc('familia').get();
-      const tarjetasConf = ((configSnap.data()?.tarjetas ?? []) as Array<{
-        codigo: string; banco: string; tipo: string; titular?: string;
-        numeroCuenta?: string; ultimos4?: string[];
-      }>);
-      const numeroCuentaExtraido = (resumen.numeroCuenta as string | null) ?? null;
-      const ultimos4Extraido      = (resumen.ultimos4     as string | null) ?? null;
-      const bancoRes              = (resumen.banco         as string) || banco;
-      const tarjetaRes            = (resumen.tarjeta       as string) || tarjeta;
-      const titularExtraido       = (resumen.titular       as string | null) ?? null;
-
-      let tarjetaCodigoResuelto: string | null = null;
-
-      // Capa 1: numeroCuenta exacto (único match)
-      if (!tarjetaCodigoResuelto && numeroCuentaExtraido) {
-        const m = tarjetasConf.filter(t => t.numeroCuenta === numeroCuentaExtraido);
-        if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
-      }
-      // Capa 2: ultimos4 exacto (único match) — ancla fallback; el array cubre titular + adicionales
-      if (!tarjetaCodigoResuelto && ultimos4Extraido) {
-        const m = tarjetasConf.filter(t => t.ultimos4?.includes(ultimos4Extraido));
-        if (m.length === 1) tarjetaCodigoResuelto = m[0].codigo;
-      }
-      // Capa 3: banco + tipo (solo si EXACTAMENTE una tarjeta)
-      if (!tarjetaCodigoResuelto) {
-        const m = tarjetasConf.filter(t => t.banco === bancoRes && t.tipo === tarjetaRes);
-        if (m.length === 1) {
-          tarjetaCodigoResuelto = m[0].codigo;
-        } else if (m.length > 1 && titularExtraido) {
-          // Capa 4: desempate por titular (nombre del PDF vs titular en config)
-          const normStr = (s: string) =>
-            s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-          const normTitular = normStr(titularExtraido);
-          const byTitular = m.filter(t => t.titular && normTitular.includes(normStr(t.titular)));
-          if (byTitular.length === 1) tarjetaCodigoResuelto = byTitular[0].codigo;
-        }
-      }
-
-      const estadoFinal = tarjetaCodigoResuelto ? 'parseado' : 'requiere_tarjeta';
-
-      const movimientosParseados = movsBrutos.map((m, i) => ({
-        seq:               typeof m.seq === 'number' ? m.seq : i + 1,
-        tipoLinea:         TIPOLINEA_VALIDOS.has(m.tipoLinea ?? '') ? m.tipoLinea : 'consumo',
-        fechaConsumo:      m.fechaConsumo  ?? null,
-        descripcionRaw:    m.descripcionRaw ?? '',
-        nroCupon:          m.nroCupon      ?? '',
-        cuotaActual:       m.cuotaActual   ?? 1,
-        cuotaTotal:        m.cuotaTotal    ?? 1,
-        moneda:            m.moneda === 'USD' ? 'USD' : 'ARS',
-        monto:             Math.abs(m.monto ?? 0),
-        personaDetectada:  m.personaDetectada ?? '',
-        esBonificacion:    m.esBonificacion   ?? false,
-        esReverso:         m.esReverso         ?? false,
-        esImpuesto:        m.esImpuesto        ?? false,
-        personaConfirmada: null,
-        categoria:         null,
-        subcategoria:      null,
-        incluir:           true,
-      }));
-
-      const fechaCierreStr = resumen.fechaCierre as string | null;
-      const periodo = fechaCierreStr ? fechaCierreStr.slice(0, 7) : (data.periodo as string) || '';
-
-      await ref.update({
-        estado:              estadoFinal,
-        tarjetaCodigo:       tarjetaCodigoResuelto,
-        nroResumen:          resumen.nroResumen         ?? null,
-        titular:             resumen.titular             ?? null,
-        banco:               resumen.banco               || banco,
-        tarjeta:             resumen.tarjeta             || tarjeta,
-        periodo,
-        fechaCierre:         fechaCierreStr              ?? null,
-        fechaVencimiento:    resumen.fechaVencimiento    ?? null,
-        totalARS:            Number(resumen.totalARS     ?? 0),
-        totalUSD:            Number(resumen.totalUSD     ?? 0),
-        pagoMinimoARS:       Number(resumen.pagoMinimoARS ?? 0),
-        cuentaDebito:        resumen.cuentaDebito        ?? null,
-        numeroCuenta:        numeroCuentaExtraido,
-        ultimos4:            ultimos4Extraido,
-        ajustesConsolidado:  Array.isArray(resumen.ajustesConsolidado)
-          ? resumen.ajustesConsolidado
-          : [],
-        movimientosParseados,
-        parseadoEn:          FieldValue.serverTimestamp(),
-        errorExtraccion:     FieldValue.delete(),
-        actualizadoEn:       FieldValue.serverTimestamp(),
-      });
-
-      console.log(`[extraerResumenTarjeta] ${snap.id} → parseado (${movimientosParseados.length} movs)`);
-
-    } catch (e) {
-      const mensaje = e instanceof Error ? e.message : String(e);
-      console.error(`[extraerResumenTarjeta] error en ${snap.id}:`, mensaje);
-      await ref.update({
-        estado:          'error',
-        errorExtraccion: mensaje,
-        actualizadoEn:   FieldValue.serverTimestamp(),
-      });
-    }
+// F9.99.5 — reintento cuando el usuario setea estado:'subido' desde la UI (error → subido)
+export const reintentarResumenTarjeta = onDocumentUpdated(
+  {
+    document:       'resumenesTarjeta/{id}',
+    secrets:        [anthropicKey],
+    timeoutSeconds: 300,
+    memory:         '1GiB',
+  },
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after  = event.data?.after?.data();
+    if (!before || !after) return;
+    if (before.estado !== 'error' || after.estado !== 'subido') return;
+    const ref = db.collection('resumenesTarjeta').doc(event.params.id);
+    await procesarResumenTarjeta(event.params.id, ref, after);
   },
 );
 
@@ -2780,10 +2858,19 @@ function buildPromptSectorial(contexto: Record<string, unknown>): string {
 COMPOSICIÓN DE LA CARTERA:
 ${JSON.stringify(contexto, null, 2)}
 
-Escribí un panorama sectorial en texto libre (no JSON), en español rioplatense. Estructura: un bloque por sector relevante de la cartera (energía AR, macro/CER AR, soberano AR, cripto, tech global). Para cada sector incluí:
+Escribí un panorama sectorial en texto libre (no JSON), en español rioplatense. Cada sector relevante de la cartera es una sección. Para cada sector incluí:
 1. Situación actual y riesgos relevantes.
 2. Próximos eventos con fecha aproximada.
-3. "Qué haría en cada caso" — 2 a 3 escenarios observables para ESE sector con la forma: "Si [condición concreta] → las opciones serían [A / B], con el trade-off [X]". Uno por línea, breve.
+3. "Qué haría en cada caso" — 2 a 3 escenarios observables con la forma: "Si [condición concreta] → las opciones serían [A / B], con el trade-off [X]". Uno por línea, breve.
+
+FORMATO DE SECCIONES (obligatorio — la UI lo usa para navegar el informe):
+Cada sección DEBE empezar EXACTAMENTE con \`## <Nombre> [driver: <driver>]\`. Secciones canónicas:
+  ## Energía AR [driver: energia_ar]
+  ## Macro y pesos AR [driver: cer_pesos]
+  ## Soberano USD [driver: soberano]
+  ## Cripto [driver: cripto]
+  ## Global [driver: tech_global]
+Incluir solo los sectores representados en la cartera. Sin otros headers.
 
 REGLAS INNEGOCIABLES:
 - PROHIBIDO: imperativos sin condición ("vendé", "comprá", "conviene salir").
@@ -2930,18 +3017,18 @@ function normalizarEspecie(s: string): string {
   return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
-// Parser fail-soft de un elemento de carteras[]
-// Estructura confirmada: { fechaDatos } + campos internos a confirmar
+// F9.97.1 — Estructura confirmada por AppsScript en producción:
+// carteras[] son las posiciones directamente; campo especie = nombreActivo, peso = share.
 function parsePosicionCafci(item: Record<string, unknown>): {
   especieRaw: string;
   pesoPct: number;
   incompleto: boolean;
 } {
   const especieRaw = String(
-    item['especie'] ?? item['nombreEspecie'] ?? item['instrumento'] ?? item['descripcion'] ?? ''
+    item['nombreActivo'] ?? item['especie'] ?? item['nombreEspecie'] ?? item['instrumento'] ?? item['descripcion'] ?? ''
   );
   const pesoRaw =
-    item['porcentaje'] ?? item['peso'] ?? item['porcentajeFondo'] ?? item['participacion'] ?? item['pct'];
+    item['share'] ?? item['porcentaje'] ?? item['peso'] ?? item['porcentajeFondo'] ?? item['participacion'] ?? item['pct'];
   const pesoPct = typeof pesoRaw === 'number' ? pesoRaw : parseFloat(String(pesoRaw ?? '0')) || 0;
   const incompleto = !especieRaw || pesoPct === 0;
   return { especieRaw: especieRaw || '(sin especie)', pesoPct, incompleto };
@@ -2983,74 +3070,115 @@ export const sincronizarCafci = onCall(
         const url = `https://api.pub.cafci.org.ar/fondo/${fondo.fondoId}/clase/${fondo.claseId}/ficha`;
         const res = await fetch(url, {
           headers: {
-            'Origin': 'https://cafci.org.ar',
-            'Referer': 'https://cafci.org.ar/',
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (compatible)',
+            'User-Agent': 'Mozilla/5.0',
+            'Accept': 'application/json, text/plain, */*',
+            // Headers que funcionaron en producción desde Apps Script (nota el www.)
+            'Origin': 'https://www.cafci.org.ar',
+            'Referer': 'https://www.cafci.org.ar/',
           },
         });
         if (!res.ok) {
-          console.warn(`[sincronizarCafci] ${fondo.nombre}: HTTP ${res.status}`);
-          continue;
+          const msg = res.status === 403
+            ? `HTTP 403 — CloudFront bloqueó la request. Si persiste, usá pegado manual de JSON.`
+            : `HTTP ${res.status}`;
+          throw new Error(msg);
         }
+
         const json = await res.json() as Record<string, unknown>;
+
+        // F9.97.1: validar success y estructura confirmada
+        if ((json as any).success !== true) {
+          throw new Error('La API no devolvió success:true');
+        }
         const infoSemanal = (json as any)?.data?.info?.semanal;
-        const carteras: unknown[] = Array.isArray(infoSemanal?.carteras) ? infoSemanal.carteras : [];
-        if (carteras.length === 0) {
-          console.warn(`[sincronizarCafci] ${fondo.nombre}: carteras[] vacío o no encontrado`);
-          continue;
+        if (!infoSemanal) {
+          throw new Error('Falta data.info.semanal en la respuesta de CAFCI');
         }
 
-        // Tomar la corrida más reciente (primer elemento del array)
-        const carteraMasReciente = carteras[0] as Record<string, unknown>;
-        const fechaDatos = String(carteraMasReciente['fechaDatos'] ?? fechaFetch.slice(0, 10));
-        const items: unknown[] = Array.isArray(carteraMasReciente['posiciones'] ?? carteraMasReciente['tenencias'] ?? carteraMasReciente['items'])
-          ? (carteraMasReciente['posiciones'] ?? carteraMasReciente['tenencias'] ?? carteraMasReciente['items']) as unknown[]
-          : [];
+        // F9.97.1: carteras[] son las posiciones directamente (no sub-array)
+        const carteras: unknown[] = Array.isArray(infoSemanal.carteras) ? infoSemanal.carteras : [];
+        if (carteras.length === 0) {
+          throw new Error('carteras[] vacío o ausente en data.info.semanal');
+        }
 
-        // Si no hay sub-array de posiciones, intentar parsear el propio objeto como posición (algunos fondos vienen aplanados)
-        const posicionesRaw: Record<string, unknown>[] = items.length > 0
-          ? items as Record<string, unknown>[]
-          : [carteraMasReciente];
+        // F9.97.1: fechaDatos está en infoSemanal, no dentro de cada item
+        const fechaDatos = String(infoSemanal.fechaDatos ?? fechaFetch.slice(0, 10));
 
-        const posiciones: Array<{ especieRaw: string; ticker: string | null; pesoPct: number; incompleto?: boolean }> = [];
+        // Nombres desde el modelo de la API
+        const nombreFondo = String((json as any)?.data?.model?.fondo?.nombre ?? fondo.nombre);
+        const nombreClase = String((json as any)?.data?.model?.nombre ?? fondo.nombre);
+
+        const posiciones: Array<{
+          especieRaw: string;
+          ticker: string | null;
+          pesoPct: number;
+          categoria?: string;
+          incompleto?: boolean;
+        }> = [];
         let totalPct = 0;
 
-        for (const item of posicionesRaw) {
+        for (const item of carteras) {
           const { especieRaw, pesoPct, incompleto } = parsePosicionCafci(item as Record<string, unknown>);
-          // Buscar mapping existente
           const norm = normalizarEspecie(especieRaw);
-          const mappingSnap = await db.collection('cafciMapping').doc(norm).get();
           let ticker: string | null = null;
+          let categoria: string | undefined;
 
-          if (mappingSnap.exists) {
-            ticker = (mappingSnap.data() as { ticker: string | null }).ticker;
-          } else {
-            // Auto-mapping: si la especie ya parece un ticker
-            const auto = autoTickerMapping(especieRaw);
-            ticker = auto;
-            // Guardar en cafciMapping para que quede registrado
-            await db.collection('cafciMapping').doc(norm).set({ ticker: auto });
-            if (!auto && !incompleto) {
-              pendientesMapeo.push(especieRaw);
+          // Detectar liquidez: FCI, Cta Cte, Caución — no son pendientes de mapeo humano
+          if (/^(fci\b|cta\.? ?cte\.?|cauci[oó]n)/i.test(especieRaw.trim())) {
+            ticker = null;
+            categoria = 'LIQUIDEZ';
+          }
+          // Detectar CEDEARs — excluir de benchmark AR, no son pendientes
+          else if (/^cedear/i.test(especieRaw.trim())) {
+            ticker = null;
+            categoria = 'CEDEAR';
+          }
+          else {
+            const mappingSnap = await db.collection('cafciMapping').doc(norm).get();
+            if (mappingSnap.exists) {
+              const mdata = mappingSnap.data() as { ticker: string | null; categoria?: string };
+              ticker = mdata.ticker;
+              if (mdata.categoria) categoria = mdata.categoria;
+            } else {
+              const auto = autoTickerMapping(especieRaw);
+              ticker = auto;
+              await db.collection('cafciMapping').doc(norm).set({ ticker: auto });
+              if (!auto && !incompleto) {
+                pendientesMapeo.push(especieRaw);
+              }
             }
           }
 
-          posiciones.push({ especieRaw, ticker, pesoPct, ...(incompleto ? { incompleto: true } : {}) });
+          posiciones.push({
+            especieRaw,
+            ticker,
+            pesoPct,
+            ...(categoria ? { categoria } : {}),
+            ...(incompleto ? { incompleto: true } : {}),
+          });
           totalPct += pesoPct;
+        }
+
+        // Control de integridad: suma de share debe ser ~100
+        const advertenciaIntegridad = totalPct < 98 || totalPct > 102;
+        if (advertenciaIntegridad) {
+          console.warn(`[sincronizarCafci] ${fondo.nombre}: suma share = ${totalPct.toFixed(2)} (fuera de [98,102])`);
         }
 
         const docId = `${fondo.fondoId}_${fechaDatos}`;
         await db.collection('cafciCarteras').doc(docId).set({
           fondoId: fondo.fondoId,
           nombre: fondo.nombre,
+          nombreFondo,
+          nombreClase,
           fechaDatos,
           fechaFetch,
           posiciones,
           totalPct,
+          ...(advertenciaIntegridad ? { advertenciaIntegridad: true } : {}),
         });
         sincronizados++;
-        console.log(`[sincronizarCafci] ${fondo.nombre} sincronizado: ${posiciones.length} posiciones`);
+        console.log(`[sincronizarCafci] ${fondo.nombre}: ${posiciones.length} posiciones, total ${totalPct.toFixed(2)}%`);
       } catch (err) {
         console.error(`[sincronizarCafci] Error en ${fondo.nombre}:`, err);
       }
@@ -3192,10 +3320,62 @@ export const obtenerSeriesPrecios = onCall(
 
 // ── F9.99 — Análisis IA vía chat (prompt sin costo, importar respuesta) ────────
 
-// Helper compartido: extrae JSON/markdown de un rawText (usado por analizarConIA y importarAnalisisIA)
-function extraerResultado(modo: 'posicion' | 'sectorial' | 'agenda', rawText: string): unknown {
+// F9.99.1 — Prompt de análisis en lote (toda la cartera, un único bloque JSON)
+function buildPromptLote(contexto: Record<string, unknown>): string {
+  const posiciones = contexto['posiciones'] as Array<{ ticker: string; sector: string; pesoEnCartera: string; valorUsd: number }> ?? [];
+  const drivers: Record<string, string[]> = {};
+  for (const p of posiciones) {
+    const d = p.sector ?? 'otro';
+    if (!drivers[d]) drivers[d] = [];
+    drivers[d].push(p.ticker);
+  }
+  const driverLines = Object.entries(drivers).map(([d, ts]) => `  - ${d}: ${ts.join(', ')}`).join('\n');
+  return `Sos un analista financiero especialista en mercados argentinos e internacionales. Analizás toda la cartera de una vez.
+
+CONTEXTO GLOBAL DE LA CARTERA:
+${JSON.stringify(contexto['global'] ?? {}, null, 2)}
+
+POSICIONES A ANALIZAR (${posiciones.length} posiciones):
+${JSON.stringify(posiciones, null, 2)}
+
+DRIVERS AGRUPADOS (para optimizar tus búsquedas web — 1 búsqueda sirve para todo el grupo):
+${driverLines}
+
+Respondé ÚNICAMENTE con un único bloque \`\`\`json con esta estructura exacta:
+{
+  "analisis": [
+    {
+      "ticker": "PAMP",
+      "resultado": {
+        "queEs": "1-2 frases",
+        "situacionActual": "3-5 frases con info HOY",
+        "riesgos": ["riesgo 1", "riesgo 2", "riesgo 3"],
+        "rolEnCartera": "1-3 frases sobre el rol en esta cartera",
+        "proximosEventos": [{ "cuando": "YYYY-MM-DD o null", "evento": "descripción corta" }],
+        "queHariaEnCadaCaso": [{ "caso": "condición observable", "acciones": ["opción A", "opción B"], "costo": "trade-off" }],
+        "fuentes": ["url o fuente consultada"]
+      }
+    }
+  ]
+}
+
+REGLAS INNEGOCIABLES:
+- Español rioplatense.
+- PROHIBIDO: imperativos sin condición ("vendé", "comprá", "recomiendo"), precios objetivo como certeza.
+- PERMITIDO: condicionales con opciones ("si X, convendría evaluar A o B"), siempre con trade-off explícito.
+- 2 a 4 casos en queHariaEnCadaCaso, del más probable al menos.
+- La decisión es del titular: cada caso presenta opciones, nunca una salida obligada.
+- Si no hay info confiable de algo, usá null en ese campo; no inventés.
+- ~150 palabras por ticker en resultado (hay ${posiciones.length} posiciones, sé conciso).
+- Agrupá búsquedas web por driver para no hacer búsquedas redundantes.
+
+INSTRUCCIÓN DE CONTINUACIÓN: si la respuesta no cabe en un mensaje, cortá al final de un elemento completo del array "analisis" (después del } que cierra el objeto del ticker) y esperá que el usuario escriba "seguí". El usuario concatenará las partes antes de importar.`;
+}
+
+// Helper compartido: extrae JSON/markdown de un rawText (usado por analizarConIA e importarAnalisisIA)
+function extraerResultado(modo: 'posicion' | 'sectorial' | 'agenda' | 'lote', rawText: string): unknown {
   if (modo === 'sectorial') return rawText;
-  // posicion y agenda: JSON esperado
+  // posicion, agenda y lote: JSON esperado
   const mdJson = rawText.match(/```json\s*([\s\S]*?)\s*```/);
   const rawJson = rawText.match(/(\{[\s\S]*\})/);
   const jsonStr = mdJson ? mdJson[1] : (rawJson ? rawJson[1] : null);
@@ -3212,13 +3392,13 @@ export const generarPromptIA = onCall(
     if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
 
     const { modo, ticker, contexto } = (request.data ?? {}) as {
-      modo?: 'posicion' | 'sectorial' | 'agenda';
+      modo?: 'posicion' | 'sectorial' | 'agenda' | 'lote';
       ticker?: string;
       contexto?: Record<string, unknown>;
     };
 
-    if (!modo || !['posicion', 'sectorial', 'agenda'].includes(modo)) {
-      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial" o "agenda"');
+    if (!modo || !['posicion', 'sectorial', 'agenda', 'lote'].includes(modo)) {
+      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial", "agenda" o "lote"');
     }
     if (modo === 'posicion' && !ticker) {
       throw new HttpsError('invalid-argument', 'ticker requerido para modo posicion');
@@ -3231,11 +3411,16 @@ export const generarPromptIA = onCall(
       ? buildPromptPosicion(contexto)
       : modo === 'agenda'
         ? buildPromptAgenda(contexto)
-        : buildPromptSectorial(contexto);
+        : modo === 'lote'
+          ? buildPromptLote(contexto)
+          : buildPromptSectorial(contexto);
 
-    const instrucciones = modo === 'sectorial'
-      ? `\n\n---\nINSTRUCCIONES DE FORMATO (para uso en chat):\n- Usá búsqueda web para verificar datos actuales antes de responder.\n- Respondé ÚNICAMENTE con el análisis dentro de un bloque \`\`\`markdown.\n- Sin texto antes ni después del bloque. Si algún dato no se puede verificar, aclaralo dentro del bloque.`
-      : `\n\n---\nINSTRUCCIONES DE FORMATO (para uso en chat):\n- Usá búsqueda web para verificar datos actuales antes de responder.\n- Respondé ÚNICAMENTE con el JSON pedido, dentro de un bloque \`\`\`json.\n- Sin texto antes ni después del bloque. Sin comentarios dentro del JSON.\n- Si algún dato no se puede verificar, usá null en ese campo; no inventes.`;
+    // lote ya lleva las instrucciones de formato embebidas en buildPromptLote
+    const instrucciones = modo === 'lote'
+      ? ''
+      : modo === 'sectorial'
+        ? `\n\n---\nINSTRUCCIONES DE FORMATO (para uso en chat):\n- Usá búsqueda web para verificar datos actuales antes de responder.\n- Respondé ÚNICAMENTE con el análisis dentro de un bloque \`\`\`markdown.\n- Cada sector debe empezar EXACTAMENTE con \`## <Nombre> [driver: <driver>]\` (drivers válidos: energia_ar, cer_pesos, soberano, cripto, tech_global).\n- Sin texto antes ni después del bloque. Si algún dato no se puede verificar, aclaralo dentro del bloque.`
+        : `\n\n---\nINSTRUCCIONES DE FORMATO (para uso en chat):\n- Usá búsqueda web para verificar datos actuales antes de responder.\n- Respondé ÚNICAMENTE con el JSON pedido, dentro de un bloque \`\`\`json.\n- Sin texto antes ni después del bloque. Sin comentarios dentro del JSON.\n- Si algún dato no se puede verificar, usá null en ese campo; no inventes.`;
 
     return {
       prompt: promptBase + instrucciones,
@@ -3254,6 +3439,9 @@ function validarResultadoImportado(
   if (modo === 'sectorial') {
     if (typeof resultado !== 'string' || resultado.length < 200) {
       return 'El análisis sectorial debe ser un texto de al menos 200 caracteres';
+    }
+    if (!/^## .+ \[driver: \w+\]/m.test(resultado)) {
+      return 'El texto no tiene secciones por sector. Regenerá con el prompt actual — el texto debe incluir headers del tipo "## Nombre [driver: xxx]"';
     }
     return null;
   }
@@ -3286,12 +3474,12 @@ export const importarAnalisisIA = onCall(
     if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
 
     const { modo, ticker, contenido } = (request.data ?? {}) as {
-      modo?: 'posicion' | 'sectorial' | 'agenda';
+      modo?: 'posicion' | 'sectorial' | 'agenda' | 'lote';
       ticker?: string;
       contenido?: string;
     };
 
-    if (!modo || !['posicion', 'sectorial', 'agenda'].includes(modo)) {
+    if (!modo || !['posicion', 'sectorial', 'agenda', 'lote'].includes(modo)) {
       throw new HttpsError('invalid-argument', 'modo inválido');
     }
     if (modo === 'posicion' && !ticker) {
@@ -3309,16 +3497,56 @@ export const importarAnalisisIA = onCall(
       );
     }
 
-    const errorValidacion = validarResultadoImportado(modo, resultado);
-    if (errorValidacion) {
-      throw new HttpsError('invalid-argument', `Validación fallida: ${errorValidacion}`);
-    }
-
     const db2 = getFirestore();
     const modeloUsado = 'chat-manual';
     const origen = 'chat';
     const generadoEnISO = new Date().toISOString();
-    const generadoEn = FieldValue.serverTimestamp(); // para que orderBy('generadoEn') funcione igual que el camino API
+    const generadoEn = FieldValue.serverTimestamp();
+
+    // ── Modo lote: fail-soft por elemento ────────────────────────────────────
+    if (modo === 'lote') {
+      const parsed = resultado as Record<string, unknown>;
+      if (!Array.isArray(parsed['analisis']) || parsed['analisis'].length === 0) {
+        throw new HttpsError('invalid-argument', 'Se esperaba { analisis: [...] } con al menos un elemento');
+      }
+      const items = parsed['analisis'] as Array<{ ticker?: unknown; resultado?: unknown }>;
+      const erroresPorTicker: string[] = [];
+      let importados = 0;
+
+      const batchSize = 450;
+      for (let i = 0; i < items.length; i += batchSize) {
+        const batch = db2.batch();
+        for (const item of items.slice(i, i + batchSize)) {
+          if (typeof item.ticker !== 'string' || !item.ticker) {
+            erroresPorTicker.push(`(item ${i}: sin ticker)`);
+            continue;
+          }
+          const t = item.ticker;
+          const errV = validarResultadoImportado('posicion', item.resultado);
+          if (errV) {
+            erroresPorTicker.push(`${t} (${errV})`);
+            continue;
+          }
+          batch.set(db2.collection('analisisPosiciones').doc(t), {
+            ticker: t, generadoEn, generadoEnISO, modeloUsado, origen, resultado: item.resultado,
+          });
+          importados++;
+        }
+        await batch.commit();
+      }
+
+      const resumen = erroresPorTicker.length > 0
+        ? `${importados} importados, ${erroresPorTicker.length} con error: ${erroresPorTicker.join('; ')}`
+        : `${importados} análisis importados`;
+      console.log(`[importarAnalisisIA] lote: ${resumen}`);
+      return { ok: true, resumen };
+    }
+
+    // ── Modos individuales ────────────────────────────────────────────────────
+    const errorValidacion = validarResultadoImportado(modo, resultado);
+    if (errorValidacion) {
+      throw new HttpsError('invalid-argument', `Validación fallida: ${errorValidacion}`);
+    }
 
     let resumen: string;
     if (modo === 'posicion') {

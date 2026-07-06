@@ -103,3 +103,4 @@
 .rt-badge--confirmado       { background: #dcfce7; color: #166534; }
 .rt-badge--error            { background: #fee2e2; color: #991b1b; }
 .rt-badge--requiere_tarjeta { background: #ffedd5; color: #9a3412; }
+.rt-badge--duplicado        { background: #f3e8ff; color: #7e22ce; }

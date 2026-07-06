@@ -79,7 +79,10 @@ export interface CardStatement {
   banco: string;
   tarjeta: string;
   periodo: string;
-  estado: 'subido' | 'parseado' | 'confirmado' | 'error' | 'requiere_tarjeta';
+  estado: 'subido' | 'parseado' | 'confirmado' | 'error' | 'requiere_tarjeta' | 'duplicado';
+  tipoError?: 'infra' | 'parsing' | null;
+  intentos?: number;
+  duplicadoDe?: string | null;
   nroResumen: string | null;
   titular: string | null;
   fechaCierre: Date | null;

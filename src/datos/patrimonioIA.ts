@@ -172,7 +172,7 @@ export async function generarAgenda(
 }
 
 // ── F9.99: callables chat path ────────────────────────────────────────────────
-export type ModoIA = 'posicion' | 'sectorial' | 'agenda';
+export type ModoIA = 'posicion' | 'sectorial' | 'agenda' | 'lote';
 
 export type PromptGenerado = {
   prompt: string;
@@ -212,4 +212,41 @@ export async function importarAnalisisIA(
 ): Promise<ImportarResult> {
   const r = await _importarAnalisisIA({ modo, contenido, ...(ticker ? { ticker } : {}) });
   return r.data;
+}
+
+// ── F9.99.3: helpers de sectorial ─────────────────────────────────────────────
+
+export type Driver = 'energia_ar' | 'cer_pesos' | 'soberano' | 'cripto' | 'tech_global' | 'otro';
+
+export type SeccionSectorial = { driver: string; titulo: string; cuerpo: string };
+
+export function splitSectorialPorDriver(texto: string): SeccionSectorial[] {
+  const headerRe = /^## (.+?) \[driver: (\w+)\]/gm;
+  const pieces: { idx: number; driver: string; titulo: string }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = headerRe.exec(texto)) !== null) {
+    pieces.push({ idx: match.index, driver: match[2], titulo: match[1] });
+  }
+  return pieces.map((p, i) => {
+    const end = i + 1 < pieces.length ? pieces[i + 1].idx : texto.length;
+    const lineEnd = texto.indexOf('\n', p.idx);
+    const cuerpo = lineEnd >= 0 ? texto.slice(lineEnd + 1, end).trim() : '';
+    return { driver: p.driver, titulo: p.titulo, cuerpo };
+  });
+}
+
+export function tickerADriver(ticker: string, sectorDisp: string): Driver {
+  const t = ticker.toUpperCase();
+  const s = sectorDisp.toLowerCase();
+  if (/^(BTC|ETH|AAVE|UNI|SOL|MATIC|BNB)$/.test(t)) return 'cripto';
+  if (/^(GD|AL)\d{2}/.test(t)) return 'soberano';
+  if (/^(LECAP|LEDES|LECER|LELINK|DICA|TDF|TZVD|TDA|TVP)/.test(t)) return 'cer_pesos';
+  if (/^(TRAN|TGSU2|TGSU|PAMP|VIST|YPFD|YPF|CEPU|MOLI)$/.test(t)) return 'energia_ar';
+  if (/^(ACN|GLOB|CVX|VZ|MSFT|GOOGL|GOOG|AMZN|META|NVDA|AAPL)$/.test(t) || t === 'B') return 'tech_global';
+  if (/cripto|defi|btc|eth/.test(s)) return 'cripto';
+  if (/soberano|bono usd|global/.test(s)) return 'soberano';
+  if (/energi|tarifas|gas|electr|util|petr|oil/.test(s)) return 'energia_ar';
+  if (/peso|cer|ajust|local|captur/.test(s)) return 'cer_pesos';
+  if (/tech|eeuu/.test(s)) return 'tech_global';
+  return 'otro';
 }

@@ -1,49 +1,49 @@
-# CAFCI API — Exploración de estructura
+# CAFCI API — Estructura confirmada
 
-**Fecha de exploración:** 2026-07-05  
-**Explorador:** Claude Code (sesión F9.97)
-
-## Estado de la exploración
-
-### Endpoint confirmado (por documentación previa del dueño)
-
-```
-GET https://api.pub.cafci.org.ar/fondo/{fondoId}/clase/{claseId}/ficha
-Headers requeridos:
-  Origin:  https://cafci.org.ar
-  Referer: https://cafci.org.ar/
-```
-
-### Resultado del intento de fetch automatizado
-
-La API devuelve **403 Forbidden** con body `{"error":"Route not allowed"}` para cualquier
-petición curl directa, incluso con los headers correctos. La respuesta viene de CloudFront
-(`X-Cache: FunctionGeneratedResponse from cloudfront`, pop `EZE50-P4`).
-
-Esto indica que la API valida el origen a nivel de CDN — acepta requests desde el dominio
-cafci.org.ar (con cookie de sesión activa del browser), pero bloquea peticiones directas
-desde IPs externas.
-
-**Conclusión:** El fetch real debe hacerse manualmente desde el browser del dueño o desde
-una Cloud Function en un entorno IP-trusteado. La Cloud Function `sincronizarCafci` debe
-ejecutarse desde Firebase (southamerica-east1) — es probable que tampoco esté en la allowlist
-de CAFCI. Si la sincronización falla por 403, el dueño puede copiar la respuesta JSON cruda
-del browser y pegarla manualmente.
+**Fecha de confirmación:** 2026-07-05  
+**Fuente:** Código AppsScript en producción (`10_Fondos_CAFCl.js`), corrió contra
+`api.pub.cafci.org.ar` y pobló 365 filas con control `total_share = 100.0` en 14 fondos.
 
 ---
 
-## Estructura parcialmente confirmada (por el dueño, exploración previa)
+## Endpoint
+
+```
+GET https://api.pub.cafci.org.ar/fondo/{fondoId}/clase/{claseId}/ficha
+```
+
+### Headers requeridos (exactos — nota el `www.`)
+
+```
+User-Agent: Mozilla/5.0
+Accept: application/json, text/plain, */*
+Origin:  https://www.cafci.org.ar
+Referer: https://www.cafci.org.ar/
+```
+
+El header original sin `www.` (`https://cafci.org.ar`) devuelve 403 desde CloudFront.
+Si la Cloud Function sigue devolviendo 403, el camino de pegado manual de JSON sigue
+disponible en la UI.
+
+---
+
+## Estructura de respuesta confirmada
 
 ```json
 {
+  "success": true,
   "data": {
+    "model": {
+      "nombre": "<nombre de la CLASE>",
+      "fondo": { "nombre": "<nombre del FONDO>" }
+    },
     "info": {
       "semanal": {
+        "fechaDatos": "YYYY-MM-DD",
         "carteras": [
-          {
-            "fechaDatos": "YYYY-MM-DD",
-            "..."  // campos internos NO confirmados
-          }
+          { "nombreActivo": "YPF - D",                  "share": 17.902 },
+          { "nombreActivo": "Grupo Fciero Galicia - B",  "share": 17.708 },
+          ...
         ]
       }
     }
@@ -51,43 +51,64 @@ del browser y pegarla manualmente.
 }
 ```
 
-## Campos internos de `carteras[]` — NO confirmados, a completar
+### Invariantes confirmados
 
-Los campos que tipicamente tienen las APIs de fondos argentinos (BYMA, CNV, CAFCI) son:
+| Campo            | Ubicación                          | Notas                               |
+|------------------|------------------------------------|-------------------------------------|
+| `success`        | raíz                               | Debe ser `true`; si no, error claro |
+| `fechaDatos`     | `data.info.semanal.fechaDatos`     | NO dentro de cada item de carteras  |
+| `carteras[]`     | `data.info.semanal.carteras`       | Son las posiciones directamente     |
+| `nombreActivo`   | cada item de `carteras[]`          | Campo especie; formato "Empresa - Clase" |
+| `share`          | cada item de `carteras[]`          | Peso porcentual; Σ ≈ 100 por fondo  |
+| fondo nombre     | `data.model.fondo.nombre`          | Fallback: nombre configurado        |
+| clase nombre     | `data.model.nombre`                | Fallback: nombre configurado        |
 
-| Campo probable    | Tipo    | Descripción                            |
-|-------------------|---------|----------------------------------------|
-| `especie`         | string  | Nombre/ticker de la especie            |
-| `tipoEspecie`     | string  | Tipo de instrumento (ON, FCI, RV, etc) |
-| `porcentaje`      | number  | Peso porcentual en la cartera          |
-| `valor`           | number  | Valor en ARS                           |
-| `cantidad`        | number  | Cantidad de nominales                  |
-
-**IMPORTANTE:** Estos campos son SUPUESTOS. El parser implementado usa acceso defensivo
-con fallback a `incompleto: true` si un campo esperado no existe.
-
-**Acción pendiente del dueño:** Acceder desde el browser a la ficha de un fondo en
-cafci.org.ar, abrir DevTools → Network, filtrar por la URL de la API, copiar el JSON de
-respuesta y actualizar este archivo con la estructura real de un elemento de `carteras[]`.
+**La suma de `share` da 100.0 ± redondeo** (verificado en 14 fondos reales).  
+Si la suma queda fuera de [98, 102], el doc se guarda con `advertenciaIntegridad: true`
+y la UI muestra un banner de advertencia en la solapa Benchmark.
 
 ---
 
-## Cómo obtener fondoId y claseId
+## Tipos de especie especiales (no son pendientes de mapeo humano)
 
-1. Ir a https://cafci.org.ar/fondos
-2. Buscar el fondo deseado
-3. Abrir la ficha del fondo
-4. La URL tiene la forma `/fondos/{fondoId}/{claseId}` o similar
-5. Esos IDs son los que se cargan en `configPatrimonio/cafci.fondos[]`
+| Patrón (regex)               | ticker | categoria  | Excluir benchmark AR |
+|------------------------------|--------|------------|----------------------|
+| `/^fci\b/i`                  | null   | LIQUIDEZ   | sí                   |
+| `/^cta\.? ?cte\.?/i`         | null   | LIQUIDEZ   | sí                   |
+| `/^cauci[oó]n/i`             | null   | LIQUIDEZ   | sí                   |
+| `/^cedear/i`                 | null   | CEDEAR     | sí                   |
+
+Estos se detectan en el parser server-side (`sincronizarCafci`) antes de buscar en
+`cafciMapping`. FCI/cauciones/cuentas corrientes representan hasta ~15% de algunos fondos.
 
 ---
 
-## Parser implementado (fail-soft)
+## Mapping especie→ticker (`cafciMapping`)
 
-El parser en `functions/src/index.ts` intenta leer:
-- `item.especie` o `item.tipoEspecie` → `especieRaw`
-- `item.porcentaje` o `item.peso` o `item.porcentajeFondo` → `pesoPct`
+Colección Firestore con documentos `{ ticker, tipo, sector }`.
+- Clave: `normalizarEspecie(nombreActivo)` (NFD-lowercase)
+- 70 patrones pre-sembrados desde el sistema AppsScript anterior (seed de abril 2026)
+- Botón "Importar mapping (70)" en Config → Fondos CAFCI
 
-Si un campo esperado no existe → `incompleto: true`, nunca excepción.
+---
 
-Actualizar el parser una vez que se confirme la estructura real.
+## Parser implementado (F9.97.1)
+
+En `functions/src/index.ts`, función `sincronizarCafci`:
+
+1. Valida `json.success === true` y `data.info.semanal` presente.
+2. Lee `carteras[]` de `data.info.semanal` — son posiciones directas.
+3. Lee `fechaDatos` de `data.info.semanal.fechaDatos`.
+4. Para cada item: campo `nombreActivo` (primario), `share` (primario).
+5. Detecta LIQUIDEZ/CEDEAR por prefijo antes de buscar en `cafciMapping`.
+6. Calcula `totalPct = Σ share` y marca `advertenciaIntegridad` si fuera de [98,102].
+7. Guarda en `cafciCarteras/{fondoId}_{fechaDatos}`.
+
+---
+
+## Fondos sugeridos (seed F9.97.1 §8a)
+
+13 fondos de acciones AR validados contra la API en abril 2026.
+Botón "Importar fondos sugeridos (13)" en Config → Fondos CAFCI — merge, no borra los ya configurados.
+
+Ver tabla completa en `docs/patrimonio/cafci-seed.json` → clave `fondos_acciones`.

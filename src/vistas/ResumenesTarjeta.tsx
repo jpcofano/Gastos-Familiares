@@ -8,6 +8,7 @@ import {
   confirmarResumenTarjeta,
   agregarAjusteCuadreManual,
   calcularCuadre,
+  reintentarResumen,
   type CuadreResult,
 } from '../datos/resumenesTarjeta';
 import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
@@ -291,11 +292,12 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
 function ResumenCard({
   resumen, config, onVerPreview,
 }: { resumen: CardStatement; config: FamiliaConfig | null; onVerPreview: () => void }) {
-  const [tarjetaSel,  setTarjetaSel]  = useState(config?.tarjetas[0]?.codigo ?? '');
-  const [asignando,   setAsignando]   = useState(false);
-  const [errorAsg,    setErrorAsg]    = useState<string | null>(null);
-  const [descartando, setDescartando] = useState(false);
-  const [errDesc,     setErrDesc]     = useState<string | null>(null);
+  const [tarjetaSel,   setTarjetaSel]   = useState(config?.tarjetas[0]?.codigo ?? '');
+  const [asignando,    setAsignando]    = useState(false);
+  const [errorAsg,     setErrorAsg]     = useState<string | null>(null);
+  const [descartando,  setDescartando]  = useState(false);
+  const [errDesc,      setErrDesc]      = useState<string | null>(null);
+  const [reintentando, setReintentando] = useState(false);
 
   async function handleDescartar() {
     const n = resumen.movimientosParseados.filter(m => m.incluir).length;
@@ -310,6 +312,14 @@ function ResumenCard({
     if (!res.ok) setErrDesc(res.error.message);
   }
 
+  async function handleReintentar() {
+    setReintentando(true);
+    setErrDesc(null);
+    const res = await reintentarResumen(resumen.id);
+    setReintentando(false);
+    if (!res.ok) setErrDesc(res.error.message);
+  }
+
   async function handleAsignar() {
     if (!config || !tarjetaSel) return;
     setAsignando(true);
@@ -319,6 +329,8 @@ function ResumenCard({
     if (!res.ok) setErrorAsg(res.error.message);
   }
 
+  const procesando = resumen.estado === 'subido';
+
   return (
     <TarjetaFace resumen={resumen} config={config} onDescartar={handleDescartar} descartando={descartando}>
       {errDesc && <p className="rt-error-inline">{errDesc}</p>}
@@ -326,10 +338,43 @@ function ResumenCard({
         {resumen.estado === 'subido' && (
           <span className="rt-procesando">Extrayendo PDF…</span>
         )}
-        {resumen.estado === 'error' && resumen.errorExtraccion && (
-          <span className="rt-error-inline" title={resumen.errorExtraccion}>
-            Error — ver consola
-          </span>
+        {resumen.estado === 'error' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="rt-error-inline" title={resumen.errorExtraccion ?? undefined}>
+              Error ({resumen.tipoError ?? 'infra'})
+              {(resumen.intentos ?? 0) >= 3 && ' — 3+ intentos, considerar re-subir el PDF'}
+            </span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                className="rt-btn rt-btn--sm rt-btn--primary"
+                onClick={handleReintentar}
+                disabled={reintentando || procesando}
+              >
+                {reintentando ? 'Reintentando…' : 'Reintentar'}
+              </button>
+              <button
+                className="rt-btn rt-btn--sm"
+                onClick={handleDescartar}
+                disabled={descartando}
+              >
+                Descartar
+              </button>
+            </div>
+          </div>
+        )}
+        {resumen.estado === 'duplicado' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span className="rt-error-inline">
+              Duplicado de {resumen.duplicadoDe?.slice(0, 8) ?? '?'}…
+            </span>
+            <button
+              className="rt-btn rt-btn--sm"
+              onClick={handleDescartar}
+              disabled={descartando}
+            >
+              Descartar
+            </button>
+          </div>
         )}
         {resumen.estado === 'requiere_tarjeta' && config && (
           <div className="rt-asignar-form">

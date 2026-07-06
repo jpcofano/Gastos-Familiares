@@ -21,6 +21,7 @@ import {
   cargarConfigIA, guardarConfigIA,
   normalizarEventoProximo,
   generarPromptIA, importarAnalisisIA,
+  splitSectorialPorDriver, tickerADriver,
   type AnalisisPosicion, type AnalisisSectorial, type ConfigIA,
   type AgendaMacro, type EventoAgenda, type ModoIA,
 } from '../datos/patrimonioIA';
@@ -41,6 +42,7 @@ import {
 import {
   cargarConfigCafci, guardarConfigCafci, cargarUltimasCarteras, cargarMappings,
   sincronizarCafci as sincronizarCafciCallable, calcBenchmark,
+  importarFondosSugeridos, importarMappingSeed,
   type ConfigCafci, type CafciCartera, type CafciFondoConfig,
 } from '../datos/patrimonioCafci';
 import PatrimonioIngesta from './PatrimonioIngesta';
@@ -909,11 +911,14 @@ type ConsolidadoTicker = {
   tieneStale: boolean;
 };
 
-function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, configIA, onAnalizar }: {
+function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, configIA, onAnalizar, onAbrirChat, agenda, sectorial }: {
   M: PatMetrics; posiciones: Posicion[]; manuales: PosicionManual[]; fechaCorrida: string;
   analisisCache: Record<string, AnalisisPosicion>;
   configIA: ConfigIA;
   onAnalizar: (ticker: string, contexto: Record<string, unknown>) => void;
+  onAbrirChat: (ticker: string, contexto: Record<string, unknown>) => void;
+  agenda: AgendaMacro | null;
+  sectorial: AnalisisSectorial | null;
 }) {
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
   const [analizando, setAnalizando] = useState<Set<string>>(new Set());
@@ -1055,12 +1060,9 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
                       onAnalizar(c.ticker, ctx);
                       setTimeout(() => setAnalizando(prev => { const n = new Set(prev); n.delete(c.ticker); return n; }), 30000);
                     }}
-                    onAbrirChat={(ctx) => {
-                      const onDone = () => cargarAnalisisPosicion(c.ticker).then(a => {
-                        if (a) setAnalisisCache(prev => ({ ...prev, [c.ticker]: a }));
-                      });
-                      setModalPromptChat({ modo: 'posicion', ticker: c.ticker, contexto: ctx, onDone });
-                    }}
+                    onAbrirChat={(ctx) => onAbrirChat(c.ticker, ctx)}
+                    agenda={agenda}
+                    sectorial={sectorial}
                   />
                 </div>
               )}
@@ -1521,20 +1523,93 @@ function PlanTab({ M, posiciones, decisiones, onRegistrarLibre, onRegistrarDesde
   );
 }
 
+// ── Markdown renderer liviano (sin dependencias, para sectorial) ──────────────
+function renderInline(text: string): JSX.Element {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  if (parts.length === 1) return <>{text}</>;
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.startsWith('**') && p.endsWith('**')
+          ? <strong key={i}>{p.slice(2, -2)}</strong>
+          : <span key={i}>{p}</span>
+      )}
+    </>
+  );
+}
+
+function renderMarkdownLite(text: string): JSX.Element {
+  const lines = text.split('\n');
+  const nodes: JSX.Element[] = [];
+  const paraBuf: string[] = [];
+
+  const flushPara = () => {
+    const content = paraBuf.join(' ').trim();
+    paraBuf.length = 0;
+    if (!content) return;
+    nodes.push(<p key={nodes.length} style={{ fontSize: 12, lineHeight: 1.6, margin: '0 0 5px 0', color: 'var(--color-text-sec)' }}>{renderInline(content)}</p>);
+  };
+
+  for (const raw of lines) {
+    if (raw.startsWith('## ')) {
+      flushPara();
+      const title = raw.slice(3).replace(/\s*\[driver:\s*\w+\]/, '').trim();
+      nodes.push(<div key={nodes.length} style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)', marginTop: 8, marginBottom: 2 }}>{title}</div>);
+    } else if (/^[-·•]\s/.test(raw)) {
+      flushPara();
+      nodes.push(<div key={nodes.length} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {renderInline(raw.replace(/^[-·•]\s/, ''))}</div>);
+    } else if (/^Si .+→/.test(raw)) {
+      flushPara();
+      const arrowIdx = raw.indexOf('→');
+      const cond = raw.slice(0, arrowIdx).trim();
+      const result = raw.slice(arrowIdx + 1).trim();
+      nodes.push(
+        <div key={nodes.length} style={{ background: 'var(--gf-gray-50)', border: '1px solid var(--gf-gray-100)', borderRadius: 6, padding: '5px 10px', fontSize: 11.5, margin: '2px 0' }}>
+          <span style={{ fontWeight: 700 }}>{cond} →</span>
+          <span style={{ color: 'var(--color-text-sec)' }}> {renderInline(result)}</span>
+        </div>
+      );
+    } else if (raw.trim() === '') {
+      flushPara();
+    } else {
+      paraBuf.push(raw);
+    }
+  }
+  flushPara();
+  return <>{nodes}</>;
+}
+
 // ── Análisis IA por ticker (dentro del acordeón de Tenencias) ────────────────
-function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, analisis, analizando, configIA, onAnalizar, onAbrirChat }: {
+function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, analisis, analizando, configIA, onAnalizar, onAbrirChat, agenda, sectorial }: {
   ticker: string; totalUsd: number; totalPortafolio: number; sectorDisp: string;
   analisis: AnalisisPosicion | null;
   analizando: boolean;
   configIA: ConfigIA;
   onAnalizar: (contexto: Record<string, unknown>) => void;
   onAbrirChat: (contexto: Record<string, unknown>) => void;
+  agenda: AgendaMacro | null;
+  sectorial: AnalisisSectorial | null;
 }) {
+  const [panoramaExpandido, setPanoramaExpandido] = useState(false);
   const pct = (x: number) => Math.round(x * 100) + '%';
   const contexto = { ticker, sector: sectorDisp, pesoEnCartera: pct(totalUsd / (totalPortafolio || 1)), valorUsd: Math.round(totalUsd) };
 
   const diasAntiguo = analisis
     ? Math.floor((Date.now() - new Date(analisis.generadoEnISO).getTime()) / 86400000)
+    : null;
+
+  // Permeado
+  const driver = tickerADriver(ticker, sectorDisp);
+  const eventosDriver = (agenda && driver !== 'otro')
+    ? agenda.eventos
+        .filter(ev => ev.driver === driver)
+        .sort((a, b) => (!a.fecha ? 1 : !b.fecha ? -1 : a.fecha < b.fecha ? -1 : 1))
+        .slice(0, 3)
+    : [];
+  const seccionesSectorial = sectorial ? splitSectorialPorDriver(sectorial.resultado) : [];
+  const seccionDriver = seccionesSectorial.find(s => s.driver === driver);
+  const diasSectorial = sectorial
+    ? Math.floor((Date.now() - new Date(sectorial.generadoEnISO).getTime()) / 86400000)
     : null;
 
   return (
@@ -1602,9 +1677,19 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
           {analisis.resultado.proximosEventos && analisis.resultado.proximosEventos.length > 0 && (
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 2 }}>Próximos eventos</div>
-              {analisis.resultado.proximosEventos.map((e, i) => (
-                <div key={i} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {e}</div>
-              ))}
+              {analisis.resultado.proximosEventos.map((e, i) => {
+                const ev = normalizarEventoProximo(e);
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 5, alignItems: 'baseline', fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>
+                    {ev.cuando && (
+                      <span style={{ fontSize: 10, fontWeight: 700, background: 'var(--gf-gray-100)', borderRadius: 4, padding: '1px 5px', flexShrink: 0, color: 'var(--gf-gray-500)' }}>
+                        {ev.cuando.slice(5).replace('-', '/')}
+                      </span>
+                    )}
+                    <span>· {ev.evento}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
           {analisis.resultado.queHariaEnCadaCaso && analisis.resultado.queHariaEnCadaCaso.length > 0 && (
@@ -1631,6 +1716,42 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
               {analisis.resultado.senalesAVigilar.map((s, i) => (
                 <div key={i} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {s}</div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Permeado: eventos de la agenda del mismo driver */}
+      {eventosDriver.length > 0 && (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--gf-gray-100)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 4 }}>De la agenda</div>
+          {eventosDriver.map((ev, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 11.5, color: 'var(--color-text-sec)', padding: '2px 0' }}>
+              {ev.fecha && (
+                <span style={{ fontSize: 10, fontWeight: 700, background: 'var(--gf-gray-100)', borderRadius: 4, padding: '1px 5px', flexShrink: 0, color: 'var(--gf-gray-500)' }}>
+                  {ev.fecha.slice(5).replace('-', '/')}
+                </span>
+              )}
+              <span>{ev.evento}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Permeado: sección del panorama sectorial del mismo driver */}
+      {seccionDriver && (
+        <div style={{ marginTop: 6 }}>
+          <button
+            onClick={() => setPanoramaExpandido(v => !v)}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', color: 'var(--gf-gray-400)', fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-base)' }}
+          >
+            <span>{panoramaExpandido ? '▲' : '▼'}</span>
+            <span>Panorama {seccionDriver.titulo}</span>
+            {diasSectorial !== null && <span style={{ fontWeight: 400, marginLeft: 4 }}>· hace {diasSectorial}d</span>}
+          </button>
+          {panoramaExpandido && (
+            <div style={{ marginTop: 4, paddingLeft: 4 }}>
+              {renderMarkdownLite(seccionDriver.cuerpo)}
             </div>
           )}
         </div>
@@ -1828,7 +1949,7 @@ function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGe
 }
 
 // ── Solapa Research ───────────────────────────────────────────────────────────
-function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda, onAbrirChat }: {
+function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, onChatLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda, onAbrirChat }: {
   M: PatMetrics;
   configIA: ConfigIA;
   sectorial: AnalisisSectorial | null;
@@ -1837,12 +1958,16 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
   loteProgreso: { actual: number; total: number; errores: string[] } | null;
   onGenerarSectorial: () => void;
   onAnalizarLote: () => void;
+  onChatLote: () => void;
   analisisCache: Record<string, AnalisisPosicion>;
   agenda: AgendaMacro | null;
   generandoAgenda: boolean;
   onGenerarAgenda: () => void;
   onAbrirChat: (modo: ModoIA, ticker: string | undefined, contexto: Record<string, unknown>) => void;
 }) {
+  const [expandedSecIdx, setExpandedSecIdx] = useState<Set<number>>(new Set([0]));
+  const seccionesSectorial = sectorial ? splitSectorialPorDriver(sectorial.resultado) : [];
+
   const fmtFechaISO = (iso: string) => {
     const d = iso.slice(0, 10);
     const [y,m,dd] = d.split('-');
@@ -1872,13 +1997,21 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <span style={{ fontSize: 13, fontWeight: 700 }}>Analizar toda la cartera</span>
-          <button
-            onClick={onAnalizarLote}
-            disabled={!configIA.habilitado || analizandoLote}
-            style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: (!configIA.habilitado || analizandoLote) ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: (!configIA.habilitado || analizandoLote) ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || analizandoLote) ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
-          >
-            {analizandoLote ? 'Analizando…' : 'Analizar lote'}
-          </button>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <button
+              onClick={onChatLote}
+              style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'transparent', color: 'var(--color-text-sec)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              Chat
+            </button>
+            <button
+              onClick={onAnalizarLote}
+              disabled={!configIA.habilitado || analizandoLote}
+              style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: (!configIA.habilitado || analizandoLote) ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: (!configIA.habilitado || analizandoLote) ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || analizandoLote) ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              {analizandoLote ? 'Analizando…' : 'Analizar lote'}
+            </button>
+          </div>
         </div>
         {loteProgreso && (
           <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
@@ -1894,8 +2027,8 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
           </div>
         )}
         <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
-          ~{Object.keys(M.bySector).length * 2} tickers · puede tardar varios minutos · consume API
-          {!configIA.habilitado && <span style={{ marginLeft: 5 }}>· activar IA en Configuración</span>}
+          Chat: costo cero · Analizar lote: consume API
+          {!configIA.habilitado && <span style={{ marginLeft: 5 }}>· activar IA en Configuración para usar lote</span>}
         </div>
       </Card>
 
@@ -1933,8 +2066,34 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
           </div>
         </div>
         {sectorial ? (
-          <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--color-text-sec)', whiteSpace: 'pre-wrap' }}>
-            {sectorial.resultado}
+          <div>
+            {seccionesSectorial.length > 0
+              ? seccionesSectorial.map((sec, i) => (
+                  <div key={sec.driver} style={{ borderBottom: i < seccionesSectorial.length - 1 ? '1px solid var(--gf-gray-100)' : undefined, paddingBottom: i < seccionesSectorial.length - 1 ? 8 : 0, marginBottom: i < seccionesSectorial.length - 1 ? 8 : 0 }}>
+                    <button
+                      onClick={() => setExpandedSecIdx(prev => {
+                        const next = new Set(prev);
+                        if (next.has(i)) next.delete(i); else next.add(i);
+                        return next;
+                      })}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0', fontSize: 12, fontWeight: 700, color: 'var(--color-text)', width: '100%', textAlign: 'left', fontFamily: 'var(--font-base)' }}
+                    >
+                      <span style={{ fontSize: 10, color: 'var(--gf-gray-400)', flexShrink: 0 }}>{expandedSecIdx.has(i) ? '▲' : '▼'}</span>
+                      {sec.titulo}
+                    </button>
+                    {expandedSecIdx.has(i) && (
+                      <div style={{ marginTop: 4 }}>
+                        {renderMarkdownLite(sec.cuerpo)}
+                      </div>
+                    )}
+                  </div>
+                ))
+              : (
+                <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--color-text-sec)', whiteSpace: 'pre-wrap' }}>
+                  {sectorial.resultado}
+                </div>
+              )
+            }
           </div>
         ) : (
           <div style={{ fontSize: 12, color: 'var(--gf-gray-400)' }}>
@@ -2066,11 +2225,13 @@ function AportesRetirosCard({ flujos, onAdd, onEdit }: {
 }
 
 // ── Card de fondos CAFCI ──────────────────────────────────────────────────────
-function CafciFondosCard({ configCafci, sincronizando, onSincronizar, onGuardar }: {
+function CafciFondosCard({ configCafci, sincronizando, onSincronizar, onGuardar, onImportarFondos, onImportarMapping }: {
   configCafci: ConfigCafci;
   sincronizando: boolean;
   onSincronizar: () => void;
   onGuardar: (c: ConfigCafci) => void;
+  onImportarFondos: () => void;
+  onImportarMapping: () => void;
 }) {
   const [nombre, setNombre] = useState('');
   const [fondoId, setFondoId] = useState('');
@@ -2087,6 +2248,12 @@ function CafciFondosCard({ configCafci, sincronizando, onSincronizar, onGuardar 
   const inp: React.CSSProperties = {
     padding: '8px 10px', borderRadius: 8, border: '1px solid var(--gf-gray-200)',
     fontSize: 12.5, fontFamily: 'var(--font-base)', width: '100%', boxSizing: 'border-box',
+  };
+
+  const btnSec: React.CSSProperties = {
+    padding: '7px 11px', borderRadius: 9, border: '1px solid var(--gf-gray-200)',
+    cursor: 'pointer', background: 'transparent', color: 'var(--color-text-sec)',
+    fontSize: 11.5, fontWeight: 600, fontFamily: 'var(--font-base)',
   };
 
   return (
@@ -2153,6 +2320,14 @@ function CafciFondosCard({ configCafci, sincronizando, onSincronizar, onGuardar 
           + Agregar fondo
         </button>
       )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button onClick={onImportarFondos} style={btnSec}>
+          Importar fondos sugeridos (13)
+        </button>
+        <button onClick={onImportarMapping} style={btnSec}>
+          Importar mapping (70)
+        </button>
+      </div>
     </Card>
   );
 }
@@ -2246,6 +2421,12 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
         </Card>
       )}
 
+      {carteras.some(c => c.advertenciaIntegridad) && (
+        <div style={{ fontSize: 11.5, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 10, padding: '8px 12px', lineHeight: 1.5 }}>
+          ⚠️ {carteras.filter(c => c.advertenciaIntegridad).map(c => c.nombre).join(', ')} — la suma de shares está fuera de [98, 102]. Los datos pueden ser parciales.
+        </div>
+      )}
+
       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'center', padding: '4px 0' }}>
         {carteras.map(c => c.nombre).join(' · ')} · {carteras[0]?.fechaDatos ?? '—'}
       </div>
@@ -2254,7 +2435,7 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
 }
 
 // ── Solapa Configuración ──────────────────────────────────────────────────────
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, sincronizandoCafci, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci }: {
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, sincronizandoCafci, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci }: {
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
   configIA: ConfigIA;
@@ -2271,13 +2452,15 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
   onEditFlujo: (f: FlujoPatrimonio) => void;
   onSincronizarCafci: () => void;
   onGuardarConfigCafci: (c: ConfigCafci) => void;
+  onImportarFondosCafci: () => void;
+  onImportarMappingCafci: () => void;
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
       <AportesRetirosCard flujos={flujos} onAdd={onAddFlujo} onEdit={onEditFlujo} />
-      <CafciFondosCard configCafci={configCafci} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} />
+      <CafciFondosCard configCafci={configCafci} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} />
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -2573,7 +2756,8 @@ function ModalPromptChat({
   const [validando, setValidando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importado, setImportado] = useState(false);
-  const nombreModo = modo === 'posicion' ? `Posición ${ticker}` : modo === 'sectorial' ? 'Sectorial' : 'Agenda macro';
+  const [resumenImportado, setResumenImportado] = useState<string | null>(null);
+  const nombreModo = modo === 'posicion' ? `Posición ${ticker}` : modo === 'sectorial' ? 'Sectorial' : modo === 'agenda' ? 'Agenda macro' : 'Lote (toda la cartera)';
 
   useEffect(() => {
     setCargando(true);
@@ -2603,7 +2787,8 @@ function ModalPromptChat({
     setValidando(true);
     setError(null);
     try {
-      await importarAnalisisIA(modo, contenido, ticker);
+      const result = await importarAnalisisIA(modo, contenido, ticker);
+      setResumenImportado(result.resumen);
       setImportado(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -2667,12 +2852,20 @@ function ModalPromptChat({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', padding: '12px 0' }}>
                 <span style={{ fontSize: 28 }}>✓</span>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>Análisis importado</div>
+                {resumenImportado && (
+                  <div style={{ fontSize: 12, color: 'var(--color-text-sec)', textAlign: 'center', lineHeight: 1.4 }}>{resumenImportado}</div>
+                )}
                 <button onClick={onDone} style={{ ...btn, background: 'var(--color-accent)', color: '#fff', width: '100%' }}>Cerrar</button>
               </div>
             ) : (
               <>
                 <div style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
                   Pegá la respuesta de Claude. Puede incluir los fences {modo === 'sectorial' ? '```markdown' : '```json'} o no.
+                  {modo === 'lote' && (
+                    <span style={{ display: 'block', marginTop: 4, color: 'var(--gf-gray-400)' }}>
+                      Si Claude cortó en varios mensajes, concatená todas las partes antes de pegar (el JSON debe ser un único bloque válido).
+                    </span>
+                  )}
                 </div>
                 <textarea value={contenido} onChange={e => { setContenido(e.target.value); setError(null); }} rows={8} placeholder={modo === 'sectorial' ? 'Pegar texto aquí…' : 'Pegar JSON aquí…'}
                   style={{ fontSize: 11.5, borderRadius: 8, border: `1px solid ${error ? 'var(--gf-expense)' : 'var(--gf-gray-200)'}`, padding: '8px 10px', resize: 'vertical', fontFamily: 'var(--font-base)', color: 'var(--color-text)', background: 'var(--color-surface)' }} />
@@ -2855,6 +3048,29 @@ export default function Patrimonio() {
     setConfigCafci(c);
   }
 
+  async function handleImportarFondosCafci() {
+    try {
+      const n = await importarFondosSugeridos();
+      const updated = await cargarConfigCafci();
+      setConfigCafci(updated);
+      if (n === 0) alert('Los 13 fondos sugeridos ya estaban en la lista.');
+      else alert(`${n} fondo${n !== 1 ? 's' : ''} agregado${n !== 1 ? 's' : ''}.`);
+    } catch (e) {
+      console.error('[importarFondos]', e);
+    }
+  }
+
+  async function handleImportarMappingCafci() {
+    try {
+      const n = await importarMappingSeed();
+      const mappings = await cargarMappings();
+      setCafciMappings(mappings);
+      alert(`Mapping importado: ${n} patrones escritos en cafciMapping.`);
+    } catch (e) {
+      console.error('[importarMapping]', e);
+    }
+  }
+
   async function handleSincronizarCafci() {
     if (sincronizandoCafci) return;
     setSincronizandoCafci(true);
@@ -2908,6 +3124,34 @@ export default function Patrimonio() {
       setLoteProgreso({ actual: i + 1, total: tickers.length, errores: [...errores] });
     }
     setAnalizandoLote(false);
+  }
+
+  function handleAbrirChatLote() {
+    if (!M) return;
+    const byTickerMap: Record<string, { totalUsd: number; sectorDisp: string }> = {};
+    for (const p of todasPosiciones) {
+      const sec = (() => { const base = SECTOR_DISPLAY[p.sector] ?? p.sector; if (p.sector === 'cripto' || p.sector === 'cash' || p.sector === 'global') return base; return base + (p.pais_riesgo === 'AR' ? ' AR' : ' Global'); })();
+      if (!byTickerMap[p.ticker]) byTickerMap[p.ticker] = { totalUsd: 0, sectorDisp: sec };
+      byTickerMap[p.ticker].totalUsd += p.valorUsd;
+    }
+    const posicionesLote = Object.entries(byTickerMap).map(([t, v]) => ({
+      ticker: t, sector: v.sectorDisp, pesoEnCartera: pct(v.totalUsd / (M.total || 1)), valorUsd: Math.round(v.totalUsd),
+    }));
+    const contexto = {
+      posiciones: posicionesLote,
+      global: { total: Math.round(M.total), paisAr: pct(M.paisAr), cripto: pct(M.cripto), hhi: M.hhi },
+    };
+    setModalPromptChat({
+      modo: 'lote',
+      contexto,
+      onDone: () => {
+        cargarTodosLosAnalisis().then(analisis => {
+          const cache: Record<string, AnalisisPosicion> = {};
+          for (const a of analisis) if (a.ticker) cache[a.ticker] = a;
+          setAnalisisCache(prev => ({ ...prev, ...cache }));
+        });
+      },
+    });
   }
 
   async function handleGenerarSectorial() {
@@ -3074,6 +3318,16 @@ export default function Patrimonio() {
               analisisCache={analisisCache}
               configIA={configIA}
               onAnalizar={handleAnalizarPosicion}
+              agenda={agenda}
+              sectorial={sectorial}
+              onAbrirChat={(ticker, contexto) => {
+                const onDone = () => {
+                  cargarAnalisisPosicion(ticker).then(a => {
+                    if (a) setAnalisisCache(prev => ({ ...prev, [ticker]: a }));
+                  });
+                };
+                setModalPromptChat({ modo: 'posicion', ticker, contexto, onDone });
+              }}
             />
           )}
           {tab === 'riesgo'    && <RiesgoTab M={M} posiciones={todasPosiciones} />}
@@ -3163,6 +3417,7 @@ export default function Patrimonio() {
               loteProgreso={loteProgreso}
               onGenerarSectorial={handleGenerarSectorial}
               onAnalizarLote={handleAnalizarLote}
+              onChatLote={handleAbrirChatLote}
               analisisCache={analisisCache}
               agenda={agenda}
               generandoAgenda={generandoAgenda}
@@ -3199,6 +3454,8 @@ export default function Patrimonio() {
               onEditFlujo={f => { setEditFlujo(f); setShowModalFlujo(true); }}
               onSincronizarCafci={handleSincronizarCafci}
               onGuardarConfigCafci={handleGuardarConfigCafci}
+              onImportarFondosCafci={handleImportarFondosCafci}
+              onImportarMappingCafci={handleImportarMappingCafci}
             />
           )}
         </>

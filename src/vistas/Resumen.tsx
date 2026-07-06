@@ -5,6 +5,7 @@ import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
 import { confirmarPagoEsperado, desmarcarPago } from '../datos/movimientos';
+import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
 import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
 import { fmtMoney } from '../datos/money';
@@ -122,7 +123,7 @@ function porPersonaIngreso(movs: Movement[]): [string, number][] {
 //   > 0 → rojo (falta plata); ≤ 0 → verde "Cubierto".
 // Estas dos tarjetas NO dependen del toggle ARS/USD — siempre muestran su moneda fija.
 // F9.71 — card oscura centrada: Neto grande + eq, Ingresos/Gastos columnas con eq.
-function KpiCards({ c, cur, faltaCubrirUsd }: { c: Kpis; cur: Moneda; faltaCubrirUsd: number }) {
+function KpiCards({ c, cur, faltaCubrirUsd, nSinMonto }: { c: Kpis; cur: Moneda; faltaCubrirUsd: number; nSinMonto: number }) {
   const netBig = cur === 'ARS' ? c.netArsEq : c.netUsdEq;
   const netSmall = cur === 'ARS' ? c.netUsdEq : c.netArsEq;
   const fmt = cur === 'ARS' ? fmtArs : fmtUsdEq;
@@ -131,7 +132,8 @@ function KpiCards({ c, cur, faltaCubrirUsd }: { c: Kpis; cur: Moneda; faltaCubri
   const ingSmall = cur === 'ARS' ? c.ingUsdEq : c.ingArsEq;
   const gasBig = cur === 'ARS' ? c.gasArsEq : c.gasUsdEq;
   const gasSmall = cur === 'ARS' ? c.gasUsdEq : c.gasArsEq;
-  const cubierto = faltaCubrirUsd <= 0;
+  const esCubierto = faltaCubrirUsd <= 0;
+  const cubiertoParcial = esCubierto && nSinMonto > 0;
   return (
     <>
       <div style={{ background: 'linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)', borderRadius: 'var(--radius-card)', padding: 'var(--space-4)', color: '#fff', boxShadow: 'var(--shadow-soft)', textAlign: 'center' }}>
@@ -139,7 +141,7 @@ function KpiCards({ c, cur, faltaCubrirUsd }: { c: Kpis; cur: Moneda; faltaCubri
         <div style={{ fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.5px', lineHeight: 1.05, marginTop: 6 }}>
           {netBig >= 0 ? '+' : '−'}{fmt(Math.abs(netBig))}
         </div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,.6)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{fmtOtra(Math.abs(netSmall))}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,.6)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{netBig >= 0 ? '+' : '−'}{fmtOtra(Math.abs(netSmall))}</div>
         <div style={{ display: 'flex', marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.15)' }}>
           {([{ label: 'Ingresos', v: ingBig, eq: ingSmall, col: 'var(--gf-emerald-100)' }, { label: 'Gastos', v: gasBig, eq: gasSmall, col: '#fca5a5' }] as const).map((x, i) => (
             <div key={x.label} style={{ flex: 1, borderLeft: i > 0 ? '1px solid rgba(255,255,255,.12)' : 'none' }}>
@@ -155,8 +157,8 @@ function KpiCards({ c, cur, faltaCubrirUsd }: { c: Kpis; cur: Moneda; faltaCubri
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(c.pesosDisp)}</span>
         </Card>
         <Card eyebrow="Falta cubrir (USD)" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cubierto ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
-            {cubierto ? 'Cubierto' : fmtUsdEq(faltaCubrirUsd)}
+          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: esCubierto ? (cubiertoParcial ? '#b45309' : 'var(--gf-income)') : 'var(--gf-expense)' }}>
+            {esCubierto ? (cubiertoParcial ? 'Cubierto*' : 'Cubierto') : fmtUsdEq(faltaCubrirUsd)}
           </span>
         </Card>
       </div>
@@ -195,9 +197,11 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
     ? checklist.filter(ci => ci.item.diaVencimiento === hoy.getDate())
     : [];
 
-  // F9.55 — "Falta cubrir (USD)": Σ esperados ARS-eq del mes ÷ tc − pesosDisp
-  // (cobertura real de la caja contra los compromisos fijos)
-  const esperadosArsEq = checklist.reduce((s, ci) => {
+  // F9.55 — "Falta cubrir (USD)": Σ esperados ARS-eq del mes ÷ tc − pesosDisp.
+  // F9.99.5 — excluye ítems ya cubiertos; nSinMonto = no cubiertos sin monto (ámbar).
+  const noCubiertos = checklist.filter(ci => !cubierto(ci.estado));
+  const nSinMonto = noCubiertos.filter(ci => ci.item.montoEsperado == null).length;
+  const esperadosArsEq = noCubiertos.reduce((s, ci) => {
     const m = ci.item.montoEsperado;
     if (m == null) return s;
     return ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
@@ -218,7 +222,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <KpiCards c={c} cur={cur} faltaCubrirUsd={faltaCubrirUsd} />
+      <KpiCards c={c} cur={cur} faltaCubrirUsd={faltaCubrirUsd} nSinMonto={nSinMonto} />
 
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       {/* F9.62 — clickeable: lleva a la solapa Gastos Fijos */}
@@ -421,6 +425,48 @@ const TINT: Record<EstadoChecklist, string> = {
   no_aplica:     'var(--gf-gray-300)',
 };
 
+function MontoInlineEdit({ item }: { item: ExpectedItem }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState('');
+
+  function startEdit() {
+    setVal(item.montoEsperado != null ? String(item.montoEsperado) : '');
+    setEditing(true);
+  }
+
+  async function commit() {
+    setEditing(false);
+    const n = parseFloat(val.replace(',', '.'));
+    if (!isNaN(n) && n > 0 && n !== item.montoEsperado) {
+      await actualizarItemEsperado(item.id, { montoEsperado: n });
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        inputMode="decimal"
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+        style={{ width: 90, fontSize: 14, fontVariantNumeric: 'tabular-nums', border: '1px solid var(--gf-gray-300)', borderRadius: 6, padding: '2px 6px', textAlign: 'right' }}
+      />
+    );
+  }
+  return (
+    <span
+      onClick={startEdit}
+      title="Editar monto esperado"
+      style={{ cursor: 'text', borderBottom: '1px dashed var(--gf-gray-300)' }}
+    >
+      <Money value={item.montoEsperado ?? 0} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
+    </span>
+  );
+}
+
 function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMesActual }: {
   checklist: CheckItem[];
   config: FamiliaConfig | null;
@@ -474,7 +520,10 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMes
                       </div>
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <Money value={monto} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
+                      {!tieneMatch && !item.tarjetaCodigo
+                        ? <MontoInlineEdit item={item} />
+                        : <Money value={monto} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
+                      }
                       {estado === 'parcial' && <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>Falta completar</div>}
                     </div>
                   </div>

@@ -50,6 +50,9 @@ export function docACardStatement(id: string, data: DocumentData): CardStatement
     confirmadoPor:       data.confirmadoPor          ?? null,
     observaciones:       data.observaciones          ?? null,
     errorExtraccion:     data.errorExtraccion        ?? null,
+    tipoError:           data.tipoError              ?? null,
+    intentos:            data.intentos               ?? 0,
+    duplicadoDe:         data.duplicadoDe            ?? null,
     movimientosParseados: movs,
     ajustesConsolidado:  Array.isArray(data.ajustesConsolidado)
       ? (data.ajustesConsolidado as AjusteConsolidado[])
@@ -186,9 +189,13 @@ export function calcularCuadre(
   }
   const diffARS = Math.abs(sumaARS - totalARS);
   const diffUSD = Math.abs(sumaUSD - totalUSD);
+  // F9.99.5 — umbral relativo: 0.01% del total con piso de $10 ARS.
+  // Resúmenes largos acumulan redondeos de céntimos → $1 era demasiado estricto.
+  // USD queda en ≤1 (los totales USD son pequeños y la precisión centavil importa).
+  const umbralARS = totalARS > 0 ? Math.max(10, totalARS * 0.0001) : 10;
   return {
     sumaARS, sumaUSD, diffARS, diffUSD,
-    balanceARS: totalARS === 0 || diffARS <= 1,
+    balanceARS: totalARS === 0 || diffARS <= umbralARS,
     balanceUSD: totalUSD === 0 || diffUSD <= 1,
   };
 }
@@ -356,6 +363,20 @@ export async function confirmarResumenTarjeta(
       });
     }
 
+    // ── Setear montoEsperado en los items de la tarjeta ──────────────────────
+    if (itemARS && resumen.totalARS > 0) {
+      batch.update(doc(db, 'itemsEsperados', itemARS.id), {
+        montoEsperado: resumen.totalARS,
+        actualizadoEn: serverTimestamp(),
+      });
+    }
+    if (itemUSD && resumen.totalUSD > 0) {
+      batch.update(doc(db, 'itemsEsperados', itemUSD.id), {
+        montoEsperado: resumen.totalUSD,
+        actualizadoEn: serverTimestamp(),
+      });
+    }
+
     // ── Marcar resumen como confirmado ────────────────────────────────────────
     const resumenRef = doc(db, 'resumenesTarjeta', resumen.id);
     batch.update(resumenRef, {
@@ -419,6 +440,21 @@ export async function agregarAjusteCuadreManual(
     await updateDoc(doc(db, 'resumenesTarjeta', resumen.id), {
       ajustesConsolidado: [...resumen.ajustesConsolidado, entrada],
       actualizadoEn:      serverTimestamp(),
+    });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+// ── Reintento (F9.99.5) ───────────────────────────────────────────────────────
+
+export async function reintentarResumen(resumenId: string): Promise<Resultado<void>> {
+  try {
+    await updateDoc(doc(db, 'resumenesTarjeta', resumenId), {
+      estado:          'subido',
+      errorExtraccion: null,
+      actualizadoEn:   serverTimestamp(),
     });
     return { ok: true, data: undefined };
   } catch (e) {
