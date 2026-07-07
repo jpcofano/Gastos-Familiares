@@ -1609,6 +1609,82 @@ export const descartarEntrada = onCall(
   },
 );
 
+// F9.99.6 — descarta un entrante ruteado o en error desde la UI, sin scripts one-shot.
+// Borra: el doc entrante + su PDF en Storage + el doc destino (si existe y NO está
+// vinculado/confirmado) + el PDF del destino. Guard duro: si el destino ya está
+// vinculado/confirmado, abortar con failed-precondition — NUNCA tocar datos reales.
+// Idempotente: entrante o destino ya inexistentes → warn y continuar.
+export const descartarEntranteCompleto = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { hash } = request.data as { hash?: string };
+    if (!hash) throw new HttpsError('invalid-argument', 'hash requerido');
+
+    const entranteRef  = db.collection('entrantes').doc(hash);
+    const entranteSnap = await entranteRef.get();
+    if (!entranteSnap.exists) {
+      console.warn(`[descartarEntranteCompleto] entrante ${hash} ya no existe — idempotente`);
+      return { ok: true };
+    }
+    const entData = entranteSnap.data()!;
+
+    const estado = entData.estado as string;
+    if (estado !== 'ruteado' && estado !== 'error') {
+      throw new HttpsError(
+        'failed-precondition',
+        `No se puede descartar un entrante en estado '${estado}'`,
+      );
+    }
+
+    const batch = db.batch();
+
+    const destino = entData.destino as { coleccion: string; id: string } | undefined;
+    if (destino?.id) {
+      const destinoRef  = db.collection(destino.coleccion).doc(destino.id);
+      const destinoSnap = await destinoRef.get();
+      if (destinoSnap.exists) {
+        const d = destinoSnap.data()!;
+        const estadoDestino = d.estado as string;
+        // Guard de seguridad: NUNCA borrar destinos vinculados/confirmados
+        if (estadoDestino === 'vinculado' || estadoDestino === 'confirmado') {
+          throw new HttpsError(
+            'failed-precondition',
+            `El destino (${destino.coleccion}/${destino.id}) ya está ${estadoDestino} — no se puede descartar. Este entrante está vinculado a datos reales.`,
+          );
+        }
+        const refPdfDestino = d.refStoragePdf as string | undefined;
+        if (refPdfDestino) {
+          try { await getStorage().bucket().file(refPdfDestino).delete(); }
+          catch (e) { console.warn(`[descartarEntranteCompleto] PDF destino no borrado: ${String(e)}`); }
+        }
+        batch.delete(destinoRef);
+      } else {
+        console.warn(`[descartarEntranteCompleto] destino ${destino.coleccion}/${destino.id} ya no existe — idempotente`);
+      }
+    }
+
+    const rutaStorage = entData.rutaStorage as string | undefined;
+    if (rutaStorage) {
+      try { await getStorage().bucket().file(rutaStorage).delete(); }
+      catch (e) { console.warn(`[descartarEntranteCompleto] PDF entrante no borrado: ${String(e)}`); }
+    }
+
+    batch.delete(entranteRef);
+    await batch.commit();
+
+    console.log(`[descartarEntranteCompleto] entrante ${hash} descartado (por ${email})`);
+    return { ok: true };
+  },
+);
+
 // F6.9.11 — el dependiente carga su propio comprobante como su propio movimiento.
 // Atómica (batch crear-movimiento + marcar-comprobante-vinculado) e idempotente
 // (precondición estado==='extraido': un reintento corta en failed-precondition).

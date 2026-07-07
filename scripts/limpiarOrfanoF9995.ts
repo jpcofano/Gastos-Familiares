@@ -1,8 +1,13 @@
+// DEPRECADO F9.99.6 — La limpieza de entrantes huérfanos se hace desde la UI
+// (botón "Descartar" en EntranteCard para estados ruteado/error), via la callable
+// `descartarEntranteCompleto`. Este script NO borra el registro en `entrantes`,
+// lo que dejaría el ítem trabado permanentemente — NO CORRER.
+//
 // F9.99.5 — Limpieza única del doc huérfano en resumenesTarjeta
 // El doc quedó en estado 'error' (HTTP 400 "credit balance too low") sin haberse
 // extraído nunca; el mismo PDF fue re-subido y ya está confirmado → duplicado muerto.
 //
-// Uso:
+// Uso original (referencia histórica — usar la UI en su lugar):
 //   tsx scripts/limpiarOrfanoF9995.ts               ← dry-run, solo lista
 //   tsx scripts/limpiarOrfanoF9995.ts --apply        ← borra Firestore + Storage
 //   tsx scripts/limpiarOrfanoF9995.ts --target=production --apply   ← prod

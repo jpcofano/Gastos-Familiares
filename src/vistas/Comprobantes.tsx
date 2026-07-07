@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { confirmarRama1, cargarMovimientoDesdeComprobante, buscarObligacionAbierta, confirmadoPagoPorFecha, esObligacionDoc } from '../datos/comprobantes';
-import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada } from '../datos/entrantes';
+import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useResumenesTarjeta } from '../hooks/useResumenesTarjeta';
@@ -478,8 +478,9 @@ function ComprobanteCard({
 // ── Bandeja de entrada ────────────────────────────────────────────────────────
 
 function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
-  const [resolviendo, setResolviendo] = useState(false);
-  const [errLocal,    setErrLocal]    = useState<string | null>(null);
+  const [resolviendo,  setResolviendo]  = useState(false);
+  const [descartando,  setDescartando]  = useState(false);
+  const [errLocal,     setErrLocal]     = useState<string | null>(null);
 
   async function resolver(tipo: 'comprobante' | 'resumen') {
     setResolviendo(true);
@@ -489,8 +490,19 @@ function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
     if (!res.ok) setErrLocal(res.error.message);
   }
 
+  async function descartar() {
+    if (!confirm('Se borra el archivo y su documento destino no confirmado. No afecta datos ya vinculados. ¿Continuar?')) return;
+    setDescartando(true);
+    setErrLocal(null);
+    const res = await descartarEntranteCompleto(e.hash);
+    setDescartando(false);
+    if (!res.ok) setErrLocal(res.error.message);
+    // si ok, onSnapshot elimina el card de la bandeja
+  }
+
   const nombre = e.nombreArchivo ?? e.hash.slice(0, 16) + '…';
   const kb     = e.tamano != null ? `${(e.tamano / 1024).toFixed(0)} KB` : '';
+  const puedeDscartar = esAdmin && (e.estado === 'ruteado' || e.estado === 'error');
 
   return (
     <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--gf-gray-100)' }}>
@@ -498,6 +510,11 @@ function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
         <BadgeEntrante estado={e.estado} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</span>
         {kb && <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', flexShrink: 0 }}>{kb}</span>}
+        {puedeDscartar && (
+          <Button variant="secondary" size="sm" disabled={descartando} onClick={descartar}>
+            {descartando ? 'Descartando…' : 'Descartar'}
+          </Button>
+        )}
       </div>
 
       {e.motivoDeteccion && <p style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 4 }}>{e.motivoDeteccion}</p>}
@@ -515,6 +532,10 @@ function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
           </div>
           {errLocal && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errLocal}</span>}
         </div>
+      )}
+
+      {errLocal && e.estado !== 'ambiguo' && (
+        <span style={{ display: 'block', fontSize: 12, color: 'var(--gf-err-text)', marginTop: 6 }}>{errLocal}</span>
       )}
     </div>
   );
@@ -644,7 +665,8 @@ export default function Comprobantes() {
   const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes(memberId, esAdmin);
   const { resumenes } = useResumenesTarjeta();
   const { items } = useItemsEsperados();
-  const [mostrarAltaManual, setMostrarAltaManual] = useState(false);
+  const [mostrarAltaManual,    setMostrarAltaManual]    = useState(false);
+  const [expandirHistorial,    setExpandirHistorial]    = useState(false);
 
   // ── ShareLanding (F9.51) — cubre el arranque en frío cuando llega por
   // Web Share Target. Se monta apenas IDB devuelve el File; sus fases las
@@ -805,6 +827,7 @@ export default function Comprobantes() {
         })()}
 
         {/* ── Lista ──────────────────────────────────────────────────────── */}
+        {/* F9.99.6 — primeros 5 por defecto; "Ver más" expande; "Ver menos" colapsa */}
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 8 }}>Historial — Comprobantes y facturas</div>
           {cargandoLista && <p style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>Cargando…</p>}
@@ -812,19 +835,44 @@ export default function Comprobantes() {
           {!cargandoLista && comprobantes.length === 0 && (
             <p style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>Sin comprobantes aún.</p>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {comprobantes.map(comp => (
-              <ComprobanteCard
-                key={comp.id}
-                comp={comp}
-                items={items}
-                memberId={memberId}
-                miembro={miembro}
-                esAdmin={esAdmin}
-                autoAbrir={autoAbrirCompId === comp.id}
-              />
-            ))}
-          </div>
+          {(() => {
+            const LIMITE = 5;
+            const visibles = expandirHistorial ? comprobantes : comprobantes.slice(0, LIMITE);
+            const restantes = comprobantes.length - LIMITE;
+            return (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {visibles.map(comp => (
+                    <ComprobanteCard
+                      key={comp.id}
+                      comp={comp}
+                      items={items}
+                      memberId={memberId}
+                      miembro={miembro}
+                      esAdmin={esAdmin}
+                      autoAbrir={autoAbrirCompId === comp.id}
+                    />
+                  ))}
+                </div>
+                {!expandirHistorial && restantes > 0 && (
+                  <button
+                    onClick={() => setExpandirHistorial(true)}
+                    style={{ marginTop: 8, width: '100%', padding: '10px 0', borderRadius: 8, border: '1px solid var(--color-border-card)', background: 'var(--color-surface)', fontSize: 13, fontWeight: 600, color: 'var(--color-text-sec)', cursor: 'pointer' }}
+                  >
+                    Ver más ({restantes} restantes)
+                  </button>
+                )}
+                {expandirHistorial && comprobantes.length > LIMITE && (
+                  <button
+                    onClick={() => setExpandirHistorial(false)}
+                    style={{ marginTop: 8, width: '100%', padding: '10px 0', borderRadius: 8, border: '1px solid var(--color-border-card)', background: 'var(--color-surface)', fontSize: 13, fontWeight: 600, color: 'var(--color-text-sec)', cursor: 'pointer' }}
+                  >
+                    Ver menos
+                  </button>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* ── Resúmenes de tarjeta (solo admin) ──────────────────────────── */}

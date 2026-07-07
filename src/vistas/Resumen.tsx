@@ -118,35 +118,37 @@ function porPersonaIngreso(movs: Movement[]): [string, number][] {
 
 // ── KPI block (compartido entre secciones) ───────────────────────────────────
 
-// F9.55 — "Pesos disponibles" = ingresos ARS del mes (fijo en ARS, sin toggle).
-// "Falta cubrir (USD)" = (Σ esperadosArsEq − pesosDisp) / tc:
-//   > 0 → rojo (falta plata); ≤ 0 → verde "Cubierto".
-// Estas dos tarjetas NO dependen del toggle ARS/USD — siempre muestran su moneda fija.
+// F9.99.6 — semáforo en el NETO (verde si ≥ 0, rojo si < 0); Ingresos/Gastos neutros.
+// "Cobertura del mes" = gastos totales ArsEq vs pesos disponibles.
+//   Supuesto: gastos USD convertidos a ARS al TC del mes → puede sobreestimar si el dueño
+//   paga gastos USD con dólares propios. El cálculo es el definido por el dueño.
 // F9.71 — card oscura centrada: Neto grande + eq, Ingresos/Gastos columnas con eq.
-function KpiCards({ c, cur, faltaCubrirUsd, nSinMonto }: { c: Kpis; cur: Moneda; faltaCubrirUsd: number; nSinMonto: number }) {
-  const netBig = cur === 'ARS' ? c.netArsEq : c.netUsdEq;
-  const netSmall = cur === 'ARS' ? c.netUsdEq : c.netArsEq;
-  const fmt = cur === 'ARS' ? fmtArs : fmtUsdEq;
-  const fmtOtra = cur === 'ARS' ? fmtUsdEq : fmtArs;
-  const ingBig = cur === 'ARS' ? c.ingArsEq : c.ingUsdEq;
-  const ingSmall = cur === 'ARS' ? c.ingUsdEq : c.ingArsEq;
-  const gasBig = cur === 'ARS' ? c.gasArsEq : c.gasUsdEq;
-  const gasSmall = cur === 'ARS' ? c.gasUsdEq : c.gasArsEq;
-  const esCubierto = faltaCubrirUsd <= 0;
-  const cubiertoParcial = esCubierto && nSinMonto > 0;
+function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
+  const netBig   = cur === 'ARS' ? c.netArsEq  : c.netUsdEq;
+  const netSmall = cur === 'ARS' ? c.netUsdEq  : c.netArsEq;
+  const fmt      = cur === 'ARS' ? fmtArs      : fmtUsdEq;
+  const fmtOtra  = cur === 'ARS' ? fmtUsdEq    : fmtArs;
+  const ingBig   = cur === 'ARS' ? c.ingArsEq  : c.ingUsdEq;
+  const ingSmall = cur === 'ARS' ? c.ingUsdEq  : c.ingArsEq;
+  const gasBig   = cur === 'ARS' ? c.gasArsEq  : c.gasUsdEq;
+  const gasSmall = cur === 'ARS' ? c.gasUsdEq  : c.gasArsEq;
+  const netColor = netBig >= 0 ? 'var(--gf-emerald-100)' : '#fca5a5';
+  // faltanteArs: gastos totales ArsEq − pesos disponibles (ingresos ARS del mes)
+  const faltanteArs = c.gasArsEq - c.pesosDisp;
+  const cubierto = faltanteArs <= 0;
   return (
     <>
       <div style={{ background: 'linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)', borderRadius: 'var(--radius-card)', padding: 'var(--space-4)', color: '#fff', boxShadow: 'var(--shadow-soft)', textAlign: 'center' }}>
         <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'rgba(255,255,255,.55)' }}>Neto del mes</div>
-        <div style={{ fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.5px', lineHeight: 1.05, marginTop: 6 }}>
+        <div style={{ fontSize: 34, fontWeight: 800, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.5px', lineHeight: 1.05, marginTop: 6, color: netColor }}>
           {netBig >= 0 ? '+' : '−'}{fmt(Math.abs(netBig))}
         </div>
         <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,.6)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{netBig >= 0 ? '+' : '−'}{fmtOtra(Math.abs(netSmall))}</div>
         <div style={{ display: 'flex', marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.15)' }}>
-          {([{ label: 'Ingresos', v: ingBig, eq: ingSmall, col: 'var(--gf-emerald-100)' }, { label: 'Gastos', v: gasBig, eq: gasSmall, col: '#fca5a5' }] as const).map((x, i) => (
+          {([{ label: 'Ingresos', v: ingBig, eq: ingSmall }, { label: 'Gastos', v: gasBig, eq: gasSmall }] as const).map((x, i) => (
             <div key={x.label} style={{ flex: 1, borderLeft: i > 0 ? '1px solid rgba(255,255,255,.12)' : 'none' }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'rgba(255,255,255,.5)' }}>{x.label}</div>
-              <div style={{ fontSize: 19, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: x.col, marginTop: 3 }}>{fmt(x.v)}</div>
+              <div style={{ fontSize: 19, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: '#fff', marginTop: 3 }}>{fmt(x.v)}</div>
               <div style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,.55)', fontVariantNumeric: 'tabular-nums', marginTop: 1 }}>{fmtOtra(x.eq)}</div>
             </div>
           ))}
@@ -156,9 +158,11 @@ function KpiCards({ c, cur, faltaCubrirUsd, nSinMonto }: { c: Kpis; cur: Moneda;
         <Card eyebrow="Pesos disponibles" style={{ flex: 1 }}>
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(c.pesosDisp)}</span>
         </Card>
-        <Card eyebrow="Falta cubrir (USD)" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: esCubierto ? (cubiertoParcial ? '#b45309' : 'var(--gf-income)') : 'var(--gf-expense)' }}>
-            {esCubierto ? (cubiertoParcial ? 'Cubierto*' : 'Cubierto') : fmtUsdEq(faltaCubrirUsd)}
+        <Card eyebrow="Cobertura del mes" style={{ flex: 1 }}>
+          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cubierto ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
+            {cubierto
+              ? 'Cubierto'
+              : `Sin cubrir · −${fmtUsdEq(faltanteArs / c.tc)}`}
           </span>
         </Card>
       </div>
@@ -197,17 +201,6 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
     ? checklist.filter(ci => ci.item.diaVencimiento === hoy.getDate())
     : [];
 
-  // F9.55 — "Falta cubrir (USD)": Σ esperados ARS-eq del mes ÷ tc − pesosDisp.
-  // F9.99.5 — excluye ítems ya cubiertos; nSinMonto = no cubiertos sin monto (ámbar).
-  const noCubiertos = checklist.filter(ci => !cubierto(ci.estado));
-  const nSinMonto = noCubiertos.filter(ci => ci.item.montoEsperado == null).length;
-  const esperadosArsEq = noCubiertos.reduce((s, ci) => {
-    const m = ci.item.montoEsperado;
-    if (m == null) return s;
-    return ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
-  }, 0);
-  const faltaCubrirUsd = c.tc > 0 ? (esperadosArsEq - c.pesosDisp) / c.tc : 0;
-
   // Total de hoy pendiente (ARS eq) para el header de Card HOY
   // F9.76 — pendiente/pagado por estado real, no por presencia de match. Un por_confirmar sigue
   // siendo deuda hasta que el pago real lo confirme.
@@ -222,7 +215,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <KpiCards c={c} cur={cur} faltaCubrirUsd={faltaCubrirUsd} nSinMonto={nSinMonto} />
+      <KpiCards c={c} cur={cur} />
 
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       {/* F9.62 — clickeable: lleva a la solapa Gastos Fijos */}

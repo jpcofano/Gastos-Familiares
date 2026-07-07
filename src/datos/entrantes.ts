@@ -120,3 +120,15 @@ export async function descartarEntrada(
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
 }
+
+// F9.99.6 — descarta un entrante ruteado/error desde la UI (admin). La CF
+// verifica que el destino NO esté vinculado/confirmado antes de borrar.
+export async function descartarEntranteCompleto(hash: string): Promise<Resultado<void>> {
+  try {
+    const fn = httpsCallable(functions, 'descartarEntranteCompleto');
+    await fn({ hash });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
