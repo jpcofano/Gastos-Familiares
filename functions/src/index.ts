@@ -290,18 +290,17 @@ export const matchComprobante = onDocumentUpdated(
       return;
     }
 
-    // Derivar mes del comprobante + meses adyacentes para la ventana ±7d
+    // F9.99.7 Parte 1 — ventana [mes-1 … mes+3]: un pago de hoy puede saldar una obligación
+    // de hasta 3 meses adelante (ej. cuota de colegio pagada por adelantado). Las ramas de
+    // match (payee/nombre/destino) no cambian: ya operan sobre `movs`, que ahora trae más.
     const mesComp = datos.fecha ? datos.fecha.slice(0, 7) : '';
     const mesesAConsultar: string[] = [];
     if (mesComp) {
       const [y, m] = mesComp.split('-').map(Number);
-      const prev = new Date(y, m - 2);
-      const next = new Date(y, m);
-      mesesAConsultar.push(
-        `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`,
-        mesComp,
-        `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`,
-      );
+      for (let delta = -1; delta <= 3; delta++) {
+        const d = new Date(y, m - 1 + delta);
+        mesesAConsultar.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
     }
 
     const [movsSnap, itemsSnap] = await Promise.all([

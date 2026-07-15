@@ -43,6 +43,13 @@ export interface Movement {
   destinoAlias?: string | null;
   destinoNombre?: string | null;
   vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
+  // F9.99.7 — fecha real en que confirmadoPago pasó a true (puede diferir del mes del ítem:
+  // pago adelantado de un futuro, o registro tardío de un vencido). null = nunca confirmado
+  // por este mecanismo (movs legacy / creados antes de F9.99.7).
+  pagadoEn?: Date | null;
+  // F9.99.7 — marca movimientos creados por el botón "Registrar pago" del checklist, para que
+  // una futura deduplicación (si el extracto trae el mismo débito) pueda detectarlo.
+  registradoDesdeChecklist?: boolean;
 }
 
 export interface AjusteConsolidado {

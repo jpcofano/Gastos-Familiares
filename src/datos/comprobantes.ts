@@ -134,6 +134,11 @@ export async function confirmarRama1(
   itemEsperadoId: string | undefined,
 ): Promise<Resultado<void>> {
   try {
+    // F9.99.7 Parte 3 — pago adelantado: vincular a un movimiento futuro NO toca su `mes`
+    // (ver batch.update abajo, sin campo mes); `pagadoEn` queda como evidencia de cuándo se
+    // pagó realmente, para que el mes futuro pueda mostrar "pagado por adelantado el DD/MM".
+    const quedaConfirmado = !esObligacionDoc(comp.datosExtraidos?.tipoDocumento) &&
+      confirmadoPagoPorFecha(comp.datosExtraidos?.vencimientos?.[0]?.fecha ?? comp.datosExtraidos?.fecha);
     const batch = writeBatch(db);
     batch.update(doc(db, 'movimientos', movimientoId), {
       hashPdf:        comp.hashPdf,
@@ -142,7 +147,7 @@ export async function confirmarRama1(
       // estado del pago real). Solo pagos/tickets confirman por fecha.
       ...(esObligacionDoc(comp.datosExtraidos?.tipoDocumento)
         ? {}
-        : { confirmadoPago: confirmadoPagoPorFecha(comp.datosExtraidos?.vencimientos?.[0]?.fecha ?? comp.datosExtraidos?.fecha) }),
+        : { confirmadoPago: quedaConfirmado, ...(quedaConfirmado ? { pagadoEn: serverTimestamp() } : {}) }),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
       // F6.8 — propagar destino y vencimientos para que aprenderDestino() aprenda
       // seedImport: false — gradúa el mov de "seed pristino" a "tocado por usuario"
@@ -184,23 +189,29 @@ export async function cargarMovimientoDesdeComprobante(
   }
 }
 
-// F9.82 — picker "Conciliar con gasto esperado": busca obligación abierta para un item
-export async function buscarObligacionAbierta(
+// F9.82 — picker "Conciliar con gasto esperado": busca obligaciones abiertas para un ítem.
+// F9.99.7 Parte 2 — ya no es mes exacto: mismo mes del comprobante + TODOS los futuros
+// (decisión del dueño: el picker debe poder saldar una obligación de cualquier mes futuro,
+// no solo la del mes en curso), cada una con su mes para que el usuario elija sin ambigüedad.
+export interface ObligacionAbierta { id: string; mes: string }
+
+export async function buscarObligacionesAbiertas(
   itemEsperadoId: string,
-  mes: string,
-): Promise<string | null> {
+  mesDesde: string,
+): Promise<ObligacionAbierta[]> {
   try {
     const snap = await getDocs(
       query(
         collection(db, 'movimientos'),
         where('itemEsperadoId', '==', itemEsperadoId),
         where('confirmadoPago', '==', false),
-        where('mes', '==', mes),
-        limit(5),
+        where('mes', '>=', mesDesde),
+        orderBy('mes', 'asc'),
+        limit(12),
       ),
     );
-    return snap.empty ? null : snap.docs[0].id;
+    return snap.docs.map(d => ({ id: d.id, mes: d.data().mes as string }));
   } catch {
-    return null;
+    return [];
   }
 }

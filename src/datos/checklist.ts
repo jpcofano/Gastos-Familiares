@@ -37,10 +37,20 @@ export function aplicaEnMes(_item: ExpectedItem, _mes: string): boolean {
   return true;
 }
 
+// F9.99.7 — corte de semántica de pagos: los meses >= este valor ya no asumen "pagado" sin
+// evidencia (ni por arrastre de mes pasado, ni por diaVencimiento de un débito automático).
+// Los meses < corte conservan el comportamiento legacy — no se re-pinta la historia.
+// Ver docs/prompts/F9.99.7-semantica-pagos-y-match-futuros.md.
+export const MES_CORTE_SEMANTICA_PAGOS = '2026-07';
+
 export function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr: string, mes: string): EstadoChecklist {
   if (!aplicaEnMes(item, mes)) return 'no_aplica';
+  const corte = mes >= MES_CORTE_SEMANTICA_PAGOS;
+
   if (matches.length > 0) {
-    if (mes < mesActualStr) return 'pagado';
+    // F9.99.7 Parte 5 — fin del arrastre: solo meses < corte siguen asumiendo "pagado" por
+    // el mero hecho de estar en el pasado, sin mirar confirmadoPago.
+    if (!corte && mes < mesActualStr) return 'pagado';
     const confirmados = matches.filter(m => m.confirmadoPago);
     if (confirmados.length > 0) {
       const montoConf = confirmados.reduce((s, m) => s + Math.abs(m.monto), 0);
@@ -49,14 +59,16 @@ export function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr
     }
     return 'por_confirmar';
   }
-  if (item.pagoAutomatico) {
-    // F9.61 — débito automático: usa la fecha para determinar si ya se ejecutó
+
+  if (item.pagoAutomatico && !corte) {
+    // F9.61 — legacy (mes < corte): débito automático se asume pagado por vencimiento.
     if (mes < mesActualStr) return 'pagado';
     if (mes > mesActualStr) return 'programado';
-    // mes actual: pagado si el diaVencimiento ya llegó (o no hay día → asumir vigente)
     if (item.diaVencimiento && item.diaVencimiento <= new Date().getDate()) return 'pagado';
     return 'automatico';
   }
+  // F9.99.7 Parte 4.1 — mes >= corte: pagoAutomatico ya no es atajo de estado, es metadato.
+  // Cae a la misma máquina que cualquier ítem: programado / no_registrado / vencido / pendiente.
   if (mes > mesActualStr) return 'programado';
   if (mes < mesActualStr) return 'no_registrado';
   if (item.diaVencimiento && item.diaVencimiento < new Date().getDate()) return 'vencido';

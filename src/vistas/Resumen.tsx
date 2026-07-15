@@ -4,7 +4,7 @@ import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
-import { confirmarPagoEsperado, desmarcarPago } from '../datos/movimientos';
+import { confirmarPagoEsperado, desmarcarPago, registrarPagoChecklist } from '../datos/movimientos';
 import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
 import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
@@ -213,16 +213,37 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
     }, 0);
   const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(ci => cubierto(ci.estado));
 
+  // F9.92.1 — desglose por banco de lo ya conciliado hoy (los pendientes sin match no tienen banco).
+  const hoyPorBanco = new Map<string, number>();
+  for (const ci of hoyItems) {
+    const banco = ci.matches[0]?.banco;
+    if (!banco) continue;
+    const monto = ci.matches.reduce((s, m) => s + arsEq(m), 0);
+    hoyPorBanco.set(banco, (hoyPorBanco.get(banco) ?? 0) + monto);
+  }
+  const hoyBancos = [...hoyPorBanco.entries()].sort((a, b) => b[1] - a[1]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <KpiCards c={c} cur={cur} />
 
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       {/* F9.62 — clickeable: lleva a la solapa Gastos Fijos */}
+      {/* F9.92.1 — check verde en vez de badge "0" cuando no hay nada por revisar */}
       <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-        <Icon name="alert-circle" size={17} color="var(--gf-out)" />
-        <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>Revisar pendientes del mes</span>
-        <span style={{ minWidth: 22, height: 22, borderRadius: 999, background: 'var(--gf-out)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{porRevisar}</span>
+        {porRevisar === 0 ? (
+          <span style={{ width: 17, height: 17, borderRadius: 999, background: 'var(--gf-income)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Icon name="check" size={11} color="#fff" />
+          </span>
+        ) : (
+          <Icon name="alert-circle" size={17} color="var(--gf-out)" />
+        )}
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: porRevisar === 0 ? 'var(--gf-income)' : 'var(--color-text)' }}>
+          {porRevisar === 0 ? 'Al día con los gastos fijos' : 'Revisar pendientes del mes'}
+        </span>
+        {porRevisar > 0 && (
+          <span style={{ minWidth: 22, height: 22, borderRadius: 999, background: 'var(--gf-out)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{porRevisar}</span>
+        )}
       </Card>
 
       <Card variant="flat" padding="var(--space-3)">
@@ -235,6 +256,19 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
             </span>
           )}
         </div>
+        {hoyBancos.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
+            {hoyBancos.map(([b, v]) => {
+              const info = bancoDeNombre(b, config?.bancos);
+              return (
+                <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-strong)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '3px 8px 3px 4px' }}>
+                  <BankLogo id={info?.id ?? b} nombre={info?.nombre ?? b} color={info?.color ?? (colorMedio(b, config?.bancos) ?? colorHash(b))} dominio={info?.dominio} size={17} radius={999} />
+                  {b} · {fmtArs(v)}
+                </span>
+              );
+            })}
+          </div>
+        )}
         {hoyItems.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>
             {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
@@ -460,12 +494,140 @@ function MontoInlineEdit({ item }: { item: ExpectedItem }) {
   );
 }
 
-function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMesActual }: {
+function hoyISOLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function fmtDDMM(d: Date): string {
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function mesDe(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// F9.99.7 Parte 4.2/4.4 — tarjeta de un ítem del checklist, reutilizada tanto en la lista
+// principal como en la sección "Débitos automáticos" (mismos estados/interacciones).
+function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago }: {
+  ci: CheckItem;
+  mes: string;
+  config: FamiliaConfig | null;
+  esMesActual: boolean;
+  onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
+  onDesmarcar: (matches: Movement[]) => void;
+  onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
+}) {
+  const { item, matches, estado } = ci;
+  const [registrando, setRegistrando] = useState(false);
+  const [montoVal, setMontoVal] = useState('');
+  const [fechaVal, setFechaVal] = useState('');
+  const [guardando, setGuardando] = useState(false);
+
+  const accionable = ACCIONABLE.includes(estado);
+  const montoReal = matches.reduce((s, m) => s + Math.abs(m.monto), 0);
+  const tieneMatch = estado === 'pagado' || estado === 'parcial' || estado === 'por_confirmar';
+  const monto = tieneMatch ? montoReal : (item.montoEsperado ?? 0);
+  const etiqueta = [item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || '(sin categoría)';
+
+  // F9.99.7 Parte 3 — pago adelantado: el mes real del pago (pagadoEn) difiere del mes del ítem.
+  const pagadoEn = matches.find(m => m.pagadoEn)?.pagadoEn ?? null;
+  const esAdelantado = estado === 'pagado' && pagadoEn != null && mesDe(pagadoEn) !== mes;
+
+  function abrirRegistrar() {
+    setMontoVal(item.montoEsperado != null ? String(item.montoEsperado) : '');
+    setFechaVal(hoyISOLocal());
+    setRegistrando(true);
+  }
+
+  async function confirmarRegistro() {
+    const n = parseFloat(montoVal.replace(',', '.'));
+    if (isNaN(n) || n <= 0) return;
+    setGuardando(true);
+    await onRegistrarPago(item, n, new Date(fechaVal + 'T12:00:00'));
+    setGuardando(false);
+    setRegistrando(false);
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 10, background: 'var(--color-surface)', border: '1px solid var(--gf-gray-150)', borderRadius: 14, padding: '11px 12px' }}>
+      <span style={{ width: 9, height: 9, borderRadius: 999, background: TINT[estado], marginTop: 6, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{etiqueta}</div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              {item.persona && <Badge tone="neutral">{nombrePersona(item.persona, config)}</Badge>}
+              <StatusBadge state={estado} />
+            </div>
+          </div>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            {!tieneMatch && !item.tarjetaCodigo
+              ? <MontoInlineEdit item={item} />
+              : <Money value={monto} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
+            }
+            {estado === 'parcial' && <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>Falta completar</div>}
+          </div>
+        </div>
+        {estado === 'por_confirmar' && (
+          <div style={{ marginTop: 9 }}>
+            <Button variant="green" size="sm" style={{ width: '100%' }} onClick={() => onConfirmar(item, matches)}>
+              <Icon name="check" size={15} /> Confirmar pago
+            </Button>
+          </div>
+        )}
+        {estado === 'pagado' && esAdelantado && (
+          <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 4 }}>Pagado por adelantado el {fmtDDMM(pagadoEn as Date)}</div>
+        )}
+        {estado === 'pagado' && esMesActual && matches.length > 0 && (
+          <div style={{ marginTop: 9 }}>
+            <Button variant="secondary" size="sm" style={{ width: '100%' }} onClick={() => onDesmarcar(matches)}>
+              Deshacer
+            </Button>
+          </div>
+        )}
+        {/* F9.99.7 Parte 4.4 — cualquier accionable SIN match puede registrarse como pagado directamente */}
+        {accionable && matches.length === 0 && !registrando && (
+          <div style={{ marginTop: 9 }}>
+            <Button variant="secondary" size="sm" style={{ width: '100%' }} onClick={abrirRegistrar}>
+              <Icon name="plus" size={14} /> Registrar pago
+            </Button>
+          </div>
+        )}
+        {registrando && (
+          <div style={{ marginTop: 9, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="text" inputMode="decimal" autoFocus value={montoVal} onChange={e => setMontoVal(e.target.value)}
+                placeholder="Monto" style={{ flex: 1, fontSize: 13, border: '1px solid var(--gf-gray-300)', borderRadius: 8, padding: '6px 8px' }}
+              />
+              <input
+                type="date" value={fechaVal} onChange={e => setFechaVal(e.target.value)}
+                style={{ fontSize: 13, border: '1px solid var(--gf-gray-300)', borderRadius: 8, padding: '6px 8px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Button variant="green" size="sm" style={{ flex: 1 }} disabled={guardando || !montoVal} onClick={confirmarRegistro}>
+                {guardando ? 'Guardando…' : 'Confirmar'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setRegistrando(false)}>Cancelar</Button>
+            </div>
+          </div>
+        )}
+        {accionable && estado !== 'por_confirmar' && item.diaVencimiento && (
+          <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6 }}>vence día {item.diaVencimiento}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, onRegistrarPago, esMesActual, mes }: {
   checklist: CheckItem[];
   config: FamiliaConfig | null;
   onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
   onDesmarcar: (matches: Movement[]) => void;
+  onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
   esMesActual: boolean;
+  mes: string;
 }) {
   const alDia = checklist.filter(c => cubierto(c.estado)).length;
   // F9.62 — "pendiente" suma TODO lo no pagado: si el ítem tiene un movimiento sin confirmar
@@ -478,6 +640,11 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMes
       const montoReal = c.matches.reduce((a, m) => a + Math.abs(m.monto), 0);
       return s + (noConfirmado ? montoReal : (c.item.montoEsperado ?? 0));
     }, 0);
+
+  // F9.99.7 Parte 4.2 — débitos automáticos: sección propia, mismas tarjetas/estados/acciones.
+  const principales  = checklist.filter(c => !c.item.pagoAutomatico);
+  const automaticos  = checklist.filter(c => c.item.pagoAutomatico);
+  const cardProps = { mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -493,55 +660,21 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, esMes
       {checklist.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--color-text-sec)', margin: '0 4px' }}>Sin ítems esperados activos.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {checklist.map(({ item, matches, estado }) => {
-            const accionable = ACCIONABLE.includes(estado);
-            const montoReal = matches.reduce((s, m) => s + Math.abs(m.monto), 0);
-            const tieneMatch = estado === 'pagado' || estado === 'parcial' || estado === 'por_confirmar';
-            const monto = tieneMatch ? montoReal : (item.montoEsperado ?? 0);
-            const etiqueta = [item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || '(sin categoría)';
-            return (
-              <div key={item.id} style={{ display: 'flex', gap: 10, background: 'var(--color-surface)', border: '1px solid var(--gf-gray-150)', borderRadius: 14, padding: '11px 12px' }}>
-                <span style={{ width: 9, height: 9, borderRadius: 999, background: TINT[estado], marginTop: 6, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{etiqueta}</div>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                        {item.persona && <Badge tone="neutral">{nombrePersona(item.persona, config)}</Badge>}
-                        <StatusBadge state={estado} />
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      {!tieneMatch && !item.tarjetaCodigo
-                        ? <MontoInlineEdit item={item} />
-                        : <Money value={monto} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
-                      }
-                      {estado === 'parcial' && <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>Falta completar</div>}
-                    </div>
-                  </div>
-                  {estado === 'por_confirmar' && (
-                    <div style={{ marginTop: 9 }}>
-                      <Button variant="green" size="sm" style={{ width: '100%' }} onClick={() => onConfirmar(item, matches)}>
-                        <Icon name="check" size={15} /> Confirmar pago
-                      </Button>
-                    </div>
-                  )}
-                  {estado === 'pagado' && esMesActual && matches.length > 0 && (
-                    <div style={{ marginTop: 9 }}>
-                      <Button variant="secondary" size="sm" style={{ width: '100%' }} onClick={() => onDesmarcar(matches)}>
-                        Deshacer
-                      </Button>
-                    </div>
-                  )}
-                  {accionable && estado !== 'por_confirmar' && item.diaVencimiento && (
-                    <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6 }}>vence día {item.diaVencimiento}</div>
-                  )}
-                </div>
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {principales.map(ci => <ItemChecklistCard key={ci.item.id} ci={ci} {...cardProps} />)}
+          </div>
+          {automaticos.length > 0 && (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '2px 4px 0' }}>
+                Débitos automáticos
               </div>
-            );
-          })}
-        </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {automaticos.map(ci => <ItemChecklistCard key={ci.item.id} ci={ci} {...cardProps} />)}
+              </div>
+            </>
+          )}
+        </>
       )}
       <div style={{ height: 4 }} />
     </div>
@@ -560,7 +693,7 @@ function ResumenVisual() {
   const [editandoMovimiento, setEditandoMovimiento] = useState<Movement | null>(null);
   const tabs: { id: 'dia' | 'fijos'; label: string }[] = [{ id: 'dia', label: 'Por día' }, { id: 'fijos', label: 'Gastos Fijos' }];
 
-  const { miembro } = useMiembroCtx();
+  const { memberId, miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
   const { config } = useFamiliaConfig();
   const { movimientos, cargando, error } = useMovimientosDelMes(mes);
@@ -576,6 +709,10 @@ function ResumenVisual() {
   }
   async function handleDesmarcar(matches: Movement[]) {
     const res = await desmarcarPago(matches);
+    if (!res.ok) setErrorAccion(res.error.message);
+  }
+  async function handleRegistrarPago(item: ExpectedItem, monto: number, fecha: Date) {
+    const res = await registrarPagoChecklist(item, mes, { monto, fecha, creadoPor: memberId, persona: null });
     if (!res.ok) setErrorAccion(res.error.message);
   }
 
@@ -644,7 +781,9 @@ function ResumenVisual() {
           config={config}
           onConfirmar={handleConfirmar}
           onDesmarcar={handleDesmarcar}
+          onRegistrarPago={handleRegistrarPago}
           esMesActual={mes === mesActual()}
+          mes={mes}
         />
       )}
     </div>

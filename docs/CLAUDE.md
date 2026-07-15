@@ -130,6 +130,60 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
      del banco) o pendiente (reloj / "A pagar"). Sin ítems → "Nada que pagar hoy". Para meses distintos al
      actual → "Ver mes actual para pagos de hoy". `PorDiaSeccion` recibe `checklist: CheckItem[]` y
      `mes: string` como props nuevas desde `ResumenVisual`.
+- F9.99.7 — Semántica de pagos: match contra futuros, débitos automáticos al ciclo normal, fin del
+  "pagado por fecha" (ver `docs/prompts/F9.99.7-semantica-pagos-y-match-futuros.md`). **Corte:**
+  `MES_CORTE_SEMANTICA_PAGOS = '2026-07'` (`src/datos/checklist.ts`) — las reglas nuevas de estado
+  solo aplican a `mes >= corte`; meses anteriores conservan el comportamiento legacy (no se
+  re-pinta la historia). **Parte 1 (ventana de match):** `matchComprobante` (functions) pasa de
+  `[mes−1, mes, mes+1]` a `[mes−1 … mes+3]` — un pago de hoy puede saldar una obligación hasta 3
+  meses adelante. `reconciliarPorPayee`/`reconciliarPorNombre`/`matchPorDestino` no cambiaron (ya
+  operan sobre el `movs` que les pasa el caller). **Parte 2 (picker manual):**
+  `buscarObligacionAbierta` → `buscarObligacionesAbiertas` (`src/datos/comprobantes.ts`): ya no es
+  mes exacto + `limit(1)`, es `mes >= mesDelComprobante` ordenado asc, `limit(12)`, devuelve
+  `{id,mes}[]`. Picker en `Comprobantes.tsx`: al elegir el ítem, busca sus obligaciones abiertas;
+  si hay ≥1 muestra una segunda lista "¿Qué mes salda este pago?" con cada mes visible (nunca
+  auto-elige); si hay 0, cae al flujo existente (crea movimiento nuevo en el mes del comprobante).
+  Índice compuesto nuevo `movimientos (itemEsperadoId ASC, confirmadoPago ASC, mes ASC)` en
+  `firestore.indexes.json`. **Parte 3 (pago adelantado):** `confirmarRama1` (comprobantes.ts) y
+  `confirmarPagoEsperado` (movimientos.ts) escriben `pagadoEn: serverTimestamp()` al confirmar
+  pago — nunca tocan `mes` del movimiento (auditado: ya no lo tocaban). Campo nuevo
+  `Movement.pagadoEn?: Date | null`. `ItemChecklistCard` (Resumen.tsx) muestra "Pagado por
+  adelantado el DD/MM" cuando `pagadoEn` cae en un mes distinto al del ítem. El mes del pago no
+  suma el gasto como propio porque `mes` nunca se tocó (consecuencia del diseño, no requirió
+  código extra). **Parte 4 (débitos automáticos):** `estadoItem` ya no asume `pagado` por
+  `diaVencimiento <= hoy` en ítems `pagoAutomatico` para `mes >= corte` — caen a la misma máquina
+  que cualquier ítem (programado/no_registrado/vencido/pendiente; `pagado` solo con match
+  confirmado). `pagoAutomatico` queda como metadato. UI: `GastosFijosSeccion` separa
+  `checklist.filter(pagoAutomatico)` en una sub-sección propia "Débitos automáticos" (mismas
+  tarjetas/estados/acciones, vía `ItemChecklistCard` compartido). **Botón "Registrar pago"**
+  (nuevo, aplica a TODO accionable sin match, no solo débitos): mini-form inline (monto prefill
+  `montoEsperado`, fecha prefill hoy, ambos editables) → `registrarPagoChecklist()`
+  (movimientos.ts) crea un movimiento con `mes` = mes del ítem (NO el de `fecha`, que es cuándo se
+  registra el pago — pueden diferir a propósito), `itemEsperadoId`, `confirmadoPago:true`,
+  `pagado:true`, `pagadoEn:fecha`, `registradoDesdeChecklist:true`. Riesgo de duplicado
+  documentado, no resuelto acá: si más tarde el extracto bancario trae el mismo débito, se crea un
+  movimiento duplicado; el marcador `registradoDesdeChecklist` queda como señal para una
+  deduplicación futura (no construida en esta feature). **Parte 5 (fin del arrastre):** para
+  `mes >= corte`, un mes pasado con matches sin confirmar ya no es automáticamente `pagado` — usa
+  `confirmadoPago` real (`por_confirmar`/`parcial`/`pagado` según corresponda), igual que un mes en
+  curso. **Parte 6 (auditoría `pagado` vs `confirmadoPago`):** inventario — `movimiento.pagado` no
+  lo lee ninguna lógica de negocio hoy (ni checklist, ni agregados, ni Dashboard), solo se guarda;
+  los únicos escritores son `AltaMovimiento.tsx` y la callable `cargarMovimientoDesdeComprobante`
+  (ambos ya derivan de la fecha, correcto) y `resumenesTarjeta.ts` (hardcodea `true`, correcto —
+  un consumo de tarjeta ya ocurrió). Fix aplicado: `crearMovimiento` (movimientos.ts) tenía
+  `payload.pagado ?? true` — código muerto en la práctica (el único caller siempre lo manda
+  explícito) pero corregido a `payload.pagado ?? pagadoPorFechaDefault` (deriva de `fecha` como
+  F9.63) para no dejar una trampa a futuros callers. `crearMovimiento` también gana `mes?`/`pagadoEn?`/
+  `registradoDesdeChecklist?` opcionales en `NuevoMovimiento` (antes `mes` existía pero se
+  ignoraba). No se unificaron los dos campos (fuera de alcance, decisión del dueño).
+- F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
+  banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
+  fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
+  `porRevisar > 0` sin cambios (alert-circle rojo + badge numérico). Card "Hoy" suma un desglose
+  por banco (`hoyPorBanco`, misma píldora `BankLogo` que "Gastos por día") entre el header y la
+  lista de ítems, agregando los `hoyItems` ya conciliados (`ci.matches[0]?.banco`) — usa
+  `arsEq(m)` para convertir montos USD (no `Math.abs(m.monto)` crudo, a diferencia del prompt
+  original). Pendientes sin match no tienen banco todavía y no entran en el desglose. Frontend puro.
 - F9.55.1 — Dashboard Inicio: "Otras" en "Por categoría" expandible. Tap en "Otras"
   despliega las categorías agrupadas (las que quedan fuera del top 6), cada una con su
   estilo normal (barra, monto, %). Cada categoría dentro de "Otras" es a su vez expandible

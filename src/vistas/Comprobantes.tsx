@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, buscarObligacionAbierta, confirmadoPagoPorFecha, esObligacionDoc } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, type ObligacionAbierta } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -30,6 +30,13 @@ function fmtMonto(n: number | null | undefined, moneda: string): string {
   return moneda === 'USD'
     ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// F9.99.7 Parte 2 — picker: cada obligación futura se muestra con su mes inequívoco.
+const MESES_LARGO = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+function formatMesCorto(mes: string): string {
+  const [y, m] = mes.split('-');
+  return `${MESES_LARGO[Number(m) - 1]} ${y}`;
 }
 
 const ESTADO_COMP_TONE = { subido: 'info', extraido: 'warning', vinculado: 'success', error: 'danger' } as const;
@@ -116,6 +123,10 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
   const [mostrarPicker, setMostrarPicker] = useState(false);
   const [pickerItem,    setPickerItem]    = useState<string>('');
   const [pickerCargando, setPickerCargando] = useState(false);
+  // F9.99.7 Parte 2 — obligaciones abiertas del ítem elegido (mismo mes + todos los futuros)
+  const [obligaciones,  setObligaciones]  = useState<ObligacionAbierta[]>([]);
+  const [obligacionSel, setObligacionSel] = useState<string>('');
+  const [buscandoObligaciones, setBuscandoObligaciones] = useState(false);
   const autoConfirmadoRef = useRef(false);
   const autoAbiertoRef = useRef(false);
 
@@ -310,16 +321,31 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
   const itemsGasto = items.filter(i => i.activo && i.tipo === 'Gasto' && i.moneda === d.moneda);
   const labelItem  = (i: ExpectedItem) =>
     i.notas || i.matchTexto?.incluye[0] || [i.categoria, i.subcategoria].filter(Boolean).join(' › ') || i.id;
+  const fechaComp = d.vencimientos?.[0]?.fecha ?? d.fecha;
+  const mesComp = fechaComp ? fechaComp.slice(0, 7) : new Date().toISOString().slice(0, 7);
+
+  // F9.99.7 Parte 2 — al elegir el ítem, busca sus obligaciones abiertas (mismo mes + futuras)
+  // para que el usuario elija cuál salda este pago, en vez de asumir el mes del comprobante.
+  useEffect(() => {
+    if (!pickerItem) { setObligaciones([]); setObligacionSel(''); return; }
+    let cancelado = false;
+    setBuscandoObligaciones(true);
+    setObligacionSel('');
+    buscarObligacionesAbiertas(pickerItem, mesComp).then(obs => {
+      if (cancelado) return;
+      setObligaciones(obs);
+      setBuscandoObligaciones(false);
+    });
+    return () => { cancelado = true; };
+  }, [pickerItem, mesComp]);
 
   async function handleConciliar() {
     if (!pickerItem) return;
     setPickerCargando(true);
     setErrorLocal(null);
-    const fechaComp = d.vencimientos?.[0]?.fecha ?? d.fecha;
-    const mes = fechaComp ? fechaComp.slice(0, 7) : new Date().toISOString().slice(0, 7);
-    const movId = await buscarObligacionAbierta(pickerItem, mes);
-    if (movId) {
-      const res = await confirmarRama1(comp, movId, pickerItem);
+    if (obligaciones.length > 0) {
+      if (!obligacionSel) { setPickerCargando(false); return; }
+      const res = await confirmarRama1(comp, obligacionSel, pickerItem);
       setPickerCargando(false);
       if (!res.ok) setErrorLocal(res.error.message);
     } else {
@@ -375,9 +401,31 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
               </label>
             ))}
           </div>
+          {/* F9.99.7 Parte 2 — mismo mes + todos los futuros, cada uno con su mes visible */}
+          {pickerItem && buscandoObligaciones && (
+            <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Buscando obligaciones abiertas…</span>
+          )}
+          {pickerItem && !buscandoObligaciones && obligaciones.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2, paddingTop: 8, borderTop: '1px solid var(--gf-gray-100)' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>¿Qué mes salda este pago?</span>
+              {obligaciones.map(o => (
+                <label key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '4px 0', cursor: 'pointer' }}>
+                  <input type="radio" name={`picker-mes-${comp.id}`} value={o.id} checked={obligacionSel === o.id} onChange={() => setObligacionSel(o.id)} />
+                  <span>{formatMesCorto(o.mes)}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {pickerItem && !buscandoObligaciones && obligaciones.length === 0 && (
+            <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>No hay obligación abierta para este ítem — se va a crear un movimiento nuevo.</span>
+          )}
           {errorLocal && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errorLocal}</span>}
           <div style={{ display: 'flex', gap: 8 }}>
-            <Button variant="primary" size="sm" disabled={!pickerItem || pickerCargando} onClick={handleConciliar}>
+            <Button
+              variant="primary" size="sm"
+              disabled={!pickerItem || pickerCargando || buscandoObligaciones || (obligaciones.length > 0 && !obligacionSel)}
+              onClick={handleConciliar}
+            >
               {pickerCargando ? 'Conciliando…' : 'Confirmar'}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setMostrarPicker(false)}>Cancelar</Button>

@@ -48,6 +48,8 @@ export function docAMovimiento(id: string, data: DocumentData): Movement {
     vencimientos:           data.vencimientos                     ?? null,
     creadoEn:               data.creadoEn?.toDate()               ?? new Date(0),
     actualizadoEn:          data.actualizadoEn?.toDate()          ?? new Date(0),
+    pagadoEn:               data.pagadoEn?.toDate()               ?? null,
+    registradoDesdeChecklist: data.registradoDesdeChecklist        ?? false,
   };
 }
 
@@ -85,9 +87,15 @@ export interface NuevoMovimiento {
   vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
   // F6.x descartar — marca que este mov fue creado DESDE un comprobante (vs vinculado rama 1)
   origenComprobanteId?: string;
-  // F6.9.11 — usados solo por la callable cargarMovimientoDesdeComprobante; crearMovimiento los ignora
+  // F6.9.11 — fechaMs solo lo usa la callable cargarMovimientoDesdeComprobante; crearMovimiento lo ignora.
   fechaMs?: number;
+  // F9.99.7 — override explícito del mes (independiente de `fecha`). Antes solo lo usaba la
+  // callable; ahora crearMovimiento también lo respeta (lo necesita "Registrar pago" del
+  // checklist: mes = mes del ítem, fecha = fecha real de pago, pueden diferir).
   mes?: string;
+  // F9.99.7 — fecha real en que se confirmó el pago (pago adelantado / registro tardío).
+  pagadoEn?: Date | null;
+  registradoDesdeChecklist?: boolean;
 }
 
 type ResultadoCreacion =
@@ -96,7 +104,12 @@ type ResultadoCreacion =
 
 export async function crearMovimiento(payload: NuevoMovimiento): Promise<ResultadoCreacion> {
   try {
-    const mes = `${payload.fecha.getFullYear()}-${String(payload.fecha.getMonth() + 1).padStart(2, '0')}`;
+    // F9.99.7 Parte 6.2 — sin `pagado` explícito, derivar de la fecha (como F9.63 server-side)
+    // en vez de asumir `true` a ciegas: una fecha futura no debería nacer "pagada".
+    const fechaISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const pagadoPorFechaDefault = fechaISO(payload.fecha) <= fechaISO(new Date());
+    // F9.99.7 — mes override explícito (Registrar pago: mes del ítem ≠ mes de la fecha real de pago).
+    const mes = payload.mes ?? `${payload.fecha.getFullYear()}-${String(payload.fecha.getMonth() + 1).padStart(2, '0')}`;
     const docRef = await addDoc(collection(db, 'movimientos'), {
       fecha:             Timestamp.fromDate(payload.fecha),
       mes,
@@ -115,7 +128,7 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       subtipo:           'Manual',
       origen:            'Manual',
       excluirDash:       false,
-      pagado:            payload.pagado ?? true,
+      pagado:            payload.pagado ?? pagadoPorFechaDefault,
       incluirResumenMes: payload.incluirResumenMes,
       itemEsperadoId:    payload.itemEsperadoId     ?? null,
       numeroComprobante: payload.numeroComprobante ?? null,
@@ -128,6 +141,8 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
       destinoNombre:        payload.destinoNombre         ?? null,
       vencimientos:         payload.vencimientos          ?? null,
       origenComprobanteId:  payload.origenComprobanteId   ?? null,
+      pagadoEn:             payload.pagadoEn ? Timestamp.fromDate(payload.pagadoEn) : null,
+      registradoDesdeChecklist: payload.registradoDesdeChecklist ?? false,
       // idLegacy intencionalmente ausente — los validators lo usan para distinguir docs del seed
       creadoEn:          serverTimestamp(),
       actualizadoEn:     serverTimestamp(),
@@ -140,6 +155,38 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
 
 type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
 
+// F9.99.7 Parte 4.4 — "Registrar pago" desde el checklist: crea un movimiento real ya
+// confirmado para un ítem accionable sin match (vencido/pendiente/no_registrado). `mes` es el
+// mes del ítem visto en el checklist (NO el de `fecha`, que es cuándo se registra el pago —
+// pueden diferir, ej. registrar hoy un vencido de un mes pasado).
+export async function registrarPagoChecklist(
+  item: ExpectedItem,
+  mes: string,
+  params: { monto: number; fecha: Date; creadoPor: string; persona: string | null },
+): Promise<ResultadoCreacion> {
+  return crearMovimiento({
+    fecha:             params.fecha,
+    mes,
+    tipo:              item.tipo,
+    descripcion:       item.notas || [item.categoria, item.subcategoria].filter(Boolean).join(' › ') || 'Pago registrado',
+    monto:             params.monto,
+    moneda:            item.moneda,
+    tcUsdArs:          null,
+    categoria:         item.categoria ?? '',
+    subcategoria:      item.subcategoria ?? '',
+    etiqueta:          item.etiqueta,
+    banco:             item.banco,
+    persona:           params.persona ?? item.persona ?? '',
+    creadoPor:         params.creadoPor,
+    incluirResumenMes: true,
+    itemEsperadoId:    item.id,
+    pagado:            true,
+    confirmadoPago:    true,
+    pagadoEn:          params.fecha,
+    registradoDesdeChecklist: true,
+  });
+}
+
 export async function confirmarPagoEsperado(
   item: ExpectedItem,
   matches: Movement[],
@@ -150,6 +197,9 @@ export async function confirmarPagoEsperado(
       batch.update(doc(db, 'movimientos', m.id), {
         confirmadoPago: true,
         itemEsperadoId: item.id,
+        // F9.99.7 — fecha real de confirmación (permite detectar pago adelantado/tardío
+        // cuando difiere del mes del ítem).
+        pagadoEn: serverTimestamp(),
         actualizadoEn: serverTimestamp(),
       });
     }
@@ -166,6 +216,7 @@ export async function desmarcarPago(matches: Movement[]): Promise<Resultado<void
     for (const m of matches) {
       batch.update(doc(db, 'movimientos', m.id), {
         confirmadoPago: false,
+        pagadoEn: null,
         actualizadoEn: serverTimestamp(),
       });
     }

@@ -47,6 +47,11 @@
     { "collectionGroup": "destinos", "queryScope": "COLLECTION", "fields": [
       { "fieldPath": "tipo",      "order": "ASCENDING" },
       { "fieldPath": "confianza", "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "movimientos", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "itemEsperadoId", "order": "ASCENDING" },
+      { "fieldPath": "confirmadoPago", "order": "ASCENDING" },
+      { "fieldPath": "mes",            "order": "ASCENDING" }
     ]}
   ],
   "fieldOverrides": []
