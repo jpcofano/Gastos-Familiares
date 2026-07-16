@@ -64,6 +64,28 @@ function nombrePersona(memberId: string | null, config: FamiliaConfig | null): s
   return config?.miembros[memberId]?.nombre ?? memberId;
 }
 
+// ── Agenda unificada del mes (F9.99.8) ───────────────────────────────────────
+// Esperados: el checklist actual, SIN cambios en su cálculo (calcularChecklist).
+// Futuros sueltos: gastos manuales sin plantilla — tipo='Gasto', pagado=false,
+// fecha >= hoy — que ningún ítem esperado capturó (dedupe: si matchean alguna
+// rama de movimientosDelItem() ya cuentan como esperado, vía ci.matches).
+// Ver docs/prompts/F9.99.8-agenda-pagos-unificada.md.
+type AgendaEntry = { kind: 'esperado'; ci: CheckItem } | { kind: 'suelto'; mov: Movement };
+
+function inicioDia(d: Date): Date { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+function sueltosFuturosDelMes(movs: Movement[], checklist: CheckItem[], hoy: Date): Movement[] {
+  const matchedIds = new Set(checklist.flatMap(ci => ci.matches.map(m => m.id)));
+  const inicioHoy = inicioDia(hoy);
+  return movs.filter(m =>
+    m.tipo === 'Gasto' && !m.pagado && !matchedIds.has(m.id) && inicioDia(m.fecha) >= inicioHoy
+  );
+}
+
+function agendaCubierto(e: AgendaEntry): boolean {
+  return e.kind === 'esperado' ? cubierto(e.ci.estado) : e.mov.confirmadoPago === true;
+}
+
 // ── KPIs de caja (incluirResumenMes=true) ────────────────────────────────────
 
 interface Kpis {
@@ -172,7 +194,7 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
 
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, mes, onIrAGastos }: {
+function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, mes, onIrAGastos }: {
   movs: Movement[];
   porRevisar: number;
   onIrAGastos: () => void;
@@ -181,6 +203,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   esAdmin: boolean;
   onEditarMovimiento?: (mov: Movement) => void;
   checklist: CheckItem[];
+  sueltosFuturos: Movement[];
   mes: string;
 }) {
   const cajaMov = movs.filter(m => m.incluirResumenMes);
@@ -194,32 +217,54 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   const fmtSmall = (ars: number) => cur === 'ARS' ? fmtMoney(ars, { from: 'ARS', to: 'USD' }) : fmtArs(ars);
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
 
-  // Card HOY: esperados que vencen hoy (solo para el mes actual)
+  // Card HOY (solo para el mes actual). F9.99.8 — unión de:
+  //  (a) esperados con diaVencimiento === hoy (comportamiento pre-existente),
+  //  (b) esperados en estado 'vencido' (por definición de estadoItem, sin match → no cubiertos),
+  //  (c) futuros sueltos (gastos manuales sin plantilla) con fecha === hoy.
+  // Vencidos primero, sin duplicar si un ítem cae en (a) y (b) a la vez (no puede pasar: 'vencido'
+  // exige diaVencimiento < hoy.getDate()).
   const mesActualHoy = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
   const esMesActual = mes === mesActualHoy;
-  const hoyItems = esMesActual
-    ? checklist.filter(ci => ci.item.diaVencimiento === hoy.getDate())
+  const hoyEsperados: CheckItem[] = [];
+  if (esMesActual) {
+    const vistos = new Set<string>();
+    for (const ci of checklist) if (ci.estado === 'vencido') { hoyEsperados.push(ci); vistos.add(ci.item.id); }
+    for (const ci of checklist) if (ci.item.diaVencimiento === hoy.getDate() && !vistos.has(ci.item.id)) hoyEsperados.push(ci);
+  }
+  const inicioHoy = inicioDia(hoy);
+  const sueltosHoy = esMesActual
+    ? sueltosFuturos.filter(m => inicioDia(m.fecha).getTime() === inicioHoy.getTime())
     : [];
+  const hoyItems: AgendaEntry[] = [
+    ...hoyEsperados.map(ci => ({ kind: 'esperado', ci } as AgendaEntry)),
+    ...sueltosHoy.map(mov => ({ kind: 'suelto', mov } as AgendaEntry)),
+  ];
 
-  // Total de hoy pendiente (ARS eq) para el header de Card HOY
+  // Total de hoy pendiente (ARS eq) para el header de Card HOY, sobre el conjunto ampliado.
   // F9.76 — pendiente/pagado por estado real, no por presencia de match. Un por_confirmar sigue
   // siendo deuda hasta que el pago real lo confirme.
   const hoyPendienteArsEq = hoyItems
-    .filter(ci => !cubierto(ci.estado))
-    .reduce((s, ci) => {
-      const m = ci.item.montoEsperado;
+    .filter(e => !agendaCubierto(e))
+    .reduce((s, e) => {
+      if (e.kind === 'suelto') return s + arsEq(e.mov);
+      const m = e.ci.item.montoEsperado;
       if (m == null) return s;
-      return ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
+      return e.ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
     }, 0);
-  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(ci => cubierto(ci.estado));
+  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(agendaCubierto);
 
   // F9.92.1 — desglose por banco de lo ya conciliado hoy (los pendientes sin match no tienen banco).
   const hoyPorBanco = new Map<string, number>();
-  for (const ci of hoyItems) {
-    const banco = ci.matches[0]?.banco;
-    if (!banco) continue;
-    const monto = ci.matches.reduce((s, m) => s + arsEq(m), 0);
-    hoyPorBanco.set(banco, (hoyPorBanco.get(banco) ?? 0) + monto);
+  for (const e of hoyItems) {
+    if (e.kind === 'esperado') {
+      const banco = e.ci.matches[0]?.banco;
+      if (!banco) continue;
+      const monto = e.ci.matches.reduce((s, m) => s + arsEq(m), 0);
+      hoyPorBanco.set(banco, (hoyPorBanco.get(banco) ?? 0) + monto);
+    } else {
+      if (!agendaCubierto(e) || !e.mov.banco) continue;
+      hoyPorBanco.set(e.mov.banco, (hoyPorBanco.get(e.mov.banco) ?? 0) + arsEq(e.mov));
+    }
   }
   const hoyBancos = [...hoyPorBanco.entries()].sort((a, b) => b[1] - a[1]);
 
@@ -230,6 +275,8 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       {/* F9.62 — clickeable: lleva a la solapa Gastos Fijos */}
       {/* F9.92.1 — check verde en vez de badge "0" cuando no hay nada por revisar */}
+      {/* F9.99.8 — con pendientes, el texto suma cantidad + monto total ARS eq (misma
+          semántica de porRevisar, sin cambios en su cálculo — línea ~735) */}
       <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
         {porRevisar === 0 ? (
           <span style={{ width: 17, height: 17, borderRadius: 999, background: 'var(--gf-income)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -239,11 +286,17 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           <Icon name="alert-circle" size={17} color="var(--gf-out)" />
         )}
         <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: porRevisar === 0 ? 'var(--gf-income)' : 'var(--color-text)' }}>
-          {porRevisar === 0 ? 'Al día con los gastos fijos' : 'Revisar pendientes del mes'}
+          {porRevisar === 0 ? 'Al día con los gastos fijos' : (() => {
+            const pendientesMonto = checklist
+              .filter(x => x.matches.length === 0 && ACCIONABLE.includes(x.estado))
+              .reduce((s, x) => {
+                const m = x.item.montoEsperado;
+                if (m == null) return s;
+                return s + (x.item.moneda === 'ARS' ? m : m * c.tc);
+              }, 0);
+            return `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendientesMonto)}`;
+          })()}
         </span>
-        {porRevisar > 0 && (
-          <span style={{ minWidth: 22, height: 22, borderRadius: 999, background: 'var(--gf-out)', color: '#fff', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{porRevisar}</span>
-        )}
       </Card>
 
       <Card variant="flat" padding="var(--space-3)">
@@ -275,14 +328,21 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {hoyItems.map((ci, i) => {
-              const pagado       = cubierto(ci.estado); // pagado | automatico
-              const porConfirmar = !pagado && (ci.estado === 'por_confirmar' || ci.estado === 'parcial');
-              const etiqueta = [ci.item.categoria, ci.item.subcategoria].filter(Boolean).join(' › ') || ci.item.notas || '(sin categoría)';
-              const bancoPago = ci.matches[0]?.banco;
+            {hoyItems.map((e, i) => {
+              const esVencido    = e.kind === 'esperado' && e.ci.estado === 'vencido';
+              const pagado       = e.kind === 'esperado' ? cubierto(e.ci.estado) : e.mov.confirmadoPago === true;
+              const porConfirmar = e.kind === 'esperado' && !pagado && (e.ci.estado === 'por_confirmar' || e.ci.estado === 'parcial');
+              const etiqueta = e.kind === 'esperado'
+                ? ([e.ci.item.categoria, e.ci.item.subcategoria].filter(Boolean).join(' › ') || e.ci.item.notas || '(sin categoría)')
+                : (e.mov.descripcion || '(sin descripción)');
+              const bancoPago = e.kind === 'esperado' ? e.ci.matches[0]?.banco : (pagado ? e.mov.banco : null);
               const bancoInfo = bancoPago ? bancoDeNombre(bancoPago, config?.bancos) : undefined;
+              const key = e.kind === 'esperado' ? e.ci.item.id : e.mov.id;
+              const monto = e.kind === 'esperado'
+                ? (e.ci.item.montoEsperado != null ? fmtMoney(e.ci.item.montoEsperado, { from: e.ci.item.moneda, to: e.ci.item.moneda }) : '—')
+                : fmtMoney(e.mov.monto, { from: e.mov.moneda, to: e.mov.moneda });
               return (
-                <div key={ci.item.id} style={{
+                <div key={key} style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0',
                   borderBottom: i < hoyItems.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
                 }}>
@@ -293,20 +353,23 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                       <Icon
                         name={pagado ? 'check' : porConfirmar ? 'alert-circle' : 'clock'}
                         size={14}
-                        color={pagado ? '#fff' : porConfirmar ? 'var(--gf-out)' : 'var(--gf-gray-400)'}
+                        color={pagado ? '#fff' : porConfirmar ? 'var(--gf-out)' : esVencido ? 'var(--gf-expense)' : 'var(--gf-gray-400)'}
                       />
                     </span>
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiqueta}</div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
+                    <div style={{ fontSize: 11, color: esVencido && !pagado ? 'var(--gf-expense)' : 'var(--color-text-sec)', fontWeight: esVencido && !pagado ? 700 : 400 }}>
                       {pagado
                         ? `Conciliado${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}`
-                        : porConfirmar ? 'Cargado · a confirmar' : 'A pagar'}
+                        : porConfirmar ? 'Cargado · a confirmar'
+                        : e.kind === 'esperado' && esVencido ? `Venció día ${e.ci.item.diaVencimiento}`
+                        : e.kind === 'suelto' ? 'Sin plantilla · a pagar'
+                        : 'A pagar'}
                     </div>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, color: pagado ? 'var(--gf-income)' : 'var(--color-text)' }}>
-                    {ci.item.montoEsperado != null ? fmtMoney(ci.item.montoEsperado, { from: ci.item.moneda, to: ci.item.moneda }) : '—'}
+                    {monto}
                   </div>
                 </div>
               );
@@ -620,8 +683,35 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
   );
 }
 
-function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, onRegistrarPago, esMesActual, mes }: {
-  checklist: CheckItem[];
+// F9.99.8 — tarjeta de un futuro suelto (gasto manual sin plantilla) dentro de la agenda del mes.
+// Sin estado de la state machine (no es ExpectedItem): check verde solo si confirmadoPago=true.
+function SueltoAgendaCard({ mov, config }: { mov: Movement; config: FamiliaConfig | null }) {
+  const pagado = mov.confirmadoPago === true;
+  const etiqueta = mov.descripcion || '(sin descripción)';
+  return (
+    <div style={{ display: 'flex', gap: 10, background: 'var(--color-surface)', border: '1px solid var(--gf-gray-150)', borderRadius: 14, padding: '11px 12px' }}>
+      <span style={{ width: 9, height: 9, borderRadius: 999, background: pagado ? TINT.pagado : TINT.pendiente, marginTop: 6, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{etiqueta}</div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              {mov.persona && <Badge tone="neutral">{nombrePersona(mov.persona, config)}</Badge>}
+              <Badge tone="neutral">Sin plantilla</Badge>
+            </div>
+          </div>
+          <Money value={mov.monto} currency={mov.moneda} colored={false} decimals={0} style={{ fontSize: 15, flexShrink: 0 }} />
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6 }}>
+          {pagado ? 'Conciliado' : `Vence ${fmtDDMM(mov.fecha)}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegistrarPago, esMesActual, mes }: {
+  agenda: AgendaEntry[];
   config: FamiliaConfig | null;
   onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
   onDesmarcar: (matches: Movement[]) => void;
@@ -629,21 +719,26 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, onReg
   esMesActual: boolean;
   mes: string;
 }) {
-  const alDia = checklist.filter(c => cubierto(c.estado)).length;
+  const alDia = agenda.filter(agendaCubierto).length;
   // F9.62 — "pendiente" suma TODO lo no pagado: si el ítem tiene un movimiento sin confirmar
   // (por_confirmar/parcial) usa el monto REAL del movimiento; si no, el montoEsperado. Ítems
   // sin monto ni match no aportan (no hay número que sumar).
-  const pendiente = checklist
-    .filter(c => !cubierto(c.estado))
-    .reduce((s, c) => {
+  // F9.99.8 — un futuro suelto (sin ExpectedItem) aporta su monto real (mismo criterio: no
+  // convierte moneda, igual que el resto de esta suma — ver nota de F9.62).
+  const pendiente = agenda
+    .filter(e => !agendaCubierto(e))
+    .reduce((s, e) => {
+      if (e.kind === 'suelto') return s + Math.abs(e.mov.monto);
+      const c = e.ci;
       const noConfirmado = c.estado === 'por_confirmar' || c.estado === 'parcial';
       const montoReal = c.matches.reduce((a, m) => a + Math.abs(m.monto), 0);
       return s + (noConfirmado ? montoReal : (c.item.montoEsperado ?? 0));
     }, 0);
 
   // F9.99.7 Parte 4.2 — débitos automáticos: sección propia, mismas tarjetas/estados/acciones.
-  const principales  = checklist.filter(c => !c.item.pagoAutomatico);
-  const automaticos  = checklist.filter(c => c.item.pagoAutomatico);
+  // F9.99.8 — los sueltos nunca son pagoAutomatico, quedan siempre en "principales".
+  const principales  = agenda.filter(e => e.kind === 'suelto' || !e.ci.item.pagoAutomatico);
+  const automaticos  = agenda.filter((e): e is { kind: 'esperado'; ci: CheckItem } => e.kind === 'esperado' && e.ci.item.pagoAutomatico);
   const cardProps = { mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago };
 
   return (
@@ -653,16 +748,19 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, onReg
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-expense)', fontVariantNumeric: 'tabular-nums' }}>{fmtArs(pendiente)}</span>
         </Card>
         <Card eyebrow="Al día" style={{ flex: '0 0 96px', textAlign: 'center' }}>
-          <span style={{ fontSize: 'var(--text-xl)', fontWeight: 700 }}>{alDia}<span style={{ fontSize: 14, color: 'var(--gf-gray-400)' }}>/{checklist.length}</span></span>
+          <span style={{ fontSize: 'var(--text-xl)', fontWeight: 700 }}>{alDia}<span style={{ fontSize: 14, color: 'var(--gf-gray-400)' }}>/{agenda.length}</span></span>
         </Card>
       </div>
 
-      {checklist.length === 0 ? (
+      {agenda.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--color-text-sec)', margin: '0 4px' }}>Sin ítems esperados activos.</p>
       ) : (
         <>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {principales.map(ci => <ItemChecklistCard key={ci.item.id} ci={ci} {...cardProps} />)}
+            {principales.map(e => e.kind === 'esperado'
+              ? <ItemChecklistCard key={e.ci.item.id} ci={e.ci} {...cardProps} />
+              : <SueltoAgendaCard key={e.mov.id} mov={e.mov} config={config} />
+            )}
           </div>
           {automaticos.length > 0 && (
             <>
@@ -670,7 +768,7 @@ function GastosFijosSeccion({ checklist, config, onConfirmar, onDesmarcar, onReg
                 Débitos automáticos
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {automaticos.map(ci => <ItemChecklistCard key={ci.item.id} ci={ci} {...cardProps} />)}
+                {automaticos.map(e => <ItemChecklistCard key={e.ci.item.id} ci={e.ci} {...cardProps} />)}
               </div>
             </>
           )}
@@ -702,6 +800,12 @@ function ResumenVisual() {
   // F9.62 — "revisar" cuenta solo lo SIN CARGAR (sin movimiento asociado). por_confirmar
   // tiene match (cargado, falta confirmar) y NO entra en este conteo.
   const porRevisar = checklist.filter(c => c.matches.length === 0 && ACCIONABLE.includes(c.estado)).length;
+  // F9.99.8 — agenda unificada: checklist (sin cambios) ∪ futuros sueltos sin plantilla.
+  const sueltosFuturos = sueltosFuturosDelMes(movimientos, checklist, new Date());
+  const agenda: AgendaEntry[] = [
+    ...checklist.map(ci => ({ kind: 'esperado', ci } as AgendaEntry)),
+    ...sueltosFuturos.map(mov => ({ kind: 'suelto', mov } as AgendaEntry)),
+  ];
 
   async function handleConfirmar(item: ExpectedItem, matches: Movement[]) {
     const res = await confirmarPagoEsperado(item, matches);
@@ -774,10 +878,10 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} mes={mes} onIrAGastos={() => setSec('fijos')} />
+        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} mes={mes} onIrAGastos={() => setSec('fijos')} />
       ) : (
         <GastosFijosSeccion
-          checklist={checklist}
+          agenda={agenda}
           config={config}
           onConfirmar={handleConfirmar}
           onDesmarcar={handleDesmarcar}

@@ -176,6 +176,36 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   F9.63) para no dejar una trampa a futuros callers. `crearMovimiento` también gana `mes?`/`pagadoEn?`/
   `registradoDesdeChecklist?` opcionales en `NuevoMovimiento` (antes `mes` existía pero se
   ignoraba). No se unificaron los dos campos (fuera de alcance, decisión del dueño).
+- F9.99.8 — Resumen: agenda de pagos unificada (Hoy + vencidos + futuros sueltos; check con monto
+  pendiente). Ver `docs/prompts/F9.99.8-agenda-pagos-unificada.md` (spec) y
+  `docs/prompts/F9.99.7_addendum_1.md` (ciclo de vida completo del gasto, documental). Todo en
+  `src/vistas/Resumen.tsx`, sin tocar `checklist.ts` (el cálculo del checklist no cambia).
+  **Agenda unificada:** tipo `AgendaEntry = {kind:'esperado',ci:CheckItem} | {kind:'suelto',mov:Movement}`.
+  `sueltosFuturosDelMes(movs, checklist, hoy)` filtra movimientos `tipo='Gasto'`, `pagado=false`,
+  `fecha >= hoy` (comparación por día, no por hora) que NINGÚN ítem esperado capturó — dedupe vía
+  el `Set` de ids ya presentes en `checklist[].matches` (si una rama de `movimientosDelItem()` lo
+  agarra, ya cuenta como esperado y no aparece como suelto). `agenda = checklist ∪ sueltosFuturos`,
+  calculada en `ResumenVisual` y pasada a `GastosFijosSeccion` (reemplaza el prop `checklist` por
+  `agenda`) — los sueltos entran siempre a "principales" (nunca son `pagoAutomatico`), suman a
+  "Pendiente" (monto crudo, mismo criterio sin conversión de moneda que ya tenía esa suma, F9.62)
+  y al denominador de "Al día X/Y". Card nueva `SueltoAgendaCard`: sin estado de la state machine
+  (no es `ExpectedItem`) — check verde solo si `mov.confirmadoPago===true`, badge "Sin plantilla".
+  **Card Hoy** (`PorDiaSeccion`, scope `esMesActual` sin cambios): unión de (a) esperados con
+  `diaVencimiento===hoy.getDate()` (como antes), (b) esperados en estado `vencido` (por
+  definición de `estadoItem` ya están sin match/no cubiertos — un vencido ya pagado deja de ser
+  `vencido` y no aparece acá), (c) futuros sueltos con fecha exactamente hoy. Vencidos primero
+  (sin duplicar: `vencido` exige `diaVencimiento < hoy.getDate()`, nunca coincide con (a)). Fila de
+  un vencido en la card muestra "Venció día D" en `--gf-expense` en vez de "A pagar". `hoyPendienteArsEq`,
+  `todoPagadoHoy` y el desglose por banco (`hoyPorBanco`, F9.92.1) se recalculan sobre el conjunto
+  ampliado vía helper `agendaCubierto(e)` (esperado: `cubierto(estado)`; suelto: `confirmadoPago===true`).
+  "Nada que pagar hoy" solo si la unión filtrada da vacío.
+  **Check "Al día":** `porRevisar` sigue calculándose exactamente igual (sobre esperados, sin
+  cambios) — solo cambia el texto: con pendientes, suma cantidad + monto ARS eq inline ("Revisar
+  pendientes del mes · 3 sin pagar · $ 1.234.567", reutilizando el patrón de conversión ya usado
+  para `hoyPendienteArsEq`); el badge numérico separado se retira (redundante con el texto). Con
+  `porRevisar===0`, texto verde sin números, sin cambios.
+  Frontend puro, sin cambios de Rules/Functions. `tsc --noEmit`: 41 errores pre-existentes, ninguno
+  nuevo en `Resumen.tsx`. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
