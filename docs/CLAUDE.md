@@ -758,7 +758,13 @@ Estas mejoras quedan registradas pero no se implementan en F2:
   antes de implementar.
 - Cambios a CLAUDE.md: mostrar diff antes de aplicar.
 - Investigar primero, reportar findings, esperar aprobacion antes de tocar codigo.
-- Commit por tarea numerada, mensaje en castellano, push al final cuando lo pida yo.
+- Commit por tarea numerada, mensaje en castellano. Push automático al terminar cada
+  tarea/feature, SIN esperar que se pida explícitamente — el objetivo es que el working
+  tree quede limpio (`git status` sin pendientes) y `origin/main` refleje siempre el
+  estado local. Si hay archivos sueltos ajenos a la tarea (docs movidos, notas de sesión,
+  etc.) que ya estaban en el working tree, van en un commit aparte de "housekeeping" para
+  no mezclarlos con el commit de la feature, pero se commitean y pushean igual — no queda
+  nada sin sincronizar al cierre de la sesión.
 - Claude Code NO corre `npm install`, `npm run seed`, ni `firebase deploy` por
   iniciativa propia. Esos comandos los corro yo manualmente.
 
