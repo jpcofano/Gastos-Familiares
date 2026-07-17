@@ -227,6 +227,42 @@ export async function desmarcarPago(matches: Movement[]): Promise<Resultado<void
   }
 }
 
+// F9.99.8.1 — "Marcar pagado"/"Deshacer" de un suelto de agenda (gasto manual sin plantilla,
+// sin ExpectedItem asociado): mismo camino de edición directa que confirmarPagoEsperado/
+// desmarcarPago (writeBatch admin), pero sobre el movimiento existente — NUNCA crea uno nuevo
+// (evitaría un duplicado si más tarde llega el mismo gasto por extracto, F9.99.7).
+export async function marcarPagadoSuelto(mov: Movement): Promise<Resultado<void>> {
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'movimientos', mov.id), {
+      pagado: true,
+      confirmadoPago: true,
+      pagadoEn: serverTimestamp(),
+      actualizadoEn: serverTimestamp(),
+    });
+    await batch.commit();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+export async function desmarcarPagadoSuelto(mov: Movement): Promise<Resultado<void>> {
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'movimientos', mov.id), {
+      pagado: false,
+      confirmadoPago: false,
+      pagadoEn: null,
+      actualizadoEn: serverTimestamp(),
+    });
+    await batch.commit();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
 export async function existeNumeroComprobante(numero: string): Promise<boolean> {
   try {
     const snap = await getDocs(

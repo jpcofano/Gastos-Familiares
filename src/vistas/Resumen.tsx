@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
-import { confirmarPagoEsperado, desmarcarPago, registrarPagoChecklist } from '../datos/movimientos';
+import { confirmarPagoEsperado, desmarcarPago, registrarPagoChecklist, marcarPagadoSuelto, desmarcarPagadoSuelto } from '../datos/movimientos';
 import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
 import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
@@ -12,6 +12,7 @@ import { fmtMoney } from '../datos/money';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
 import { calcularChecklist, cubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
+import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, pendienteAgenda, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
 import EditarMovimiento from './EditarMovimiento';
 import type { Movement, ExpectedItem, FamiliaConfig, MedioPago } from '../types';
 import './Resumen.css';
@@ -62,28 +63,6 @@ function arsEq(m: Movement): number { return m.moneda === 'ARS' ? m.monto : (m.t
 function nombrePersona(memberId: string | null, config: FamiliaConfig | null): string {
   if (!memberId) return '—';
   return config?.miembros[memberId]?.nombre ?? memberId;
-}
-
-// ── Agenda unificada del mes (F9.99.8) ───────────────────────────────────────
-// Esperados: el checklist actual, SIN cambios en su cálculo (calcularChecklist).
-// Futuros sueltos: gastos manuales sin plantilla — tipo='Gasto', pagado=false,
-// fecha >= hoy — que ningún ítem esperado capturó (dedupe: si matchean alguna
-// rama de movimientosDelItem() ya cuentan como esperado, vía ci.matches).
-// Ver docs/prompts/F9.99.8-agenda-pagos-unificada.md.
-type AgendaEntry = { kind: 'esperado'; ci: CheckItem } | { kind: 'suelto'; mov: Movement };
-
-function inicioDia(d: Date): Date { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-
-function sueltosFuturosDelMes(movs: Movement[], checklist: CheckItem[], hoy: Date): Movement[] {
-  const matchedIds = new Set(checklist.flatMap(ci => ci.matches.map(m => m.id)));
-  const inicioHoy = inicioDia(hoy);
-  return movs.filter(m =>
-    m.tipo === 'Gasto' && !m.pagado && !matchedIds.has(m.id) && inicioDia(m.fecha) >= inicioHoy
-  );
-}
-
-function agendaCubierto(e: AgendaEntry): boolean {
-  return e.kind === 'esperado' ? cubierto(e.ci.estado) : e.mov.confirmadoPago === true;
 }
 
 // ── KPIs de caja (incluirResumenMes=true) ────────────────────────────────────
@@ -192,9 +171,53 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
   );
 }
 
+// F9.99.8.1 — fila compartida entre "Gastos por día" y la card Hoy: día + chips de banco +
+// total grande/chico + chevron expandible. El contenido expandido (children) lo decide cada
+// caller: movimientos reales confirmados (Por día) o ítems de agenda con estado (Hoy).
+function DiaRowShell({ dayBig, daySub, banks, totalNode, highlight, expanded, onToggle, config, fmtChip, children }: {
+  dayBig: string;
+  daySub: string;
+  banks: [string, number][];
+  totalNode: ReactNode;
+  highlight?: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  config: FamiliaConfig | null;
+  fmtChip: (v: number) => string;
+  children?: ReactNode;
+}) {
+  return (
+    <Card variant={highlight ? 'highlight' : 'flat'} padding="var(--space-3)">
+      <button
+        onClick={onToggle}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
+      >
+        <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
+          <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{dayBig}</div>
+          <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', textTransform: 'uppercase' }}>{daySub}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {banks.map(([b, v]) => {
+            const info = bancoDeNombre(b, config?.bancos);
+            return (
+              <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-strong)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '3px 8px 3px 4px' }}>
+                <BankLogo id={info?.id ?? b} nombre={info?.nombre ?? b} color={info?.color ?? (colorMedio(b, config?.bancos) ?? colorHash(b))} dominio={info?.dominio} size={17} radius={999} />
+                {b} · {fmtChip(v)}
+              </span>
+            );
+          })}
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>{totalNode}</div>
+        <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />
+      </button>
+      {children}
+    </Card>
+  );
+}
+
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, mes, onIrAGastos }: {
+function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, onIrAGastos }: {
   movs: Movement[];
   porRevisar: number;
   onIrAGastos: () => void;
@@ -204,6 +227,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   onEditarMovimiento?: (mov: Movement) => void;
   checklist: CheckItem[];
   sueltosFuturos: Movement[];
+  agenda: AgendaEntry[];
   mes: string;
 }) {
   const cajaMov = movs.filter(m => m.incluirResumenMes);
@@ -216,6 +240,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   const fmtBig = (ars: number) => cur === 'ARS' ? fmtArs(ars) : fmtMoney(ars, { from: 'ARS', to: 'USD' });
   const fmtSmall = (ars: number) => cur === 'ARS' ? fmtMoney(ars, { from: 'ARS', to: 'USD' }) : fmtArs(ars);
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
+  const [hoyExpandido, setHoyExpandido] = useState(true);
 
   // Card HOY (solo para el mes actual). F9.99.8 — unión de:
   //  (a) esperados con diaVencimiento === hoy (comportamiento pre-existente),
@@ -275,8 +300,10 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       {/* F9.62 — clickeable: lleva a la solapa Gastos Fijos */}
       {/* F9.92.1 — check verde en vez de badge "0" cuando no hay nada por revisar */}
-      {/* F9.99.8 — con pendientes, el texto suma cantidad + monto total ARS eq (misma
-          semántica de porRevisar, sin cambios en su cálculo — línea ~735) */}
+      {/* F9.99.8 — con pendientes, el texto suma cantidad. F9.99.8.1 — el monto pasa a ser el
+          pendiente TOTAL de la agenda (vencidos + por_confirmar a monto real + sueltos), vía
+          pendienteAgenda() compartida con GastosFijosSeccion — el disparador (porRevisar===0)
+          no cambia. */}
       <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
         {porRevisar === 0 ? (
           <span style={{ width: 17, height: 17, borderRadius: 999, background: 'var(--gf-income)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -286,48 +313,40 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           <Icon name="alert-circle" size={17} color="var(--gf-out)" />
         )}
         <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: porRevisar === 0 ? 'var(--gf-income)' : 'var(--color-text)' }}>
-          {porRevisar === 0 ? 'Al día con los gastos fijos' : (() => {
-            const pendientesMonto = checklist
-              .filter(x => x.matches.length === 0 && ACCIONABLE.includes(x.estado))
-              .reduce((s, x) => {
-                const m = x.item.montoEsperado;
-                if (m == null) return s;
-                return s + (x.item.moneda === 'ARS' ? m : m * c.tc);
-              }, 0);
-            return `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendientesMonto)}`;
-          })()}
+          {porRevisar === 0 ? 'Al día con los gastos fijos' : `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendienteAgenda(agenda))}`}
         </span>
       </Card>
 
-      <Card variant="flat" padding="var(--space-3)">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: hoyItems.length > 0 ? 10 : 4 }}>
-          <Icon name="calendar" size={13} color="var(--gf-gray-400)" />
-          <span style={{ flex: 1 }}>Hoy — {hoy.toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit' })}</span>
-          {hoyItems.length > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 700, color: todoPagadoHoy ? 'var(--gf-income)' : 'var(--gf-expense)', textTransform: 'none', letterSpacing: 0 }}>
-              {todoPagadoHoy ? 'Todo pagado' : `$ ${hoyPendienteArsEq.toLocaleString('es-AR', { maximumFractionDigits: 0 })} a pagar`}
-            </span>
-          )}
-        </div>
-        {hoyBancos.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
-            {hoyBancos.map(([b, v]) => {
-              const info = bancoDeNombre(b, config?.bancos);
-              return (
-                <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-strong)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '3px 8px 3px 4px' }}>
-                  <BankLogo id={info?.id ?? b} nombre={info?.nombre ?? b} color={info?.color ?? (colorMedio(b, config?.bancos) ?? colorHash(b))} dominio={info?.dominio} size={17} radius={999} />
-                  {b} · {fmtArs(v)}
-                </span>
-              );
-            })}
-          </div>
+      {/* F9.99.8.1 — Card Hoy pasa a usar la MISMA fila que "Gastos por día" (DiaRowShell):
+          chips de banco, total grande/chico, expandible. El contenido expandido agrega
+          estado por ítem (check/reloj/alerta/vencido) y lápiz de edición cuando hay un único
+          movimiento real detrás del ítem (esperado con 1 match, o el suelto mismo). */}
+      <DiaRowShell
+        dayBig={String(hoy.getDate())}
+        daySub="HOY"
+        banks={hoyBancos}
+        totalNode={hoyItems.length === 0 ? null : todoPagadoHoy ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--gf-income)', fontWeight: 700, fontSize: 13 }}>
+            <Icon name="check" size={13} color="var(--gf-income)" /> Al día
+          </span>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>{fmtBig(hoyPendienteArsEq)}</div>
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(hoyPendienteArsEq)}</div>
+          </>
         )}
-        {hoyItems.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>
+        highlight
+        expanded={hoyExpandido}
+        onToggle={() => setHoyExpandido(v => !v)}
+        config={config}
+        fmtChip={fmtBig}
+      >
+        {hoyExpandido && (hoyItems.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--color-text-sec)', marginTop: 10 }}>
             {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
             {hoyItems.map((e, i) => {
               const esVencido    = e.kind === 'esperado' && e.ci.estado === 'vencido';
               const pagado       = e.kind === 'esperado' ? cubierto(e.ci.estado) : e.mov.confirmadoPago === true;
@@ -341,11 +360,22 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
               const monto = e.kind === 'esperado'
                 ? (e.ci.item.montoEsperado != null ? fmtMoney(e.ci.item.montoEsperado, { from: e.ci.item.moneda, to: e.ci.item.moneda }) : '—')
                 : fmtMoney(e.mov.monto, { from: e.mov.moneda, to: e.mov.moneda });
+              // Lápiz de edición (paridad con la fila de Por día): solo si hay un único
+              // movimiento real detrás del ítem — un esperado con 0 o >1 matches no es editable acá.
+              const editTarget = e.kind === 'suelto' ? e.mov : (e.ci.matches.length === 1 ? e.ci.matches[0] : null);
+              const editable = esAdmin && editTarget != null;
               return (
-                <div key={key} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0',
-                  borderBottom: i < hoyItems.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
-                }}>
+                <button
+                  key={key}
+                  onClick={editable ? () => onEditarMovimiento?.(editTarget) : undefined}
+                  disabled={!editable}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', width: '100%',
+                    borderBottom: i < hoyItems.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
+                    background: 'none', border: 'none', cursor: editable ? 'pointer' : 'default',
+                    textAlign: 'left', fontFamily: 'var(--font-base)',
+                  }}
+                >
                   {pagado && bancoInfo ? (
                     <BankLogo id={bancoInfo.id} nombre={bancoInfo.nombre} color={bancoInfo.color} dominio={bancoInfo.dominio} size={28} radius={7} />
                   ) : (
@@ -371,12 +401,13 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                   <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, color: pagado ? 'var(--gf-income)' : 'var(--color-text)' }}>
                     {monto}
                   </div>
-                </div>
+                  {editable && <Icon name="pencil" size={12} color="var(--gf-gray-300)" />}
+                </button>
               );
             })}
           </div>
-        )}
-      </Card>
+        ))}
+      </DiaRowShell>
 
       {personas.length > 0 && (
         <div>
@@ -418,40 +449,25 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
               const banks   = Object.entries(d.banks).sort((a, b) => b[1] - a[1]);
               const expanded = diasExpandidos.has(d.day);
               const movsDelDia = cajaMov.filter(m => m.tipo === 'Gasto' && m.fecha.getDate() === d.day && m.fecha.toDateString() === d.date.toDateString());
+              const totalNode = (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(d.eqArs)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(d.eqArs)}</div>
+                </>
+              );
               return (
-                <Card key={d.day} variant={isHoy ? 'highlight' : 'flat'} padding="var(--space-3)">
-                  <button
-                    onClick={() => setDiasExpandidos(prev => { const s = new Set(prev); s.has(d.day) ? s.delete(d.day) : s.add(d.day); return s; })}
-                    style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, background: 'none', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
-                  >
-                    <div style={{ width: 40, flexShrink: 0, textAlign: 'center' }}>
-                      <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{d.day}</div>
-                      <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', textTransform: 'uppercase' }}>{DIA_ES[d.date.getDay()]}</div>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                      {banks.map(([b, v]) => {
-                        const info = bancoDeNombre(b, config?.bancos);
-                        return (
-                          <span key={b} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--color-text-strong)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '3px 8px 3px 4px' }}>
-                            <BankLogo
-                              id={info?.id ?? b}
-                              nombre={info?.nombre ?? b}
-                              color={info?.color ?? (colorMedio(b, config?.bancos) ?? colorHash(b))}
-                              dominio={info?.dominio}
-                              size={17}
-                              radius={999}
-                            />
-                            {b} · {fmtBig(v)}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(d.eqArs)}</div>
-                      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(d.eqArs)}</div>
-                    </div>
-                    <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />
-                  </button>
+                <DiaRowShell
+                  key={d.day}
+                  dayBig={String(d.day)}
+                  daySub={DIA_ES[d.date.getDay()]}
+                  banks={banks}
+                  totalNode={totalNode}
+                  highlight={isHoy}
+                  expanded={expanded}
+                  onToggle={() => setDiasExpandidos(prev => { const s = new Set(prev); s.has(d.day) ? s.delete(d.day) : s.add(d.day); return s; })}
+                  config={config}
+                  fmtChip={fmtBig}
+                >
                   {isHoy && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gf-emerald)', textTransform: 'uppercase', letterSpacing: '.5px', marginTop: 6 }}>Hoy</div>}
                   {expanded && movsDelDia.length > 0 && (
                     <div style={{ marginTop: 8, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -490,7 +506,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                       ))}
                     </div>
                   )}
-                </Card>
+                </DiaRowShell>
               );
             })}
           </div>
@@ -685,9 +701,21 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
 
 // F9.99.8 — tarjeta de un futuro suelto (gasto manual sin plantilla) dentro de la agenda del mes.
 // Sin estado de la state machine (no es ExpectedItem): check verde solo si confirmadoPago=true.
-function SueltoAgendaCard({ mov, config }: { mov: Movement; config: FamiliaConfig | null }) {
+// F9.99.8.1 — accionable: "Marcar pagado"/"Deshacer" edita el movimiento existente
+// (pagado + confirmadoPago) vía marcarPagadoSuelto/desmarcarPagadoSuelto — nunca crea uno nuevo.
+function SueltoAgendaCard({ mov, config, onMarcarPagado, onDeshacer }: {
+  mov: Movement;
+  config: FamiliaConfig | null;
+  onMarcarPagado: (mov: Movement) => Promise<void>;
+  onDeshacer: (mov: Movement) => Promise<void>;
+}) {
   const pagado = mov.confirmadoPago === true;
   const etiqueta = mov.descripcion || '(sin descripción)';
+  const [guardando, setGuardando] = useState(false);
+
+  async function marcar() { setGuardando(true); await onMarcarPagado(mov); setGuardando(false); }
+  async function deshacer() { setGuardando(true); await onDeshacer(mov); setGuardando(false); }
+
   return (
     <div style={{ display: 'flex', gap: 10, background: 'var(--color-surface)', border: '1px solid var(--gf-gray-150)', borderRadius: 14, padding: '11px 12px' }}>
       <span style={{ width: 9, height: 9, borderRadius: 999, background: pagado ? TINT.pagado : TINT.pendiente, marginTop: 6, flexShrink: 0 }} />
@@ -705,39 +733,50 @@ function SueltoAgendaCard({ mov, config }: { mov: Movement; config: FamiliaConfi
         <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6 }}>
           {pagado ? 'Conciliado' : `Vence ${fmtDDMM(mov.fecha)}`}
         </div>
+        {!pagado && (
+          <div style={{ marginTop: 9 }}>
+            <Button variant="green" size="sm" style={{ width: '100%' }} disabled={guardando} onClick={marcar}>
+              <Icon name="check" size={15} /> Marcar pagado
+            </Button>
+          </div>
+        )}
+        {pagado && (
+          <div style={{ marginTop: 9 }}>
+            <Button variant="secondary" size="sm" style={{ width: '100%' }} disabled={guardando} onClick={deshacer}>
+              Deshacer
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegistrarPago, esMesActual, mes }: {
+function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegistrarPago, onMarcarPagadoSuelto, onDeshacerSuelto, esMesActual, mes }: {
   agenda: AgendaEntry[];
   config: FamiliaConfig | null;
   onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
   onDesmarcar: (matches: Movement[]) => void;
   onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
+  onMarcarPagadoSuelto: (mov: Movement) => Promise<void>;
+  onDeshacerSuelto: (mov: Movement) => Promise<void>;
   esMesActual: boolean;
   mes: string;
 }) {
   const alDia = agenda.filter(agendaCubierto).length;
-  // F9.62 — "pendiente" suma TODO lo no pagado: si el ítem tiene un movimiento sin confirmar
-  // (por_confirmar/parcial) usa el monto REAL del movimiento; si no, el montoEsperado. Ítems
-  // sin monto ni match no aportan (no hay número que sumar).
-  // F9.99.8 — un futuro suelto (sin ExpectedItem) aporta su monto real (mismo criterio: no
-  // convierte moneda, igual que el resto de esta suma — ver nota de F9.62).
-  const pendiente = agenda
-    .filter(e => !agendaCubierto(e))
-    .reduce((s, e) => {
-      if (e.kind === 'suelto') return s + Math.abs(e.mov.monto);
-      const c = e.ci;
-      const noConfirmado = c.estado === 'por_confirmar' || c.estado === 'parcial';
-      const montoReal = c.matches.reduce((a, m) => a + Math.abs(m.monto), 0);
-      return s + (noConfirmado ? montoReal : (c.item.montoEsperado ?? 0));
-    }, 0);
+  // F9.62/F9.99.8 — "pendiente" = pendienteAgenda() compartida con PorDiaSeccion (F9.99.8.1),
+  // ver src/datos/agenda.ts.
+  const pendiente = pendienteAgenda(agenda);
 
   // F9.99.7 Parte 4.2 — débitos automáticos: sección propia, mismas tarjetas/estados/acciones.
   // F9.99.8 — los sueltos nunca son pagoAutomatico, quedan siempre en "principales".
-  const principales  = agenda.filter(e => e.kind === 'suelto' || !e.ci.item.pagoAutomatico);
+  // F9.99.8.1 — principales ya no anexa los sueltos al final: se intercalan con los esperados
+  // por día de vencimiento ascendente (diaDeAgenda, sort estable — ítems del mismo día
+  // conservan el orden relativo previo por estado).
+  const principales = agenda
+    .filter(e => e.kind === 'suelto' || !e.ci.item.pagoAutomatico)
+    .slice()
+    .sort((a, b) => diaDeAgenda(a) - diaDeAgenda(b));
   const automaticos  = agenda.filter((e): e is { kind: 'esperado'; ci: CheckItem } => e.kind === 'esperado' && e.ci.item.pagoAutomatico);
   const cardProps = { mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago };
 
@@ -759,7 +798,7 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {principales.map(e => e.kind === 'esperado'
               ? <ItemChecklistCard key={e.ci.item.id} ci={e.ci} {...cardProps} />
-              : <SueltoAgendaCard key={e.mov.id} mov={e.mov} config={config} />
+              : <SueltoAgendaCard key={e.mov.id} mov={e.mov} config={config} onMarcarPagado={onMarcarPagadoSuelto} onDeshacer={onDeshacerSuelto} />
             )}
           </div>
           {automaticos.length > 0 && (
@@ -802,10 +841,7 @@ function ResumenVisual() {
   const porRevisar = checklist.filter(c => c.matches.length === 0 && ACCIONABLE.includes(c.estado)).length;
   // F9.99.8 — agenda unificada: checklist (sin cambios) ∪ futuros sueltos sin plantilla.
   const sueltosFuturos = sueltosFuturosDelMes(movimientos, checklist, new Date());
-  const agenda: AgendaEntry[] = [
-    ...checklist.map(ci => ({ kind: 'esperado', ci } as AgendaEntry)),
-    ...sueltosFuturos.map(mov => ({ kind: 'suelto', mov } as AgendaEntry)),
-  ];
+  const agenda = construirAgenda(checklist, sueltosFuturos);
 
   async function handleConfirmar(item: ExpectedItem, matches: Movement[]) {
     const res = await confirmarPagoEsperado(item, matches);
@@ -817,6 +853,15 @@ function ResumenVisual() {
   }
   async function handleRegistrarPago(item: ExpectedItem, monto: number, fecha: Date) {
     const res = await registrarPagoChecklist(item, mes, { monto, fecha, creadoPor: memberId, persona: null });
+    if (!res.ok) setErrorAccion(res.error.message);
+  }
+  // F9.99.8.1 — "Marcar pagado"/"Deshacer" de un suelto de agenda, vía SueltoAgendaCard.
+  async function handleMarcarPagadoSuelto(mov: Movement) {
+    const res = await marcarPagadoSuelto(mov);
+    if (!res.ok) setErrorAccion(res.error.message);
+  }
+  async function handleDeshacerSuelto(mov: Movement) {
+    const res = await desmarcarPagadoSuelto(mov);
     if (!res.ok) setErrorAccion(res.error.message);
   }
 
@@ -878,7 +923,7 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} mes={mes} onIrAGastos={() => setSec('fijos')} />
+        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} agenda={agenda} mes={mes} onIrAGastos={() => setSec('fijos')} />
       ) : (
         <GastosFijosSeccion
           agenda={agenda}
@@ -886,6 +931,8 @@ function ResumenVisual() {
           onConfirmar={handleConfirmar}
           onDesmarcar={handleDesmarcar}
           onRegistrarPago={handleRegistrarPago}
+          onMarcarPagadoSuelto={handleMarcarPagadoSuelto}
+          onDeshacerSuelto={handleDeshacerSuelto}
           esMesActual={mes === mesActual()}
           mes={mes}
         />

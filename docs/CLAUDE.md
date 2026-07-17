@@ -206,6 +206,32 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `porRevisar===0`, texto verde sin números, sin cambios.
   Frontend puro, sin cambios de Rules/Functions. `tsc --noEmit`: 41 errores pre-existentes, ninguno
   nuevo en `Resumen.tsx`. Deploy: `--only hosting`.
+- F9.99.8.1 — Hotfix agenda: card Hoy con la fila de "Por día", check "Al día" con pendiente
+  total, sueltos accionables y ordenados. Ver `docs/prompts/F9.99.8.1-hotfix-agenda-card-hoy.md`.
+  **Módulo compartido nuevo `src/datos/agenda.ts`:** `AgendaEntry`, `agendaCubierto`,
+  `sueltosFuturosDelMes`, `construirAgenda`, `pendienteAgenda` (vencidos/pendientes sin match →
+  `montoEsperado`; `por_confirmar`/`parcial` → monto REAL de sus matches; sueltos → monto real) y
+  `diaDeAgenda` (día de vencimiento de una entrada, `99` si no tiene) se extraen de `Resumen.tsx`
+  para que F9.99.9 (picker con agenda unificada) los reuse sin duplicar — sin cambio de
+  comportamiento en la extracción. **1. Card Hoy = fila de "Por día":** nuevo `DiaRowShell`
+  (día + chips de banco + total grande/chico + chevron expandible), compartido entre "Gastos por
+  día" y la card Hoy (antes visual propia). El contenido expandido de Hoy agrega estado por ítem
+  (check verde/reloj/alerta/"Venció día D", sin cambios de esa lógica) y lápiz de edición cuando
+  hay un único movimiento real detrás del ítem (esperado con 1 match, o el suelto mismo) —
+  `onEditarMovimiento` ya existía, solo se extiende a este contexto. **2. Check "Al día":** el
+  monto ahora es `pendienteAgenda(agenda)` (vencidos + por_confirmar a monto real + sueltos) en
+  vez de solo ítems sin match — el disparador (`porRevisar===0`) no cambia.
+  **3. `SueltoAgendaCard` accionable:** "Marcar pagado"/"Deshacer" vía `marcarPagadoSuelto`/
+  `desmarcarPagadoSuelto` (`src/datos/movimientos.ts`) — mismo patrón `writeBatch` directo que
+  `confirmarPagoEsperado`/`desmarcarPago` (admin-only por Rules), sobre el movimiento existente;
+  nunca crea uno nuevo (evita duplicado si más tarde el mismo gasto llega por extracto, F9.99.7).
+  **4. Orden:** `principales` (checklist no-automático ∪ sueltos) pasa de "sueltos al final sin
+  ordenar" a sort por `diaDeAgenda` ascendente (sort estable — empates conservan el orden previo
+  por estado); `pendiente` y `alDia/total` de `GastosFijosSeccion` siguen sobre `agenda` completa,
+  sin afectarse por el reorden de `principales`. Semántica del match/checklist intacta. Frontend
+  puro, sin cambios de Rules/Functions. `tsc --noEmit`: mismo baseline que antes de este cambio
+  (48 errores pre-existentes ajenos a este archivo — el número subió de 41 a 48 en commits
+  anteriores no relacionados; 0 errores nuevos introducidos acá). Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
