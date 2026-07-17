@@ -127,7 +127,7 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
     return (
       <FullModal>
         <ModalBar title="Editar movimiento" onClose={onCancelar} />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gf-gray-400)' }}>
           Cargando catálogos…
         </div>
       </FullModal>
@@ -150,9 +150,9 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
       <form onSubmit={handleGuardar} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <Drawer>
           {esDeTarjeta && (
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', background: 'var(--gf-amber-50, #fffbeb)', borderBottom: '1px solid var(--gf-gray-100)', borderRadius: '4px 4px 0 0' }}>
-              <Icon name="triangle-alert" size={15} color="var(--gf-amber-600, #d97706)" style={{ marginTop: 1, flexShrink: 0 }} />
-              <span style={{ fontSize: 12, color: 'var(--gf-amber-700, #b45309)', fontWeight: 500 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', background: 'var(--gf-amber-50)', borderBottom: '1px solid var(--gf-gray-100)', borderRadius: '4px 4px 0 0' }}>
+              <Icon name="triangle-alert" size={15} color="var(--gf-amber-600)" style={{ marginTop: 1, flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: 'var(--gf-amber-700)', fontWeight: 500 }}>
                 Este movimiento viene de un resumen de tarjeta. Podés editarlo igual, pero hacelo con cuidado — los totales se recalculan solos.
               </span>
             </div>

@@ -250,7 +250,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
     return (
       <FullModal>
         <ModalBar title="Nuevo movimiento" onClose={onCancelar} />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--gf-gray-400)' }}>
           Cargando catálogos…
         </div>
       </FullModal>

@@ -270,6 +270,25 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   con 1 candidato (caso común) no se renderiza nada nuevo. Frontend + Functions.
   `tsc --noEmit` (cliente y `functions/`): 0 errores nuevos. Deploy:
   `cd functions && npm run build` → `firebase deploy --only functions,hosting`.
+- F9.100 — Sync de tokens de tema + limpieza de deuda de color. Ver
+  `docs/prompts/F9.100-sync-tokens-limpieza-color.md`. Cierra hardcodeos de color detectados
+  en la auditoría formato/tema kit↔vivo (jul-2026). **1. Tokens `--gf-amber-*`:** definidos en
+  `tokens.css` (`:root` + `[data-theme="dark"]`, junto a `--gf-out`); fallbacks inline
+  `var(--gf-amber-*, #hex)` limpiados en `EditarMovimiento.tsx` y `ClasificacionScreens.jsx`
+  (unificado el fallback divergente `#fef3c7`→`var(--gf-amber-50)`). **2. Azul→esmeralda/ink en
+  acción primaria:** `ConfigEsperados.css` (`.cfg-tab--activo`→`var(--color-accent)`,
+  `.cfg-btn-nuevo`/`.cfg-btn-pri`→`var(--color-primary)`/`var(--color-primary-dark)`) y
+  `ResumenesTarjeta.css` (`.rt-btn--primary`→ídem); el azul informativo (`.cfg-chip-moneda`,
+  outline de foco, `.rt-badge`) se deja sin tocar, es semántica distinta. **3. Token
+  `--gf-chart-serie`:** reemplaza `#9cb3e8` hardcodeado en `Dashboard.tsx` (barras "no-pico" de
+  diaria y anual, incl. proyección punteada); dark con equivalente muteado `#3a4d7a`. **4. Muted
+  y negativo-sobre-ink:** `#9ca3af` → `var(--gf-gray-400)` en `AltaMovimiento.tsx`,
+  `EditarMovimiento.tsx`, `Dashboard.tsx` y el `desc` del `Hero` de `CaptureModal.tsx`; `#fca5a5`
+  (texto de balance negativo sobre el hero ink en `Dashboard.tsx`/`Resumen.tsx`) → token nuevo
+  `--gf-on-ink-neg` (mismo valor light/dark, es sobre superficie ink). **5. Paleta de sectores de
+  Patrimonio:** no tocada (opcional, queda igual — sigue local a `Patrimonio.tsx`). Frontend
+  puro (tokens + CSS/estilos inline), sin cambios de modelo/Rules/Functions. `tsc --noEmit`: 41
+  errores pre-existentes, ninguno nuevo. `vite build`: OK. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

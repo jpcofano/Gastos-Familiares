@@ -68,12 +68,12 @@
 .rt-btn:hover:not(:disabled) { background: #f9fafb; }
 .rt-btn:disabled { opacity: 0.5; cursor: default; }
 .rt-btn--primary {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
   color: #fff;
   font-weight: 600;
 }
-.rt-btn--primary:hover:not(:disabled) { background: #1e40af; border-color: #1e40af; }
+.rt-btn--primary:hover:not(:disabled) { background: var(--color-primary-dark); border-color: var(--color-primary-dark); }
 .rt-btn--sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
 
 /* ── Resultado subida ────────────────────────────────────────────────────────── */

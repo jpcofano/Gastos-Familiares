@@ -133,7 +133,7 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
   const ingSmall = cur === 'ARS' ? c.ingUsdEq  : c.ingArsEq;
   const gasBig   = cur === 'ARS' ? c.gasArsEq  : c.gasUsdEq;
   const gasSmall = cur === 'ARS' ? c.gasUsdEq  : c.gasArsEq;
-  const netColor = netBig >= 0 ? 'var(--gf-emerald-100)' : '#fca5a5';
+  const netColor = netBig >= 0 ? 'var(--gf-emerald-100)' : 'var(--gf-on-ink-neg)';
   // faltanteArs: gastos totales ArsEq − pesos disponibles (ingresos ARS del mes)
   const faltanteArs = c.gasArsEq - c.pesosDisp;
   const cubierto = faltanteArs <= 0;

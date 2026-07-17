@@ -30,15 +30,15 @@
 }
 .cfg-tab:hover { color: #374151; }
 .cfg-tab--activo {
-  color: #1d4ed8;
-  border-bottom-color: #1d4ed8;
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
 }
 
 /* ── Acciones globales ── */
 .cfg-acciones { margin-bottom: 1rem; }
 .cfg-btn-nuevo {
   padding: 0.45rem 1rem;
-  background: #1d4ed8;
+  background: var(--color-primary);
   color: white;
   border: none;
   border-radius: 6px;
@@ -46,7 +46,7 @@
   font-weight: 600;
   cursor: pointer;
 }
-.cfg-btn-nuevo:hover { background: #1e40af; }
+.cfg-btn-nuevo:hover { background: var(--color-primary-dark); }
 
 /* ── Estado / error ── */
 .cfg-estado { color: #6b7280; font-style: italic; padding: 0.5rem 0; }
@@ -330,7 +330,7 @@
 .cfg-btn-pri:disabled { opacity: 0.6; cursor: default; }
 .cfg-btn-pri {
   padding: 0.45rem 1.1rem;
-  background: #1d4ed8;
+  background: var(--color-primary);
   color: white;
   border: none;
   border-radius: 6px;
@@ -338,4 +338,4 @@
   font-weight: 600;
   cursor: pointer;
 }
-.cfg-btn-pri:hover:not(:disabled) { background: #1e40af; }
+.cfg-btn-pri:hover:not(:disabled) { background: var(--color-primary-dark); }
