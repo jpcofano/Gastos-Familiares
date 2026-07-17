@@ -189,6 +189,9 @@ export interface PropuestaMatch {
   origenReconciliacion?: boolean;
   // F9.82 — pase débil por nombre: rama 1 candidatos, nunca auto-confirma
   reconciliacionDebil?: boolean;
+  // F9.99.9 — el picker de agenda unificada saldó un suelto (movimiento sin plantilla)
+  // en vez de una plantilla — RazonVinculado lo distingue de "Cargado como nuevo".
+  origenSuelto?: boolean;
 }
 
 export interface Comprobante {

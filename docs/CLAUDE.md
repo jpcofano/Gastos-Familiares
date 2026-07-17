@@ -232,6 +232,44 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   puro, sin cambios de Rules/Functions. `tsc --noEmit`: mismo baseline que antes de este cambio
   (48 errores pre-existentes ajenos a este archivo — el número subió de 41 a 48 en commits
   anteriores no relacionados; 0 errores nuevos introducidos acá). Deploy: `--only hosting`.
+- F9.99.9 — Comprobantes: picker de conciliación manual con agenda unificada. Ver
+  `docs/prompts/F9.99.9-picker-agenda-unificada.md`. **1. Fuente de candidatos:** el picker
+  consume la agenda del **mes actual** (`construirAgenda`/`calcularChecklist` sobre
+  `useMovimientosDelMes(mesActualStr())`, NO la ventana [mes−1..mes+3] del match automático) —
+  calculada una vez en `Comprobantes()` y pasada como prop `agenda` a `ComprobanteCard` →
+  `PropuestaCard`. Filtro: `tipo==='Gasto' && moneda===d.moneda`, igual que antes.
+  **2. Dos tipos de candidato:** esperado (plantilla) → flujo existente sin cambios (obligación
+  abierta vía `confirmarRama1` o alta vinculada vía `cargarMovimientoDesdeComprobante`); suelto
+  (gasto sin plantilla) → nueva `confirmarSueltoDesdeComprobante(comp, movId)`
+  (`src/datos/comprobantes.ts`) — mismo patrón `writeBatch` que `confirmarRama1` (hashPdf +
+  refStoragePdf + comprobante→vinculado) pero **sin** `origenComprobanteId`: el movimiento es
+  preexistente, no nace de este comprobante — si el comprobante se descarta después,
+  `descartarEntrada()` debe REVERTIR el vínculo (rama sin `origenComprobanteId` de esa función),
+  no borrar un movimiento que el usuario ya tenía cargado. Marca `propuestaMatch.origenSuelto:true`
+  en el mismo batch para que `RazonVinculado` (Comprobantes.tsx) distinga "Saldó un gasto suelto"
+  de "Cargado como nuevo"/"Cumplió un gasto esperado". Campo nuevo `PropuestaMatch.origenSuelto?`
+  (cliente, `src/types/index.ts`). Selección del picker: string prefijado
+  `"esperado:<id>" | "suelto:<id>"` (antes solo guardaba el itemEsperadoId).
+  **3. Presentación:** candidatos ordenados no-cubiertos primero (vencidos antes que el resto)
+  por día de vencimiento ascendente (`diaDeAgenda`), cubiertos al fondo y radio deshabilitado;
+  ícono check/alerta/reloj reusa la semántica de la card Hoy (F9.99.8.1); sueltos con badge
+  "Sin plantilla"; vencidos muestran "Venció día D".
+  **4. `buscarObligacionesAbiertas`:** piso `mes >= mesComp` → `mes >= mesComp−1` (coherente con
+  la ventana de match [mes−1..mes+3]) — mismo índice compuesto `movimientos (itemEsperadoId,
+  confirmadoPago, mes)` del F9.99.7, sin índice nuevo.
+  **5. Gate ampliado:** el botón picker ya no exige `esPagoDoc` — disponible para CUALQUIER
+  documento de gasto en rama 3 ("Conciliar con gasto esperado") y como acción secundaria en
+  rama 2 ("Asignar a otro gasto"), ambos `esAdmin`-only, sin agregar fricción al camino feliz
+  (rama 2 de candidato único sigue yendo directo a "Revisar y cargar").
+  **6. Rama 2 con múltiples esperados:** `calcularPropuesta` (`functions/src/matchLogica.ts`)
+  ahora popula `descripcion`/`monto`/`moneda` en los candidatos tipo `'esperado'` (antes solo
+  mandaba `id` — la UI tomaba `itemsMatch[0]` a ciegas); `ItemEsperadoMin` gana
+  `categoria`/`subcategoria`/`notas`/`montoEsperado` (poblados en `matchComprobante`,
+  `functions/src/index.ts`). Cuando hay >1 candidato, `PropuestaCard` muestra un radio-chooser
+  ("Coincide con varios gastos esperados — elegí cuál") ANTES de habilitar "Revisar y cargar";
+  con 1 candidato (caso común) no se renderiza nada nuevo. Frontend + Functions.
+  `tsc --noEmit` (cliente y `functions/`): 0 errores nuevos. Deploy:
+  `cd functions && npm run build` → `firebase deploy --only functions,hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

@@ -44,6 +44,7 @@ export function docAComprobante(id: string, data: DocumentData): Comprobante {
       } : undefined,
       origenReconciliacion: (pm.origenReconciliacion as boolean | undefined),
       reconciliacionDebil:  (pm.reconciliacionDebil  as boolean | undefined),
+      origenSuelto:         (pm.origenSuelto         as boolean | undefined),
     } : undefined,
   };
 }
@@ -195,17 +196,26 @@ export async function cargarMovimientoDesdeComprobante(
 // no solo la del mes en curso), cada una con su mes para que el usuario elija sin ambigüedad.
 export interface ObligacionAbierta { id: string; mes: string }
 
+function mesMenosUno(mes: string): string {
+  const [y, m] = mes.split('-').map(Number);
+  const d = new Date(y, m - 2, 1); // (m-1) 0-indexed, -1 mes más
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export async function buscarObligacionesAbiertas(
   itemEsperadoId: string,
   mesDesde: string,
 ): Promise<ObligacionAbierta[]> {
   try {
+    // F9.99.9 Parte 4 — piso mesDesde−1 (antes mesDesde exacto): coherente con la ventana de
+    // match [mes−1..mes+3] — una obligación abierta del mes anterior también debe aparecer acá.
+    // Mismo índice compuesto (itemEsperadoId, confirmadoPago, mes) del F9.99.7 — solo cambia el valor.
     const snap = await getDocs(
       query(
         collection(db, 'movimientos'),
         where('itemEsperadoId', '==', itemEsperadoId),
         where('confirmadoPago', '==', false),
-        where('mes', '>=', mesDesde),
+        where('mes', '>=', mesMenosUno(mesDesde)),
         orderBy('mes', 'asc'),
         limit(12),
       ),
@@ -213,5 +223,37 @@ export async function buscarObligacionesAbiertas(
     return snap.docs.map(d => ({ id: d.id, mes: d.data().mes as string }));
   } catch {
     return [];
+  }
+}
+
+// F9.99.9 — picker con agenda unificada: confirmar un "suelto" (movimiento sin plantilla, sin
+// itemEsperadoId) como saldado por este comprobante. Mismo patrón que confirmarRama1 (hashPdf +
+// refStoragePdf, comprobante → vinculado) pero SIN origenComprobanteId — el movimiento es
+// preexistente, no nace de este comprobante: si más tarde el comprobante se descarta,
+// descartarEntrada() debe REVERTIR el vínculo (rama "else" de esa función, por hashPdf sin
+// origenComprobanteId), no borrar un movimiento que el usuario ya tenía cargado.
+export async function confirmarSueltoDesdeComprobante(
+  comp: Comprobante,
+  movimientoId: string,
+): Promise<Resultado<void>> {
+  try {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'movimientos', movimientoId), {
+      pagado:        true,
+      confirmadoPago: true,
+      pagadoEn:      serverTimestamp(),
+      hashPdf:       comp.hashPdf,
+      refStoragePdf: comp.refStoragePdf,
+      actualizadoEn: serverTimestamp(),
+    });
+    batch.update(doc(db, 'comprobantes', comp.id), {
+      estado: 'vinculado',
+      'propuestaMatch.origenSuelto': true,
+      actualizadoEn: serverTimestamp(),
+    });
+    await batch.commit();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
 }

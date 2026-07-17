@@ -334,11 +334,15 @@ export const matchComprobante = onDocumentUpdated(
       const data = d.data();
       const mt   = data.matchTexto as { incluye?: string[]; excluye?: string[] } | null;
       return {
-        id:         d.id,
-        tipo:       data.tipo   as 'Gasto' | 'Ingreso',
-        moneda:     data.moneda as 'ARS' | 'USD',
-        activo:     (data.activo as boolean) ?? false,
-        matchTexto: mt ? { incluye: mt.incluye ?? [], excluye: mt.excluye ?? [] } : null,
+        id:            d.id,
+        tipo:          data.tipo   as 'Gasto' | 'Ingreso',
+        moneda:        data.moneda as 'ARS' | 'USD',
+        activo:        (data.activo as boolean) ?? false,
+        matchTexto:    mt ? { incluye: mt.incluye ?? [], excluye: mt.excluye ?? [] } : null,
+        categoria:     (data.categoria    as string | null) ?? null,
+        subcategoria:  (data.subcategoria as string | null) ?? null,
+        notas:         (data.notas        as string | null) ?? null,
+        montoEsperado: (data.montoEsperado as number | null) ?? null,
       };
     });
 

@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, type ObligacionAbierta } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, type ObligacionAbierta } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useResumenesTarjeta } from '../hooks/useResumenesTarjeta';
+import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
+import { calcularChecklist, mesActualStr } from '../datos/checklist';
+import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, diaDeAgenda, type AgendaEntry } from '../datos/agenda';
 import { Icon } from '../design-system/Icon';
 import { Card, Badge, Message, Button } from '../design-system/components';
 import { Fab } from '../design-system/shell';
@@ -62,8 +65,8 @@ function RazonVinculado({ pm }: { pm: Comprobante['propuestaMatch'] }) {
   switch (pm.rama) {
     case 0: texto = 'Ya cargado'; tone = 'neutral'; break;
     case 1: texto = pm.origenReconciliacion ? 'Pagó una factura' : 'Vinculado a un movimiento'; tone = 'info'; break;
-    case 2: texto = pm.esAdicional ? 'Pago adicional' : 'Cumplió un gasto esperado'; tone = 'success'; break;
-    case 3: texto = 'Cargado como nuevo'; tone = 'success'; break;
+    case 2: texto = pm.origenSuelto ? 'Saldó un gasto suelto' : (pm.esAdicional ? 'Pago adicional' : 'Cumplió un gasto esperado'); tone = 'success'; break;
+    case 3: texto = pm.origenSuelto ? 'Saldó un gasto suelto' : 'Cargado como nuevo'; tone = 'success'; break;
     default: return null;
   }
   return <Badge tone={tone}>{texto}</Badge>;
@@ -104,6 +107,9 @@ function DatosResumen({ d }: { d: DatosExtraidos }) {
 interface PropuestaProps {
   comp: Comprobante;
   items: ExpectedItem[];
+  // F9.99.9 — agenda unificada del mes actual (checklist ∪ sueltos), fuente del picker de
+  // conciliación manual — ver src/datos/agenda.ts.
+  agenda: AgendaEntry[];
   memberId: string;
   miembro: import('../types').FamiliaMiembro;
   esAdmin: boolean;
@@ -112,7 +118,22 @@ interface PropuestaProps {
   autoAbrir?: boolean;
 }
 
-function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: PropuestaProps) {
+// F9.99.9 — etiqueta + monto de un candidato de la agenda (esperado o suelto) para el picker.
+function labelAgenda(e: AgendaEntry): string {
+  return e.kind === 'esperado'
+    ? (e.ci.item.notas || e.ci.item.matchTexto?.incluye[0] || [e.ci.item.categoria, e.ci.item.subcategoria].filter(Boolean).join(' › ') || e.ci.item.id)
+    : (e.mov.descripcion || '(sin descripción)');
+}
+function montoAgenda(e: AgendaEntry): { monto: number | null; moneda: 'ARS' | 'USD' } {
+  return e.kind === 'esperado'
+    ? { monto: e.ci.item.montoEsperado, moneda: e.ci.item.moneda }
+    : { monto: e.mov.monto, moneda: e.mov.moneda };
+}
+function candKey(e: AgendaEntry): string {
+  return e.kind === 'esperado' ? `esperado:${e.ci.item.id}` : `suelto:${e.mov.id}`;
+}
+
+function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAbrir }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
   const { clasificar, cargando: cargandoDict } = useDiccionario();
@@ -121,12 +142,17 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
   const [candidatoSel,  setCandidatoSel]  = useState<string>('');
   const [errorLocal,    setErrorLocal]    = useState<string | null>(null);
   const [mostrarPicker, setMostrarPicker] = useState(false);
-  const [pickerItem,    setPickerItem]    = useState<string>('');
+  // F9.99.9 — candidato del picker, prefijado por tipo: "esperado:<itemId>" | "suelto:<movId>"
+  // (antes solo guardaba el itemEsperadoId; ahora la agenda mezcla dos tipos de candidato).
+  const [pickerSel,     setPickerSel]     = useState<string>('');
   const [pickerCargando, setPickerCargando] = useState(false);
   // F9.99.7 Parte 2 — obligaciones abiertas del ítem elegido (mismo mes + todos los futuros)
   const [obligaciones,  setObligaciones]  = useState<ObligacionAbierta[]>([]);
   const [obligacionSel, setObligacionSel] = useState<string>('');
   const [buscandoObligaciones, setBuscandoObligaciones] = useState(false);
+  // F9.99.9 — rama 2 con múltiples esperados matcheados por texto: el usuario elige, no se
+  // asigna a ciegas (antes tomaba itemsMatch[0] en silencio).
+  const [rama2Sel, setRama2Sel] = useState<string>('');
   const autoConfirmadoRef = useRef(false);
   const autoAbiertoRef = useRef(false);
 
@@ -275,7 +301,14 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
     origenComprobanteId: comp.id,
   };
 
-  const esperado = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
+  // F9.99.9 — rama 2 con múltiples esperados matcheados por texto (pm.candidatos): el usuario
+  // elige cuál corresponde en vez de asignarse a ciegas a itemsMatch[0] (pm.itemEsperadoId).
+  // Con un solo candidato (caso común) esto no agrega ningún paso — camino feliz intacto.
+  const rama2CandidatosTipoEsperado = pm.rama === 2 ? (pm.candidatos ?? []).filter(c => c.tipo === 'esperado') : [];
+  const necesitaElegirRama2 = rama2CandidatosTipoEsperado.length > 1;
+  const itemEsperadoEfectivo = necesitaElegirRama2 ? (rama2Sel || undefined) : pm.itemEsperadoId;
+
+  const esperado = itemEsperadoEfectivo ? items.find(i => i.id === itemEsperadoEfectivo) : undefined;
 
   const preload = pm.rama === 2
     ? {
@@ -283,7 +316,7 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
         banco:          undefined,
         categoria:      esperado?.categoria    ?? undefined,
         subcategoria:   esperado?.subcategoria ?? undefined,
-        itemEsperadoId: pm.itemEsperadoId,
+        itemEsperadoId: itemEsperadoEfectivo,
       }
     : preloadBase;
 
@@ -316,43 +349,68 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
     </span>
   );
 
-  // F9.82 — picker "Conciliar con gasto esperado": solo admin + pago + ramas 2/3
-  const esPagoDoc = d.tipoDocumento === 'transferencia' || d.tipoDocumento === 'comprobante_pago';
-  const itemsGasto = items.filter(i => i.activo && i.tipo === 'Gasto' && i.moneda === d.moneda);
-  const labelItem  = (i: ExpectedItem) =>
-    i.notas || i.matchTexto?.incluye[0] || [i.categoria, i.subcategoria].filter(Boolean).join(' › ') || i.id;
+  // F9.99.9 — picker "Conciliar con gasto esperado" / "Asignar a otro gasto": disponible para
+  // TODO documento de gasto (antes solo transferencia/comprobante_pago), rama 3 y rama 2
+  // (secundario/colapsado). Candidatos = agenda unificada del mes actual (checklist ∪ sueltos),
+  // filtrada a Gasto + misma moneda; no-cubiertos primero (vencidos antes que el resto) por
+  // día de vencimiento ascendente, cubiertos al fondo y no seleccionables.
+  const candidatosAgenda = agenda
+    .filter(e => e.kind === 'esperado'
+      ? e.ci.item.tipo === 'Gasto' && e.ci.item.moneda === d.moneda
+      : e.mov.moneda === d.moneda)
+    .slice()
+    .sort((a, b) => {
+      const aCub = agendaCubierto(a) ? 1 : 0, bCub = agendaCubierto(b) ? 1 : 0;
+      if (aCub !== bCub) return aCub - bCub;
+      const aVenc = a.kind === 'esperado' && a.ci.estado === 'vencido' ? 0 : 1;
+      const bVenc = b.kind === 'esperado' && b.ci.estado === 'vencido' ? 0 : 1;
+      if (aVenc !== bVenc) return aVenc - bVenc;
+      return diaDeAgenda(a) - diaDeAgenda(b);
+    });
   const fechaComp = d.vencimientos?.[0]?.fecha ?? d.fecha;
   const mesComp = fechaComp ? fechaComp.slice(0, 7) : new Date().toISOString().slice(0, 7);
+  const pickerKind: 'esperado' | 'suelto' | null =
+    pickerSel.startsWith('esperado:') ? 'esperado' : pickerSel.startsWith('suelto:') ? 'suelto' : null;
+  const pickerId = pickerKind ? pickerSel.slice(pickerSel.indexOf(':') + 1) : '';
 
-  // F9.99.7 Parte 2 — al elegir el ítem, busca sus obligaciones abiertas (mismo mes + futuras)
-  // para que el usuario elija cuál salda este pago, en vez de asumir el mes del comprobante.
+  // F9.99.7 Parte 2 — al elegir un esperado, busca sus obligaciones abiertas (mismo mes + futuras,
+  // F9.99.9 Parte 4: piso mesComp−1) para que el usuario elija cuál salda este pago. Un suelto
+  // es un único movimiento — no tiene "qué mes", se confirma directo (ver handleConciliar).
   useEffect(() => {
-    if (!pickerItem) { setObligaciones([]); setObligacionSel(''); return; }
+    if (pickerKind !== 'esperado' || !pickerId) { setObligaciones([]); setObligacionSel(''); return; }
     let cancelado = false;
     setBuscandoObligaciones(true);
     setObligacionSel('');
-    buscarObligacionesAbiertas(pickerItem, mesComp).then(obs => {
+    buscarObligacionesAbiertas(pickerId, mesComp).then(obs => {
       if (cancelado) return;
       setObligaciones(obs);
       setBuscandoObligaciones(false);
     });
     return () => { cancelado = true; };
-  }, [pickerItem, mesComp]);
+  }, [pickerKind, pickerId, mesComp]);
 
   async function handleConciliar() {
-    if (!pickerItem) return;
+    if (!pickerSel) return;
     setPickerCargando(true);
     setErrorLocal(null);
+    // F9.99.9 — suelto: confirma el movimiento existente (pagado+confirmadoPago), nunca crea uno nuevo.
+    if (pickerKind === 'suelto') {
+      const res = await confirmarSueltoDesdeComprobante(comp, pickerId);
+      setPickerCargando(false);
+      if (!res.ok) setErrorLocal(res.error.message);
+      else setMostrarPicker(false);
+      return;
+    }
     if (obligaciones.length > 0) {
       if (!obligacionSel) { setPickerCargando(false); return; }
-      const res = await confirmarRama1(comp, obligacionSel, pickerItem);
+      const res = await confirmarRama1(comp, obligacionSel, pickerId);
       setPickerCargando(false);
       if (!res.ok) setErrorLocal(res.error.message);
     } else {
-      const itemEsp = items.find(i => i.id === pickerItem);
+      const itemEsp = items.find(i => i.id === pickerId);
       const payload = {
         ...preloadBase,
-        itemEsperadoId: pickerItem,
+        itemEsperadoId: pickerId,
         categoria:      itemEsp?.categoria  ?? preloadBase.categoria,
         subcategoria:   itemEsp?.subcategoria ?? preloadBase.subcategoria,
         banco:          undefined,
@@ -381,31 +439,65 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
         </span>
       </div>
 
-      {/* F9.82 — picker para pagos sin obligación detectada automáticamente */}
-      {esAdmin && esPagoDoc && !mostrarAlta && (
-        <Button variant="ghost" size="sm" onClick={() => { setMostrarPicker(p => !p); setPickerItem(''); setErrorLocal(null); }}>
-          <Icon name="git-compare" size={13} /> Conciliar con gasto esperado
-        </Button>
-      )}
-      {mostrarPicker && esAdmin && esPagoDoc && (
+      {/* F9.99.9 — rama 2 con múltiples esperados: el usuario elige antes de seguir (no corta
+          el camino feliz — con un único candidato esto no se renderiza). */}
+      {pm.rama === 2 && necesitaElegirRama2 && !rama2Sel && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Elegí el gasto esperado que paga este comprobante</span>
-          <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {itemsGasto.map(i => (
-              <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', cursor: 'pointer' }}>
-                <input type="radio" name={`picker-${comp.id}`} value={i.id} checked={pickerItem === i.id} onChange={() => setPickerItem(i.id)} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Coincide con varios gastos esperados — elegí cuál</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {rama2CandidatosTipoEsperado.map(c => (
+              <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', cursor: 'pointer' }}>
+                <input type="radio" name={`r2-${comp.id}`} value={c.id} onChange={() => setRama2Sel(c.id)} />
                 <span style={{ flex: 1 }}>
-                  {labelItem(i)}
-                  {i.montoEsperado != null && <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6 }}>{fmtMonto(i.montoEsperado, i.moneda)}</span>}
+                  {c.descripcion ?? c.id}
+                  {c.monto != null && <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6 }}>{fmtMonto(c.monto, c.moneda ?? d.moneda)}</span>}
                 </span>
               </label>
             ))}
           </div>
-          {/* F9.99.7 Parte 2 — mismo mes + todos los futuros, cada uno con su mes visible */}
-          {pickerItem && buscandoObligaciones && (
+        </div>
+      )}
+
+      {/* F9.99.9 — picker de conciliación manual, ampliado a cualquier doc de gasto (rama 3) y
+          disponible como acción secundaria en rama 2 ("Asignar a otro gasto"). Candidatos =
+          agenda unificada del mes actual (esperados + sueltos), no solo plantillas. */}
+      {esAdmin && !mostrarAlta && (!necesitaElegirRama2 || rama2Sel) && (
+        <Button variant="ghost" size="sm" onClick={() => { setMostrarPicker(p => !p); setPickerSel(''); setErrorLocal(null); }}>
+          <Icon name="git-compare" size={13} /> {pm.rama === 2 ? 'Asignar a otro gasto' : 'Conciliar con gasto esperado'}
+        </Button>
+      )}
+      {mostrarPicker && esAdmin && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Elegí qué gasto salda este comprobante</span>
+          <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {candidatosAgenda.length === 0 && (
+              <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Sin candidatos este mes.</span>
+            )}
+            {candidatosAgenda.map(e => {
+              const key = candKey(e);
+              const cubiertoE = agendaCubierto(e);
+              const vencidoE = e.kind === 'esperado' && e.ci.estado === 'vencido';
+              const { monto, moneda } = montoAgenda(e);
+              return (
+                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', cursor: cubiertoE ? 'default' : 'pointer', opacity: cubiertoE ? 0.5 : 1 }}>
+                  <input type="radio" name={`picker-${comp.id}`} value={key} checked={pickerSel === key} disabled={cubiertoE} onChange={() => setPickerSel(key)} />
+                  <Icon name={cubiertoE ? 'check' : vencidoE ? 'alert-circle' : 'clock'} size={13} color={cubiertoE ? 'var(--gf-income)' : vencidoE ? 'var(--gf-expense)' : 'var(--gf-gray-400)'} />
+                  <span style={{ flex: 1 }}>
+                    {labelAgenda(e)}
+                    {e.kind === 'suelto' && <Badge tone="neutral">Sin plantilla</Badge>}
+                    {vencidoE && <span style={{ color: 'var(--gf-expense)', marginLeft: 6, fontWeight: 700 }}>Venció día {e.ci.item.diaVencimiento}</span>}
+                    {monto != null && <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6 }}>{fmtMonto(monto, moneda)}</span>}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {/* F9.99.7 Parte 2 — mismo mes + todos los futuros, cada uno con su mes visible; solo
+              aplica a esperados (un suelto es un único movimiento, sin ambigüedad de mes). */}
+          {pickerKind === 'esperado' && buscandoObligaciones && (
             <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Buscando obligaciones abiertas…</span>
           )}
-          {pickerItem && !buscandoObligaciones && obligaciones.length > 0 && (
+          {pickerKind === 'esperado' && !buscandoObligaciones && obligaciones.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2, paddingTop: 8, borderTop: '1px solid var(--gf-gray-100)' }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>¿Qué mes salda este pago?</span>
               {obligaciones.map(o => (
@@ -416,14 +508,14 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
               ))}
             </div>
           )}
-          {pickerItem && !buscandoObligaciones && obligaciones.length === 0 && (
+          {pickerKind === 'esperado' && !buscandoObligaciones && obligaciones.length === 0 && (
             <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>No hay obligación abierta para este ítem — se va a crear un movimiento nuevo.</span>
           )}
           {errorLocal && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errorLocal}</span>}
           <div style={{ display: 'flex', gap: 8 }}>
             <Button
               variant="primary" size="sm"
-              disabled={!pickerItem || pickerCargando || buscandoObligaciones || (obligaciones.length > 0 && !obligacionSel)}
+              disabled={!pickerSel || pickerCargando || (pickerKind === 'esperado' && (buscandoObligaciones || (obligaciones.length > 0 && !obligacionSel)))}
               onClick={handleConciliar}
             >
               {pickerCargando ? 'Conciliando…' : 'Confirmar'}
@@ -433,7 +525,7 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
         </div>
       )}
 
-      {!mostrarAlta && !mostrarPicker && (
+      {!mostrarAlta && !mostrarPicker && (!necesitaElegirRama2 || rama2Sel) && (
         <Button variant="primary" size="sm" disabled={cargandoDict} onClick={() => setMostrarAlta(true)}>
           {cargandoDict ? 'Cargando…' : 'Revisar y cargar'}
         </Button>
@@ -460,10 +552,11 @@ function PropuestaCard({ comp, items, memberId, miembro, esAdmin, autoAbrir }: P
 // ── Tarjeta de comprobante ────────────────────────────────────────────────────
 
 function ComprobanteCard({
-  comp, items, memberId, miembro, esAdmin, autoAbrir,
+  comp, items, agenda, memberId, miembro, esAdmin, autoAbrir,
 }: {
   comp:     Comprobante;
   items:    ExpectedItem[];
+  agenda:   AgendaEntry[];
   memberId: string;
   miembro:  import('../types').FamiliaMiembro;
   esAdmin:  boolean;
@@ -509,7 +602,7 @@ function ComprobanteCard({
         <p style={{ fontSize: 12, color: 'var(--gf-err-text)', marginTop: 6 }}>{comp.errorExtraccion}</p>
       )}
       {comp.estado === 'extraido' && comp.propuestaMatch && (
-        <PropuestaCard comp={comp} items={items} memberId={memberId} miembro={miembro} esAdmin={esAdmin} autoAbrir={autoAbrir} />
+        <PropuestaCard comp={comp} items={items} agenda={agenda} memberId={memberId} miembro={miembro} esAdmin={esAdmin} autoAbrir={autoAbrir} />
       )}
       {comp.estado === 'extraido' && !comp.propuestaMatch && (
         <p style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 6 }}>Calculando match…</p>
@@ -716,6 +809,15 @@ export default function Comprobantes() {
   const [mostrarAltaManual,    setMostrarAltaManual]    = useState(false);
   const [expandirHistorial,    setExpandirHistorial]    = useState(false);
 
+  // F9.99.9 — agenda del mes actual (checklist ∪ sueltos futuros), fuente del picker de
+  // conciliación manual (decisión del dueño: alcance = mes actual + vencidos, NO la ventana
+  // amplia [mes−1..mes+3] que usa el match automático). No-admin igual llama al hook (no puede
+  // condicionar hooks), pero el picker está gateado a esAdmin — el resultado no se usa.
+  const mesAct = mesActualStr();
+  const { movimientos: movsMesActual } = useMovimientosDelMes(mesAct, esAdmin ? undefined : memberId);
+  const checklistMesActual = calcularChecklist(items, movsMesActual, mesAct);
+  const agendaPicker = construirAgenda(checklistMesActual, sueltosFuturosDelMes(movsMesActual, checklistMesActual, new Date()));
+
   // ── ShareLanding (F9.51) — cubre el arranque en frío cuando llega por
   // Web Share Target. Se monta apenas IDB devuelve el File; sus fases las
   // dispara el progreso real (subida → router → extracción), no timers.
@@ -895,6 +997,7 @@ export default function Comprobantes() {
                       key={comp.id}
                       comp={comp}
                       items={items}
+                      agenda={agendaPicker}
                       memberId={memberId}
                       miembro={miembro}
                       esAdmin={esAdmin}

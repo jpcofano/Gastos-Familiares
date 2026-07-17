@@ -44,6 +44,12 @@ export interface ItemEsperadoMin {
   moneda: 'ARS' | 'USD';
   activo: boolean;
   matchTexto: MatchTexto | null;
+  // F9.99.9 — para poblar descripción/monto de los candidatos tipo 'esperado' (antes solo `id`,
+  // el picker de Comprobantes.tsx los mostraba a ciegas).
+  categoria: string | null;
+  subcategoria: string | null;
+  notas: string | null;
+  montoEsperado: number | null;
 }
 
 export interface PropuestaMatch {
@@ -234,8 +240,16 @@ export function calcularPropuesta(
     return {
       rama: 2,
       itemEsperadoId: itemsMatch[0].id,
+      // F9.99.9 — candidatos con descripción/monto para que el picker no elija a ciegas
+      // (antes solo mandaba `id`; el usuario tenía que confiar en itemsMatch[0]).
       ...(itemsMatch.length > 1 ? {
-        candidatos: itemsMatch.map(i => ({ tipo: 'esperado' as const, id: i.id })),
+        candidatos: itemsMatch.map(i => ({
+          tipo: 'esperado' as const,
+          id: i.id,
+          descripcion: i.notas || [i.categoria, i.subcategoria].filter(Boolean).join(' › ') || i.id,
+          monto: i.montoEsperado ?? undefined,
+          moneda: i.moneda,
+        })),
       } : {}),
       calculadoEn: ahora,
     };
