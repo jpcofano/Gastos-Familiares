@@ -289,6 +289,47 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   Patrimonio:** no tocada (opcional, queda igual — sigue local a `Patrimonio.tsx`). Frontend
   puro (tokens + CSS/estilos inline), sin cambios de modelo/Rules/Functions. `tsc --noEmit`: 41
   errores pre-existentes, ninguno nuevo. `vite build`: OK. Deploy: `--only hosting`.
+- F9.101 — Patrimonio Research: "Actualizar todo" (un solo punto de entrada para lote +
+  sectorial + agenda + manuales + sync CAFCI). Ver `docs/prompts/F9.101-actualizacion-integral.md`.
+  **1. Backend, modo `'completo'`** en `generarPromptIA`/`importarAnalisisIA`
+  (`functions/src/index.ts`): `buildPromptCompleto(contexto)` compone lote+sectorial+agenda+
+  manuales en un único prompt, pasando a cada `buildPrompt*` solo el sub-contexto que espera
+  (mismo contrato que en modo standalone, evita repetir el JSON completo dentro de cada bloque)
+  y agregando un bloque final de instrucciones de formato que tiene prioridad sobre las
+  instrucciones individuales de cada sub-bloque — pide un único ```json con
+  `{ lote: {analisis}, sectorial: "...", agenda: {eventos}, manuales: [...] }`. Import fail-soft
+  por sección: `importarLote`/`importarSectorial`/`importarAgenda` (helpers nuevos, reusan
+  `validarResultadoImportado`) e `importarManuales` (nuevo, sin validación genérica — valida
+  contra Firestore que el doc de `posicionesManuales` exista y que
+  `|valorUsd − cantidad_del_doc × precioUnitarioUsd| < 1`; solo actualiza `valorUsd`/
+  `fechaValuacion`, nunca `cantidad`, nunca crea docs; `precioUnitarioUsd: null` → skip).
+  Los modos individuales (`posicion`/`sectorial`/`agenda`/`lote`) se refactorizaron para
+  delegar en los mismos helpers — mismo comportamiento externo, sin duplicar la lógica de
+  escritura. **2. Backend, etapa `'manuales'` en `analizarConIA`** (modo API): mismo prompt de
+  manuales con `web_search`, la import reusa `importarManuales` directamente server-side.
+  **3. Frontend (`Patrimonio.tsx`), card "Actualización integral"** arriba de las cards
+  existentes en Research, con dos botones: **Chat** (`handleAbrirChatCompleto` arma el
+  contexto combinado vía `buildContextoCompleto()` — reusa `buildByTickerMap()`, ahora
+  extraído como helper compartido con "Analizar lote"/"Chat lote" — y abre el
+  `ModalPromptChat` existente con `modo:'completo'`; al importar con éxito refresca
+  analisisCache/sectorial/agenda/manuales y dispara `handleSincronizarCafci()`) y **API**
+  (`handleActualizarTodoApi`, orquestador cliente secuencial de 5 etapas con progreso
+  `Etapa N/5: <label>…`: lote reusa `analizarLoteTickers()` — extraído de
+  `handleAnalizarLote` para compartir progreso —, sectorial, agenda, manuales
+  (`analizarManuales()` nuevo wrapper en `patrimonioIA.ts`) y sync CAFCI; fail-soft por etapa,
+  resumen final por etapa). **4. CTA post-ingesta:** `PatrimonioIngesta.tsx` no tenía pantalla
+  de éxito (el modal se cerraba en seco al confirmar) — en vez de tocar ese componente, el
+  callback `onConfirmado` en `Patrimonio.tsx` ahora dispara un toast fijo con "Actualizar
+  análisis con la cartera nueva →" que navega a la solapa Research (`setTab('research')`);
+  pura navegación, sin lógica nueva de ingesta. Auditoría previa a implementar (regla del
+  proyecto) encontró 3 discrepancias menores respecto al spec — confirmadas con el usuario
+  antes de tocar código: `analizarConIA` no tenía modo lote (no bloqueante, "Analizar lote"
+  ya iteraba ticker por ticker); `handleSincronizarCafci` vive en la solapa Config, no
+  Research (igual invocable, está en scope del componente); `PatrimonioIngesta` sin pantalla
+  de éxito (resuelto con el toast del punto 4). Frontend + Functions. `tsc --noEmit`
+  (cliente y `functions/`): 0 errores nuevos (48 pre-existentes ajenos, mismo baseline).
+  `vite build`: OK. Deploy: `cd functions && npm run build` → `firebase deploy --only
+  functions,hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
@@ -1218,4 +1259,4 @@ Resumen de sesión de diseño: `docs/patrimonio/RESUMEN-SESION.md`.
 Prompt de extracción: `docs/patrimonio/patrimonio-extraccion.md`.
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
-**Implementado hasta F9.99.** Detalle completo en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
+**Implementado hasta F9.101.** Detalle completo en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.

@@ -2996,6 +2996,29 @@ REGLAS INNEGOCIABLES:
 - Priorizá por exposición: los drivers con mayor % en cartera van primero.`;
 }
 
+function buildPromptManuales(contexto: Record<string, unknown>): string {
+  const manuales = contexto['manuales'] as Array<{ id: string; ticker: string; nombre: string; cantidad: number; valorUsd: number; fechaValuacion: string }> ?? [];
+  return `Sos un analista financiero. Necesito el precio de mercado actual de estas posiciones cargadas manualmente (planes de empleado, cuentas sin API):
+
+POSICIONES MANUALES:
+${JSON.stringify(manuales, null, 2)}
+
+Para cada una, buscá el precio de cierre más reciente del ticker (mercado en el que cotiza) y calculá valorUsd = cantidad × precioUnitarioUsd.
+
+Respondé ÚNICAMENTE con un JSON con esta estructura exacta:
+{
+  "manuales": [
+    { "id": "...", "ticker": "...", "precioUnitarioUsd": 143.21, "valorUsd": 7160.50, "fechaPrecio": "YYYY-MM-DD", "fuente": "..." }
+  ]
+}
+
+REGLAS INNEGOCIABLES:
+- Usá web_search para verificar el precio actual de cada ticker.
+- Si no podés verificar el precio de un ticker, poné "precioUnitarioUsd": null y "valorUsd": null para ese ítem — NO inventar.
+- "fechaPrecio" es la fecha del cierre usado (YYYY-MM-DD).
+- "fuente" es de dónde sacaste el precio (ej: nombre del sitio, o "no verificado" si es null).`;
+}
+
 export const analizarConIA = onCall(
   {
     region:         'southamerica-east1',
@@ -3017,19 +3040,22 @@ export const analizarConIA = onCall(
     }
 
     const { modo, ticker, contexto } = (request.data ?? {}) as {
-      modo?: 'posicion' | 'sectorial' | 'agenda';
+      modo?: 'posicion' | 'sectorial' | 'agenda' | 'manuales';
       ticker?: string;
       contexto?: Record<string, unknown>;
     };
 
-    if (!modo || !['posicion', 'sectorial', 'agenda'].includes(modo)) {
-      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial" o "agenda"');
+    if (!modo || !['posicion', 'sectorial', 'agenda', 'manuales'].includes(modo)) {
+      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial", "agenda" o "manuales"');
     }
     if (modo === 'posicion' && !ticker) {
       throw new HttpsError('invalid-argument', 'ticker requerido para modo posicion');
     }
     if (!contexto || typeof contexto !== 'object') {
       throw new HttpsError('invalid-argument', 'contexto requerido');
+    }
+    if (modo === 'manuales' && !(Array.isArray(contexto['manuales']) && (contexto['manuales'] as unknown[]).length > 0)) {
+      throw new HttpsError('invalid-argument', 'contexto.manuales requerido con al menos un elemento');
     }
 
     const client = new Anthropic({ apiKey: anthropicKey.value() });
@@ -3039,10 +3065,12 @@ export const analizarConIA = onCall(
       ? buildPromptPosicion(contexto)
       : modo === 'agenda'
         ? buildPromptAgenda(contexto)
-        : buildPromptSectorial(contexto);
+        : modo === 'manuales'
+          ? buildPromptManuales(contexto)
+          : buildPromptSectorial(contexto);
 
-    const maxWebSearch = modo === 'agenda' ? 5 : 3;
-    const maxTokens    = modo === 'posicion' ? 1500 : modo === 'agenda' ? 4000 : 3000;
+    const maxWebSearch = modo === 'agenda' ? 5 : modo === 'manuales' ? 5 : 3;
+    const maxTokens    = modo === 'posicion' ? 1500 : modo === 'agenda' ? 4000 : modo === 'manuales' ? 1500 : 3000;
 
     const response = await client.messages.create({
       model: modeloUsado,
@@ -3069,6 +3097,8 @@ export const analizarConIA = onCall(
     const generadoEnISO = new Date().toISOString();
     const origen = 'api';
 
+    let resumenManuales: string | undefined;
+
     if (modo === 'posicion') {
       await db.collection('analisisPosiciones').doc(ticker!).set({
         ticker, generadoEn, generadoEnISO, modeloUsado, origen, resultado,
@@ -3080,6 +3110,10 @@ export const analizarConIA = onCall(
         eventos: (resultado as { eventos: unknown[] }).eventos ?? [],
       });
       console.log('[analizarConIA] agenda macro generada');
+    } else if (modo === 'manuales') {
+      // importarManuales: helper compartido con importarAnalisisIA (F9.101), se define más abajo por hoisting.
+      resumenManuales = await importarManuales(db, (resultado as { manuales?: unknown }).manuales);
+      console.log(`[analizarConIA] ${resumenManuales}`);
     } else {
       await db.collection('analisisSectorial').add({
         generadoEn, generadoEnISO, modeloUsado, origen, resultado,
@@ -3087,7 +3121,7 @@ export const analizarConIA = onCall(
       console.log('[analizarConIA] sectorial generado');
     }
 
-    return { ok: true, resultado };
+    return { ok: true, resultado, ...(resumenManuales ? { resumen: resumenManuales } : {}) };
   },
 );
 
@@ -3451,10 +3485,56 @@ REGLAS INNEGOCIABLES:
 INSTRUCCIÓN DE CONTINUACIÓN: si la respuesta no cabe en un mensaje, cortá al final de un elemento completo del array "analisis" (después del } que cierra el objeto del ticker) y esperá que el usuario escriba "seguí". El usuario concatenará las partes antes de importar.`;
 }
 
+// F9.101 — Modo 'completo': compone lote + sectorial + agenda + manuales en un único prompt.
+// Reusa el texto íntegro de cada buildPrompt* (incluidas sus reglas de contenido); el bloque final
+// de instrucciones de formato tiene prioridad sobre las instrucciones de formato individuales de
+// cada bloque (que quedan igual para no romper el uso standalone de cada builder).
+function buildPromptCompleto(contexto: Record<string, unknown>): string {
+  // Cada builder recibe solo el sub-contexto que espera (mismo contrato que en modo standalone)
+  // en vez del contexto combinado completo, para no repetir el JSON de las otras 3 secciones dentro de cada bloque.
+  const loteCtx = { posiciones: contexto['posiciones'] ?? [], global: contexto['global'] ?? {} };
+  const sectorialCtx = { bySector: contexto['bySector'] ?? {}, byTipo: contexto['byTipo'] ?? {}, paisAr: contexto['paisAr'], total: contexto['total'] };
+  const agendaCtx = { exposicion: contexto['exposicion'] ?? {}, total: contexto['total'], paisAr: contexto['paisAr'], cripto: contexto['cripto'] };
+  const manualesCtx = { manuales: contexto['manuales'] ?? [] };
+
+  const bloqueLote = buildPromptLote(loteCtx);
+  const bloqueSectorial = buildPromptSectorial(sectorialCtx);
+  const bloqueAgenda = buildPromptAgenda(agendaCtx);
+  const bloqueManuales = buildPromptManuales(manualesCtx);
+
+  return `Sos un analista financiero especialista en mercados argentinos e internacionales. Vas a hacer CUATRO análisis en una sola respuesta: análisis de lote de posiciones, panorama sectorial, agenda de eventos y precios de posiciones manuales. Usá búsqueda web para verificar datos actuales antes de responder a cada bloque.
+
+═══ BLOQUE 1 — ANÁLISIS DE LOTE ═══
+${bloqueLote}
+
+═══ BLOQUE 2 — PANORAMA SECTORIAL ═══
+${bloqueSectorial}
+
+═══ BLOQUE 3 — AGENDA DE EVENTOS ═══
+${bloqueAgenda}
+
+═══ BLOQUE 4 — POSICIONES MANUALES ═══
+${bloqueManuales}
+
+═══ INSTRUCCIONES DE FORMATO — MODO COMPLETO ═══
+Estas instrucciones de formato TIENEN PRIORIDAD sobre cualquier instrucción de formato mencionada dentro de los 4 bloques anteriores (el contenido y las reglas de cada bloque siguen aplicando igual; solo cambia cómo empaquetás la respuesta final):
+- Usá búsqueda web para verificar todos los datos antes de responder.
+- Respondé ÚNICAMENTE con UN SOLO bloque \`\`\`json (una sola respuesta, no cuatro bloques separados) con esta forma exacta:
+{
+  "lote": { "analisis": [ { "ticker": "...", "resultado": { ... } } ] },
+  "sectorial": "## <Nombre> [driver: <driver>]\\n...",
+  "agenda": { "eventos": [ { "fecha": "...", "evento": "...", "driver": "...", "porQueImporta": "..." } ] },
+  "manuales": [ { "id": "...", "ticker": "...", "precioUnitarioUsd": 143.21, "valorUsd": 7160.50, "fechaPrecio": "YYYY-MM-DD", "fuente": "..." } ]
+}
+- "sectorial" es el markdown completo como STRING dentro del JSON (con los headers "## Nombre [driver: xxx]" intactos, drivers válidos: energia_ar, cer_pesos, soberano, cripto, tech_global).
+- Sin texto fuera del bloque \`\`\`json; sin comentarios dentro del JSON.
+- Si la respuesta no cabe en un mensaje, priorizá cortar al final de un elemento completo de "lote.analisis" y esperá "seguí" (igual que en el modo lote individual).`;
+}
+
 // Helper compartido: extrae JSON/markdown de un rawText (usado por analizarConIA e importarAnalisisIA)
-function extraerResultado(modo: 'posicion' | 'sectorial' | 'agenda' | 'lote', rawText: string): unknown {
+function extraerResultado(modo: 'posicion' | 'sectorial' | 'agenda' | 'lote' | 'completo' | 'manuales', rawText: string): unknown {
   if (modo === 'sectorial') return rawText;
-  // posicion, agenda y lote: JSON esperado
+  // posicion, agenda, lote, completo y manuales: JSON esperado
   const mdJson = rawText.match(/```json\s*([\s\S]*?)\s*```/);
   const rawJson = rawText.match(/(\{[\s\S]*\})/);
   const jsonStr = mdJson ? mdJson[1] : (rawJson ? rawJson[1] : null);
@@ -3471,13 +3551,13 @@ export const generarPromptIA = onCall(
     if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
 
     const { modo, ticker, contexto } = (request.data ?? {}) as {
-      modo?: 'posicion' | 'sectorial' | 'agenda' | 'lote';
+      modo?: 'posicion' | 'sectorial' | 'agenda' | 'lote' | 'completo';
       ticker?: string;
       contexto?: Record<string, unknown>;
     };
 
-    if (!modo || !['posicion', 'sectorial', 'agenda', 'lote'].includes(modo)) {
-      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial", "agenda" o "lote"');
+    if (!modo || !['posicion', 'sectorial', 'agenda', 'lote', 'completo'].includes(modo)) {
+      throw new HttpsError('invalid-argument', 'modo debe ser "posicion", "sectorial", "agenda", "lote" o "completo"');
     }
     if (modo === 'posicion' && !ticker) {
       throw new HttpsError('invalid-argument', 'ticker requerido para modo posicion');
@@ -3492,10 +3572,12 @@ export const generarPromptIA = onCall(
         ? buildPromptAgenda(contexto)
         : modo === 'lote'
           ? buildPromptLote(contexto)
-          : buildPromptSectorial(contexto);
+          : modo === 'completo'
+            ? buildPromptCompleto(contexto)
+            : buildPromptSectorial(contexto);
 
-    // lote ya lleva las instrucciones de formato embebidas en buildPromptLote
-    const instrucciones = modo === 'lote'
+    // lote y completo ya llevan las instrucciones de formato embebidas en su propio builder
+    const instrucciones = modo === 'lote' || modo === 'completo'
       ? ''
       : modo === 'sectorial'
         ? `\n\n---\nINSTRUCCIONES DE FORMATO (para uso en chat):\n- Usá búsqueda web para verificar datos actuales antes de responder.\n- Respondé ÚNICAMENTE con el análisis dentro de un bloque \`\`\`markdown.\n- Cada sector debe empezar EXACTAMENTE con \`## <Nombre> [driver: <driver>]\` (drivers válidos: energia_ar, cer_pesos, soberano, cripto, tech_global).\n- Sin texto antes ni después del bloque. Si algún dato no se puede verificar, aclaralo dentro del bloque.`
@@ -3545,6 +3627,139 @@ function validarResultadoImportado(
   return null;
 }
 
+// ── F9.101 — Helpers de importación por sección, compartidos entre los modos ──
+// individuales y el modo 'completo' (fail-soft: cada sección se valida/escribe
+// de forma independiente, un error en una no aborta las demás).
+type MetaImport = {
+  generadoEn: FirebaseFirestore.FieldValue;
+  generadoEnISO: string;
+  modeloUsado: string;
+  origen: string;
+};
+
+async function importarLote(
+  db2: FirebaseFirestore.Firestore,
+  items: Array<{ ticker?: unknown; resultado?: unknown }>,
+  meta: MetaImport,
+): Promise<{ importados: number; erroresPorTicker: string[] }> {
+  const erroresPorTicker: string[] = [];
+  let importados = 0;
+  const batchSize = 450;
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = db2.batch();
+    for (const item of items.slice(i, i + batchSize)) {
+      if (typeof item.ticker !== 'string' || !item.ticker) {
+        erroresPorTicker.push(`(item ${i}: sin ticker)`);
+        continue;
+      }
+      const t = item.ticker;
+      const errV = validarResultadoImportado('posicion', item.resultado);
+      if (errV) {
+        erroresPorTicker.push(`${t} (${errV})`);
+        continue;
+      }
+      batch.set(db2.collection('analisisPosiciones').doc(t), {
+        ticker: t, ...meta, resultado: item.resultado,
+      });
+      importados++;
+    }
+    await batch.commit();
+  }
+  return { importados, erroresPorTicker };
+}
+
+async function importarSectorial(
+  db2: FirebaseFirestore.Firestore,
+  texto: unknown,
+  meta: MetaImport,
+): Promise<{ error: string | null }> {
+  const error = validarResultadoImportado('sectorial', texto);
+  if (error) return { error };
+  await db2.collection('analisisSectorial').add({ ...meta, resultado: texto });
+  return { error: null };
+}
+
+async function importarAgenda(
+  db2: FirebaseFirestore.Firestore,
+  obj: unknown,
+  meta: MetaImport,
+): Promise<{ error: string | null; count: number }> {
+  const error = validarResultadoImportado('agenda', obj);
+  if (error) return { error, count: 0 };
+  const eventos = (obj as { eventos: unknown[] }).eventos;
+  await db2.collection('agendaMacro').add({ ...meta, horizonteDias: 45, eventos });
+  return { error: null, count: eventos.length };
+}
+
+// Sección manuales: NUNCA toca `cantidad` ni crea docs nuevos. Solo actualiza
+// valorUsd/fechaValuacion de posicionesManuales existentes, y solo si el doc
+// existe y el valor cuadra con cantidad × precioUnitarioUsd (± $1).
+async function importarManuales(
+  db2: FirebaseFirestore.Firestore,
+  items: unknown,
+): Promise<string> {
+  if (!Array.isArray(items) || items.length === 0) return 'manuales: sin datos';
+
+  const actualizadas: string[] = [];
+  const sinPrecio: string[] = [];
+  const errores: string[] = [];
+
+  for (const raw of items as Array<Record<string, unknown>>) {
+    const id = raw['id'];
+    const ticker = typeof raw['ticker'] === 'string' ? raw['ticker'] as string : null;
+    const label = ticker ?? (typeof id === 'string' ? id : '?');
+
+    if (typeof id !== 'string' || !id) {
+      errores.push(`${label} (sin id)`);
+      continue;
+    }
+
+    const precioUnitarioUsd = raw['precioUnitarioUsd'];
+    if (precioUnitarioUsd === null || precioUnitarioUsd === undefined) {
+      sinPrecio.push(label);
+      continue;
+    }
+    if (typeof precioUnitarioUsd !== 'number' || precioUnitarioUsd <= 0) {
+      errores.push(`${label} (precioUnitarioUsd inválido)`);
+      continue;
+    }
+    const valorUsd = raw['valorUsd'];
+    if (typeof valorUsd !== 'number') {
+      errores.push(`${label} (valorUsd inválido)`);
+      continue;
+    }
+
+    const docRef = db2.collection('posicionesManuales').doc(id);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      errores.push(`${label} (doc no existe)`);
+      continue;
+    }
+    const cantidad = snap.data()?.['cantidad'];
+    if (typeof cantidad !== 'number') {
+      errores.push(`${label} (doc sin cantidad)`);
+      continue;
+    }
+    if (Math.abs(valorUsd - cantidad * precioUnitarioUsd) >= 1) {
+      errores.push(`${label} (valorUsd no cuadra con cantidad × precio)`);
+      continue;
+    }
+
+    const fechaPrecio = raw['fechaPrecio'];
+    await docRef.update({
+      valorUsd,
+      fechaValuacion: typeof fechaPrecio === 'string' && fechaPrecio ? fechaPrecio : snap.data()?.['fechaValuacion'],
+    });
+    actualizadas.push(label);
+  }
+
+  const partes: string[] = [];
+  if (actualizadas.length > 0) partes.push(`${actualizadas.length} actualizada${actualizadas.length === 1 ? '' : 's'} (${actualizadas.join(', ')})`);
+  if (sinPrecio.length > 0) partes.push(`${sinPrecio.length} sin precio (${sinPrecio.join(', ')})`);
+  if (errores.length > 0) partes.push(`${errores.length} con error (${errores.join('; ')})`);
+  return `manuales: ${partes.length > 0 ? partes.join(', ') : 'nada procesado'}`;
+}
+
 export const importarAnalisisIA = onCall(
   { region: 'southamerica-east1', memory: '256MiB' },
   async (request) => {
@@ -3553,12 +3768,12 @@ export const importarAnalisisIA = onCall(
     if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
 
     const { modo, ticker, contenido } = (request.data ?? {}) as {
-      modo?: 'posicion' | 'sectorial' | 'agenda' | 'lote';
+      modo?: 'posicion' | 'sectorial' | 'agenda' | 'lote' | 'completo';
       ticker?: string;
       contenido?: string;
     };
 
-    if (!modo || !['posicion', 'sectorial', 'agenda', 'lote'].includes(modo)) {
+    if (!modo || !['posicion', 'sectorial', 'agenda', 'lote', 'completo'].includes(modo)) {
       throw new HttpsError('invalid-argument', 'modo inválido');
     }
     if (modo === 'posicion' && !ticker) {
@@ -3581,39 +3796,48 @@ export const importarAnalisisIA = onCall(
     const origen = 'chat';
     const generadoEnISO = new Date().toISOString();
     const generadoEn = FieldValue.serverTimestamp();
+    const meta: MetaImport = { generadoEn, generadoEnISO, modeloUsado, origen };
 
-    // ── Modo lote: fail-soft por elemento ────────────────────────────────────
+    // ── Modo completo: fail-soft por sección (lote, sectorial, agenda, manuales) ──
+    if (modo === 'completo') {
+      const parsed = resultado as Record<string, unknown>;
+      const partes: string[] = [];
+
+      const loteObj = parsed['lote'] as Record<string, unknown> | undefined;
+      const loteItems = Array.isArray(loteObj?.['analisis'])
+        ? loteObj!['analisis'] as Array<{ ticker?: unknown; resultado?: unknown }>
+        : [];
+      if (loteItems.length > 0) {
+        const { importados, erroresPorTicker } = await importarLote(db2, loteItems, meta);
+        partes.push(erroresPorTicker.length > 0
+          ? `lote: ${importados} importados, ${erroresPorTicker.length} con error`
+          : `lote: ${importados} importados`);
+      } else {
+        partes.push('lote: sin datos');
+      }
+
+      const rSec = await importarSectorial(db2, parsed['sectorial'], meta);
+      partes.push(rSec.error ? `sectorial: error (${rSec.error})` : 'sectorial: ok');
+
+      const rAge = await importarAgenda(db2, parsed['agenda'], meta);
+      partes.push(rAge.error ? `agenda: error (${rAge.error})` : `agenda: ${rAge.count} eventos`);
+
+      partes.push(await importarManuales(db2, parsed['manuales']));
+
+      const resumen = partes.join(' · ');
+      console.log(`[importarAnalisisIA] completo: ${resumen}`);
+      return { ok: true, resumen };
+    }
+
+    // ── Modo lote (standalone): fail-soft por elemento ───────────────────────
     if (modo === 'lote') {
       const parsed = resultado as Record<string, unknown>;
       if (!Array.isArray(parsed['analisis']) || parsed['analisis'].length === 0) {
         throw new HttpsError('invalid-argument', 'Se esperaba { analisis: [...] } con al menos un elemento');
       }
-      const items = parsed['analisis'] as Array<{ ticker?: unknown; resultado?: unknown }>;
-      const erroresPorTicker: string[] = [];
-      let importados = 0;
-
-      const batchSize = 450;
-      for (let i = 0; i < items.length; i += batchSize) {
-        const batch = db2.batch();
-        for (const item of items.slice(i, i + batchSize)) {
-          if (typeof item.ticker !== 'string' || !item.ticker) {
-            erroresPorTicker.push(`(item ${i}: sin ticker)`);
-            continue;
-          }
-          const t = item.ticker;
-          const errV = validarResultadoImportado('posicion', item.resultado);
-          if (errV) {
-            erroresPorTicker.push(`${t} (${errV})`);
-            continue;
-          }
-          batch.set(db2.collection('analisisPosiciones').doc(t), {
-            ticker: t, generadoEn, generadoEnISO, modeloUsado, origen, resultado: item.resultado,
-          });
-          importados++;
-        }
-        await batch.commit();
-      }
-
+      const { importados, erroresPorTicker } = await importarLote(
+        db2, parsed['analisis'] as Array<{ ticker?: unknown; resultado?: unknown }>, meta,
+      );
       const resumen = erroresPorTicker.length > 0
         ? `${importados} importados, ${erroresPorTicker.length} con error: ${erroresPorTicker.join('; ')}`
         : `${importados} análisis importados`;
@@ -3622,32 +3846,25 @@ export const importarAnalisisIA = onCall(
     }
 
     // ── Modos individuales ────────────────────────────────────────────────────
-    const errorValidacion = validarResultadoImportado(modo, resultado);
-    if (errorValidacion) {
-      throw new HttpsError('invalid-argument', `Validación fallida: ${errorValidacion}`);
-    }
-
-    let resumen: string;
     if (modo === 'posicion') {
+      const errorValidacion = validarResultadoImportado(modo, resultado);
+      if (errorValidacion) throw new HttpsError('invalid-argument', `Validación fallida: ${errorValidacion}`);
       await db2.collection('analisisPosiciones').doc(ticker!).set({
-        ticker, generadoEn, generadoEnISO, modeloUsado, origen, resultado,
+        ticker, ...meta, resultado,
       });
-      resumen = `Análisis de ${ticker} importado`;
-    } else if (modo === 'agenda') {
-      const eventos = (resultado as { eventos: unknown[] }).eventos;
-      await db2.collection('agendaMacro').add({
-        generadoEn, generadoEnISO, modeloUsado, origen, horizonteDias: 45,
-        eventos,
-      });
-      resumen = `Agenda con ${eventos.length} eventos importada`;
-    } else {
-      await db2.collection('analisisSectorial').add({
-        generadoEn, generadoEnISO, modeloUsado, origen, resultado,
-      });
-      resumen = `Análisis sectorial importado (${(resultado as string).length} chars)`;
+      console.log(`[importarAnalisisIA] posicion ${ticker} importado vía chat`);
+      return { ok: true, resumen: `Análisis de ${ticker} importado` };
     }
-
-    console.log(`[importarAnalisisIA] ${modo} ${ticker ?? ''} importado vía chat`);
-    return { ok: true, resumen };
+    if (modo === 'agenda') {
+      const r = await importarAgenda(db2, resultado, meta);
+      if (r.error) throw new HttpsError('invalid-argument', `Validación fallida: ${r.error}`);
+      console.log('[importarAnalisisIA] agenda importada vía chat');
+      return { ok: true, resumen: `Agenda con ${r.count} eventos importada` };
+    }
+    // modo === 'sectorial'
+    const r = await importarSectorial(db2, resultado, meta);
+    if (r.error) throw new HttpsError('invalid-argument', `Validación fallida: ${r.error}`);
+    console.log('[importarAnalisisIA] sectorial importado vía chat');
+    return { ok: true, resumen: `Análisis sectorial importado (${(resultado as string).length} chars)` };
   },
 );

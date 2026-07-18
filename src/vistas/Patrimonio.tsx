@@ -16,7 +16,7 @@ import {
   type InformeAnterior, type StressResult, type OpcionResult,
 } from '../datos/patrimonioInforme';
 import {
-  analizarPosicion, analizarSectorial, generarAgenda,
+  analizarPosicion, analizarSectorial, generarAgenda, analizarManuales,
   cargarAnalisisPosicion, cargarTodosLosAnalisis, cargarUltimoSectorial, cargarUltimaAgenda,
   cargarConfigIA, guardarConfigIA,
   normalizarEventoProximo,
@@ -1949,7 +1949,7 @@ function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGe
 }
 
 // ── Solapa Research ───────────────────────────────────────────────────────────
-function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, onChatLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda, onAbrirChat }: {
+function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, onChatLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda, onAbrirChat, onActualizarTodoChat, onActualizarTodoApi, actualizandoTodo, resultadoActualizarTodo }: {
   M: PatMetrics;
   configIA: ConfigIA;
   sectorial: AnalisisSectorial | null;
@@ -1964,6 +1964,10 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
   generandoAgenda: boolean;
   onGenerarAgenda: () => void;
   onAbrirChat: (modo: ModoIA, ticker: string | undefined, contexto: Record<string, unknown>) => void;
+  onActualizarTodoChat: () => void;
+  onActualizarTodoApi: () => void;
+  actualizandoTodo: { idx: number; total: number; label: string } | null;
+  resultadoActualizarTodo: string[] | null;
 }) {
   const [expandedSecIdx, setExpandedSecIdx] = useState<Set<number>>(new Set([0]));
   const seccionesSectorial = sectorial ? splitSectorialPorDriver(sectorial.resultado) : [];
@@ -1983,6 +1987,44 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* F9.101 — Actualización integral */}
+      <Card>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>Actualización integral</span>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <button
+              onClick={onActualizarTodoChat}
+              disabled={!!actualizandoTodo}
+              style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'transparent', color: 'var(--color-text-sec)', fontSize: 12, fontWeight: 700, cursor: actualizandoTodo ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              Chat
+            </button>
+            <button
+              onClick={onActualizarTodoApi}
+              disabled={!configIA.habilitado || !!actualizandoTodo}
+              style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: (!configIA.habilitado || actualizandoTodo) ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: (!configIA.habilitado || actualizandoTodo) ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: (!configIA.habilitado || actualizandoTodo) ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              {actualizandoTodo ? 'Actualizando…' : 'Actualizar todo · API'}
+            </button>
+          </div>
+        </div>
+        {actualizandoTodo && (
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
+            Etapa {actualizandoTodo.idx}/{actualizandoTodo.total}: {actualizandoTodo.label}…
+          </div>
+        )}
+        {!actualizandoTodo && resultadoActualizarTodo && (
+          <div style={{ fontSize: 11, color: 'var(--color-text-sec)', lineHeight: 1.5, marginTop: 2 }}>
+            {resultadoActualizarTodo.map((r, i) => <div key={i}>{r}</div>)}
+          </div>
+        )}
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
+          Análisis de lote + panorama sectorial + agenda macro + valuación de manuales + sincronizar CAFCI, en un solo paso.
+          {' '}Chat: costo cero · API: consume, con progreso por etapa
+          {!configIA.habilitado && <span style={{ marginLeft: 5 }}>· activar IA en Configuración para usar API</span>}
+        </div>
+      </Card>
+
       {/* Calendario de eventos */}
       <CalendarioCard
         analisisCache={analisisCache}
@@ -2757,7 +2799,7 @@ function ModalPromptChat({
   const [error, setError] = useState<string | null>(null);
   const [importado, setImportado] = useState(false);
   const [resumenImportado, setResumenImportado] = useState<string | null>(null);
-  const nombreModo = modo === 'posicion' ? `Posición ${ticker}` : modo === 'sectorial' ? 'Sectorial' : modo === 'agenda' ? 'Agenda macro' : 'Lote (toda la cartera)';
+  const nombreModo = modo === 'posicion' ? `Posición ${ticker}` : modo === 'sectorial' ? 'Sectorial' : modo === 'agenda' ? 'Agenda macro' : modo === 'completo' ? 'Actualización integral' : 'Lote (toda la cartera)';
 
   useEffect(() => {
     setCargando(true);
@@ -2861,7 +2903,7 @@ function ModalPromptChat({
               <>
                 <div style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
                   Pegá la respuesta de Claude. Puede incluir los fences {modo === 'sectorial' ? '```markdown' : '```json'} o no.
-                  {modo === 'lote' && (
+                  {(modo === 'lote' || modo === 'completo') && (
                     <span style={{ display: 'block', marginTop: 4, color: 'var(--gf-gray-400)' }}>
                       Si Claude cortó en varios mensajes, concatená todas las partes antes de pegar (el JSON debe ser un único bloque válido).
                     </span>
@@ -2951,6 +2993,11 @@ export default function Patrimonio() {
   const [editFijo,         setEditFijo]         = useState<ActivoFijo | null>(null);
   const [showModalManual,  setShowModalManual]  = useState(false);
   const [editManual,       setEditManual]       = useState<PosicionManual | null>(null);
+
+  // F9.101 — Actualización integral
+  const [actualizandoTodo, setActualizandoTodo] = useState<{ idx: number; total: number; label: string } | null>(null);
+  const [resultadoActualizarTodo, setResultadoActualizarTodo] = useState<string[] | null>(null);
+  const [toastIngestaOk,   setToastIngestaOk]   = useState(false);
 
   useEffect(() => {
     cargarTCReciente(1).then(h => { if (h[0]) setTc(h[0].tcUsdArs); });
@@ -3099,18 +3146,26 @@ export default function Patrimonio() {
     }
   }
 
-  async function handleAnalizarLote() {
-    if (!M || analizandoLote) return;
-    // Collect tickers from consolidated list
+  // Agrupa todasPosiciones por ticker (consolida distintas cuentas del mismo papel).
+  // Compartido por Analizar lote, Chat lote y Actualización integral (F9.101).
+  function buildByTickerMap(): Record<string, { totalUsd: number; sectorDisp: string }> {
     const byTickerMap: Record<string, { totalUsd: number; sectorDisp: string }> = {};
     for (const p of todasPosiciones) {
       const sec = (() => { const base = SECTOR_DISPLAY[p.sector] ?? p.sector; if (p.sector === 'cripto' || p.sector === 'cash' || p.sector === 'global') return base; return base + (p.pais_riesgo === 'AR' ? ' AR' : ' Global'); })();
       if (!byTickerMap[p.ticker]) byTickerMap[p.ticker] = { totalUsd: 0, sectorDisp: sec };
       byTickerMap[p.ticker].totalUsd += p.valorUsd;
     }
+    return byTickerMap;
+  }
+
+  // Corre el análisis ticker-por-ticker (API directa) y reporta progreso. Compartido
+  // por el botón "Analizar lote" standalone y la etapa 1 de "Actualizar todo — API".
+  async function analizarLoteTickers(
+    onProgreso?: (actual: number, total: number, errores: string[]) => void,
+  ): Promise<{ ok: number; errores: string[] }> {
+    if (!M) return { ok: 0, errores: [] };
+    const byTickerMap = buildByTickerMap();
     const tickers = Object.keys(byTickerMap);
-    setAnalizandoLote(true);
-    setLoteProgreso({ actual: 0, total: tickers.length, errores: [] });
     const errores: string[] = [];
     for (let i = 0; i < tickers.length; i++) {
       const t = tickers[i];
@@ -3121,19 +3176,22 @@ export default function Patrimonio() {
       } catch {
         errores.push(t);
       }
-      setLoteProgreso({ actual: i + 1, total: tickers.length, errores: [...errores] });
+      onProgreso?.(i + 1, tickers.length, errores);
     }
+    return { ok: tickers.length - errores.length, errores };
+  }
+
+  async function handleAnalizarLote() {
+    if (!M || analizandoLote) return;
+    setAnalizandoLote(true);
+    setLoteProgreso({ actual: 0, total: Object.keys(buildByTickerMap()).length, errores: [] });
+    await analizarLoteTickers((actual, total, errores) => setLoteProgreso({ actual, total, errores }));
     setAnalizandoLote(false);
   }
 
   function handleAbrirChatLote() {
     if (!M) return;
-    const byTickerMap: Record<string, { totalUsd: number; sectorDisp: string }> = {};
-    for (const p of todasPosiciones) {
-      const sec = (() => { const base = SECTOR_DISPLAY[p.sector] ?? p.sector; if (p.sector === 'cripto' || p.sector === 'cash' || p.sector === 'global') return base; return base + (p.pais_riesgo === 'AR' ? ' AR' : ' Global'); })();
-      if (!byTickerMap[p.ticker]) byTickerMap[p.ticker] = { totalUsd: 0, sectorDisp: sec };
-      byTickerMap[p.ticker].totalUsd += p.valorUsd;
-    }
+    const byTickerMap = buildByTickerMap();
     const posicionesLote = Object.entries(byTickerMap).map(([t, v]) => ({
       ticker: t, sector: v.sectorDisp, pesoEnCartera: pct(v.totalUsd / (M.total || 1)), valorUsd: Math.round(v.totalUsd),
     }));
@@ -3152,6 +3210,113 @@ export default function Patrimonio() {
         });
       },
     });
+  }
+
+  // F9.101 — contexto combinado para el modo 'completo' (lote + sectorial + agenda + manuales).
+  function buildContextoCompleto(): Record<string, unknown> {
+    if (!M) return {};
+    const byTickerMap = buildByTickerMap();
+    const posicionesLote = Object.entries(byTickerMap).map(([t, v]) => ({
+      ticker: t, sector: v.sectorDisp, pesoEnCartera: pct(v.totalUsd / (M.total || 1)), valorUsd: Math.round(v.totalUsd),
+    }));
+    const exposicion: Record<string, string> = {};
+    for (const [sector, val] of Object.entries(M.bySector)) exposicion[sector] = pct(val / (M.total || 1));
+    const manuales = posicionesManuales.map(m => ({
+      id: m.id, ticker: m.ticker, nombre: m.nombre, cantidad: m.cantidad, valorUsd: m.valorUsd, fechaValuacion: m.fechaValuacion,
+    }));
+    return {
+      posiciones: posicionesLote,
+      global: { total: Math.round(M.total), paisAr: pct(M.paisAr), cripto: pct(M.cripto), hhi: M.hhi },
+      bySector: M.bySector,
+      byTipo: M.byTipo,
+      exposicion,
+      total: Math.round(M.total),
+      paisAr: pct(M.paisAr),
+      cripto: pct(M.cripto),
+      manuales,
+    };
+  }
+
+  function handleAbrirChatCompleto() {
+    if (!M) return;
+    setModalPromptChat({
+      modo: 'completo',
+      contexto: buildContextoCompleto(),
+      onDone: () => {
+        Promise.all([
+          cargarTodosLosAnalisis(),
+          cargarUltimoSectorial(),
+          cargarUltimaAgenda(),
+          cargarPosicionesManuales(),
+        ]).then(([analisis, sec, age, manuales]) => {
+          const cache: Record<string, AnalisisPosicion> = {};
+          for (const a of analisis) if (a.ticker) cache[a.ticker] = a;
+          setAnalisisCache(prev => ({ ...prev, ...cache }));
+          setSectorial(sec);
+          setAgenda(age);
+          setPosicionesManuales(manuales);
+        });
+        handleSincronizarCafci();
+      },
+    });
+  }
+
+  // F9.101 — orquestador API: corre las 5 etapas secuencialmente, fail-soft (una etapa
+  // que falla se registra y no frena a las siguientes).
+  async function handleActualizarTodoApi() {
+    if (!M || actualizandoTodo) return;
+    setResultadoActualizarTodo(null);
+    const resultados: string[] = [];
+
+    setActualizandoTodo({ idx: 1, total: 5, label: 'Lote' });
+    try {
+      const { ok, errores } = await analizarLoteTickers();
+      resultados.push(errores.length > 0 ? `Lote: ${ok} ok, ${errores.length} con error` : `Lote: ${ok} ok`);
+    } catch (e) {
+      resultados.push(`Lote: error (${e instanceof Error ? e.message : String(e)})`);
+    }
+
+    setActualizandoTodo({ idx: 2, total: 5, label: 'Sectorial' });
+    try {
+      const result = await analizarSectorial({ bySector: M.bySector, byTipo: M.byTipo, paisAr: pct(M.paisAr), total: M.total });
+      setSectorial(result);
+      resultados.push('Sectorial: ok');
+    } catch (e) {
+      resultados.push(`Sectorial: error (${e instanceof Error ? e.message : String(e)})`);
+    }
+
+    setActualizandoTodo({ idx: 3, total: 5, label: 'Agenda' });
+    try {
+      const exposicion: Record<string, string> = {};
+      for (const [sector, val] of Object.entries(M.bySector)) exposicion[sector] = pct(val / (M.total || 1));
+      const result = await generarAgenda({ exposicion, total: Math.round(M.total), paisAr: pct(M.paisAr), cripto: pct(M.cripto) });
+      setAgenda(result);
+      resultados.push(`Agenda: ${result.eventos.length} eventos`);
+    } catch (e) {
+      resultados.push(`Agenda: error (${e instanceof Error ? e.message : String(e)})`);
+    }
+
+    setActualizandoTodo({ idx: 4, total: 5, label: 'Manuales' });
+    try {
+      if (posicionesManuales.length > 0) {
+        const resumen = await analizarManuales({
+          manuales: posicionesManuales.map(m => ({ id: m.id, ticker: m.ticker, nombre: m.nombre, cantidad: m.cantidad, valorUsd: m.valorUsd, fechaValuacion: m.fechaValuacion })),
+        });
+        setPosicionesManuales(await cargarPosicionesManuales());
+        resultados.push(resumen);
+      } else {
+        resultados.push('Manuales: sin posiciones manuales');
+      }
+    } catch (e) {
+      resultados.push(`Manuales: error (${e instanceof Error ? e.message : String(e)})`);
+    }
+
+    setActualizandoTodo({ idx: 5, total: 5, label: 'Sincronizar CAFCI' });
+    await handleSincronizarCafci();
+    resultados.push('Sincronizar CAFCI: hecho');
+
+    setActualizandoTodo(null);
+    setResultadoActualizarTodo(resultados);
   }
 
   async function handleGenerarSectorial() {
@@ -3434,6 +3599,10 @@ export default function Patrimonio() {
                 };
                 setModalPromptChat({ modo, ticker, contexto, onDone });
               }}
+              onActualizarTodoChat={handleAbrirChatCompleto}
+              onActualizarTodoApi={handleActualizarTodoApi}
+              actualizandoTodo={actualizandoTodo}
+              resultadoActualizarTodo={resultadoActualizarTodo}
             />
           )}
           {tab === 'config' && (
@@ -3469,9 +3638,28 @@ export default function Patrimonio() {
           activosFijos={activosFijos}
           totalManualesUsd={totalManualesUsd}
           metricasJson={metricasJson}
-          onConfirmado={() => { setShowIngesta(false); cargar(); }}
+          onConfirmado={() => { setShowIngesta(false); cargar(); setToastIngestaOk(true); }}
           onClose={() => setShowIngesta(false)}
         />
+      )}
+
+      {/* F9.101 — CTA post-ingesta: navega a Research con la card de actualización integral */}
+      {toastIngestaOk && (
+        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 60, maxWidth: 480, margin: '0 auto', background: 'var(--gf-ink)', color: '#fff', borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10, boxShadow: 'var(--shadow-card)' }}>
+          <Icon name="check" size={16} color="var(--gf-emerald-line, #0a7d5e)" style={{ marginTop: 2, flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 12.5 }}>Corrida actualizada</div>
+            <button
+              onClick={() => { setTab('research'); setToastIngestaOk(false); }}
+              style={{ marginTop: 6, background: 'rgba(255,255,255,.16)', border: 'none', borderRadius: 8, padding: '7px 10px', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              Actualizar análisis con la cartera nueva →
+            </button>
+          </div>
+          <button onClick={() => setToastIngestaOk(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+            <Icon name="x" size={15} color="#fff" />
+          </button>
+        </div>
       )}
 
       {showModalFijo && (

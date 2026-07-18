@@ -139,8 +139,8 @@ export async function cargarUltimaAgenda(): Promise<AgendaMacro | null> {
 
 // ── Callable wrapper ──────────────────────────────────────────────────────────
 const _analizarConIA = httpsCallable<
-  { modo: 'posicion' | 'sectorial' | 'agenda'; ticker?: string; contexto: Record<string, unknown> },
-  { ok: boolean; resultado: unknown }
+  { modo: 'posicion' | 'sectorial' | 'agenda' | 'manuales'; ticker?: string; contexto: Record<string, unknown> },
+  { ok: boolean; resultado: unknown; resumen?: string }
 >(functions, 'analizarConIA');
 
 export async function analizarPosicion(
@@ -171,8 +171,18 @@ export async function generarAgenda(
   return result;
 }
 
+// F9.101 — etapa 'manuales' del orquestador API: actualiza valorUsd/fechaValuacion
+// de posicionesManuales server-side (vía importarManuales); no hay caché propio
+// que releer acá, el caller refresca cargarPosicionesManuales() por su cuenta.
+export async function analizarManuales(
+  contexto: Record<string, unknown>,
+): Promise<string> {
+  const r = await _analizarConIA({ modo: 'manuales', contexto });
+  return r.data.resumen ?? 'manuales: sin resumen';
+}
+
 // ── F9.99: callables chat path ────────────────────────────────────────────────
-export type ModoIA = 'posicion' | 'sectorial' | 'agenda' | 'lote';
+export type ModoIA = 'posicion' | 'sectorial' | 'agenda' | 'lote' | 'completo';
 
 export type PromptGenerado = {
   prompt: string;
