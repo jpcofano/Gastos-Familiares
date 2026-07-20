@@ -209,8 +209,14 @@ export async function importarMappingSeed(): Promise<number> {
 }
 
 // ── Sincronización (callable) ──────────────────────────────────────────────────
-export async function sincronizarCafci(): Promise<{ sincronizados: number; pendientesMapeo: string[] }> {
-  const fn = httpsCallable<void, { sincronizados: number; pendientesMapeo: string[] }>(
+export type ResultadoSincronizarCafci = {
+  sincronizados: number;
+  pendientesMapeo: string[];
+  errores: Array<{ fondo: string; mensaje: string }>;
+};
+
+export async function sincronizarCafci(): Promise<ResultadoSincronizarCafci> {
+  const fn = httpsCallable<void, ResultadoSincronizarCafci>(
     functions, 'sincronizarCafci'
   );
   const result = await fn();

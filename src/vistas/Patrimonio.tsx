@@ -28,7 +28,7 @@ import {
 import {
   obtenerSeriesPrecios, calcularOptimizacion, cargarTCRango, dolarizarSerie, correrTests,
   cargarUltimaOptimizacion, guardarOptimizacion,
-  type ResultadoOptimizacion, type PuntoPrecio,
+  type ResultadoOptimizacion, type PuntoPrecio, type DiagnosticoSerie,
 } from '../datos/patrimonioOptimizacion';
 import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics } from '../types/patrimonio';
 import {
@@ -43,7 +43,7 @@ import {
   cargarConfigCafci, guardarConfigCafci, cargarUltimasCarteras, cargarMappings,
   sincronizarCafci as sincronizarCafciCallable, calcBenchmark,
   importarFondosSugeridos, importarMappingSeed,
-  type ConfigCafci, type CafciCartera, type CafciFondoConfig,
+  type ConfigCafci, type CafciCartera, type CafciFondoConfig, type ResultadoSincronizarCafci,
 } from '../datos/patrimonioCafci';
 import PatrimonioIngesta from './PatrimonioIngesta';
 
@@ -2553,6 +2553,20 @@ function toYahooTicker(ticker: string, tipo: string, pais_riesgo: string, _moned
 }
 
 // ── Solapa Optimización (F9.98) ───────────────────────────────────────────────
+// F9.102 4b — texto humano del motivo de exclusión/inclusión de una serie en Optim.
+// El "mín 40" está hardcodeado en paridad con MIN_OBS del onCalcular de Optim (Patrimonio.tsx);
+// si ese valor cambia, actualizar acá también (no hay un solo punto de verdad para minObs hoy).
+function motivoDiagHumano(d: DiagnosticoSerie): string {
+  switch (d.motivo) {
+    case 'ok': return 'ok';
+    case 'sin_datos_yahoo': return 'sin datos de Yahoo';
+    case 'tc_insuficiente': return `TC insuficiente (${d.puntosDolarizados ?? 0} sem, mín 40)`;
+    case 'serie_corta': return `serie corta (${d.semanasAlineadas} sem, mín 40)`;
+    case 'recorta_interseccion': return `recorta la intersección (${d.semanasAlineadas} sem)`;
+    default: return d.motivo;
+  }
+}
+
 function OptimizacionTab({
   posiciones, resultado, calculando, error, onCalcular,
 }: {
@@ -2566,9 +2580,19 @@ function OptimizacionTab({
   const [pesoMax, setPesoMax] = useState(0.15);
   const [showTests, setShowTests] = useState(false);
   const [testResults, setTestResults] = useState<ReturnType<typeof correrTests> | null>(null);
+  const [showDiag, setShowDiag] = useState(false);
 
   const aptas = posiciones.filter(p => ['accion', 'cedear', 'cripto'].includes(p.tipo));
   const totalUsd = posiciones.reduce((s, p) => s + p.valorUsd, 0) || 1;
+
+  // F9.102 5 — dedupe de chips: una posición puede repetirse por cuenta (misma posición en
+  // varias cuentas) o coincidir en símbolo Yahoo entre ticker AR/US del mismo activo; se
+  // agrega primero por símbolo (key ya única) y se mapea desde ahí.
+  const aptasPorSimbolo = new Map<string, number>();
+  for (const p of aptas) {
+    const sym = toYahooTicker(p.ticker, p.tipo, p.pais_riesgo, p.moneda_origen);
+    aptasPorSimbolo.set(sym, (aptasPorSimbolo.get(sym) ?? 0) + p.valorUsd);
+  }
 
   const btn = { padding: '8px 14px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-base)' } as const;
   const secH = { fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase' as const, letterSpacing: '.4px', marginBottom: 6 };
@@ -2635,11 +2659,10 @@ function OptimizacionTab({
         <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={secH}>Posiciones elegibles</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {aptas.map(p => {
-              const sym = toYahooTicker(p.ticker, p.tipo, p.pais_riesgo, p.moneda_origen);
+            {[...aptasPorSimbolo.keys()].map(sym => {
               const sinSerie = resultado?.sinSerieSuficiente?.includes(sym);
               return (
-                <span key={p.ticker} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, background: sinSerie ? 'var(--gf-gray-100)' : 'var(--gf-emerald-50, #d1fae5)', borderRadius: 6, padding: '3px 8px', color: sinSerie ? 'var(--gf-gray-400)' : 'var(--gf-emerald)' }}>
+                <span key={sym} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11.5, background: sinSerie ? 'var(--gf-gray-100)' : 'var(--gf-emerald-50, #d1fae5)', borderRadius: 6, padding: '3px 8px', color: sinSerie ? 'var(--gf-gray-400)' : 'var(--gf-emerald)' }}>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: sinSerie ? 'var(--gf-gray-300)' : 'var(--gf-emerald)', flexShrink: 0 }} />
                   {sym}
                   {sinSerie && <span style={{ fontSize: 10, color: 'var(--gf-gray-400)' }}>sin serie</span>}
@@ -2650,6 +2673,43 @@ function OptimizacionTab({
           </div>
         </div>
       </Card>
+
+      {/* F9.102 4b — diagnóstico de series: reemplaza la adivinanza del chip "sin serie" con
+          el detalle de puntos/semanas/motivo por símbolo. */}
+      {resultado?.diagnostico && Object.keys(resultado.diagnostico).length > 0 && (
+        <div>
+          <button onClick={() => setShowDiag(v => !v)}
+            style={{ ...btn, background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', width: '100%' }}>
+            {showDiag ? 'Ocultar diagnóstico de series' : 'Ver diagnóstico de series'}
+          </button>
+          {showDiag && (
+            <Card>
+              <div style={{ padding: '10px 14px', overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11.5 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--gf-gray-200)' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 10.5 }}>Símbolo</th>
+                      <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 10.5 }}>Puntos</th>
+                      <th style={{ textAlign: 'right', padding: '4px 6px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 10.5 }}>Semanas</th>
+                      <th style={{ textAlign: 'left', padding: '4px 6px', fontWeight: 700, color: 'var(--gf-gray-400)', fontSize: 10.5 }}>Motivo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(resultado.diagnostico).sort(([a], [b]) => a.localeCompare(b)).map(([sym, d]) => (
+                      <tr key={sym} style={{ borderBottom: '1px solid var(--gf-gray-100)' }}>
+                        <td style={{ padding: '5px 6px', fontWeight: 700 }}>{sym}</td>
+                        <td style={{ padding: '5px 6px', textAlign: 'right', color: 'var(--color-text-sec)' }}>{d.puntosDolarizados ?? d.puntosCrudos}</td>
+                        <td style={{ padding: '5px 6px', textAlign: 'right', color: 'var(--color-text-sec)' }}>{d.semanasAlineadas}</td>
+                        <td style={{ padding: '5px 6px', color: d.motivo === 'ok' ? 'var(--gf-emerald)' : 'var(--color-text-sec)' }}>{motivoDiagHumano(d)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
 
       {resultado && (
         <>
@@ -2998,6 +3058,8 @@ export default function Patrimonio() {
   const [actualizandoTodo, setActualizandoTodo] = useState<{ idx: number; total: number; label: string } | null>(null);
   const [resultadoActualizarTodo, setResultadoActualizarTodo] = useState<string[] | null>(null);
   const [toastIngestaOk,   setToastIngestaOk]   = useState(false);
+  // F9.102 3b — feedback real de "Sincronizar CAFCI" (antes fail-silent).
+  const [toastCafci, setToastCafci] = useState<{ texto: string; error: boolean } | null>(null);
 
   useEffect(() => {
     cargarTCReciente(1).then(h => { if (h[0]) setTc(h[0].tcUsdArs); });
@@ -3118,17 +3180,26 @@ export default function Patrimonio() {
     }
   }
 
-  async function handleSincronizarCafci() {
-    if (sincronizandoCafci) return;
+  // F9.102 3b — deja de tragar el resultado: toast con conteos reales + errores por fondo,
+  // y devuelve el resultado (o null en error) para que "Actualizar todo" (etapa 5) lo consuma.
+  async function handleSincronizarCafci(): Promise<ResultadoSincronizarCafci | null> {
+    if (sincronizandoCafci) return null;
     setSincronizandoCafci(true);
     try {
-      await sincronizarCafciCallable();
+      const result = await sincronizarCafciCallable();
       // Recargar carteras tras sincronizar
       const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(), cargarMappings()]);
       setCafciCarteras(carteras);
       setCafciMappings(mappings);
+      const partes = [`CAFCI: ${result.sincronizados}/${configCafci.fondos.length} fondos`];
+      if (result.pendientesMapeo.length > 0) partes.push(`${result.pendientesMapeo.length} especies sin mapear`);
+      if (result.errores.length > 0) partes.push(`${result.errores.length} con error (${result.errores[0].fondo}: ${result.errores[0].mensaje})`);
+      setToastCafci({ texto: partes.join(' · '), error: result.errores.length > 0 });
+      return result;
     } catch (e) {
       console.error('[sincronizarCafci]', e);
+      setToastCafci({ texto: `Sincronizar CAFCI: falló (${e instanceof Error ? e.message : String(e)})`, error: true });
+      return null;
     } finally {
       setSincronizandoCafci(false);
     }
@@ -3312,8 +3383,12 @@ export default function Patrimonio() {
     }
 
     setActualizandoTodo({ idx: 5, total: 5, label: 'Sincronizar CAFCI' });
-    await handleSincronizarCafci();
-    resultados.push('Sincronizar CAFCI: hecho');
+    const resultCafci = await handleSincronizarCafci();
+    resultados.push(
+      resultCafci
+        ? `Sincronizar CAFCI: ${resultCafci.sincronizados}/${configCafci.fondos.length}${resultCafci.errores.length > 0 ? ` (${resultCafci.errores.length} con error)` : ''}`
+        : 'Sincronizar CAFCI: falló'
+    );
 
     setActualizandoTodo(null);
     setResultadoActualizarTodo(resultados);
@@ -3547,6 +3622,12 @@ export default function Patrimonio() {
                     tcByDate = await cargarTCRango(desde, hasta);
                   }
 
+                  // F9.102 4b — diagnóstico end-to-end: faltantes de la CF (sin_datos_yahoo) y
+                  // exclusiones por TC insuficiente al dolarizar (tc_insuficiente) se arman acá;
+                  // el resto (ok/serie_corta/recorta_interseccion) sale de alinearSeries.
+                  const diagnosticoPrevio: Record<string, DiagnosticoSerie> = {};
+                  for (const s of faltantes) diagnosticoPrevio[s] = { puntosCrudos: 0, semanasAlineadas: 0, motivo: 'sin_datos_yahoo' };
+
                   for (const [s, serie] of Object.entries(rawSeries)) {
                     if (serie.moneda === 'USD') {
                       seriesDolar[s] = serie.puntos;
@@ -3554,6 +3635,7 @@ export default function Patrimonio() {
                       const { puntos: dolarizados, excluir } = dolarizarSerie(serie.puntos, tcByDate, MIN_OBS);
                       if (excluir) {
                         excluidos.push(s);
+                        diagnosticoPrevio[s] = { puntosCrudos: serie.puntos.length, puntosDolarizados: dolarizados.length, semanasAlineadas: 0, motivo: 'tc_insuficiente' };
                       } else {
                         seriesDolar[s] = dolarizados;
                       }
@@ -3562,6 +3644,7 @@ export default function Patrimonio() {
 
                   const resultado = calcularOptimizacion(seriesDolar, pesosActuales, semanas, pesoMax, MIN_OBS);
                   resultado.sinSerieSuficiente = [...new Set([...resultado.sinSerieSuficiente, ...excluidos])];
+                  resultado.diagnostico = { ...diagnosticoPrevio, ...resultado.diagnostico };
                   await guardarOptimizacion(resultado);
                   setOptimizacion(resultado);
                 } catch (e) {
@@ -3657,6 +3740,17 @@ export default function Patrimonio() {
             </button>
           </div>
           <button onClick={() => setToastIngestaOk(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+            <Icon name="x" size={15} color="#fff" />
+          </button>
+        </div>
+      )}
+
+      {/* F9.102 3b — toast mínimo de resultado de "Sincronizar CAFCI" (éxito o error) */}
+      {toastCafci && (
+        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 60, maxWidth: 480, margin: '0 auto', background: 'var(--gf-ink)', color: '#fff', borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10, boxShadow: 'var(--shadow-card)' }}>
+          <Icon name={toastCafci.error ? 'triangle-alert' : 'check'} size={16} color={toastCafci.error ? '#fca5a5' : 'var(--gf-emerald-line, #0a7d5e)'} style={{ marginTop: 2, flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.4 }}>{toastCafci.texto}</div>
+          <button onClick={() => setToastCafci(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
             <Icon name="x" size={15} color="#fff" />
           </button>
         </div>

@@ -3176,6 +3176,7 @@ export const sincronizarCafci = onCall(
 
     let sincronizados = 0;
     const pendientesMapeo: string[] = [];
+    const errores: Array<{ fondo: string; mensaje: string }> = [];
     const fechaFetch = new Date().toISOString();
 
     for (const fondo of fondos) {
@@ -3294,10 +3295,15 @@ export const sincronizarCafci = onCall(
         console.log(`[sincronizarCafci] ${fondo.nombre}: ${posiciones.length} posiciones, total ${totalPct.toFixed(2)}%`);
       } catch (err) {
         console.error(`[sincronizarCafci] Error en ${fondo.nombre}:`, err);
+        errores.push({ fondo: fondo.nombre, mensaje: err instanceof Error ? err.message : String(err) });
       }
     }
 
-    return { sincronizados, pendientesMapeo: [...new Set(pendientesMapeo)].slice(0, 20) };
+    return {
+      sincronizados,
+      pendientesMapeo: [...new Set(pendientesMapeo)].slice(0, 20),
+      errores: errores.slice(0, 13),
+    };
   },
 );
 

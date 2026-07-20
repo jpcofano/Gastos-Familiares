@@ -30,19 +30,22 @@ export function agendaCubierto(e: AgendaEntry): boolean {
   return e.kind === 'esperado' ? cubierto(e.ci.estado) : e.mov.confirmadoPago === true;
 }
 
-// F9.62 (esperados) + F9.99.8 (sueltos) — pendiente TOTAL de la agenda: vencidos/pendientes
-// sin match aportan montoEsperado; por_confirmar/parcial aportan el monto REAL de sus matches
-// (no montoEsperado); sueltos aportan su monto real. Ítems sin monto ni match no aportan.
+// F9.102 1b — pendiente de UNA entrada, en su moneda nativa (sin conversión ARS-eq):
+// vencidos/pendientes sin match aportan montoEsperado; por_confirmar/parcial aportan el
+// monto REAL de sus matches (no montoEsperado, que puede venir null); sueltos aportan su
+// monto real. Extraído de pendienteAgenda para que PorDiaSeccion (Card HOY) lo reuse.
+export function pendienteDeEntrada(e: AgendaEntry): number {
+  if (e.kind === 'suelto') return Math.abs(e.mov.monto);
+  const c = e.ci;
+  const noConfirmado = c.estado === 'por_confirmar' || c.estado === 'parcial';
+  const montoReal = c.matches.reduce((a, m) => a + Math.abs(m.monto), 0);
+  return noConfirmado ? montoReal : (c.item.montoEsperado ?? 0);
+}
+
+// F9.62 (esperados) + F9.99.8 (sueltos) — pendiente TOTAL de la agenda: monto crudo,
+// sin conversión de moneda (ver pendienteDeEntrada).
 export function pendienteAgenda(agenda: AgendaEntry[]): number {
-  return agenda
-    .filter(e => !agendaCubierto(e))
-    .reduce((s, e) => {
-      if (e.kind === 'suelto') return s + Math.abs(e.mov.monto);
-      const c = e.ci;
-      const noConfirmado = c.estado === 'por_confirmar' || c.estado === 'parcial';
-      const montoReal = c.matches.reduce((a, m) => a + Math.abs(m.monto), 0);
-      return s + (noConfirmado ? montoReal : (c.item.montoEsperado ?? 0));
-    }, 0);
+  return agenda.filter(e => !agendaCubierto(e)).reduce((s, e) => s + pendienteDeEntrada(e), 0);
 }
 
 // F9.99.8.1 — día de vencimiento de una entrada de agenda, para intercalar sueltos con

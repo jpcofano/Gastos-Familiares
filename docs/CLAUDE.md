@@ -330,6 +330,45 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   (cliente y `functions/`): 0 errores nuevos (48 pre-existentes ajenos, mismo baseline).
   `vite build`: OK. Deploy: `cd functions && npm run build` → `firebase deploy --only
   functions,hosting`.
+- F9.102 — Card HOY completa, banner de fijos con números, feedback CAFCI y fix de alineado en
+  Optim. Ver `docs/prompts/F9.102-card-hoy-fijos-cafci-optim.md`. **1. Card HOY (Resumen):**
+  tercera fuente `HoyEntry = AgendaEntry | {kind:'real', mov}` (tipo local a `Resumen.tsx`, NO
+  se agregó a `AgendaEntry` de `agenda.ts` para no contaminar GastosFijosSeccion/picker F9.99.9)
+  — movimientos reales de caja del día (`tipo==='Gasto'`, fecha=hoy) sin match en el checklist
+  ni ya listados como sueltos; se renderizan al final ("Pagado · banco"), suman a `hoyPorBanco`
+  y son editables (lápiz, siempre 1 movimiento). Fix del pendiente: `pendienteDeEntrada(e:
+  AgendaEntry): number` extraído en `agenda.ts` (monto real de matches si por_confirmar/parcial,
+  si no montoEsperado) — `pendienteAgenda` y `hoyPendienteArsEq` lo reusan; antes un
+  por_confirmar con `montoEsperado` null mostraba $0 pese a tener un match real cargado. Con
+  `todoPagadoHoy`, el header suma el total pagado del día (`hoyTotalArsEq`) debajo del check
+  "Al día". **2. Banner de fijos:** con `porRevisar===0` ahora muestra `alDia/total` (mismo
+  cálculo que el header de `GastosFijosSeccion`: `agenda.filter(agendaCubierto).length` /
+  `agenda.length`) + `· $ a confirmar` si `pendienteAgenda(agenda) > 0`. **3. Sync CAFCI:** la
+  CF `sincronizarCafci` suma `errores: Array<{fondo, mensaje}>` (cap 13) poblado en el catch por
+  fondo; `handleSincronizarCafci` (Patrimonio.tsx) deja de tragar el resultado — toast con
+  `sincronizados/total fondos · N sin mapear · N con error (primer fondo: mensaje)`, catch con
+  toast de error, retorna el resultado para que "Actualizar todo" (etapa 5) reporte
+  `N/total` real en vez de `'hecho'` incondicional. **4. Optim (`patrimonioOptimizacion.ts`):**
+  `alinearSeries` reescrita — bucketea cada serie por semana ISO-8601 (`claveSemanaISO`, puro,
+  jueves de la semana define el año) usando la última observación de la semana, lo que absorbe
+  los corrimientos de ±1–3 días entre Yahoo US/.BA(UTC-3)/cripto que antes colapsaban la
+  intersección de fecha exacta; excluye PRIMERO las series cortas (< minObs semanas, antes se
+  intersectaba primero y una serie mala arrastraba a todas) y, si la intersección de las
+  sobrevivientes queda corta, excluye iterativamente la que más la restringe (mayor intersección
+  resultante sin ella) hasta alcanzar minObs o quedarse sin series. Suma `diagnostico:
+  Record<string, {puntos, semanas, motivo}>`. `ResultadoOptimizacion.diagnostico?` (campo
+  opcional end-to-end, richer shape con `puntosCrudos`/`puntosDolarizados?`/`semanasAlineadas`/
+  motivo incluyendo `sin_datos_yahoo`/`tc_insuficiente`) ensamblado en el `onCalcular` de
+  `OptimizacionTab`: `faltantes` de la CF → `sin_datos_yahoo`; `dolarizarSerie` con `excluir` →
+  `tc_insuficiente`; el resto sale de `alinearSeries`. UI: card colapsable "Diagnóstico de
+  series" (tabla símbolo/puntos/semanas/motivo en texto humano) debajo de "Posiciones
+  elegibles". `correrTests` suma 3 tests: fechas corridas ±2 días alinean completo, serie corta
+  no arrastra a las otras, `claveSemanaISO` en borde de año (2025-12-29 → 2026-W01). **5. Dedupe
+  de chips:** `OptimizacionTab` arma `Map<symYahoo, valorUsdAgregado>` desde `aptas` antes de
+  mapear los chips (key ya única por símbolo) — sin cambio visual además del dedupe. Frontend +
+  Functions. `tsc --noEmit` (cliente y `functions/`): 0 errores nuevos (48 pre-existentes ajenos
+  en cliente, mismo baseline; 0 en functions). `vite build` y `functions` build: OK. Deploy:
+  `cd functions && npm run build` → `firebase deploy --only functions,hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

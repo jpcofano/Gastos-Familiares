@@ -43,6 +43,17 @@ export type DeltaCartera = {
   delta: number; // pesoOptimo - pesoActual
 };
 
+// F9.102 4b — diagnóstico end-to-end por símbolo, para la card "Diagnóstico de series" en
+// Optim. sin_datos_yahoo/tc_insuficiente se agregan en el caller (Patrimonio.tsx, antes de
+// llegar a alinearSeries); ok/serie_corta/recorta_interseccion vienen de alinearSeries.
+export type MotivoDiagnosticoSerie = 'ok' | 'sin_datos_yahoo' | 'tc_insuficiente' | 'serie_corta' | 'recorta_interseccion';
+export type DiagnosticoSerie = {
+  puntosCrudos: number;
+  puntosDolarizados?: number;
+  semanasAlineadas: number;
+  motivo: MotivoDiagnosticoSerie;
+};
+
 export type ResultadoOptimizacion = {
   fechaCalculo: string; // ISO
   semanas: number;
@@ -53,6 +64,7 @@ export type ResultadoOptimizacion = {
   riskParity: CarteraOptima;
   deltasMinVarianza: DeltaCartera[];
   deltasRiskParity: DeltaCartera[];
+  diagnostico?: Record<string, DiagnosticoSerie>;
 };
 
 // ── Firestore: TC histórico para dolarización ─────────────────────────────────
@@ -142,34 +154,116 @@ export function calcRetornos(precios: number[]): number[] {
   return r;
 }
 
-// ── Alinear series por fecha ──────────────────────────────────────────────────
+// ── Semana ISO-8601 (puro, sin dependencias) ──────────────────────────────────
+// "{isoYear}-W{isoWeek:2d}". El jueves de la semana define el año ISO — absorbe los
+// corrimientos de ±1–3 días entre Yahoo US / .BA (UTC-3, toISOString() puede correr un
+// día) / cripto (opera 7 días) que antes hacían colapsar la intersección por fecha exacta.
+export function claveSemanaISO(fecha: string): string {
+  const [y, m, d] = fecha.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const diaLun0 = (date.getUTCDay() + 6) % 7; // lunes=0 … domingo=6
+  date.setUTCDate(date.getUTCDate() - diaLun0 + 3); // mover al jueves de esta semana
+  const isoYear = date.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+  const jan4DiaLun0 = (jan4.getUTCDay() + 6) % 7;
+  const semana1Lunes = new Date(jan4);
+  semana1Lunes.setUTCDate(jan4.getUTCDate() - jan4DiaLun0);
+  const diffDias = Math.round((date.getTime() - semana1Lunes.getTime()) / 86400000);
+  const isoWeek = Math.floor(diffDias / 7) + 1;
+  return `${isoYear}-W${String(isoWeek).padStart(2, '0')}`;
+}
+
+// Reduce una serie a { semanaISO → cierre }, usando la ÚLTIMA observación de la semana
+// (los puntos se ordenan por fecha asc antes de bucketear, así "última escritura gana").
+function bucketSemanal(puntos: PuntoPrecio[]): Record<string, number> {
+  const ordenados = [...puntos].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const map: Record<string, number> = {};
+  for (const p of ordenados) map[claveSemanaISO(p.fecha)] = p.cierre;
+  return map;
+}
+
+function interseccionSemanas(simbolos: string[], semanasPorSimbolo: Record<string, Record<string, number>>): string[] {
+  if (simbolos.length === 0) return [];
+  let inter = Object.keys(semanasPorSimbolo[simbolos[0]]);
+  for (const s of simbolos.slice(1)) {
+    const set = new Set(Object.keys(semanasPorSimbolo[s]));
+    inter = inter.filter(w => set.has(w));
+  }
+  return inter;
+}
+
+export type MotivoExclusionSerie = 'ok' | 'serie_corta' | 'recorta_interseccion';
+export type DiagnosticoAlineado = { puntos: number; semanas: number; motivo: MotivoExclusionSerie };
+
+// ── Alinear series por semana ISO ──────────────────────────────────────────────
+// F9.102 4a — reescrita: bucketea cada serie por semana ISO (absorbe corrimientos de fecha
+// entre fuentes), excluye PRIMERO las series cortas (antes: se intersectaba primero y una
+// sola serie mala arrastraba a todas bajo minObs), y si la intersección de las sobrevivientes
+// queda corta, excluye iterativamente la que más la restringe (la cuya ausencia libera más
+// semanas comunes) hasta alcanzar minObs o quedarse sin series.
 export function alinearSeries(
   series: Record<string, PuntoPrecio[]>,
   minObs: number
-): { fechas: string[]; precios: Record<string, number[]>; excluidos: string[] } {
-  // Intersección de fechas entre todas las series
-  const setsFechas = Object.values(series).map(s => new Set(s.map(p => p.fecha)));
-  let fechasComunes = setsFechas[0] ? [...setsFechas[0]] : [];
-  for (const s of setsFechas.slice(1)) {
-    fechasComunes = fechasComunes.filter(f => s.has(f));
-  }
-  fechasComunes.sort();
-
-  const precios: Record<string, number[]> = {};
+): { fechas: string[]; precios: Record<string, number[]>; excluidos: string[]; diagnostico: Record<string, DiagnosticoAlineado> } {
+  const diagnostico: Record<string, DiagnosticoAlineado> = {};
   const excluidos: string[] = [];
 
+  // 1. Bucket semanal por símbolo
+  const semanasPorSimbolo: Record<string, Record<string, number>> = {};
   for (const [simbolo, puntos] of Object.entries(series)) {
-    const byFecha: Record<string, number> = {};
-    for (const p of puntos) byFecha[p.fecha] = p.cierre;
-    const vals = fechasComunes.map(f => byFecha[f] ?? 0).filter(v => v > 0);
-    if (vals.length < minObs) {
+    semanasPorSimbolo[simbolo] = bucketSemanal(puntos);
+  }
+
+  // 2. Excluir primero las series cortas (antes de intersectar)
+  let activos: string[] = [];
+  for (const simbolo of Object.keys(series)) {
+    const nSemanas = Object.keys(semanasPorSimbolo[simbolo]).length;
+    if (nSemanas < minObs) {
       excluidos.push(simbolo);
+      diagnostico[simbolo] = { puntos: series[simbolo].length, semanas: nSemanas, motivo: 'serie_corta' };
     } else {
-      precios[simbolo] = fechasComunes.map(f => byFecha[f] ?? 0);
+      activos.push(simbolo);
     }
   }
 
-  return { fechas: fechasComunes, precios, excluidos };
+  // 3. Intersección de semanas solo entre las sobrevivientes; si queda bajo minObs, excluir
+  // iterativamente la serie cuya ausencia libera más semanas comunes (la que más restringe).
+  let semanasComunes = interseccionSemanas(activos, semanasPorSimbolo);
+  while (semanasComunes.length < minObs && activos.length > 1) {
+    let peor: string | null = null;
+    let mejorResto: string[] = [];
+    for (const candidato of activos) {
+      const resto = activos.filter(s => s !== candidato);
+      const interResto = interseccionSemanas(resto, semanasPorSimbolo);
+      if (interResto.length > mejorResto.length) {
+        mejorResto = interResto;
+        peor = candidato;
+      }
+    }
+    if (!peor) break;
+    activos = activos.filter(s => s !== peor);
+    excluidos.push(peor);
+    diagnostico[peor] = { puntos: series[peor].length, semanas: Object.keys(semanasPorSimbolo[peor]).length, motivo: 'recorta_interseccion' };
+    semanasComunes = mejorResto;
+  }
+  if (semanasComunes.length < minObs) {
+    // No quedan series suficientes ni combinándolas — excluir el resto sin diagnóstico previo.
+    for (const s of activos) {
+      excluidos.push(s);
+      diagnostico[s] = { puntos: series[s].length, semanas: Object.keys(semanasPorSimbolo[s]).length, motivo: 'recorta_interseccion' };
+    }
+    activos = [];
+    semanasComunes = [];
+  }
+
+  const fechas = semanasComunes.slice().sort();
+  const precios: Record<string, number[]> = {};
+  for (const simbolo of activos) {
+    precios[simbolo] = fechas.map(w => semanasPorSimbolo[simbolo][w]);
+    diagnostico[simbolo] = { puntos: series[simbolo].length, semanas: Object.keys(semanasPorSimbolo[simbolo]).length, motivo: 'ok' };
+  }
+
+  return { fechas, precios, excluidos, diagnostico };
 }
 
 // ── Covarianza muestral con shrinkage Ledoit-Wolf fijo (α = 0.2) ──────────────
@@ -329,8 +423,12 @@ export function calcularOptimizacion(
   pesoMax: number,
   minObs: number
 ): ResultadoOptimizacion {
-  const { precios, excluidos } = alinearSeries(series, minObs);
+  const { precios, excluidos, diagnostico: diagAlin } = alinearSeries(series, minObs);
   const simbolos = Object.keys(precios);
+  const diagnostico: Record<string, DiagnosticoSerie> = {};
+  for (const [sym, d] of Object.entries(diagAlin)) {
+    diagnostico[sym] = { puntosCrudos: d.puntos, semanasAlineadas: d.semanas, motivo: d.motivo };
+  }
   const n = simbolos.length;
 
   // Retornos semanales por activo
@@ -373,6 +471,7 @@ export function calcularOptimizacion(
     riskParity: rp,
     deltasMinVarianza: calcDeltas(minVar),
     deltasRiskParity: calcDeltas(rp),
+    diagnostico,
   };
 }
 
@@ -449,11 +548,83 @@ export function testRetornos(): TestResult {
   };
 }
 
+// F9.102 4c — tests de alinearSeries/claveSemanaISO ────────────────────────────
+function addDiasISO(fechaBase: string, dias: number): string {
+  const [y, m, d] = fechaBase.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + dias);
+  return dt.toISOString().slice(0, 10);
+}
+
+// Test 5: 3 series con las mismas semanas ISO pero fechas corridas ±2 días (equities US /
+// .BA / cripto) alinean completo — caso que con intersección por fecha exacta fallaba.
+export function testAlineadoSemanaISO(): TestResult {
+  const base = '2025-01-06'; // lunes
+  const A: PuntoPrecio[] = [];
+  const B: PuntoPrecio[] = [];
+  const C: PuntoPrecio[] = [];
+  for (let i = 0; i < 10; i++) {
+    const lunes = addDiasISO(base, i * 7);
+    A.push({ fecha: lunes, cierre: 100 + i });
+    B.push({ fecha: addDiasISO(lunes, 2), cierre: 100 + i }); // miércoles
+    C.push({ fecha: addDiasISO(lunes, 4), cierre: 100 + i }); // viernes
+  }
+  const { precios, excluidos, fechas } = alinearSeries({ A, B, C }, 5);
+  const ok = excluidos.length === 0 && fechas.length === 10
+    && (precios.A?.length ?? 0) === 10 && (precios.B?.length ?? 0) === 10 && (precios.C?.length ?? 0) === 10;
+  return {
+    nombre: 'alinearSeries: fechas corridas ±2 días alinean por semana ISO',
+    ok,
+    detalle: ok
+      ? `3 series, ${fechas.length} semanas alineadas, 0 excluidos ✓`
+      : `excluidos=[${excluidos.join(',')}], fechas=${fechas.length}`,
+  };
+}
+
+// Test 6: una serie corta se excluye ANTES de intersectar, sin arrastrar a las otras dos.
+export function testSerieCortaNoArrastra(): TestResult {
+  const base = '2025-01-06';
+  const A: PuntoPrecio[] = [];
+  const B: PuntoPrecio[] = [];
+  const C: PuntoPrecio[] = [];
+  for (let i = 0; i < 10; i++) {
+    const lunes = addDiasISO(base, i * 7);
+    A.push({ fecha: lunes, cierre: 100 + i });
+    B.push({ fecha: lunes, cierre: 200 + i });
+  }
+  for (let i = 0; i < 3; i++) C.push({ fecha: addDiasISO(base, i * 7), cierre: 300 + i });
+
+  const { precios, excluidos, fechas } = alinearSeries({ A, B, C }, 5);
+  const ok = excluidos.length === 1 && excluidos[0] === 'C' && fechas.length === 10
+    && (precios.A?.length ?? 0) === 10 && (precios.B?.length ?? 0) === 10 && precios.C === undefined;
+  return {
+    nombre: 'alinearSeries: serie corta se excluye sin arrastrar a las otras',
+    ok,
+    detalle: ok
+      ? `C excluida (corta), A/B alinean completas (${fechas.length} sem) ✓`
+      : `excluidos=[${excluidos.join(',')}], fechas=${fechas.length}`,
+  };
+}
+
+// Test 7: claveSemanaISO en el borde de año — 2025-12-29 (lunes) cae en la semana 1 de 2026.
+export function testClaveSemanaISOBordeAno(): TestResult {
+  const clave = claveSemanaISO('2025-12-29');
+  const ok = clave === '2026-W01';
+  return {
+    nombre: 'claveSemanaISO: borde de año 2025-12-29 → 2026-W01',
+    ok,
+    detalle: ok ? `${clave} ✓` : `Esperado 2026-W01, obtenido ${clave}`,
+  };
+}
+
 export function correrTests(): TestResult[] {
   return [
     testMinVarAnalitico(),
     testRiskParityAnalitico(),
     testMinVarConstraintWmax(),
     testRetornos(),
+    testAlineadoSemanaISO(),
+    testSerieCortaNoArrastra(),
+    testClaveSemanaISOBordeAno(),
   ];
 }

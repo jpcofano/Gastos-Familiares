@@ -12,12 +12,21 @@ import { fmtMoney } from '../datos/money';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
 import { calcularChecklist, cubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
-import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, pendienteAgenda, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
+import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, pendienteAgenda, pendienteDeEntrada, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
 import EditarMovimiento from './EditarMovimiento';
 import type { Movement, ExpectedItem, FamiliaConfig, MedioPago } from '../types';
 import './Resumen.css';
 
 type Moneda = 'ARS' | 'USD';
+
+// F9.102 1a — Card HOY suma una tercera fuente (movimientos reales de caja del día no
+// matcheados) además de esperados/sueltos. 'real' es local a esta card: NO entra a
+// pendienteAgenda ni al checklist de fijos (ver src/datos/agenda.ts, AgendaEntry).
+type HoyEntry = AgendaEntry | { kind: 'real'; mov: Movement };
+
+function hoyEntryCubierto(e: HoyEntry): boolean {
+  return e.kind === 'real' ? (e.mov.pagado === true || e.mov.confirmadoPago === true) : agendaCubierto(e);
+}
 
 // Lookup banco por nombre (aplicando medioCanonico) para obtener id/color/dominio
 function bancoDeNombre(nombre: string, bancos?: MedioPago[]): MedioPago | undefined {
@@ -260,25 +269,50 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   const sueltosHoy = esMesActual
     ? sueltosFuturos.filter(m => inicioDia(m.fecha).getTime() === inicioHoy.getTime())
     : [];
-  const hoyItems: AgendaEntry[] = [
+  // F9.102 1a — tercera fuente: movimientos reales de caja del día que NO son ya matches
+  // de algún esperado (mismo dedupe que sueltosFuturosDelMes) ni ya listados como sueltos
+  // (esos son los no-pagados de hoy, capturados arriba). En la práctica esto son los gastos
+  // de hoy YA pagados que ningún ítem esperado atrapó — ej. un suelto cargado y pagado el
+  // mismo día. Van al final: ya están resueltos.
+  const matchedIds = new Set(checklist.flatMap(ci => ci.matches.map(m => m.id)));
+  const sueltosHoyIds = new Set(sueltosHoy.map(m => m.id));
+  const realesHoy = esMesActual
+    ? movs.filter(m =>
+        m.tipo === 'Gasto' &&
+        inicioDia(m.fecha).getTime() === inicioHoy.getTime() &&
+        !matchedIds.has(m.id) &&
+        !sueltosHoyIds.has(m.id)
+      )
+    : [];
+  const hoyItems: HoyEntry[] = [
     ...hoyEsperados.map(ci => ({ kind: 'esperado', ci } as AgendaEntry)),
     ...sueltosHoy.map(mov => ({ kind: 'suelto', mov } as AgendaEntry)),
+    ...realesHoy.map(mov => ({ kind: 'real', mov } as HoyEntry)),
   ];
 
   // Total de hoy pendiente (ARS eq) para el header de Card HOY, sobre el conjunto ampliado.
   // F9.76 — pendiente/pagado por estado real, no por presencia de match. Un por_confirmar sigue
   // siendo deuda hasta que el pago real lo confirme.
+  // F9.102 1b — la rama 'esperado' usa pendienteDeEntrada (monto REAL de los matches cuando
+  // por_confirmar/parcial) en vez de leer item.montoEsperado directamente — antes un
+  // por_confirmar con montoEsperado null quedaba en $0 pese a tener un match real cargado.
   const hoyPendienteArsEq = hoyItems
-    .filter(e => !agendaCubierto(e))
+    .filter(e => !hoyEntryCubierto(e))
     .reduce((s, e) => {
-      if (e.kind === 'suelto') return s + arsEq(e.mov);
-      const m = e.ci.item.montoEsperado;
-      if (m == null) return s;
-      return e.ci.item.moneda === 'ARS' ? s + m : s + m * c.tc;
+      if (e.kind !== 'esperado') return s + arsEq(e.mov);
+      const raw = pendienteDeEntrada(e);
+      return s + (e.ci.item.moneda === 'ARS' ? raw : raw * c.tc);
     }, 0);
-  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(agendaCubierto);
+  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(hoyEntryCubierto);
+  // F9.102 1b — total pagado del día (todos los ítems, incluidos los reales) para mostrar
+  // junto al check "Al día" cuando todoPagadoHoy.
+  const hoyTotalArsEq = hoyItems.reduce((s, e) => {
+    if (e.kind === 'esperado') return s + e.ci.matches.reduce((a, m) => a + arsEq(m), 0);
+    return s + arsEq(e.mov);
+  }, 0);
 
   // F9.92.1 — desglose por banco de lo ya conciliado hoy (los pendientes sin match no tienen banco).
+  // F9.102 1b — suma también los 'real' (comparten forma con 'suelto': ambos tienen .mov).
   const hoyPorBanco = new Map<string, number>();
   for (const e of hoyItems) {
     if (e.kind === 'esperado') {
@@ -287,7 +321,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       const monto = e.ci.matches.reduce((s, m) => s + arsEq(m), 0);
       hoyPorBanco.set(banco, (hoyPorBanco.get(banco) ?? 0) + monto);
     } else {
-      if (!agendaCubierto(e) || !e.mov.banco) continue;
+      if (!hoyEntryCubierto(e) || !e.mov.banco) continue;
       hoyPorBanco.set(e.mov.banco, (hoyPorBanco.get(e.mov.banco) ?? 0) + arsEq(e.mov));
     }
   }
@@ -304,6 +338,8 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           pendiente TOTAL de la agenda (vencidos + por_confirmar a monto real + sueltos), vía
           pendienteAgenda() compartida con GastosFijosSeccion — el disparador (porRevisar===0)
           no cambia. */}
+      {/* F9.102 2 — con porRevisar===0 el texto ahora muestra alDia/total (mismos cálculos que
+          el header de GastosFijosSeccion) + el pendiente a confirmar si pendienteAgenda > 0. */}
       <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
         {porRevisar === 0 ? (
           <span style={{ width: 17, height: 17, borderRadius: 999, background: 'var(--gf-income)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -313,7 +349,14 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           <Icon name="alert-circle" size={17} color="var(--gf-out)" />
         )}
         <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: porRevisar === 0 ? 'var(--gf-income)' : 'var(--color-text)' }}>
-          {porRevisar === 0 ? 'Al día con los gastos fijos' : `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendienteAgenda(agenda))}`}
+          {porRevisar === 0 ? (
+            <>
+              Al día con los gastos fijos · {agenda.filter(agendaCubierto).length}/{agenda.length}
+              {pendienteAgenda(agenda) > 0 && (
+                <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {fmtArs(pendienteAgenda(agenda))} a confirmar</span>
+              )}
+            </>
+          ) : `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendienteAgenda(agenda))}`}
         </span>
       </Card>
 
@@ -326,9 +369,12 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
         daySub="HOY"
         banks={hoyBancos}
         totalNode={hoyItems.length === 0 ? null : todoPagadoHoy ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--gf-income)', fontWeight: 700, fontSize: 13 }}>
-            <Icon name="check" size={13} color="var(--gf-income)" /> Al día
-          </span>
+          <>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--gf-income)', fontWeight: 700, fontSize: 13 }}>
+              <Icon name="check" size={13} color="var(--gf-income)" /> Al día
+            </span>
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtBig(hoyTotalArsEq)}</div>
+          </>
         ) : (
           <>
             <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>{fmtBig(hoyPendienteArsEq)}</div>
@@ -349,7 +395,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
             {hoyItems.map((e, i) => {
               const esVencido    = e.kind === 'esperado' && e.ci.estado === 'vencido';
-              const pagado       = e.kind === 'esperado' ? cubierto(e.ci.estado) : e.mov.confirmadoPago === true;
+              const pagado       = hoyEntryCubierto(e);
               const porConfirmar = e.kind === 'esperado' && !pagado && (e.ci.estado === 'por_confirmar' || e.ci.estado === 'parcial');
               const etiqueta = e.kind === 'esperado'
                 ? ([e.ci.item.categoria, e.ci.item.subcategoria].filter(Boolean).join(' › ') || e.ci.item.notas || '(sin categoría)')
@@ -360,9 +406,9 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
               const monto = e.kind === 'esperado'
                 ? (e.ci.item.montoEsperado != null ? fmtMoney(e.ci.item.montoEsperado, { from: e.ci.item.moneda, to: e.ci.item.moneda }) : '—')
                 : fmtMoney(e.mov.monto, { from: e.mov.moneda, to: e.mov.moneda });
-              // Lápiz de edición (paridad con la fila de Por día): solo si hay un único
-              // movimiento real detrás del ítem — un esperado con 0 o >1 matches no es editable acá.
-              const editTarget = e.kind === 'suelto' ? e.mov : (e.ci.matches.length === 1 ? e.ci.matches[0] : null);
+              // Lápiz de edición (paridad con la fila de Por día): un suelto o un 'real' son
+              // siempre un único movimiento (editable); un esperado con 0 o >1 matches no lo es.
+              const editTarget = e.kind !== 'esperado' ? e.mov : (e.ci.matches.length === 1 ? e.ci.matches[0] : null);
               const editable = esAdmin && editTarget != null;
               return (
                 <button
@@ -391,7 +437,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                     <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiqueta}</div>
                     <div style={{ fontSize: 11, color: esVencido && !pagado ? 'var(--gf-expense)' : 'var(--color-text-sec)', fontWeight: esVencido && !pagado ? 700 : 400 }}>
                       {pagado
-                        ? `Conciliado${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}`
+                        ? `${e.kind === 'real' ? 'Pagado' : 'Conciliado'}${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}`
                         : porConfirmar ? 'Cargado · a confirmar'
                         : e.kind === 'esperado' && esVencido ? `Venció día ${e.ci.item.diaVencimiento}`
                         : e.kind === 'suelto' ? 'Sin plantilla · a pagar'
