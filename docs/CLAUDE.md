@@ -369,6 +369,64 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   Functions. `tsc --noEmit` (cliente y `functions/`): 0 errores nuevos (48 pre-existentes ajenos
   en cliente, mismo baseline; 0 en functions). `vite build` y `functions` build: OK. Deploy:
   `cd functions && npm run build` → `firebase deploy --only functions,hosting`.
+- F9.102.1 — Hotfix: persistencia de la matriz de correlaciones + primer intento de región
+  CAFCI. Ver `docs/prompts/F9.102.1-hotfix-matriz-y-cafci.md`. **1. Serialización de la matriz**
+  (`patrimonioOptimizacion.ts`): Firestore rechaza `number[][]` (arrays anidados) — hasta F9.102
+  nunca explotó porque `correlacion.matriz` siempre quedaba vacía. `serializarCorrelacion`/
+  `deserializarCorrelacion` (puras, exportadas) convierten a `{simbolos, matrizFlat, n}`
+  row-major en el borde de Firestore; `ResultadoOptimizacion` de dominio no cambia.
+  `guardarOptimizacion` sanea valores no finitos a `0` y los anota en `advertencias: string[]`
+  (campo nuevo opcional del resultado). `cargarUltimaOptimizacion` es retrocompatible: doc viejo
+  (`matriz`) se usa tal cual, doc nuevo (`matrizFlat`) se deserializa, sin ninguno de los dos
+  devuelve matriz vacía sin tirar. **2. Guardado fail-soft** (`Patrimonio.tsx` `onCalcular`): el
+  resultado se muestra (`setOptimizacion`) ANTES de intentar persistir; el guardado quedó en su
+  propio try/catch con aviso ámbar discreto (`avisoGuardadoOptim`) si falla, sin perder el
+  cálculo. **3. CAFCI, primer intento:** override de región a `us-central1` solo en
+  `sincronizarCafci` (hipótesis: CloudFront bloquea por IP/ASN de compute en
+  `southamerica-east1`) — este intento NO concluyó (ver F9.102.2 §B). `correrTests` suma 3 tests
+  de serialización (round-trip 3×3, matriz vacía, contrato de detección de formato viejo).
+- F9.102.2 — Fix del optimizador de mínima varianza (bug bang-bang) + cierre del experimento de
+  región CAFCI + ingesta manual. Ver `docs/prompts/F9.102.2-simplex-y-cafci-manual.md`.
+  **1. `proyectarSimplex` reescrita** (`patrimonioOptimizacion.ts`): el algoritmo viejo
+  (clamp a `[0,wMax]` → renormalizar → repetir) era una proyección RADIAL, no euclídea —
+  empujaba la solución a los vértices y expulsaba activos de forma irreversible (bug real:
+  `calcMinVarianza` devolvía `wMax` en 5 activos y `0` en el resto). Reemplazada por bisección
+  sobre el umbral τ: `w(τ)ᵢ = clamp(vᵢ−τ, 0, wCap)`, monótona por construcción, converge siempre.
+  `wMaxEfectivo(n, wMax)` (pura, exportada) resuelve el caso infactible (`n·wMax < 1`, el
+  conjunto `{w≥0, Σw=1, wᵢ≤wMax}` queda vacío) usando `1/n` y dejándolo anotado en
+  `advertencias[]` del resultado (`calcularOptimizacion`, no `calcMinVarianza` — la firma de
+  ésta no cambia). `testMinVarConstraintWmax` (Sigma/wMax preexistentes, n=2 wMax=0.4 es
+  infactible por construcción — 2×0.4=0.8<1) ahora compara contra `wMaxEfectivo` en vez del wMax
+  literal; nuevo test 11 cubre el caso infactible end-to-end vía `calcularOptimizacion`.
+  **2. Guarda permanente de confiabilidad** (`OptimizacionTab`): `motorMinVarSano` corre los
+  tests analíticos deterministas de min-var (casos 1 y 3) en cada render; si alguno falla, la
+  columna "Mín. var." de "Carteras calculadas vs actual" se grisa con la leyenda "no confiable —
+  tests del motor en rojo" en vez de mostrar pesos que no son una recomendación válida. **3.
+  Cierre del experimento de región:** `src/firebase.ts` tenía `getFunctions(app,
+  'southamerica-east1')` hardcodeado — el primer intento (F9.102.1) migró `sincronizarCafci` a
+  `us-central1` pero el cliente seguía apuntando a la región vieja (función inexistente → 404
+  HTML → SDK de callables lo mapea a `internal`); cero logs de invocación real, el experimento
+  nunca corrió. Fix: instancia nueva `functionsUsCentral = getFunctions(app, 'us-central1')`
+  (+ `connectFunctionsEmulator` en dev), usada por `sincronizarCafci()` en `patrimonioCafci.ts`.
+  **4. Ingesta manual de JSON CAFCI** (independiente del resultado de 3 — red de seguridad):
+  parseo extraído a `parsearFichaCafci(json, fondo, fechaFetch)` (`functions/src/index.ts`),
+  única implementación compartida por `sincronizarCafci` (fetch automático) y la CF nueva
+  `importarCafciManual({fondoId, claseId, json})` (dueño-only, valida JSON parseable y —
+  best-effort si el payload lo trae— que el fondo/clase coincide con lo pedido; escribe en
+  `cafciCarteras` con la misma forma que la sync automática más `origen:'manual'` y
+  `fechaIngesta`). Cliente: `importarCafciManual()` wrapper + `fechaDatosDeFondo()` en
+  `patrimonioCafci.ts`; `CafciCartera` gana `origen?`/`fechaIngesta?` opcionales. UI: cada fondo
+  en el card "Fondos CAFCI" de Config muestra indicador de estado (fecha de datos o "sin datos")
+  + botón "Pegar JSON" → `PegarJsonModal` (URL de la ficha copiable/clickeable, textarea, botón
+  Importar, error inline). Mensaje de 403 corregido a `Usá "Pegar JSON" en Config` (antes
+  prometía un "pegado manual" que no existía). Frontend + Functions. `tsc --noEmit` (cliente y
+  `functions/`): 41 errores pre-existentes en cliente (baseline fijado en esta sesión — venía
+  sin registrar, había migrado de 48 a 41 entre sesiones previas), 0 nuevos; 0 en functions.
+  `vite build` y `functions` build: OK. Pendiente de cierre manual (no soy yo quien deploya):
+  correr `firebase functions:delete sincronizarCafci --region southamerica-east1` (si aplica) →
+  `cd functions && npm run build` → `firebase deploy --only functions,hosting` → probar
+  Sincronizar → `firebase functions:log --only sincronizarCafci` para confirmar 200 o 403 CON
+  log de invocación (un `internal` sin log no es una lectura válida del experimento).
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

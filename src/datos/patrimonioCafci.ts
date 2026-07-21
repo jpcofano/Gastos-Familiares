@@ -2,7 +2,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   query, orderBy, limit, writeBatch,
 } from 'firebase/firestore';
-import { db, functions } from '../firebase';
+import { db, functions, functionsUsCentral } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -35,6 +35,8 @@ export type CafciCartera = {
   posiciones: CafciPosicion[];
   totalPct: number;
   advertenciaIntegridad?: boolean;
+  origen?: 'manual';     // F9.102.2 4a — presente solo en cartas cargadas vía "Pegar JSON"
+  fechaIngesta?: string; // ISO — idem
 };
 
 // ── Config CAFCI ────���─────────────────────────────────────────────────────────
@@ -216,11 +218,34 @@ export type ResultadoSincronizarCafci = {
 };
 
 export async function sincronizarCafci(): Promise<ResultadoSincronizarCafci> {
+  // F9.102.2 3a — sincronizarCafci corre en us-central1 (ver src/firebase.ts).
   const fn = httpsCallable<void, ResultadoSincronizarCafci>(
-    functions, 'sincronizarCafci'
+    functionsUsCentral, 'sincronizarCafci'
   );
   const result = await fn();
   return result.data;
+}
+
+// ── Ingesta manual (F9.102.2 4a) ───────────────────────────────────────────────
+export type ResultadoImportarCafciManual = {
+  ok: boolean;
+  especies: number;
+  pendientesMapeo: string[];
+  fechaDatos: string;
+};
+
+export async function importarCafciManual(fondoId: string, claseId: string, json: string): Promise<ResultadoImportarCafciManual> {
+  const fn = httpsCallable<{ fondoId: string; claseId: string; json: string }, ResultadoImportarCafciManual>(
+    functions, 'importarCafciManual'
+  );
+  const result = await fn({ fondoId, claseId, json });
+  return result.data;
+}
+
+/** Fecha de datos de la última cartera cargada para un fondo (auto o manual), o null si no hay ninguna. */
+export function fechaDatosDeFondo(carteras: CafciCartera[], fondoId: string): string | null {
+  const c = carteras.find(c => c.fondoId === fondoId);
+  return c?.fechaDatos ?? null;
 }
 
 // ── Helpers de análisis para BenchmarkTab ─────────────────────────────────────

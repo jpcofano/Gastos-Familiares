@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
 import { cargarTCReciente } from '../datos/tcDiario';
 import { TC_DEFAULT } from '../datos/money';
@@ -27,7 +27,7 @@ import {
 } from '../datos/patrimonioIA';
 import {
   obtenerSeriesPrecios, calcularOptimizacion, cargarTCRango, dolarizarSerie, correrTests,
-  cargarUltimaOptimizacion, guardarOptimizacion,
+  cargarUltimaOptimizacion, guardarOptimizacion, testMinVarAnalitico, testMinVarConstraintWmax,
   type ResultadoOptimizacion, type PuntoPrecio, type DiagnosticoSerie,
 } from '../datos/patrimonioOptimizacion';
 import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics } from '../types/patrimonio';
@@ -43,7 +43,9 @@ import {
   cargarConfigCafci, guardarConfigCafci, cargarUltimasCarteras, cargarMappings,
   sincronizarCafci as sincronizarCafciCallable, calcBenchmark,
   importarFondosSugeridos, importarMappingSeed,
+  importarCafciManual as importarCafciManualCallable, fechaDatosDeFondo,
   type ConfigCafci, type CafciCartera, type CafciFondoConfig, type ResultadoSincronizarCafci,
+  type ResultadoImportarCafciManual,
 } from '../datos/patrimonioCafci';
 import PatrimonioIngesta from './PatrimonioIngesta';
 
@@ -2266,15 +2268,83 @@ function AportesRetirosCard({ flujos, onAdd, onEdit }: {
   );
 }
 
+// F9.102.2 4b — modal "Pegar JSON": URL de la ficha (copiable/clickeable) + textarea + botón
+// Importar. Errores del backend (JSON inválido, success:false, fondo que no coincide, etc.)
+// se muestran inline — más accionable que un toast lejos del textarea.
+function PegarJsonModal({ fondo, onImportar, onClose }: {
+  fondo: CafciFondoConfig;
+  onImportar: (fondoId: string, claseId: string, json: string) => Promise<ResultadoImportarCafciManual>;
+  onClose: () => void;
+}) {
+  const [json, setJson] = useState('');
+  const [importando, setImportando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = `https://api.pub.cafci.org.ar/fondo/${fondo.fondoId}/clase/${fondo.claseId}/ficha`;
+
+  async function importar() {
+    if (!json.trim() || importando) return;
+    setImportando(true);
+    setError(null);
+    try {
+      await onImportar(fondo.fondoId, fondo.claseId, json.trim());
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImportando(false);
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div style={{ background: 'var(--color-surface)', borderRadius: '18px 18px 0 0', padding: 16, width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Pegar JSON — {fondo.nombre}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginBottom: 10, lineHeight: 1.5 }}>
+          1. Abrí la URL en el navegador (te va a pedir login/CAPTCHA si CloudFront bloquea el fetch automático).
+          2. Copiá el JSON completo de la respuesta. 3. Pegalo abajo.
+        </div>
+        <a href={url} target="_blank" rel="noreferrer" style={{ display: 'block', fontSize: 11.5, color: 'var(--color-accent)', wordBreak: 'break-all', marginBottom: 10, textDecoration: 'underline' }}>
+          {url}
+        </a>
+        <textarea
+          value={json}
+          onChange={e => setJson(e.target.value)}
+          placeholder="Pegá acá el JSON completo de la ficha…"
+          rows={8}
+          style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--gf-gray-200)', fontSize: 11.5, fontFamily: 'monospace', resize: 'vertical' }}
+        />
+        {error && (
+          <div style={{ fontSize: 11.5, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '6px 9px', marginTop: 8, lineHeight: 1.4 }}>
+            {error}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button onClick={importar} disabled={!json.trim() || importando}
+            style={{ flex: 1, padding: '9px 0', borderRadius: 9, border: 'none', cursor: !json.trim() || importando ? 'not-allowed' : 'pointer', background: !json.trim() || importando ? 'var(--gf-gray-100)' : 'var(--color-accent)', color: !json.trim() || importando ? 'var(--gf-gray-400)' : '#fff', fontSize: 12.5, fontWeight: 700, fontFamily: 'var(--font-base)' }}>
+            {importando ? 'Importando…' : 'Importar'}
+          </button>
+          <button onClick={onClose}
+            style={{ flex: 1, padding: '9px 0', borderRadius: 9, border: 'none', cursor: 'pointer', background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--font-base)' }}>
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Card de fondos CAFCI ──────────────────────────────────────────────────────
-function CafciFondosCard({ configCafci, sincronizando, onSincronizar, onGuardar, onImportarFondos, onImportarMapping }: {
+function CafciFondosCard({ configCafci, carteras, sincronizando, onSincronizar, onGuardar, onImportarFondos, onImportarMapping, onImportarManual }: {
   configCafci: ConfigCafci;
+  carteras: CafciCartera[];
   sincronizando: boolean;
   onSincronizar: () => void;
   onGuardar: (c: ConfigCafci) => void;
   onImportarFondos: () => void;
   onImportarMapping: () => void;
+  onImportarManual: (fondoId: string, claseId: string, json: string) => Promise<ResultadoImportarCafciManual>;
 }) {
+  const [pegarJsonFondo, setPegarJsonFondo] = useState<CafciFondoConfig | null>(null);
   const [nombre, setNombre] = useState('');
   const [fondoId, setFondoId] = useState('');
   const [claseId, setClaseId] = useState('');
@@ -2327,18 +2397,31 @@ function CafciFondosCard({ configCafci, sincronizando, onSincronizar, onGuardar,
           Necesitás el <strong>fondoId</strong> y <strong>claseId</strong> de la URL de cafci.org.ar.
         </div>
       )}
-      {configCafci.fondos.map((f, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < configCafci.fondos.length - 1 ? '1px solid var(--gf-gray-100)' : 'none' }}>
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{f.nombre}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 1 }}>fondo {f.fondoId} · clase {f.claseId}</div>
+      {configCafci.fondos.map((f, i) => {
+        const fechaDatos = fechaDatosDeFondo(carteras, f.fondoId);
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: i < configCafci.fondos.length - 1 ? '1px solid var(--gf-gray-100)' : 'none', gap: 8 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600 }}>{f.nombre}</div>
+              <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 1 }}>fondo {f.fondoId} · clase {f.claseId}</div>
+              <div style={{ fontSize: 10.5, marginTop: 2, display: 'flex', alignItems: 'center', gap: 3, color: fechaDatos ? 'var(--gf-emerald)' : 'var(--gf-gray-400)' }}>
+                <Icon name={fechaDatos ? 'check' : 'circle-x'} size={10} color={fechaDatos ? 'var(--gf-emerald)' : 'var(--gf-gray-300)'} />
+                {fechaDatos ? `datos al ${fechaDatos}` : 'sin datos'}
+              </div>
+            </div>
+            <button onClick={() => setPegarJsonFondo(f)} style={btnSec}>
+              Pegar JSON
+            </button>
+            <button onClick={() => onGuardar({ fondos: configCafci.fondos.filter((_, j) => j !== i) })}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, flexShrink: 0 }}>
+              <Icon name="x" size={14} color="var(--gf-gray-400)" />
+            </button>
           </div>
-          <button onClick={() => onGuardar({ fondos: configCafci.fondos.filter((_, j) => j !== i) })}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-            <Icon name="x" size={14} color="var(--gf-gray-400)" />
-          </button>
-        </div>
-      ))}
+        );
+      })}
+      {pegarJsonFondo && (
+        <PegarJsonModal fondo={pegarJsonFondo} onImportar={onImportarManual} onClose={() => setPegarJsonFondo(null)} />
+      )}
       {agregando ? (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 7 }}>
           <input placeholder="Nombre del fondo" value={nombre} onChange={e => setNombre(e.target.value)} style={inp} />
@@ -2477,13 +2560,14 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
 }
 
 // ── Solapa Configuración ──────────────────────────────────────────────────────
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, sincronizandoCafci, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci }: {
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarCafciManual }: {
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
   configIA: ConfigIA;
   fechaCorrida: string;
   flujos: FlujoPatrimonio[];
   configCafci: ConfigCafci;
+  cafciCarteras: CafciCartera[];
   sincronizandoCafci: boolean;
   onEditFijo: (af: ActivoFijo) => void;
   onAddFijo: () => void;
@@ -2496,13 +2580,14 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
   onGuardarConfigCafci: (c: ConfigCafci) => void;
   onImportarFondosCafci: () => void;
   onImportarMappingCafci: () => void;
+  onImportarCafciManual: (fondoId: string, claseId: string, json: string) => Promise<ResultadoImportarCafciManual>;
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
       <AportesRetirosCard flujos={flujos} onAdd={onAddFlujo} onEdit={onEditFlujo} />
-      <CafciFondosCard configCafci={configCafci} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} />
+      <CafciFondosCard configCafci={configCafci} carteras={cafciCarteras} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} onImportarManual={onImportarCafciManual} />
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -2568,12 +2653,13 @@ function motivoDiagHumano(d: DiagnosticoSerie): string {
 }
 
 function OptimizacionTab({
-  posiciones, resultado, calculando, error, onCalcular,
+  posiciones, resultado, calculando, error, avisoGuardado, onCalcular,
 }: {
   posiciones: Array<{ ticker: string; tipo: string; pais_riesgo: string; moneda_origen: string; valorUsd: number }>;
   resultado: ResultadoOptimizacion | null;
   calculando: boolean;
   error: string | null;
+  avisoGuardado: string | null;
   onCalcular: (semanas: number, pesoMax: number) => void;
 }) {
   const [semanas, setSemanas] = useState(104);
@@ -2581,6 +2667,14 @@ function OptimizacionTab({
   const [showTests, setShowTests] = useState(false);
   const [testResults, setTestResults] = useState<ReturnType<typeof correrTests> | null>(null);
   const [showDiag, setShowDiag] = useState(false);
+
+  // F9.102.2 2 — guarda permanente (no andamiaje temporal): si los tests del motor de
+  // min-var (casos analíticos, deterministas, no dependen de datos reales) están en rojo,
+  // la columna Mín. var. no se muestra como si fuera una recomendación válida.
+  const motorMinVarSano = useMemo(
+    () => testMinVarAnalitico().ok && testMinVarConstraintWmax().ok,
+    []
+  );
 
   const aptas = posiciones.filter(p => ['accion', 'cedear', 'cripto'].includes(p.tipo));
   const totalUsd = posiciones.reduce((s, p) => s + p.valorUsd, 0) || 1;
@@ -2713,6 +2807,11 @@ function OptimizacionTab({
 
       {resultado && (
         <>
+          {avisoGuardado && (
+            <div style={{ fontSize: 11.5, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 10, padding: '8px 12px', lineHeight: 1.5 }}>
+              ⚠️ {avisoGuardado}
+            </div>
+          )}
           {/* Heatmap de correlaciones */}
           <Card>
             <div style={{ padding: '12px 14px' }}>
@@ -2757,6 +2856,11 @@ function OptimizacionTab({
           <Card>
             <div style={{ padding: '12px 14px' }}>
               <div style={secH}>Carteras calculadas vs actual</div>
+              {!motorMinVarSano && (
+                <div style={{ fontSize: 11, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '5px 9px', marginTop: 4 }}>
+                  ⚠️ Mín. var.: no confiable — tests del motor en rojo
+                </div>
+              )}
               <div style={{ overflowX: 'auto', marginTop: 6 }}>
                 <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
                   <thead>
@@ -2776,10 +2880,16 @@ function OptimizacionTab({
                           <td style={{ padding: '5px 8px', fontWeight: 700 }}>{row.simbolo}</td>
                           <td style={{ padding: '5px 8px', textAlign: 'right', color: 'var(--color-text-sec)' }}>{(row.pesoActual * 100).toFixed(1)}%</td>
                           <td style={{ padding: '5px 8px', textAlign: 'right' }}>
-                            <span>{(row.pesoOptimo * 100).toFixed(1)}%</span>
-                            <span style={{ fontSize: 10, marginLeft: 4, color: row.delta > 0.01 ? 'var(--gf-emerald)' : row.delta < -0.01 ? 'var(--color-text-sec)' : 'var(--gf-gray-400)' }}>
-                              {row.delta > 0 ? '+' : ''}{(row.delta * 100).toFixed(1)}pp
-                            </span>
+                            {motorMinVarSano ? (
+                              <>
+                                <span>{(row.pesoOptimo * 100).toFixed(1)}%</span>
+                                <span style={{ fontSize: 10, marginLeft: 4, color: row.delta > 0.01 ? 'var(--gf-emerald)' : row.delta < -0.01 ? 'var(--color-text-sec)' : 'var(--gf-gray-400)' }}>
+                                  {row.delta > 0 ? '+' : ''}{(row.delta * 100).toFixed(1)}pp
+                                </span>
+                              </>
+                            ) : (
+                              <span style={{ color: 'var(--gf-gray-300)' }}>—</span>
+                            )}
                           </td>
                           <td style={{ padding: '5px 8px', textAlign: 'right' }}>
                             <span>{(rpPeso * 100).toFixed(1)}%</span>
@@ -2795,7 +2905,7 @@ function OptimizacionTab({
                     <tr style={{ borderTop: '1px solid var(--gf-gray-200)' }}>
                       <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--gf-gray-400)' }}>Volatilidad (sem.)</td>
                       <td />
-                      <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 11, color: 'var(--gf-gray-400)' }}>{(resultado.minVarianza.volatilidad * 100).toFixed(2)}%</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 11, color: 'var(--gf-gray-300)' }}>{motorMinVarSano ? `${(resultado.minVarianza.volatilidad * 100).toFixed(2)}%` : '—'}</td>
                       <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 11, color: 'var(--gf-gray-400)' }}>{(resultado.riskParity.volatilidad * 100).toFixed(2)}%</td>
                     </tr>
                   </tfoot>
@@ -3039,6 +3149,9 @@ export default function Patrimonio() {
   const [optimizacion,          setOptimizacion]          = useState<ResultadoOptimizacion | null>(null);
   const [calculandoOptimizacion, setCalculandoOptimizacion] = useState(false);
   const [errorOptimizacion,     setErrorOptimizacion]     = useState<string | null>(null);
+  // F9.102.1 1b — el resultado se muestra en pantalla antes de persistir; si falla el guardado
+  // (ej. Firestore rechaza el doc), no se pierde el cálculo ya hecho — se avisa aparte.
+  const [avisoGuardadoOptim,    setAvisoGuardadoOptim]    = useState<string | null>(null);
 
   // F9.99 — Modal chat path
   const [modalPromptChat, setModalPromptChat] = useState<{
@@ -3203,6 +3316,21 @@ export default function Patrimonio() {
     } finally {
       setSincronizandoCafci(false);
     }
+  }
+
+  // F9.102.2 4b — ingesta manual de JSON CAFCI: red de seguridad para el bloqueo de
+  // CloudFront. Tira si falla — el modal de "Pegar JSON" muestra el mensaje inline (más
+  // accionable ahí que en un toast lejos del textarea); solo el éxito pasa por el toast
+  // compartido, igual que sincronizarCafci.
+  async function handleImportarCafciManual(fondoId: string, claseId: string, json: string) {
+    const result = await importarCafciManualCallable(fondoId, claseId, json);
+    const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(), cargarMappings()]);
+    setCafciCarteras(carteras);
+    setCafciMappings(mappings);
+    const partes = [`Importado: ${result.especies} especies · datos al ${result.fechaDatos}`];
+    if (result.pendientesMapeo.length > 0) partes.push(`${result.pendientesMapeo.length} sin mapear`);
+    setToastCafci({ texto: partes.join(' · '), error: false });
+    return result;
   }
 
   // Manuales fusionadas con corrida para métricas (lente invertible incluye manuales)
@@ -3589,9 +3717,11 @@ export default function Patrimonio() {
               resultado={optimizacion}
               calculando={calculandoOptimizacion}
               error={errorOptimizacion}
+              avisoGuardado={avisoGuardadoOptim}
               onCalcular={async (semanas, pesoMax) => {
                 setCalculandoOptimizacion(true);
                 setErrorOptimizacion(null);
+                setAvisoGuardadoOptim(null);
                 try {
                   // Derivar símbolos y pesos actuales
                   const sym = todasPosiciones
@@ -3645,8 +3775,18 @@ export default function Patrimonio() {
                   const resultado = calcularOptimizacion(seriesDolar, pesosActuales, semanas, pesoMax, MIN_OBS);
                   resultado.sinSerieSuficiente = [...new Set([...resultado.sinSerieSuficiente, ...excluidos])];
                   resultado.diagnostico = { ...diagnosticoPrevio, ...resultado.diagnostico };
-                  await guardarOptimizacion(resultado);
+
+                  // F9.102.1 1b — mostrar el resultado YA, antes de intentar persistir: un
+                  // error de guardado no debe tirar a la basura un cálculo que tardó varios
+                  // segundos (fetch de series + cómputo).
                   setOptimizacion(resultado);
+                  try {
+                    await guardarOptimizacion(resultado);
+                  } catch (eGuardado) {
+                    setAvisoGuardadoOptim(
+                      `No se pudo guardar, resultado no persistido: ${eGuardado instanceof Error ? eGuardado.message : String(eGuardado)}`
+                    );
+                  }
                 } catch (e) {
                   setErrorOptimizacion(e instanceof Error ? e.message : String(e));
                 } finally {
@@ -3696,6 +3836,7 @@ export default function Patrimonio() {
               fechaCorrida={fechaCorrida}
               flujos={flujos}
               configCafci={configCafci}
+              cafciCarteras={cafciCarteras}
               sincronizandoCafci={sincronizandoCafci}
               onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
               onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
@@ -3708,6 +3849,7 @@ export default function Patrimonio() {
               onGuardarConfigCafci={handleGuardarConfigCafci}
               onImportarFondosCafci={handleImportarFondosCafci}
               onImportarMappingCafci={handleImportarMappingCafci}
+              onImportarCafciManual={handleImportarCafciManual}
             />
           )}
         </>

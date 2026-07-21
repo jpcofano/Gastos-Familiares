@@ -29,6 +29,11 @@ export const app       = initializeApp(firebaseConfig);
 export const auth      = getAuth(app);
 export const storage   = getStorage(app);
 export const functions = getFunctions(app, 'southamerica-east1');
+// F9.102.2 3a — instancia extra para `sincronizarCafci`, que corre en us-central1 (experimento
+// de región: CloudFront bloquea el egress de compute de southamerica-east1, ver F9.102.1/.2).
+// El resto de las Cloud Functions sigue en `functions` (southamerica-east1). Si el experimento
+// no resuelve el 403, esta instancia y la función vuelven a southamerica-east1 y se elimina.
+export const functionsUsCentral = getFunctions(app, 'us-central1');
 
 let _db: ReturnType<typeof initializeFirestore>;
 try {
@@ -46,5 +51,6 @@ if (import.meta.env.DEV) {
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
   connectStorageEmulator(storage, '127.0.0.1', 9199);
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  connectFunctionsEmulator(functionsUsCentral, '127.0.0.1', 5001);
   console.log('[Firebase] conectado al emulador — Auth:9099  Firestore:8080  Storage:9199  Functions:5001');
 }

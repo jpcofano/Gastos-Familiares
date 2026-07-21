@@ -3155,9 +3155,114 @@ function autoTickerMapping(especieRaw: string): string | null {
   return null;
 }
 
+// F9.102.2 4a — parseo de ficha CAFCI extraído a un helper compartido: sincronizarCafci
+// (fetch automático) e importarCafciManual (pegado de JSON) llaman a esta ÚNICA
+// implementación, para que no haya dos parseos que puedan divergir. Mantiene todas las
+// validaciones F9.97.1 (success, data.info.semanal, carteras[], suma de shares) y el
+// auto-mapping/detección LIQUIDEZ/CEDEAR de F9.97.
+type CafciPosicionParseada = {
+  especieRaw: string;
+  ticker: string | null;
+  pesoPct: number;
+  categoria?: string;
+  incompleto?: boolean;
+};
+type ParseoFichaCafci = {
+  nombreFondo: string;
+  nombreClase: string;
+  fechaDatos: string;
+  posiciones: CafciPosicionParseada[];
+  totalPct: number;
+  advertenciaIntegridad: boolean;
+  pendientesMapeo: string[];
+};
+
+async function parsearFichaCafci(
+  json: Record<string, unknown>,
+  fondo: { fondoId: string; claseId: string; nombre: string },
+  fechaFetch: string
+): Promise<ParseoFichaCafci> {
+  // F9.97.1: validar success y estructura confirmada
+  if ((json as any).success !== true) {
+    throw new Error('La API no devolvió success:true');
+  }
+  const infoSemanal = (json as any)?.data?.info?.semanal;
+  if (!infoSemanal) {
+    throw new Error('Falta data.info.semanal en la respuesta de CAFCI');
+  }
+
+  // F9.97.1: carteras[] son las posiciones directamente (no sub-array)
+  const carteras: unknown[] = Array.isArray(infoSemanal.carteras) ? infoSemanal.carteras : [];
+  if (carteras.length === 0) {
+    throw new Error('carteras[] vacío o ausente en data.info.semanal');
+  }
+
+  // F9.97.1: fechaDatos está en infoSemanal, no dentro de cada item
+  const fechaDatos = String(infoSemanal.fechaDatos ?? fechaFetch.slice(0, 10));
+
+  // Nombres desde el modelo de la API
+  const nombreFondo = String((json as any)?.data?.model?.fondo?.nombre ?? fondo.nombre);
+  const nombreClase = String((json as any)?.data?.model?.nombre ?? fondo.nombre);
+
+  const posiciones: CafciPosicionParseada[] = [];
+  const pendientesMapeo: string[] = [];
+  let totalPct = 0;
+
+  for (const item of carteras) {
+    const { especieRaw, pesoPct, incompleto } = parsePosicionCafci(item as Record<string, unknown>);
+    const norm = normalizarEspecie(especieRaw);
+    let ticker: string | null = null;
+    let categoria: string | undefined;
+
+    // Detectar liquidez: FCI, Cta Cte, Caución — no son pendientes de mapeo humano
+    if (/^(fci\b|cta\.? ?cte\.?|cauci[oó]n)/i.test(especieRaw.trim())) {
+      ticker = null;
+      categoria = 'LIQUIDEZ';
+    }
+    // Detectar CEDEARs — excluir de benchmark AR, no son pendientes
+    else if (/^cedear/i.test(especieRaw.trim())) {
+      ticker = null;
+      categoria = 'CEDEAR';
+    }
+    else {
+      const mappingSnap = await db.collection('cafciMapping').doc(norm).get();
+      if (mappingSnap.exists) {
+        const mdata = mappingSnap.data() as { ticker: string | null; categoria?: string };
+        ticker = mdata.ticker;
+        if (mdata.categoria) categoria = mdata.categoria;
+      } else {
+        const auto = autoTickerMapping(especieRaw);
+        ticker = auto;
+        await db.collection('cafciMapping').doc(norm).set({ ticker: auto });
+        if (!auto && !incompleto) {
+          pendientesMapeo.push(especieRaw);
+        }
+      }
+    }
+
+    posiciones.push({
+      especieRaw,
+      ticker,
+      pesoPct,
+      ...(categoria ? { categoria } : {}),
+      ...(incompleto ? { incompleto: true } : {}),
+    });
+    totalPct += pesoPct;
+  }
+
+  // Control de integridad: suma de share debe ser ~100
+  const advertenciaIntegridad = totalPct < 98 || totalPct > 102;
+
+  return { nombreFondo, nombreClase, fechaDatos, posiciones, totalPct, advertenciaIntegridad, pendientesMapeo };
+}
+
 export const sincronizarCafci = onCall(
   {
-    region: 'southamerica-east1',
+    // F9.102.2 3 — sincronizarCafci corre en us-central1; el resto de las CF sigue en
+    // southamerica-east1 vía setGlobalOptions. Hipótesis del experimento (F9.102.1/.2):
+    // CloudFront bloquea por IP/ASN de GCP compute en southamerica-east1, no por fondo ni por
+    // header — ver src/firebase.ts (functionsUsCentral) para la instancia del cliente.
+    region: 'us-central1',
     memory: '512MiB',
     timeoutSeconds: 120,
   },
@@ -3166,7 +3271,6 @@ export const sincronizarCafci = onCall(
     const email = request.auth.token?.email ?? '';
     if (email.toLowerCase() !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
 
-    const db = getFirestore();
     const configSnap = await db.collection('configPatrimonio').doc('cafci').get();
     if (!configSnap.exists) throw new HttpsError('not-found', 'Configuración CAFCI no existe. Agregá al menos un fondo en Configuración.');
 
@@ -3192,107 +3296,36 @@ export const sincronizarCafci = onCall(
           },
         });
         if (!res.ok) {
+          // F9.102.2 4c — mensaje apunta a la feature real (antes prometía "pegado manual"
+          // sin que existiera; importarCafciManual + la UI "Pegar JSON" ya existen).
           const msg = res.status === 403
-            ? `HTTP 403 — CloudFront bloqueó la request. Si persiste, usá pegado manual de JSON.`
+            ? `HTTP 403 — CloudFront bloqueó la request. Usá "Pegar JSON" en Config.`
             : `HTTP ${res.status}`;
           throw new Error(msg);
         }
 
         const json = await res.json() as Record<string, unknown>;
+        const parseo = await parsearFichaCafci(json, fondo, fechaFetch);
 
-        // F9.97.1: validar success y estructura confirmada
-        if ((json as any).success !== true) {
-          throw new Error('La API no devolvió success:true');
-        }
-        const infoSemanal = (json as any)?.data?.info?.semanal;
-        if (!infoSemanal) {
-          throw new Error('Falta data.info.semanal en la respuesta de CAFCI');
+        if (parseo.advertenciaIntegridad) {
+          console.warn(`[sincronizarCafci] ${fondo.nombre}: suma share = ${parseo.totalPct.toFixed(2)} (fuera de [98,102])`);
         }
 
-        // F9.97.1: carteras[] son las posiciones directamente (no sub-array)
-        const carteras: unknown[] = Array.isArray(infoSemanal.carteras) ? infoSemanal.carteras : [];
-        if (carteras.length === 0) {
-          throw new Error('carteras[] vacío o ausente en data.info.semanal');
-        }
-
-        // F9.97.1: fechaDatos está en infoSemanal, no dentro de cada item
-        const fechaDatos = String(infoSemanal.fechaDatos ?? fechaFetch.slice(0, 10));
-
-        // Nombres desde el modelo de la API
-        const nombreFondo = String((json as any)?.data?.model?.fondo?.nombre ?? fondo.nombre);
-        const nombreClase = String((json as any)?.data?.model?.nombre ?? fondo.nombre);
-
-        const posiciones: Array<{
-          especieRaw: string;
-          ticker: string | null;
-          pesoPct: number;
-          categoria?: string;
-          incompleto?: boolean;
-        }> = [];
-        let totalPct = 0;
-
-        for (const item of carteras) {
-          const { especieRaw, pesoPct, incompleto } = parsePosicionCafci(item as Record<string, unknown>);
-          const norm = normalizarEspecie(especieRaw);
-          let ticker: string | null = null;
-          let categoria: string | undefined;
-
-          // Detectar liquidez: FCI, Cta Cte, Caución — no son pendientes de mapeo humano
-          if (/^(fci\b|cta\.? ?cte\.?|cauci[oó]n)/i.test(especieRaw.trim())) {
-            ticker = null;
-            categoria = 'LIQUIDEZ';
-          }
-          // Detectar CEDEARs — excluir de benchmark AR, no son pendientes
-          else if (/^cedear/i.test(especieRaw.trim())) {
-            ticker = null;
-            categoria = 'CEDEAR';
-          }
-          else {
-            const mappingSnap = await db.collection('cafciMapping').doc(norm).get();
-            if (mappingSnap.exists) {
-              const mdata = mappingSnap.data() as { ticker: string | null; categoria?: string };
-              ticker = mdata.ticker;
-              if (mdata.categoria) categoria = mdata.categoria;
-            } else {
-              const auto = autoTickerMapping(especieRaw);
-              ticker = auto;
-              await db.collection('cafciMapping').doc(norm).set({ ticker: auto });
-              if (!auto && !incompleto) {
-                pendientesMapeo.push(especieRaw);
-              }
-            }
-          }
-
-          posiciones.push({
-            especieRaw,
-            ticker,
-            pesoPct,
-            ...(categoria ? { categoria } : {}),
-            ...(incompleto ? { incompleto: true } : {}),
-          });
-          totalPct += pesoPct;
-        }
-
-        // Control de integridad: suma de share debe ser ~100
-        const advertenciaIntegridad = totalPct < 98 || totalPct > 102;
-        if (advertenciaIntegridad) {
-          console.warn(`[sincronizarCafci] ${fondo.nombre}: suma share = ${totalPct.toFixed(2)} (fuera de [98,102])`);
-        }
-
-        const docId = `${fondo.fondoId}_${fechaDatos}`;
+        const docId = `${fondo.fondoId}_${parseo.fechaDatos}`;
         await db.collection('cafciCarteras').doc(docId).set({
           fondoId: fondo.fondoId,
           nombre: fondo.nombre,
-          nombreFondo,
-          nombreClase,
-          fechaDatos,
+          nombreFondo: parseo.nombreFondo,
+          nombreClase: parseo.nombreClase,
+          fechaDatos: parseo.fechaDatos,
           fechaFetch,
-          posiciones,
-          totalPct,
-          ...(advertenciaIntegridad ? { advertenciaIntegridad: true } : {}),
+          posiciones: parseo.posiciones,
+          totalPct: parseo.totalPct,
+          ...(parseo.advertenciaIntegridad ? { advertenciaIntegridad: true } : {}),
         });
         sincronizados++;
-        console.log(`[sincronizarCafci] ${fondo.nombre}: ${posiciones.length} posiciones, total ${totalPct.toFixed(2)}%`);
+        pendientesMapeo.push(...parseo.pendientesMapeo);
+        console.log(`[sincronizarCafci] ${fondo.nombre}: ${parseo.posiciones.length} posiciones, total ${parseo.totalPct.toFixed(2)}%`);
       } catch (err) {
         console.error(`[sincronizarCafci] Error en ${fondo.nombre}:`, err);
         errores.push({ fondo: fondo.nombre, mensaje: err instanceof Error ? err.message : String(err) });
@@ -3303,6 +3336,79 @@ export const sincronizarCafci = onCall(
       sincronizados,
       pendientesMapeo: [...new Set(pendientesMapeo)].slice(0, 20),
       errores: errores.slice(0, 13),
+    };
+  },
+);
+
+// F9.102.2 4a — ingesta manual: red de seguridad ante el bloqueo de CloudFront que no
+// controlamos. Reutiliza parsearFichaCafci (misma implementación que la sync automática) y
+// escribe en cafciCarteras con la misma forma, más origen:'manual' y fechaIngesta.
+export const importarCafciManual = onCall(
+  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 30 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token?.email ?? '';
+    if (email.toLowerCase() !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+
+    const { fondoId, claseId, json: jsonStr } = request.data as { fondoId?: string; claseId?: string; json?: string };
+    if (!fondoId || !claseId || !jsonStr) {
+      throw new HttpsError('invalid-argument', 'Faltan fondoId, claseId o json');
+    }
+
+    const configSnap = await db.collection('configPatrimonio').doc('cafci').get();
+    const config = configSnap.exists
+      ? (configSnap.data() as { fondos?: Array<{ fondoId: string; claseId: string; nombre: string }> })
+      : { fondos: [] };
+    const fondo = (config.fondos ?? []).find(f => f.fondoId === fondoId && f.claseId === claseId);
+    if (!fondo) {
+      throw new HttpsError('not-found', `El fondo ${fondoId}/${claseId} no está en la configuración. Agregalo primero en Config.`);
+    }
+
+    let json: Record<string, unknown>;
+    try {
+      json = JSON.parse(jsonStr);
+    } catch {
+      throw new HttpsError('invalid-argument', 'JSON inválido — pegá el contenido completo de la respuesta de la ficha.');
+    }
+
+    // Best-effort: si el payload trae el id del fondo, verificar que corresponde al pedido.
+    const fondoIdJson = (json as any)?.data?.model?.fondo?.id ?? (json as any)?.data?.model?.fondoId;
+    if (fondoIdJson != null && String(fondoIdJson) !== fondo.fondoId) {
+      throw new HttpsError('invalid-argument', `El JSON pegado corresponde al fondo ${fondoIdJson}, no a ${fondo.fondoId} (${fondo.nombre}). Verificá que copiaste la ficha correcta.`);
+    }
+
+    const fechaFetch = new Date().toISOString();
+    let parseo: ParseoFichaCafci;
+    try {
+      parseo = await parsearFichaCafci(json, fondo, fechaFetch);
+    } catch (err) {
+      throw new HttpsError('invalid-argument', err instanceof Error ? err.message : String(err));
+    }
+
+    if (parseo.advertenciaIntegridad) {
+      console.warn(`[importarCafciManual] ${fondo.nombre}: suma share = ${parseo.totalPct.toFixed(2)} (fuera de [98,102])`);
+    }
+
+    const docId = `${fondo.fondoId}_${parseo.fechaDatos}`;
+    await db.collection('cafciCarteras').doc(docId).set({
+      fondoId: fondo.fondoId,
+      nombre: fondo.nombre,
+      nombreFondo: parseo.nombreFondo,
+      nombreClase: parseo.nombreClase,
+      fechaDatos: parseo.fechaDatos,
+      fechaFetch,
+      posiciones: parseo.posiciones,
+      totalPct: parseo.totalPct,
+      ...(parseo.advertenciaIntegridad ? { advertenciaIntegridad: true } : {}),
+      origen: 'manual',
+      fechaIngesta: fechaFetch,
+    });
+
+    return {
+      ok: true,
+      especies: parseo.posiciones.length,
+      pendientesMapeo: [...new Set(parseo.pendientesMapeo)].slice(0, 20),
+      fechaDatos: parseo.fechaDatos,
     };
   },
 );

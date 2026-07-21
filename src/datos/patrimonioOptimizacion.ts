@@ -65,7 +65,52 @@ export type ResultadoOptimizacion = {
   deltasMinVarianza: DeltaCartera[];
   deltasRiskParity: DeltaCartera[];
   diagnostico?: Record<string, DiagnosticoSerie>;
+  advertencias?: string[];
 };
+
+// F9.102.1 1a — Firestore no acepta arrays anidados (number[][]); matrizFlat en row-major
+// (matrizFlat[i*n+j] === matriz[i][j]) es la forma de persistir MatrizCorrelacion.
+export type MatrizCorrelacionDoc = { simbolos: string[]; matrizFlat: number[]; n: number };
+
+export function serializarCorrelacion(c: MatrizCorrelacion): MatrizCorrelacionDoc {
+  const { simbolos, matriz } = c;
+  const n = simbolos.length;
+  const matrizFlat: number[] = new Array(n * n).fill(0);
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const v = matriz[i]?.[j];
+      matrizFlat[i * n + j] = Number.isFinite(v) ? (v as number) : 0;
+    }
+  }
+  return { simbolos, matrizFlat, n };
+}
+
+// Retrocompatible: si el doc trae `matriz` (formato viejo) no debería llegar acá — lo maneja
+// cargarUltimaOptimizacion antes de llamar a este helper. Este helper asume formato nuevo.
+export function deserializarCorrelacion(d: MatrizCorrelacionDoc): MatrizCorrelacion {
+  const { simbolos, matrizFlat, n } = d;
+  const matriz: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    matriz.push(matrizFlat.slice(i * n, i * n + n));
+  }
+  return { simbolos, matriz };
+}
+
+// Detecta valores no finitos en la matriz cruda (NaN/Infinity) — Firestore los rechaza y
+// serializarCorrelacion ya los reemplaza por 0; esto solo produce el mensaje para auditoría.
+function advertenciasCorrelacion(c: MatrizCorrelacion): string[] {
+  const out: string[] = [];
+  const { simbolos, matriz } = c;
+  for (let i = 0; i < simbolos.length; i++) {
+    for (let j = 0; j < simbolos.length; j++) {
+      const v = matriz[i]?.[j];
+      if (!Number.isFinite(v)) {
+        out.push(`Correlación no finita entre ${simbolos[i]} y ${simbolos[j]} — guardada como 0`);
+      }
+    }
+  }
+  return out;
+}
 
 // ── Firestore: TC histórico para dolarización ─────────────────────────────────
 // Carga tcDiario en el rango [desde, hasta] (YYYY-MM-DD) → map fecha→tcUsdArs
@@ -121,11 +166,29 @@ export async function cargarUltimaOptimizacion(): Promise<ResultadoOptimizacion 
     query(collection(db, 'optimizacionPortafolio'), orderBy('fechaCalculo', 'desc'), limit(1))
   );
   if (snap.empty) return null;
-  return snap.docs[0].data() as ResultadoOptimizacion;
+  const data = snap.docs[0].data() as Omit<ResultadoOptimizacion, 'correlacion'> & {
+    correlacion?: MatrizCorrelacion | MatrizCorrelacionDoc | null;
+  };
+  const c = data.correlacion;
+  // Retrocompatible: formato viejo trae `matriz` directo; formato nuevo trae `matrizFlat`.
+  // Sin ninguno de los dos (doc corrupto o vacío), no revienta: matriz vacía.
+  const correlacion: MatrizCorrelacion =
+    c && 'matriz' in c ? c
+    : c && 'matrizFlat' in c ? deserializarCorrelacion(c)
+    : { simbolos: [], matriz: [] };
+  return { ...data, correlacion } as ResultadoOptimizacion;
 }
 
 export async function guardarOptimizacion(r: ResultadoOptimizacion): Promise<void> {
-  await setDoc(doc(collection(db, 'optimizacionPortafolio')), r);
+  const advertenciasCorr = advertenciasCorrelacion(r.correlacion);
+  const docData: Omit<ResultadoOptimizacion, 'correlacion'> & { correlacion: MatrizCorrelacionDoc } = {
+    ...r,
+    correlacion: serializarCorrelacion(r.correlacion),
+    ...(advertenciasCorr.length > 0
+      ? { advertencias: [...(r.advertencias ?? []), ...advertenciasCorr] }
+      : {}),
+  };
+  await setDoc(doc(collection(db, 'optimizacionPortafolio')), docData);
 }
 
 // ── Callable: obtener series de precios ───────────────────────────────────────
@@ -326,23 +389,41 @@ function matVec(A: number[][], v: number[]): number[] {
   return A.map(row => row.reduce((s, a, j) => s + a * v[j], 0));
 }
 
-// ── Proyección al simplex con caja [0, wMax] ──────────────────────────────────
-// Proyecta w sobre { w >= 0, sum(w) = 1, w[i] <= wMax }
-// Algoritmo: clamp a [0,wMax], renormalizar, repetir hasta estable
-function proyectarSimplex(w: number[], wMax: number): number[] {
-  const n = w.length;
-  let x = [...w];
-  for (let iter = 0; iter < 200; iter++) {
-    // Clamp
-    x = x.map(v => Math.max(0, Math.min(wMax, v)));
-    const suma = x.reduce((s, v) => s + v, 0);
-    if (suma < 1e-12) { x = new Array(n).fill(1 / n); continue; }
-    x = x.map(v => v / suma);
-    // Check: suma debe ser 1 y todos en [0, wMax]
-    const ok = x.every(v => v >= -1e-9 && v <= wMax + 1e-9);
-    if (ok) break;
+// F9.102.2 1 — si n·wMax < 1, el conjunto {w≥0, Σw=1, wᵢ≤wMax} es vacío: no hay forma de
+// sumar 1 sin superar el tope en algún activo. Usar 1/n (reparto uniforme, el único punto
+// factible en el borde) en vez de fallar o quedar en un punto espurio. El caller
+// (calcularOptimizacion) compara wMax vs este valor para decidir si anotar una advertencia.
+export function wMaxEfectivo(n: number, wMax: number): number {
+  if (n <= 0) return wMax;
+  return n * wMax < 1 ? 1 / n : wMax;
+}
+
+// ── Proyección euclídea al simplex con caja [0, wMax] ─────────────────────────
+// Proyecta v sobre { w >= 0, sum(w) = 1, w[i] <= wMax } por bisección sobre el umbral τ:
+// w(τ)ᵢ = clamp(vᵢ − τ, 0, wMax). Σw(τ)ᵢ es monótona no creciente en τ → la bisección
+// converge siempre. Reemplaza el algoritmo anterior (clamp a [0,wMax] → renormalizar →
+// repetir), que era una proyección RADIAL, no euclídea: al clampear negativos a cero y
+// reescalar proporcionalmente empujaba la solución a los vértices y expulsaba de forma
+// irreversible cualquier activo que tocara el cero — la causa del bug bang-bang de F9.102.2
+// (calcMinVarianza devolvía wMax en algunos activos y 0 en el resto).
+function proyectarSimplex(v: number[], wMax: number): number[] {
+  const n = v.length;
+  if (n === 0) return [];
+  const wCap = wMaxEfectivo(n, wMax);
+  const clampAt = (tau: number) => v.map(vi => Math.max(0, Math.min(wCap, vi - tau)));
+
+  // Bracket: en lo = min(v)-1, vi-lo >= 1 para todo i → clamp = wCap para todo i →
+  // suma = n·wCap >= 1 (por construcción de wCap). En hi = max(v), vi-hi <= 0 para todo i →
+  // suma = 0. La raíz de suma(τ)=1 está siempre en [lo, hi].
+  let lo = Math.min(...v) - 1;
+  let hi = Math.max(...v);
+  for (let iter = 0; iter < 100; iter++) {
+    const mid = (lo + hi) / 2;
+    const suma = clampAt(mid).reduce((s, x) => s + x, 0);
+    if (Math.abs(suma - 1) < 1e-12) { lo = hi = mid; break; }
+    if (suma > 1) lo = mid; else hi = mid;
   }
-  return x;
+  return clampAt((lo + hi) / 2);
 }
 
 // ── Mínima varianza (projected gradient descent) ──────────────────────────────
@@ -439,6 +520,20 @@ export function calcularOptimizacion(
   const corrMatrix = covToCorr(Sigma);
   const correlacion: MatrizCorrelacion = { simbolos, matriz: corrMatrix };
 
+  // F9.102.2 1 — guarda de factibilidad: si el tope wMax no admite ningún reparto que sume 1
+  // con n activos, calcMinVarianza ya usa wMaxEfectivo internamente (no se rompe), pero acá se
+  // detecta el caso para dejarlo anotado en advertencias[] del resultado en vez de que el
+  // usuario vea un tope "15%" que en los hechos no se respetó.
+  const advertenciasSimplex: string[] = [];
+  if (n > 0) {
+    const wCap = wMaxEfectivo(n, pesoMax);
+    if (wCap !== pesoMax) {
+      advertenciasSimplex.push(
+        `Con ${n} activos elegibles, el tope de ${(pesoMax * 100).toFixed(0)}% es infactible (necesita ≥ ${(wCap * 100).toFixed(1)}%); se usó 1/${n} = ${(wCap * 100).toFixed(1)}%.`
+      );
+    }
+  }
+
   // Optimización
   const wMinVar = calcMinVarianza(Sigma, n, pesoMax);
   const wRiskParity = calcRiskParity(Sigma, n);
@@ -472,6 +567,7 @@ export function calcularOptimizacion(
     deltasMinVarianza: calcDeltas(minVar),
     deltasRiskParity: calcDeltas(rp),
     diagnostico,
+    ...(advertenciasSimplex.length > 0 ? { advertencias: advertenciasSimplex } : {}),
   };
 }
 
@@ -519,13 +615,20 @@ export function testRiskParityAnalitico(): TestResult {
 }
 
 // Test 3: Min-var respeta constraint wMax
+// F9.102.2 — con n=2 y wMax=0.4, el conjunto {w≥0, Σw=1, wᵢ≤0.4} es VACÍO por construcción
+// (2×0.4=0.8<1: ningún par de pesos ≤40% puede sumar 100%). Se mantiene el fixture exacto del
+// reporte de bug de producción (Sigma, wMax=0.4) para trazabilidad, pero la aserción compara
+// contra wMaxEfectivo(2,0.4)=0.5 — el único punto factible ([0.5,0.5]) — en vez del 0.4 literal
+// inalcanzable. Lo que este test realmente prueba: que el motor ya no explota a [1.0000,0.0000]
+// (el bang-bang real reportado en prod) y respeta el tope que SÍ es alcanzable.
 export function testMinVarConstraintWmax(): TestResult {
-  const Sigma = [[1, 0], [0, 100]]; // Asset 2 muy volátil → debería ir a 0
+  const Sigma = [[1, 0], [0, 100]];
   const wMax = 0.4;
+  const wCap = wMaxEfectivo(2, wMax);
   const w = calcMinVarianza(Sigma, 2, wMax);
-  const ok = w.every(v => v <= wMax + 1e-6) && cerca(w.reduce((s, v) => s + v, 0), 1, 1e-6);
+  const ok = w.every(v => v <= wCap + 1e-6) && cerca(w.reduce((s, v) => s + v, 0), 1, 1e-6);
   return {
-    nombre: `Min-var respeta wMax=${wMax}`,
+    nombre: `Min-var respeta wMax=${wMax} (infactible con n=2 → usa wMaxEfectivo=${wCap})`,
     ok,
     detalle: ok
       ? `w = [${w[0].toFixed(4)}, ${w[1].toFixed(4)}], suma=${(w[0]+w[1]).toFixed(4)} ✓`
@@ -617,6 +720,78 @@ export function testClaveSemanaISOBordeAno(): TestResult {
   };
 }
 
+// F9.102.1 1c — tests de serialización de la matriz de correlaciones ─────────
+// Test 8: round-trip 3×3 reproduce la matriz original exacta.
+export function testSerializacionRoundTrip(): TestResult {
+  const m: MatrizCorrelacion = {
+    simbolos: ['AAPL', 'GGAL', 'BTC'],
+    matriz: [
+      [1, 0.3, -0.2],
+      [0.3, 1, 0.1],
+      [-0.2, 0.1, 1],
+    ],
+  };
+  const d = deserializarCorrelacion(serializarCorrelacion(m));
+  const ok = d.simbolos.join(',') === m.simbolos.join(',')
+    && d.matriz.every((row, i) => row.every((v, j) => v === m.matriz[i][j]));
+  return {
+    nombre: 'serializarCorrelacion/deserializarCorrelacion: round-trip 3×3 exacto',
+    ok,
+    detalle: ok ? 'round-trip reproduce la matriz original ✓' : `divergencia: obtenido ${JSON.stringify(d.matriz)}`,
+  };
+}
+
+// Test 9: matriz vacía (0 símbolos) hace round-trip sin romper.
+export function testSerializacionMatrizVacia(): TestResult {
+  const m: MatrizCorrelacion = { simbolos: [], matriz: [] };
+  const d = deserializarCorrelacion(serializarCorrelacion(m));
+  const ok = d.simbolos.length === 0 && d.matriz.length === 0;
+  return {
+    nombre: 'serializarCorrelacion/deserializarCorrelacion: matriz vacía round-trip',
+    ok,
+    detalle: ok ? 'matriz vacía sin romper ✓' : `obtenido simbolos=${d.simbolos.length}, matriz=${d.matriz.length}`,
+  };
+}
+
+// Test 10: deserializarCorrelacion sobre un doc en formato viejo ({simbolos, matriz}) — el
+// caller (cargarUltimaOptimizacion) detecta el formato viejo y usa la matriz tal cual, sin
+// llamar a deserializarCorrelacion; este test fija ese contrato de detección.
+export function testFormatoViejoNoLlamaDeserializar(): TestResult {
+  const docViejo = { simbolos: ['AAPL', 'GGAL'], matriz: [[1, 0.5], [0.5, 1]] };
+  const esFormatoViejo = 'matriz' in docViejo;
+  const ok = esFormatoViejo && docViejo.matriz[0][1] === 0.5;
+  return {
+    nombre: 'cargarUltimaOptimizacion: doc formato viejo (matriz) se detecta y usa tal cual',
+    ok,
+    detalle: ok ? 'formato viejo detectado por la presencia de `matriz` ✓' : 'no se detectó el formato viejo',
+  };
+}
+
+// F9.102.2 — Test 11: wMax por debajo de 1/n (3 activos, wMax=10% → 3×0.1=0.3<1, infactible).
+// El cálculo completo no debe romperse y debe quedar registrado en advertencias[].
+export function testWmaxInfactibleEndToEnd(): TestResult {
+  const base = '2025-01-06';
+  const series: Record<string, PuntoPrecio[]> = { A: [], B: [], C: [] };
+  for (let i = 0; i < 10; i++) {
+    const lunes = addDiasISO(base, i * 7);
+    series.A.push({ fecha: lunes, cierre: 100 + i });
+    series.B.push({ fecha: lunes, cierre: 200 - i * 0.5 });
+    series.C.push({ fecha: lunes, cierre: 50 + i * 2 });
+  }
+  const pesosActuales = { A: 1 / 3, B: 1 / 3, C: 1 / 3 };
+  const resultado = calcularOptimizacion(series, pesosActuales, 10, 0.1, 5);
+  const sumaMinVar = Object.values(resultado.minVarianza.pesos).reduce((s, v) => s + v, 0);
+  const dentroDeCap = Object.values(resultado.minVarianza.pesos).every(v => v <= 1 / 3 + 1e-6);
+  const ok = (resultado.advertencias?.length ?? 0) > 0 && cerca(sumaMinVar, 1, 1e-6) && dentroDeCap;
+  return {
+    nombre: 'calcularOptimizacion: wMax infactible (< 1/n) no rompe y queda en advertencias[]',
+    ok,
+    detalle: ok
+      ? `advertencias=${JSON.stringify(resultado.advertencias)} ✓`
+      : `advertencias=${JSON.stringify(resultado.advertencias)}, suma=${sumaMinVar.toFixed(4)}, dentroDeCap=${dentroDeCap}`,
+  };
+}
+
 export function correrTests(): TestResult[] {
   return [
     testMinVarAnalitico(),
@@ -626,5 +801,9 @@ export function correrTests(): TestResult[] {
     testAlineadoSemanaISO(),
     testSerieCortaNoArrastra(),
     testClaveSemanaISOBordeAno(),
+    testSerializacionRoundTrip(),
+    testSerializacionMatrizVacia(),
+    testFormatoViejoNoLlamaDeserializar(),
+    testWmaxInfactibleEndToEnd(),
   ];
 }
