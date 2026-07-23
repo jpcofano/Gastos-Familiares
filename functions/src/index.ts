@@ -1918,6 +1918,141 @@ export const actualizarTCManual = onCall(
   },
 );
 
+function addDiasISO(fecha: string, dias: number): string {
+  const [y, m, d] = fecha.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + dias);
+  return dt.toISOString().slice(0, 10);
+}
+
+// F9.103 — backfill de tcDiario desde ArgentinaDatos. Destraba los activos `.BA` en Optim
+// (dolarizarSerie exige ≥40 semanas de TC y hoy no hay con qué — el legacy nunca guardó serie
+// diaria, usaba un valor manual de respaldo `TC_MEP_REFERENCIA`; no hay nada que migrar, se
+// trae de afuera). Fuente: ArgentinaDatos `/v1/cotizaciones/dolares/bolsa`, mismo upstream que
+// el cron F9.30 (dolarapi.com, casa `bolsa`, campo `venta`) pero con historial desde 2018.
+//
+// SHIFT +1 día — crítico, NO es un mapeo 1:1 fecha→fecha. Auditado día por día contra
+// producción (29/12/2025→hoy): comparar tcDiario[fecha] contra api[fecha] tal cual da solo
+// 72/199 coincidencias con diffs de hasta 2%; comparar contra api[fecha − 1 día] da 198/200
+// exactas (los 2 residuales son ruido puntual de la fuente en fechas no sistemáticas, no un
+// patrón). Motivo: el cron F9.30 corre a las 09:00 ART, antes de que abra el mercado de bonos
+// que arma el dólar bolsa/MEP — a esa hora dolarapi.com todavía devuelve el cierre de AYER,
+// pero lo guarda bajo el rótulo de HOY. ArgentinaDatos rotula cada cotización con la fecha
+// real de mercado. Mismo dato, rótulo corrido un día. Sin este shift, empalmar el histórico
+// metería un escalón artificial de hasta ~2% en las 75+ semanas nuevas — volatilidad falsa
+// en todas las series AR de esas semanas.
+// Fin de semana y feriados NO necesitan forward-fill propio: la fuente ya viene con el
+// calendario completo (fin de semana y feriados repiten el último cierre hábil), salvo Año
+// Nuevo (1 caso/año, valor propio distinto) — impacto acotado, mismo orden que el ruido ya
+// tolerado en los 2 residuales.
+export const backfillTcDiario = onCall(
+  { region: 'southamerica-east1', timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const body = (request.data ?? {}) as {
+      desde?: unknown; hasta?: unknown; pisarExistentes?: unknown; soloValidar?: unknown;
+    };
+    const desde = typeof body.desde === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.desde) ? body.desde : '2024-07-01';
+    const hasta = typeof body.hasta === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.hasta) ? body.hasta : hoyArgentinaISO();
+    const pisarExistentes = body.pisarExistentes === true;
+    const soloValidar = body.soloValidar === true;
+    if (desde > hasta) throw new HttpsError('invalid-argument', 'desde debe ser <= hasta');
+
+    // 1. Un solo GET a la serie completa (no pegarle al endpoint por día).
+    let apiMap: Map<string, number>;
+    try {
+      const res = await fetch('https://api.argentinadatos.com/v1/cotizaciones/dolares/bolsa');
+      if (!res.ok) throw new Error(`ArgentinaDatos respondió HTTP ${res.status}`);
+      const data = (await res.json()) as unknown;
+      if (!Array.isArray(data)) throw new Error('la respuesta no es un array');
+      const serie = (data as Array<Record<string, unknown>>)
+        .map(d => ({ fecha: String(d.fecha), venta: Number(d.venta) }))
+        .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.fecha) && Number.isFinite(d.venta) && d.venta > 0);
+      if (serie.length === 0) throw new Error('serie vacía tras parsear');
+      apiMap = new Map(serie.map(d => [d.fecha, d.venta]));
+    } catch (e) {
+      // Mismo criterio que el cron F9.30: mejor un hueco que basura, no se escribe nada.
+      console.error('[backfillTcDiario] fetch/parseo falló, no se escribe nada:', e);
+      throw new HttpsError('unavailable', `No se pudo obtener la serie de ArgentinaDatos: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // 2. Validación de solapamiento (corre siempre, incluso si soloValidar=false): compara
+    // TODO el tcDiario propio existente contra api[fecha − 1] con el shift ya aplicado.
+    const propioSnap = await db.collection('tcDiario').get();
+    const propioMap = new Map<string, number>();
+    propioSnap.forEach(doc => propioMap.set(doc.id, doc.data().tcUsdArs as number));
+
+    const difieren: Array<{ fecha: string; propio: number; api: number; deltaAbs: number; deltaPct: number }> = [];
+    let coinciden = 0;
+    const soloPropioSinApi: string[] = [];
+    for (const [fecha, tcPropio] of propioMap) {
+      const apiVal = apiMap.get(addDiasISO(fecha, -1));
+      if (apiVal == null) { soloPropioSinApi.push(fecha); continue; }
+      const deltaAbs = Math.abs(tcPropio - apiVal);
+      const deltaPct = (deltaAbs / apiVal) * 100;
+      // Tolerancia > 0 porque la fuente puede revisar un valor puntual con ruido menor
+      // (auditado: 2/200 casos, <1% cada uno, no sistemático) — ver comentario del shift arriba.
+      if (deltaPct < 1) coinciden++;
+      else difieren.push({ fecha, propio: tcPropio, api: apiVal, deltaAbs, deltaPct });
+    }
+    const solapamiento = {
+      coinciden,
+      totalComparados: coinciden + difieren.length,
+      difieren: difieren.sort((a, b) => a.fecha.localeCompare(b.fecha)),
+      soloPropioSinApi: soloPropioSinApi.sort(),
+    };
+
+    // 3. Plan de escritura: [desde, hasta] sin doc propio (salvo pisarExistentes).
+    const aEscribir: Array<{ fecha: string; tcUsdArs: number }> = [];
+    let saltadosPorExistir = 0;
+    const sinDatoEnApi: string[] = [];
+    for (let f = desde; f <= hasta; f = addDiasISO(f, 1)) {
+      if (propioMap.has(f) && !pisarExistentes) { saltadosPorExistir++; continue; }
+      const apiVal = apiMap.get(addDiasISO(f, -1));
+      if (apiVal == null) { sinDatoEnApi.push(f); continue; }
+      aEscribir.push({ fecha: f, tcUsdArs: apiVal });
+    }
+
+    if (soloValidar) {
+      return {
+        soloValidar: true,
+        solapamiento,
+        planEscritura: { aEscribir: aEscribir.length, saltadosPorExistir, sinDatoEnApi },
+      };
+    }
+
+    // 4. Escribir en tandas de 400 (límite Firestore 500, margen).
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < aEscribir.length; i += BATCH_SIZE) {
+      const batch = db.batch();
+      for (const { fecha, tcUsdArs } of aEscribir.slice(i, i + BATCH_SIZE)) {
+        batch.set(
+          db.collection('tcDiario').doc(fecha),
+          { tcUsdArs, actualizadoEn: FieldValue.serverTimestamp(), origen: 'argentinadatos-bolsa-backfill' },
+          { merge: true },
+        );
+      }
+      await batch.commit();
+    }
+
+    console.log(`[backfillTcDiario] ${aEscribir.length} escritos, ${saltadosPorExistir} saltados (ya existían), ${sinDatoEnApi.length} sin dato en API (por ${email})`);
+    return {
+      soloValidar: false,
+      solapamiento,
+      escritos: aEscribir.length,
+      saltadosPorExistir,
+      sinDatoEnApi,
+    };
+  },
+);
+
 // F9.36 — "Mis datos": cualquier miembro autenticado edita SU PROPIO nombre
 // visible (no admin-only, a diferencia de actualizarMediosPago — un dependiente
 // edita lo suyo). Email no es editable acá: es la identidad de login, atada a

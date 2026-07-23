@@ -427,6 +427,49 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `cd functions && npm run build` → `firebase deploy --only functions,hosting` → probar
   Sincronizar → `firebase functions:log --only sincronizarCafci` para confirmar 200 o 403 CON
   log de invocación (un `internal` sin log no es una lectura válida del experimento).
+- F9.103 — Backfill de `tcDiario` desde ArgentinaDatos (destraba los `.BA` en Optim: `dolarizarSerie`
+  exige ≥40 semanas de TC y el legacy nunca guardó serie diaria — usaba `TC_MEP_REFERENCIA` manual,
+  no hay nada que migrar). Ver `docs/prompts/F9.103-backfill-tcdiario.md`.
+  **Hallazgo de auditoría (bloqueante, resuelto antes de escribir código):** comparar `tcDiario`
+  propio contra ArgentinaDatos fecha-a-fecha en el tramo de solapamiento (29/12/2025→hoy) dio solo
+  72/199 coincidencias con diffs de hasta 2% — la alarma que el prompt pedía no ignorar. Investigado
+  con scripts read-only (service account, sin escribir nada) hasta encontrar la causa: **shift
+  sistemático de 1 día**, no ruido. El cron F9.30 corre a las 09:00 ART, antes de que abra el
+  mercado de bonos que arma el dólar bolsa/MEP — a esa hora `dolarapi.com` todavía devuelve el
+  cierre de AYER pero lo guarda bajo el rótulo de HOY; ArgentinaDatos rotula cada cotización con la
+  fecha real de mercado. Comparando `tcDiario[fecha]` contra `api[fecha − 1 día]` el match sube a
+  198/200 exactas (los 2 residuales: días no sistemáticos — ni lunes ni post-feriado — con delta
+  <1%, ruido puntual de la fuente). Fin de semana y feriados AR no necesitan forward-fill propio:
+  la fuente ya viene con el calendario completo (repite el último cierre hábil), salvo Año Nuevo (1
+  caso/año, impacto acotado). Simulación (merge propio ∪ backfill, sin escribir) confirmó **cero
+  huecos internos y cero semanas ISO rotas** tanto en la ventana de 40 semanas (108 semanas
+  cubiertas, 2024-W27→2026-W30) como en la de 104 (157 semanas, 2023-W30→2026-W30) — el hueco
+  10-13/04/2026 y el de 28/06/2026 quedan tapados con el shift aplicado.
+  **1. CF `backfillTcDiario`** (`functions/src/index.ts`, admin-only, mismo nivel que
+  `actualizarTCManual`): `onCall({desde?, hasta?, pisarExistentes?, soloValidar?})`. Un solo GET a
+  `api.argentinadatos.com/v1/cotizaciones/dolares/bolsa` (serie completa, filtrada en memoria — no
+  pega por día); si el fetch falla no escribe nada (mismo criterio que el cron F9.30). Escribe
+  `tcDiario/{fecha} = api[fecha − 1 día].venta` con `origen:'argentinadatos-bolsa-backfill'`,
+  batches de 400. `pisarExistentes:false` (default) nunca toca un doc ya existente — protege el
+  cron en el borde de hoy/mañana sin condición especial, es la misma regla de "no pisar" aplicada
+  uniformemente. La validación de solapamiento corre SIEMPRE (con o sin `soloValidar`) y devuelve
+  cuántos coinciden/difieren contra la tolerancia de <1% establecida en la auditoría.
+  **2. Cliente** (`src/datos/tcDiario.ts`): `backfillTcDiario()` wrapper del callable;
+  `cargarEstadoTcDiario()` (fechaMin/fechaMax/cantidadDias/semanasISO — reusa `claveSemanaISO` de
+  `patrimonioOptimizacion.ts`, una sola fuente de verdad — /huecos) para la card de estado.
+  `TCDiarioItem.origen` suma `'argentinadatos-bolsa-backfill'`.
+  **3. UI** (`Patrimonio.tsx`, `TipoCambioCard` en la solapa Config): estado de cobertura + botones
+  "Validar" (soloValidar) y "Completar histórico" (defaults del backend), reporte de solapamiento y
+  plan/resultado de escritura inline, mismo patrón visual que `CafciFondosCard`.
+  **Sin cambios de Rules** — `tcDiario` ya era `write:false` para cliente (solo Admin SDK), igual
+  que F9.30/F9.39. **Fuera de alcance:** no se tocó el cron F9.30 ni el umbral de 40 semanas de
+  `dolarizarSerie`. `tsc --noEmit` (cliente y `functions/`): 41 errores pre-existentes en cliente
+  (mismo baseline de F9.102.2), 0 nuevos; 0 en functions. **Pendiente de cierre manual (no deployo
+  yo):** `cd functions && npm run build` → `firebase deploy --only functions,hosting` → correr
+  "Validar" desde la UI y pegar el reporte de solapamiento real (confirma además si
+  `api.argentinadatos.com` sale sin bloqueo desde la Cloud Function, algo que no se puede probar
+  sin el deploy) → si el solapamiento cierra, correr "Completar histórico" → Optim → Recalcular y
+  confirmar cuántos `.BA` entran.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

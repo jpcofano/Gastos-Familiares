@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { cargarTCReciente } from '../datos/tcDiario';
+import { cargarTCReciente, cargarEstadoTcDiario, backfillTcDiario, type EstadoTcDiario, type ResultadoBackfillTc } from '../datos/tcDiario';
 import { TC_DEFAULT } from '../datos/money';
 import { Card, MerchantLogo } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
@@ -2560,6 +2560,132 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
 }
 
 // ── Solapa Configuración ──────────────────────────────────────────────────────
+// F9.103 — card "Tipo de cambio": estado de cobertura de tcDiario + backfill desde
+// ArgentinaDatos. Mismo patrón que CafciFondosCard (fuente externa, botón de sync + reporte).
+function TipoCambioCard() {
+  const [estado, setEstado] = useState<EstadoTcDiario | null>(null);
+  const [cargandoEstado, setCargandoEstado] = useState(true);
+  const [validando, setValidando] = useState(false);
+  const [completando, setCompletando] = useState(false);
+  const [reporte, setReporte] = useState<ResultadoBackfillTc | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function recargarEstado() {
+    setCargandoEstado(true);
+    try {
+      setEstado(await cargarEstadoTcDiario());
+    } finally {
+      setCargandoEstado(false);
+    }
+  }
+
+  useEffect(() => { recargarEstado(); }, []);
+
+  async function onValidar() {
+    setValidando(true); setError(null);
+    try {
+      setReporte(await backfillTcDiario({ soloValidar: true }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setValidando(false);
+    }
+  }
+
+  async function onCompletar() {
+    setCompletando(true); setError(null);
+    try {
+      setReporte(await backfillTcDiario({}));
+      await recargarEstado();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCompletando(false);
+    }
+  }
+
+  const btnSec: React.CSSProperties = {
+    padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)',
+    cursor: 'pointer', background: 'transparent', color: 'var(--color-text-sec)',
+    fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-base)',
+  };
+  const btnPri: React.CSSProperties = {
+    padding: '7px 12px', borderRadius: 9, border: 'none',
+    cursor: 'pointer', background: 'var(--color-accent)', color: '#fff',
+    fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-base)',
+  };
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>Tipo de cambio</div>
+      {cargandoEstado ? (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginTop: 6 }}>Cargando…</div>
+      ) : estado && estado.fechaMin && estado.fechaMax ? (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.6 }}>
+          {estado.fechaMin} → {estado.fechaMax} · {estado.cantidadDias} días · {estado.semanasISO} semanas ISO
+          {estado.huecos.length > 0 && (
+            <span style={{ color: 'var(--gf-expense)', fontWeight: 700 }}>
+              {' '}· {estado.huecos.length} hueco{estado.huecos.length !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+      ) : (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginTop: 6 }}>Sin datos en tcDiario.</div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button onClick={onValidar} disabled={validando || completando} style={btnSec}>
+          {validando ? 'Validando…' : 'Validar'}
+        </button>
+        <button onClick={onCompletar} disabled={validando || completando} style={btnPri}>
+          {completando ? 'Completando…' : 'Completar histórico'}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-expense)', marginTop: 10 }}>{error}</div>
+      )}
+
+      {reporte && (
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 9, background: 'var(--gf-gray-50)', fontSize: 11, lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 700 }}>
+            Solapamiento: {reporte.solapamiento.coinciden}/{reporte.solapamiento.totalComparados} coinciden
+          </div>
+          {reporte.solapamiento.difieren.length > 0 && (
+            <div style={{ color: 'var(--gf-expense)', marginTop: 4 }}>
+              {reporte.solapamiento.difieren.length} difieren:
+              {reporte.solapamiento.difieren.slice(0, 10).map(d => (
+                <div key={d.fecha}>{d.fecha}: propio {d.propio} vs API {d.api} (Δ{d.deltaPct.toFixed(2)}%)</div>
+              ))}
+            </div>
+          )}
+          {reporte.solapamiento.soloPropioSinApi.length > 0 && (
+            <div style={{ marginTop: 4 }}>Sin dato en API: {reporte.solapamiento.soloPropioSinApi.join(', ')}</div>
+          )}
+          {reporte.soloValidar ? (
+            reporte.planEscritura && (
+              <div style={{ marginTop: 6 }}>
+                Plan: {reporte.planEscritura.aEscribir} a escribir · {reporte.planEscritura.saltadosPorExistir} ya existen
+                {reporte.planEscritura.sinDatoEnApi.length > 0 && (
+                  <div>Sin dato en API para el rango: {reporte.planEscritura.sinDatoEnApi.join(', ')}</div>
+                )}
+              </div>
+            )
+          ) : (
+            <div style={{ marginTop: 6 }}>
+              Escritos: {reporte.escritos} · Saltados (ya existían): {reporte.saltadosPorExistir}
+              {reporte.sinDatoEnApi && reporte.sinDatoEnApi.length > 0 && (
+                <div>Sin dato en API: {reporte.sinDatoEnApi.join(', ')}</div>
+              )}
+            </div>
+          )}
+          <button onClick={() => setReporte(null)} style={{ ...btnSec, marginTop: 8 }}>Cerrar</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarCafciManual }: {
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
@@ -2588,6 +2714,7 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
       <AportesRetirosCard flujos={flujos} onAdd={onAddFlujo} onEdit={onEditFlujo} />
       <CafciFondosCard configCafci={configCafci} carteras={cafciCarteras} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} onImportarManual={onImportarCafciManual} />
+      <TipoCambioCard />
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
