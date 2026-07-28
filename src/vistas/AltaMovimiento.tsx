@@ -70,6 +70,10 @@ interface Props {
   // F6.9.11 — ruteo a callable server-side (atómico, owner-scoped) en vez de crearMovimiento client-side
   onGuardarPayload?: (payload: Parameters<typeof crearMovimiento>[0]) => Promise<{ ok: boolean; error?: Error }>;
   badgePropuesta?: ReactNode;
+  // F9.106 — alta silenciosa (auto-match por destino con confianza ≥ UMBRAL_AUTO): guarda sin
+  // mostrar el form ni pedir tap. Si falla, avisa al padre para que ofrezca el camino manual.
+  autoConfirmar?: boolean;
+  onErrorAuto?: (mensaje: string) => void;
 }
 
 function hoyISO(): string {
@@ -77,7 +81,7 @@ function hoyISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload, onGuardarPayload, badgePropuesta }: Props) {
+export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancelar, preload, onGuardarPayload, badgePropuesta, autoConfirmar, onErrorAuto }: Props) {
   const esAdmin = miembro.rol === 'admin';
   const { clasificar, cargando: cargandoDict } = useDiccionario();
 
@@ -183,8 +187,9 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
     }
   }, [onGuardado, onGuardarPayload]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // F9.106 — extraído de handleSubmit para que el modo silencioso (autoConfirmar) pueda
+  // disparar el mismo camino de validación/payload/guardado sin pasar por el <form> visible.
+  const construirYGuardar = useCallback(async () => {
     setErrorMsg(null);
     setDupWarning(false);
 
@@ -244,7 +249,30 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
     }
 
     await ejecutarGuardar(payload);
+  }, [categoria, subcategoria, monto, fecha, tipo, descripcion, moneda, tcUsdArs, etiqueta, banco,
+      persona, memberId, incluirResumenMes, preload, ejecutarGuardar]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void construirYGuardar();
   };
+
+  // F9.106 — modo silencioso: una vez resueltos catálogos + TC (si aplica USD), dispara el
+  // mismo guardado sin mostrar el form. Guard por ref: solo una vez por montaje.
+  const autoConfirmarRef = useRef(false);
+  useEffect(() => {
+    if (!autoConfirmar || autoConfirmarRef.current) return;
+    if (cargandoCatalogos) return;
+    if (moneda === 'USD' && tcCargando) return;
+    autoConfirmarRef.current = true;
+    void construirYGuardar();
+  }, [autoConfirmar, cargandoCatalogos, moneda, tcCargando, construirYGuardar]);
+
+  useEffect(() => {
+    if (autoConfirmar && errorMsg) onErrorAuto?.(errorMsg);
+  }, [autoConfirmar, errorMsg, onErrorAuto]);
+
+  if (autoConfirmar) return null;
 
   if (cargandoCatalogos) {
     return (

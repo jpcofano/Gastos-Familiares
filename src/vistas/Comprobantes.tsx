@@ -42,6 +42,22 @@ function formatMesCorto(mes: string): string {
   return `${MESES_LARGO[Number(m) - 1]} ${y}`;
 }
 
+// F9.106 — mes editable en la card de confirmación: rango [mesPago-1 .. mesPago+3], mismo
+// ancho que la ventana de reconciliación server-side.
+function sumarMeses(mes: string, delta: number): string {
+  const [y, m] = mes.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Mueve una fecha ISO al mes destino, preservando el día (clamped a los días del mes destino).
+function ajustarFechaAlMes(fechaISO: string, mesDestino: string): string {
+  const dia = Number(fechaISO.slice(8, 10)) || 1;
+  const [y, m] = mesDestino.split('-').map(Number);
+  const diaClamp = Math.min(dia, new Date(y, m, 0).getDate());
+  return `${mesDestino}-${String(diaClamp).padStart(2, '0')}`;
+}
+
 const ESTADO_COMP_TONE = { subido: 'info', extraido: 'warning', vinculado: 'success', error: 'danger' } as const;
 const ESTADO_ENTR_TONE = { pendiente: 'neutral', ruteado: 'success', ambiguo: 'warning', error: 'danger' } as const;
 
@@ -58,14 +74,27 @@ function BadgeEntrante({ estado }: { estado: string }) {
 // F6.9.8 — etiqueta persistente de la razón del match en el card ya resuelto.
 // Lee propuestaMatch (sobrevive al estado vinculado: confirmarRama1/cargarMovimientoDesdeComprobante
 // solo tocan `estado`) para conservar el "por qué" después de resolver.
-function RazonVinculado({ pm }: { pm: Comprobante['propuestaMatch'] }) {
+function RazonVinculado({ pm, d, items }: { pm: Comprobante['propuestaMatch']; d?: DatosExtraidos; items: ExpectedItem[] }) {
   if (!pm) return null;
   let texto: string;
   let tone: 'info' | 'success' | 'neutral';
   switch (pm.rama) {
     case 0: texto = 'Ya cargado'; tone = 'neutral'; break;
     case 1: texto = pm.origenReconciliacion ? 'Pagó una factura' : 'Vinculado a un movimiento'; tone = 'info'; break;
-    case 2: texto = pm.origenSuelto ? 'Saldó un gasto suelto' : (pm.esAdicional ? 'Pago adicional' : 'Cumplió un gasto esperado'); tone = 'success'; break;
+    case 2: {
+      if (pm.origenSuelto) { texto = 'Saldó un gasto suelto'; tone = 'success'; break; }
+      if (pm.esAdicional)  { texto = 'Pago adicional';        tone = 'success'; break; }
+      // F9.106 — distingue la alta silenciosa (confianza ≥ UMBRAL_AUTO) de la confirmada a mano
+      const mesPago = d ? (d.vencimientos?.[0]?.fecha ?? d.fecha) : null;
+      if (pm.requiereConfirmacion === false && mesPago) {
+        const item = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
+        const label = item ? ([item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || item.id) : 'gasto esperado';
+        texto = `Asignado automáticamente a ${label} · ${formatMesCorto(mesPago.slice(0, 7))}`;
+        tone = 'success';
+        break;
+      }
+      texto = 'Cumplió un gasto esperado'; tone = 'success'; break;
+    }
     case 3: texto = pm.origenSuelto ? 'Saldó un gasto suelto' : 'Cargado como nuevo'; tone = 'success'; break;
     default: return null;
   }
@@ -153,8 +182,14 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
   // F9.99.9 — rama 2 con múltiples esperados matcheados por texto: el usuario elige, no se
   // asigna a ciegas (antes tomaba itemsMatch[0] en silencio).
   const [rama2Sel, setRama2Sel] = useState<string>('');
+  // F9.106 — mes editable en la card de confirmación (banda 0.7-0.9); vacío = usar el default
+  // calculado (mes del 1er vencimiento). Auto-silenciosa (≥0.9): flag de error para fallback manual.
+  const [mesElegido,    setMesElegido]    = useState<string>('');
+  const [errorAutoSilencioso, setErrorAutoSilencioso] = useState<string | null>(null);
+  const [autoFallidoManual,   setAutoFallidoManual]   = useState(false);
   const autoConfirmadoRef = useRef(false);
   const autoAbiertoRef = useRef(false);
+  const autoSilencioRef = useRef(false);
 
   useEffect(() => {
     if (!autoAbrir || autoAbiertoRef.current) return;
@@ -175,6 +210,16 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
       if (!res.ok) setErrorLocal(res.error.message);
       // si ok, onSnapshot actualiza el card a estado vinculado
     });
+  // comp.id es estable para la vida de este card
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.id]);
+
+  // F9.106 — rama 2 con confianza ≥ UMBRAL_AUTO: alta silenciosa, sin card ni tap del usuario.
+  useEffect(() => {
+    if (pm?.rama !== 2 || pm.requiereConfirmacion !== false) return;
+    if (autoSilencioRef.current) return;
+    autoSilencioRef.current = true;
+    setMostrarAlta(true);
   // comp.id es estable para la vida de este card
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.id]);
@@ -273,9 +318,18 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
   const sugerenciaValida = sugerencia && sugerencia.confianza >= CONFIANZA_UMBRAL ? sugerencia : null;
   const descripcionFinal = sugerenciaValida?.descripcionLimpia ?? descripcionCruda;
 
+  // F9.106 — mes de pago default (1er vencimiento, fallback emisión) + override manual del
+  // usuario en la banda de confirmación (0.7-0.9). fechaEfectiva mueve solo el mes, preserva el día.
+  const fechaOriginal   = d.vencimientos?.[0]?.fecha ?? d.fecha ?? null;
+  const mesPagoDefault  = fechaOriginal ? fechaOriginal.slice(0, 7) : new Date().toISOString().slice(0, 7);
+  const mesPagoEfectivo = mesElegido || mesPagoDefault;
+  const fechaEfectiva   = fechaOriginal && mesPagoEfectivo !== mesPagoDefault
+    ? ajustarFechaAlMes(fechaOriginal, mesPagoEfectivo)
+    : fechaOriginal;
+
   const preloadBase = {
     tipo:                'Gasto' as const,
-    fecha:               d.vencimientos?.[0]?.fecha ?? d.fecha ?? undefined,
+    fecha:               fechaEfectiva ?? undefined,
     descripcion:         descripcionFinal,
     descripcionOriginal: (descripcionCruda && descripcionFinal !== descripcionCruda) ? descripcionCruda : undefined,
     moneda:              d.moneda,
@@ -290,7 +344,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     // F9.75 — obligaciones (factura*, recibo_servicio) NO se pagan por vencimiento; el pago llega
     // después. Solo pagos/tickets confirman por fecha. (El server recalcula; esto mantiene el
     // preload coherente con lo que se va a guardar.)
-    confirmadoPago:      !esObligacionDoc(d.tipoDocumento) && confirmadoPagoPorFecha(d.vencimientos?.[0]?.fecha ?? d.fecha),
+    confirmadoPago:      !esObligacionDoc(d.tipoDocumento) && confirmadoPagoPorFecha(fechaEfectiva),
     // F6.8 — destino propagado para que aprenderDestino() aprenda al confirmar
     destinoCbu:          d.destinoCbu    ?? null,
     destinoCuit:         d.destinoCuit   ?? null,
@@ -320,6 +374,12 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
       }
     : preloadBase;
 
+  // F9.106 — "Obligación de {mes}" reemplaza el genérico "Gasto esperado" (visibilidad del mes
+  // de pago pedida por el dueño); "Pago adicional" se mantiene solo para el caso real (§3 fila 3).
+  const labelRama2 = pm.rama === 2
+    ? (pm.esAdicional ? 'Pago adicional' : `Obligación de ${formatMesCorto(mesPagoEfectivo)}`)
+    : 'Movimiento nuevo';
+
   // F9.79 — badge Pre-clasificado + Gasto esperado persiste del splash al Hero del confirm
   const badgePropuesta = (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -343,7 +403,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
           <Icon name={pm.rama === 2 ? 'git-compare' : 'plus'} size={12} />
         </span>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>
-          {pm.rama === 2 ? (pm.esAdicional ? 'Pago adicional' : 'Gasto esperado') : 'Movimiento nuevo'}
+          {labelRama2}
         </span>
       </span>
     </span>
@@ -367,8 +427,6 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
       if (aVenc !== bVenc) return aVenc - bVenc;
       return diaDeAgenda(a) - diaDeAgenda(b);
     });
-  const fechaComp = d.vencimientos?.[0]?.fecha ?? d.fecha;
-  const mesComp = fechaComp ? fechaComp.slice(0, 7) : new Date().toISOString().slice(0, 7);
   const pickerKind: 'esperado' | 'suelto' | null =
     pickerSel.startsWith('esperado:') ? 'esperado' : pickerSel.startsWith('suelto:') ? 'suelto' : null;
   const pickerId = pickerKind ? pickerSel.slice(pickerSel.indexOf(':') + 1) : '';
@@ -381,13 +439,13 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     let cancelado = false;
     setBuscandoObligaciones(true);
     setObligacionSel('');
-    buscarObligacionesAbiertas(pickerId, mesComp).then(obs => {
+    buscarObligacionesAbiertas(pickerId, mesPagoDefault).then(obs => {
       if (cancelado) return;
       setObligaciones(obs);
       setBuscandoObligaciones(false);
     });
     return () => { cancelado = true; };
-  }, [pickerKind, pickerId, mesComp]);
+  }, [pickerKind, pickerId, mesPagoDefault]);
 
   async function handleConciliar() {
     if (!pickerSel) return;
@@ -422,8 +480,27 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     }
   }
 
+  // F9.106 — confianza ≥ UMBRAL_AUTO (rama 2 vía destino): alta silenciosa, sin card ni tap.
+  // Si onErrorAuto dispara, autoFallidoManual cae a modoAuto=false y muestra el camino manual.
+  const modoAuto = pm.rama === 2 && pm.requiereConfirmacion === false && !autoFallidoManual;
+  const labelEsperado = esperado
+    ? ([esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ') || esperado.notas || esperado.id)
+    : 'gasto esperado';
+
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {modoAuto ? (
+        <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
+          Asignando automáticamente a {labelEsperado} · {formatMesCorto(mesPagoEfectivo)}…
+        </span>
+      ) : (
+      <>
+      {errorAutoSilencioso && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Badge tone="warning">No se pudo asignar automáticamente</Badge>
+          <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errorAutoSilencioso}</span>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {(pm.categoriaPrellena || sugerenciaValida) && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 8, padding: '6px 11px', background: 'rgba(245,158,11,.10)', border: '1px solid rgba(245,158,11,.25)', fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>
@@ -433,11 +510,32 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
         )}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 8, padding: '6px 11px', background: pm.rama === 2 ? 'rgba(12,143,98,.10)' : 'var(--gf-gray-100)', border: pm.rama === 2 ? '1px solid var(--gf-emerald-line)' : '1px solid transparent', fontSize: 12, fontWeight: 600, color: 'var(--color-text)' }}>
           <Icon name={pm.rama === 2 ? 'git-compare' : 'plus'} size={13} color={pm.rama === 2 ? 'var(--color-accent)' : 'var(--color-text-sec)'} />
-          {pm.rama === 2
-            ? (pm.esAdicional ? 'Pago adicional' : 'Gasto esperado')
-            : 'Movimiento nuevo'}
+          {labelRama2}
         </span>
       </div>
+
+      {/* F9.106 — banda de confianza 0.7-0.9 (match por destino): "a qué gasto y de qué mes",
+          ambos editables — mes acá, gasto esperado vía "Asignar a otro gasto" (picker existente). */}
+      {pm.rama === 2 && pm.origenDestino && pm.requiereConfirmacion === true && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-strong)' }}>
+            Asignar a: {esperado ? ([esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ') || esperado.notas || esperado.id) : 'gasto esperado'} · Mes: {formatMesCorto(mesPagoEfectivo)}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <select
+              value={mesPagoEfectivo}
+              onChange={e => setMesElegido(e.target.value)}
+              style={{ fontSize: 13, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+            >
+              {[-1, 0, 1, 2, 3].map(delta => {
+                const m = sumarMeses(mesPagoDefault, delta);
+                return <option key={m} value={m}>{formatMesCorto(m)}</option>;
+              })}
+            </select>
+            <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>Confianza {Math.round((pm.confianza ?? 0) * 100)}%</span>
+          </div>
+        </div>
+      )}
 
       {/* F9.99.9 — rama 2 con múltiples esperados: el usuario elige antes de seguir (no corta
           el camino feliz — con un único candidato esto no se renderiza). */}
@@ -530,6 +628,8 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
           {cargandoDict ? 'Cargando…' : 'Revisar y cargar'}
         </Button>
       )}
+      </>
+      )}
       {mostrarAlta && (
         <AltaMovimiento
           key={comp.id}
@@ -537,6 +637,12 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
           miembro={miembro}
           preload={preload}
           badgePropuesta={badgePropuesta}
+          autoConfirmar={modoAuto}
+          onErrorAuto={modoAuto ? (msg) => {
+            setErrorAutoSilencioso(msg);
+            setAutoFallidoManual(true);
+            setMostrarAlta(false);
+          } : undefined}
           onGuardarPayload={async (payload) => {
             const res = await cargarMovimientoDesdeComprobante(comp.id, payload);
             return { ok: res.ok, error: res.ok ? undefined : res.error };
@@ -609,7 +715,7 @@ function ComprobanteCard({
       )}
       {comp.estado === 'vinculado' && comp.propuestaMatch && (
         <div style={{ marginTop: 8 }}>
-          <RazonVinculado pm={comp.propuestaMatch} />
+          <RazonVinculado pm={comp.propuestaMatch} d={comp.datosExtraidos} items={items} />
         </div>
       )}
     </Card>

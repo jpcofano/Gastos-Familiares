@@ -470,6 +470,40 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `api.argentinadatos.com` sale sin bloqueo desde la Cloud Function, algo que no se puede probar
   sin el deploy) → si el solapamiento cierra, correr "Completar histórico" → Optim → Recalcular y
   confirmar cuántos `.BA` entran.
+- F9.106 — Asignación de factura a gasto esperado por **mes de pago** (no de emisión) + automatismo
+  graduado por confianza. Ver `docs/prompts/F9.106.spec.md`. **Bug de origen:** una factura del
+  próximo período subida dentro del mes en curso se clasificaba "pago adicional" en vez de
+  "obligación del mes siguiente" — `matchPorDestino` decidía `esAdicional` colisionando contra el
+  mes de EMISIÓN, no el de pago. **1. `mesDePago(datos)`** (`functions/src/index.ts`):
+  `vencimientos[0]?.fecha?.slice(0,7) ?? datos.fecha?.slice(0,7)`; el `mesComp` de `matchComprobante`
+  (ventana `[mes-1..mes+3]` + bucketing) usa `mesDePago` cuando el doc es obligación
+  (`esObligacionDoc`), y sigue con `datos.fecha` para pagos/tickets/transferencias — una sola
+  fuente de verdad que alimenta la ventana de reconciliación, `matchPorDestino` y `calcularPropuesta`
+  por igual. **2. `matchPorDestino` tri-rama** (reemplaza el `if/else` binario): sin obligación de
+  `itemId` en `mesComp` → rama 2 crea la obligación nueva; con una **impaga** → rama 1, la factura
+  ES esa obligación (reconcilia, no duplica — antes no existía este camino, siempre creaba);
+  con todas **pagas** → rama 2 `esAdicional:true` (cargo real). El short-circuit de
+  `matchComprobante` que antes solo cortaba en rama 2 ahora también corta en rama 1 de destino.
+  **3. Automatismo graduado** (`UMBRAL_AUTO = 0.9`, junto a `CONFIANZA_INCREMENTO`):
+  `confianza < 0.7` no llega acá (ya filtrado); `0.7 ≤ c < 0.9` → `requiereConfirmacion:true`
+  (card con ítem+mes editables); `c ≥ 0.9` → `requiereConfirmacion:false` (alta silenciosa).
+  `PropuestaMatch` gana `requiereConfirmacion?`/`confianza?` en el twin `matchLogica.ts` ↔
+  `types/index.ts` (de paso, `origenSuelto` — F9.99.9 — que faltaba en el twin de functions, sin
+  uso real ahí, cerrado por prolijidad). **4. Cliente (`Comprobantes.tsx`):** banda media muestra
+  card "Asignar a: {item} · Mes: {selector}" (rango `[mesPago-1..mesPago+3]`, mismo ancho que la
+  ventana server) + confianza actual; el ítem se reasigna con el picker "Asignar a otro gasto" ya
+  existente (F9.99.9), no uno nuevo. Banda alta: `AltaMovimiento` gana prop `autoConfirmar` —
+  monta sin UI, dispara el mismo `construirYGuardar()` (extraído de `handleSubmit`) apenas
+  catálogos+TC están listos, sin tap del usuario; si falla, `onErrorAuto` cae al camino manual
+  (picker/"Revisar y cargar") en vez de quedar colgado. Badge post-alta vía `RazonVinculado`
+  ("Asignado automáticamente a {item} · {mes}"), distinta de la confirmada a mano ("Cumplió un
+  gasto esperado"). Copy: "Gasto esperado" → "Obligación de {mes}" (rama 2 no-adicional, en el
+  badge del splash, el chip inline y el header de banda media); "Pago adicional" se mantiene solo
+  para el cargo real. `tsc --noEmit` (cliente y `functions/`): 41 errores pre-existentes en
+  cliente (mismo baseline), 0 nuevos; 0 en functions. `vite build` y `functions build`: OK.
+  **Pendiente de cierre manual (no deployo yo):** `firebase deploy --only functions,hosting` →
+  probar con una factura real de próximo período (caso Edenor del spec) → si no refresca en el
+  celu, borrar datos del sitio (mata el service worker).
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

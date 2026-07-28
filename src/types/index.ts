@@ -192,6 +192,11 @@ export interface PropuestaMatch {
   // F9.99.9 — el picker de agenda unificada saldó un suelto (movimiento sin plantilla)
   // en vez de una plantilla — RazonVinculado lo distingue de "Cargado como nuevo".
   origenSuelto?: boolean;
+  // F9.106 — auto-match por destino graduado por confianza (solo rama 2 vía matchPorDestino):
+  // true en la banda 0.7-0.9 (pide confirmación con item+mes editables), false/ausente ≥0.9
+  // (alta silenciosa) o cuando el match no viene de destino (sin cambios, siempre confirma).
+  requiereConfirmacion?: boolean;
+  confianza?: number;
 }
 
 export interface Comprobante {

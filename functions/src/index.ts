@@ -39,6 +39,13 @@ function esObligacionDoc(tipo?: string | null): boolean {
       || tipo === 'factura_a' || tipo === 'factura_b' || tipo === 'factura_c';
 }
 
+// F9.106 — mes de la obligación = mes del PRIMER vencimiento de pago (fallback: emisión).
+// "Lo que se paga en X entra en X en resumen mes" — no periodoFacturado (consumo), solo se usa
+// para obligaciones (esObligacionDoc); pagos/tickets/transferencias siguen usando datos.fecha.
+function mesDePago(datos: DatosExtractosMin): string {
+  return datos.vencimientos?.[0]?.fecha?.slice(0, 7) ?? datos.fecha?.slice(0, 7) ?? '';
+}
+
 function buildSystemPrompt(hoy: string): string {
   return `\
 Sos un extractor de datos de comprobantes argentinos (facturas, tickets, comprobantes de pago/transferencia, resúmenes de tarjeta, recibos de servicios).
@@ -293,7 +300,10 @@ export const matchComprobante = onDocumentUpdated(
     // F9.99.7 Parte 1 — ventana [mes-1 … mes+3]: un pago de hoy puede saldar una obligación
     // de hasta 3 meses adelante (ej. cuota de colegio pagada por adelantado). Las ramas de
     // match (payee/nombre/destino) no cambian: ya operan sobre `movs`, que ahora trae más.
-    const mesComp = datos.fecha ? datos.fecha.slice(0, 7) : '';
+    // F9.106 — para obligaciones (factura*/recibo_servicio), mesComp es el mes de PAGO
+    // (1er vencimiento), no el de emisión — centra la ventana de reconciliación y el bucketing
+    // de yaEnMesPago en el mes correcto. Pagos/tickets siguen usando la fecha del documento.
+    const mesComp = esObligacionDoc(datos.tipoDocumento) ? mesDePago(datos) : (datos.fecha ? datos.fecha.slice(0, 7) : '');
     const mesesAConsultar: string[] = [];
     if (mesComp) {
       const [y, m] = mesComp.split('-').map(Number);
@@ -417,14 +427,16 @@ export const matchComprobante = onDocumentUpdated(
     const propuestaDestino = await matchPorDestino(datos, movs, mesComp);
 
     // F6.9.7 (P2) — un destino CON itemEsperadoId (rama 2, incluido adicional) gana directo.
+    // F9.106 — rama 1 (impaga del mismo item+mesPago: esta factura ES esa obligación) también
+    // gana directo, mismo criterio de "no dejar que texto pise una decisión ya tomada por destino".
     // Un destino SIN item (rama 3, solo categoría aprendida) NO corta el flujo: dejamos que
     // matchConEsperados pruebe por texto. Si nada engancha, cae a rama 3 conservando el prefill.
-    if (propuestaDestino && propuestaDestino.rama === 2) {
+    if (propuestaDestino && (propuestaDestino.rama === 2 || propuestaDestino.rama === 1)) {
       await ref.update({
         propuestaMatch: { ...propuestaDestino, calculadoEn: FieldValue.serverTimestamp() },
         actualizadoEn:  FieldValue.serverTimestamp(),
       });
-      console.log(`[matchComprobante] ${hashActual} → rama destino (item=${propuestaDestino.itemEsperadoId}, adicional=${propuestaDestino.esAdicional ?? false})`);
+      console.log(`[matchComprobante] ${hashActual} → rama destino (rama=${propuestaDestino.rama}, item=${propuestaDestino.itemEsperadoId}, adicional=${propuestaDestino.esAdicional ?? false})`);
       return;
     }
 
@@ -463,6 +475,9 @@ import { createHash } from 'crypto';
 
 // sync manual con src/datos/clasificador.ts
 const CONFIANZA_INCREMENTO = 0.1;
+// F9.106 — a partir de esta confianza, el auto-match por destino crea la obligación sin
+// pedir confirmación (alta silenciosa). Por debajo (y ≥0.7) muestra card de confirmación.
+const UMBRAL_AUTO = 0.9;
 
 function idAprendido(patronNormalizado: string, bancoFiltro: string, tarjetaFiltro: string): string {
   return createHash('sha256')
@@ -491,25 +506,42 @@ async function matchPorDestino(
     if (!snap.exists) continue;
 
     const d = snap.data()!;
-    if (((d.confianza as number) ?? 0) < 0.7) continue;
+    const confianza = (d.confianza as number) ?? 0;
+    if (confianza < 0.7) continue;
 
     const itemId = (d.itemEsperadoId as string | undefined);
     if (itemId) {
-      const yaEnMes = movs.some(m => m.itemEsperadoId === itemId && m.mes === mesComp);
-      if (!yaEnMes) {
-        return { rama: 2, itemEsperadoId: itemId, origenDestino: true };
-      } else {
-        // Esperado ya pagado ese período → movimiento adicional
+      // F9.106 — tri-rama por mes de PAGO (mesComp ya viene resuelto a mesDePago para
+      // obligaciones): sin obligación de este item en mesComp → crear; con una impaga →
+      // esta factura ES esa obligación, reconciliar (no duplicar); con todas pagas →
+      // segundo cargo real del mismo mes.
+      const requiereConfirmacion = confianza < UMBRAL_AUTO;
+      const obligacionesDelMes = movs.filter(m => m.itemEsperadoId === itemId && m.mes === mesComp);
+      const impaga = obligacionesDelMes.find(m => !m.confirmadoPago);
+      if (impaga) {
         return {
-          rama: 2,
+          rama: 1,
+          movimientoId: impaga.id,
           itemEsperadoId: itemId,
-          esAdicional:         true,
-          origenDestino:       true,
-          categoriaPrellena:    (d.categoria    as string | null) ?? null,
-          subcategoriaPrellena: (d.subcategoria as string | null) ?? null,
-          etiquetaPrellena:     (d.etiqueta     as string | null) ?? null,
+          origenDestino: true,
+          origenReconciliacion: true,
         };
       }
+      if (obligacionesDelMes.length === 0) {
+        return { rama: 2, itemEsperadoId: itemId, origenDestino: true, requiereConfirmacion, confianza };
+      }
+      // Todas las obligaciones de este item en mesComp ya están pagas → movimiento adicional real
+      return {
+        rama: 2,
+        itemEsperadoId: itemId,
+        esAdicional:          true,
+        origenDestino:        true,
+        requiereConfirmacion,
+        confianza,
+        categoriaPrellena:    (d.categoria    as string | null) ?? null,
+        subcategoriaPrellena: (d.subcategoria as string | null) ?? null,
+        etiquetaPrellena:     (d.etiqueta     as string | null) ?? null,
+      };
     } else if (d.categoria) {
       // Solo categoría aprendida — prefill sin vínculo a item
       return {
