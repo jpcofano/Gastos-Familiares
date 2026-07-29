@@ -2,7 +2,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   query, orderBy, limit, writeBatch,
 } from 'firebase/firestore';
-import { db, functions, functionsUsCentral } from '../firebase';
+import { db, functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@ export type CafciPosicion = {
   especieRaw: string;
   ticker: string | null;
   pesoPct: number;
-  categoria?: 'LIQUIDEZ' | 'CEDEAR';
+  categoria?: 'LIQUIDEZ' | 'CEDEAR' | 'RESTO';
   incompleto?: boolean;
 };
 
@@ -34,7 +34,12 @@ export type CafciCartera = {
   fechaFetch: string;   // ISO
   posiciones: CafciPosicion[];
   totalPct: number;
-  advertenciaIntegridad?: boolean;
+  // F9.104 — "Resto de Activos" (cola truncada del pie chart de origen) como bucket explícito
+  // de desconocido: pesoResto nunca se prorratea ni se descarta en silencio.
+  pesoResto?: number;
+  coberturaIdentificada?: number; // totalPct − pesoResto
+  advertenciaSuma?: boolean;      // totalPct fuera de [98,102] — HTML roto o parseo incompleto
+  advertenciaCobertura?: boolean; // coberturaIdentificada < umbral — truncamiento severo
   origen?: 'manual';     // F9.102.2 4a — presente solo en cartas cargadas vía "Pegar JSON"
   fechaIngesta?: string; // ISO — idem
 };
@@ -218,9 +223,9 @@ export type ResultadoSincronizarCafci = {
 };
 
 export async function sincronizarCafci(): Promise<ResultadoSincronizarCafci> {
-  // F9.102.2 3a — sincronizarCafci corre en us-central1 (ver src/firebase.ts).
+  // F9.104 — cerrado el experimento de región (F9.102.1/.2): vuelve a la instancia default.
   const fn = httpsCallable<void, ResultadoSincronizarCafci>(
-    functionsUsCentral, 'sincronizarCafci'
+    functions, 'sincronizarCafci'
   );
   const result = await fn();
   return result.data;

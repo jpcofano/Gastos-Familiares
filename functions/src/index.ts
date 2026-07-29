@@ -18,6 +18,7 @@ import {
   type PropuestaMatch,
 } from './matchLogica';
 import { normalizar, type NormRule } from './normalizador';
+import { extraerItemsCartera, extraerFechaCartera } from './cafciHtml';
 
 if (!getApps().length) initializeApp();
 
@@ -3305,7 +3306,9 @@ function parsePosicionCafci(item: Record<string, unknown>): {
   incompleto: boolean;
 } {
   const especieRaw = String(
-    item['nombreActivo'] ?? item['especie'] ?? item['nombreEspecie'] ?? item['instrumento'] ?? item['descripcion'] ?? ''
+    // F9.104 — 'nombre' es el campo del sitio nuevo (estadisticas.cafci.org.ar); el resto
+    // queda para retrocompat con el formato viejo pegado manualmente.
+    item['nombre'] ?? item['nombreActivo'] ?? item['especie'] ?? item['nombreEspecie'] ?? item['instrumento'] ?? item['descripcion'] ?? ''
   );
   const pesoRaw =
     item['share'] ?? item['porcentaje'] ?? item['peso'] ?? item['porcentajeFondo'] ?? item['participacion'] ?? item['pct'];
@@ -3324,9 +3327,11 @@ function autoTickerMapping(especieRaw: string): string | null {
 
 // F9.102.2 4a — parseo de ficha CAFCI extraído a un helper compartido: sincronizarCafci
 // (fetch automático) e importarCafciManual (pegado de JSON) llaman a esta ÚNICA
-// implementación, para que no haya dos parseos que puedan divergir. Mantiene todas las
-// validaciones F9.97.1 (success, data.info.semanal, carteras[], suma de shares) y el
+// implementación, para que no haya dos parseos que puedan divergir. Mantiene el
 // auto-mapping/detección LIQUIDEZ/CEDEAR de F9.97.
+// F9.104 — deja de recibir el envoltorio JSON de la API vieja: cada caller ya resolvió
+// `items`/`fechaDatos`/nombres antes de llamar (HTML nuevo vía extraerItemsCartera+
+// extraerFechaCartera, o JSON legado/manual — ver los dos callers más abajo).
 type CafciPosicionParseada = {
   especieRaw: string;
   ticker: string | null;
@@ -3340,49 +3345,49 @@ type ParseoFichaCafci = {
   fechaDatos: string;
   posiciones: CafciPosicionParseada[];
   totalPct: number;
-  advertenciaIntegridad: boolean;
+  // F9.104 — "Resto de Activos" (cola truncada del pie chart de origen) se persiste como
+  // bucket explícito de desconocido, nunca prorrateado ni descartado en silencio.
+  pesoResto: number;
+  coberturaIdentificada: number; // totalPct − pesoResto
+  advertenciaSuma: boolean;        // totalPct fuera de [98,102] — HTML roto o parseo incompleto
+  advertenciaCobertura: boolean;   // coberturaIdentificada < UMBRAL_COBERTURA_MINIMA — truncamiento severo
   pendientesMapeo: string[];
 };
 
+// F9.104 — bajo esta cobertura identificada, la cartera se considera truncada de forma severa
+// para entrar al benchmark (elección de diseño, no constante técnica — ver spec §5).
+const UMBRAL_COBERTURA_MINIMA = 95;
+
 async function parsearFichaCafci(
-  json: Record<string, unknown>,
-  fondo: { fondoId: string; claseId: string; nombre: string },
-  fechaFetch: string
+  items: Array<Record<string, unknown>>,
+  fechaDatos: string,
+  nombreFondo: string,
+  nombreClase: string,
 ): Promise<ParseoFichaCafci> {
-  // F9.97.1: validar success y estructura confirmada
-  if ((json as any).success !== true) {
-    throw new Error('La API no devolvió success:true');
+  if (items.length === 0) {
+    throw new Error('La cartera vino sin items.');
   }
-  const infoSemanal = (json as any)?.data?.info?.semanal;
-  if (!infoSemanal) {
-    throw new Error('Falta data.info.semanal en la respuesta de CAFCI');
-  }
-
-  // F9.97.1: carteras[] son las posiciones directamente (no sub-array)
-  const carteras: unknown[] = Array.isArray(infoSemanal.carteras) ? infoSemanal.carteras : [];
-  if (carteras.length === 0) {
-    throw new Error('carteras[] vacío o ausente en data.info.semanal');
-  }
-
-  // F9.97.1: fechaDatos está en infoSemanal, no dentro de cada item
-  const fechaDatos = String(infoSemanal.fechaDatos ?? fechaFetch.slice(0, 10));
-
-  // Nombres desde el modelo de la API
-  const nombreFondo = String((json as any)?.data?.model?.fondo?.nombre ?? fondo.nombre);
-  const nombreClase = String((json as any)?.data?.model?.nombre ?? fondo.nombre);
 
   const posiciones: CafciPosicionParseada[] = [];
   const pendientesMapeo: string[] = [];
   let totalPct = 0;
+  let pesoResto = 0;
 
-  for (const item of carteras) {
-    const { especieRaw, pesoPct, incompleto } = parsePosicionCafci(item as Record<string, unknown>);
+  for (const item of items) {
+    const { especieRaw, pesoPct, incompleto } = parsePosicionCafci(item);
     const norm = normalizarEspecie(especieRaw);
     let ticker: string | null = null;
     let categoria: string | undefined;
 
+    // F9.104 — cola truncada del pie chart de origen: bucket de desconocido explícito,
+    // nunca pasa por el mapeo de especies ni cuenta como pendiente.
+    if (/^resto de activos$/i.test(especieRaw.trim())) {
+      ticker = null;
+      categoria = 'RESTO';
+      pesoResto += pesoPct;
+    }
     // Detectar liquidez: FCI, Cta Cte, Caución — no son pendientes de mapeo humano
-    if (/^(fci\b|cta\.? ?cte\.?|cauci[oó]n)/i.test(especieRaw.trim())) {
+    else if (/^(fci\b|cta\.? ?cte\.?|cauci[oó]n)/i.test(especieRaw.trim())) {
       ticker = null;
       categoria = 'LIQUIDEZ';
     }
@@ -3417,19 +3422,21 @@ async function parsearFichaCafci(
     totalPct += pesoPct;
   }
 
-  // Control de integridad: suma de share debe ser ~100
-  const advertenciaIntegridad = totalPct < 98 || totalPct > 102;
+  const coberturaIdentificada = totalPct - pesoResto;
+  const advertenciaSuma = totalPct < 98 || totalPct > 102;
+  const advertenciaCobertura = coberturaIdentificada < UMBRAL_COBERTURA_MINIMA;
 
-  return { nombreFondo, nombreClase, fechaDatos, posiciones, totalPct, advertenciaIntegridad, pendientesMapeo };
+  return {
+    nombreFondo, nombreClase, fechaDatos, posiciones, totalPct,
+    pesoResto, coberturaIdentificada, advertenciaSuma, advertenciaCobertura, pendientesMapeo,
+  };
 }
 
 export const sincronizarCafci = onCall(
   {
-    // F9.102.2 3 — sincronizarCafci corre en us-central1; el resto de las CF sigue en
-    // southamerica-east1 vía setGlobalOptions. Hipótesis del experimento (F9.102.1/.2):
-    // CloudFront bloquea por IP/ASN de GCP compute en southamerica-east1, no por fondo ni por
-    // header — ver src/firebase.ts (functionsUsCentral) para la instancia del cliente.
-    region: 'us-central1',
+    // F9.104 — cerrado el experimento de región (F9.102.1/.2): los 403 nunca fueron
+    // CloudFront bloqueando por IP/ASN de compute, era la API vieja dada de baja (CAFCI
+    // migró de sitio). Vuelve a southamerica-east1 vía setGlobalOptions (sin override acá).
     memory: '512MiB',
     timeoutSeconds: 120,
   },
@@ -3452,30 +3459,40 @@ export const sincronizarCafci = onCall(
 
     for (const fondo of fondos) {
       try {
-        const url = `https://api.pub.cafci.org.ar/fondo/${fondo.fondoId}/clase/${fondo.claseId}/ficha`;
+        // F9.104 — sitio nuevo: HTML server-rendered, no JSON de API. El esquema de IDs
+        // se conserva (fondoId/claseId), verificado contra 3 fondos incl. el caso borde
+        // fondoId===claseId. Origin/Referer eran spoofeo para la API vieja, ya no aplican.
+        const url = `https://estadisticas.cafci.org.ar/fondos/${fondo.fondoId}?clase=${fondo.claseId}`;
         const res = await fetch(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0',
-            'Accept': 'application/json, text/plain, */*',
-            // Headers que funcionaron en producción desde Apps Script (nota el www.)
-            'Origin': 'https://www.cafci.org.ar',
-            'Referer': 'https://www.cafci.org.ar/',
+            'Accept': 'text/html,application/xhtml+xml',
           },
         });
         if (!res.ok) {
-          // F9.102.2 4c — mensaje apunta a la feature real (antes prometía "pegado manual"
-          // sin que existiera; importarCafciManual + la UI "Pegar JSON" ya existen).
-          const msg = res.status === 403
-            ? `HTTP 403 — CloudFront bloqueó la request. Usá "Pegar JSON" en Config.`
-            : `HTTP ${res.status}`;
-          throw new Error(msg);
+          // F9.104 — logueo de lo observado, sin interpretarlo (el mensaje fijo anterior,
+          // "CloudFront bloqueó", resultó estar mal: costó tres frentes de investigación
+          // que el body real habría resuelto desde el primer día).
+          const body = (await res.text()).slice(0, 300);
+          console.error(`[sincronizarCafci] ${fondo.nombre}: HTTP ${res.status} — ${body}`);
+          throw new Error(`HTTP ${res.status}: ${body.slice(0, 150)}`);
         }
 
-        const json = await res.json() as Record<string, unknown>;
-        const parseo = await parsearFichaCafci(json, fondo, fechaFetch);
+        const html = await res.text();
+        const items = extraerItemsCartera(html);
+        const fechaDatos = extraerFechaCartera(html);
+        if (!fechaDatos) {
+          // F9.104 — fechaDatos es la clave del docId: caer a fechaFetch ensuciaría la
+          // serie histórica de forma difícil de detectar después. Falla el fondo, no el lote.
+          throw new Error('No se pudo extraer la fecha de cartera ("Valores al DD/MM/YYYY") del HTML.');
+        }
+        const parseo = await parsearFichaCafci(items as unknown as Array<Record<string, unknown>>, fechaDatos, fondo.nombre, fondo.nombre);
 
-        if (parseo.advertenciaIntegridad) {
-          console.warn(`[sincronizarCafci] ${fondo.nombre}: suma share = ${parseo.totalPct.toFixed(2)} (fuera de [98,102])`);
+        if (parseo.advertenciaSuma) {
+          console.warn(`[sincronizarCafci] ${fondo.nombre}: suma porcentaje = ${parseo.totalPct.toFixed(2)} (fuera de [98,102])`);
+        }
+        if (parseo.advertenciaCobertura) {
+          console.warn(`[sincronizarCafci] ${fondo.nombre}: cobertura identificada = ${parseo.coberturaIdentificada.toFixed(2)} (< ${UMBRAL_COBERTURA_MINIMA}, Resto de Activos = ${parseo.pesoResto.toFixed(2)})`);
         }
 
         const docId = `${fondo.fondoId}_${parseo.fechaDatos}`;
@@ -3488,11 +3505,14 @@ export const sincronizarCafci = onCall(
           fechaFetch,
           posiciones: parseo.posiciones,
           totalPct: parseo.totalPct,
-          ...(parseo.advertenciaIntegridad ? { advertenciaIntegridad: true } : {}),
+          pesoResto: parseo.pesoResto,
+          coberturaIdentificada: parseo.coberturaIdentificada,
+          ...(parseo.advertenciaSuma ? { advertenciaSuma: true } : {}),
+          ...(parseo.advertenciaCobertura ? { advertenciaCobertura: true } : {}),
         });
         sincronizados++;
         pendientesMapeo.push(...parseo.pendientesMapeo);
-        console.log(`[sincronizarCafci] ${fondo.nombre}: ${parseo.posiciones.length} posiciones, total ${parseo.totalPct.toFixed(2)}%`);
+        console.log(`[sincronizarCafci] ${fondo.nombre}: ${parseo.posiciones.length} posiciones, total ${parseo.totalPct.toFixed(2)}%, cobertura ${parseo.coberturaIdentificada.toFixed(2)}%`);
       } catch (err) {
         console.error(`[sincronizarCafci] Error en ${fondo.nombre}:`, err);
         errores.push({ fondo: fondo.nombre, mensaje: err instanceof Error ? err.message : String(err) });
@@ -3507,8 +3527,9 @@ export const sincronizarCafci = onCall(
   },
 );
 
-// F9.102.2 4a — ingesta manual: red de seguridad ante el bloqueo de CloudFront que no
-// controlamos. Reutiliza parsearFichaCafci (misma implementación que la sync automática) y
+// F9.102.2 4a — ingesta manual: red de seguridad si el fetch automático falla (sitio caído,
+// cambio de estructura, etc. — F9.104). Reutiliza parsearFichaCafci (misma implementación
+// que la sync automática) y
 // escribe en cafciCarteras con la misma forma, más origen:'manual' y fechaIngesta.
 export const importarCafciManual = onCall(
   { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 30 },
@@ -3531,29 +3552,69 @@ export const importarCafciManual = onCall(
       throw new HttpsError('not-found', `El fondo ${fondoId}/${claseId} no está en la configuración. Agregalo primero en Config.`);
     }
 
-    let json: Record<string, unknown>;
+    let json: unknown;
     try {
       json = JSON.parse(jsonStr);
     } catch {
-      throw new HttpsError('invalid-argument', 'JSON inválido — pegá el contenido completo de la respuesta de la ficha.');
-    }
-
-    // Best-effort: si el payload trae el id del fondo, verificar que corresponde al pedido.
-    const fondoIdJson = (json as any)?.data?.model?.fondo?.id ?? (json as any)?.data?.model?.fondoId;
-    if (fondoIdJson != null && String(fondoIdJson) !== fondo.fondoId) {
-      throw new HttpsError('invalid-argument', `El JSON pegado corresponde al fondo ${fondoIdJson}, no a ${fondo.fondoId} (${fondo.nombre}). Verificá que copiaste la ficha correcta.`);
+      throw new HttpsError('invalid-argument', 'JSON inválido — pegá el array completo del snippet, o el JSON completo de la ficha vieja.');
     }
 
     const fechaFetch = new Date().toISOString();
+
+    // F9.104 — dos formatos posibles pegados a mano:
+    // (a) array directo — snippet de consola del sitio nuevo (copy(...dataset.pieChartItemsValue)).
+    //     No trae fecha de cartera propia: se usa la fecha de ingesta (documentado — esta vía es
+    //     la red de seguridad, no el camino primario, que sí extrae la fecha real del HTML).
+    // (b) envoltorio {success, data:{info:{semanal:{...}}}} — JSON completo de la API vieja,
+    //     retrocompat para JSON ya guardado de sesiones anteriores.
+    let items: Array<Record<string, unknown>>;
+    let fechaDatos: string;
+    let nombreFondo = fondo.nombre;
+    let nombreClase = fondo.nombre;
+
+    if (Array.isArray(json)) {
+      if (json.length === 0) {
+        throw new HttpsError('invalid-argument', 'El array pegado vino vacío.');
+      }
+      items = json as Array<Record<string, unknown>>;
+      fechaDatos = fechaFetch.slice(0, 10);
+    } else {
+      const obj = json as Record<string, unknown>;
+      if ((obj as any).success !== true) {
+        throw new HttpsError('invalid-argument', 'La API no devolvió success:true (¿es el JSON completo de la ficha vieja?).');
+      }
+      const infoSemanal = (obj as any)?.data?.info?.semanal;
+      if (!infoSemanal) {
+        throw new HttpsError('invalid-argument', 'Falta data.info.semanal en la respuesta de CAFCI');
+      }
+      const carteras: unknown[] = Array.isArray(infoSemanal.carteras) ? infoSemanal.carteras : [];
+      if (carteras.length === 0) {
+        throw new HttpsError('invalid-argument', 'carteras[] vacío o ausente en data.info.semanal');
+      }
+      items = carteras as Array<Record<string, unknown>>;
+      fechaDatos = String(infoSemanal.fechaDatos ?? fechaFetch.slice(0, 10));
+      nombreFondo = String((obj as any)?.data?.model?.fondo?.nombre ?? fondo.nombre);
+      nombreClase = String((obj as any)?.data?.model?.nombre ?? fondo.nombre);
+
+      // Best-effort: si el payload trae el id del fondo, verificar que corresponde al pedido.
+      const fondoIdJson = (obj as any)?.data?.model?.fondo?.id ?? (obj as any)?.data?.model?.fondoId;
+      if (fondoIdJson != null && String(fondoIdJson) !== fondo.fondoId) {
+        throw new HttpsError('invalid-argument', `El JSON pegado corresponde al fondo ${fondoIdJson}, no a ${fondo.fondoId} (${fondo.nombre}). Verificá que copiaste la ficha correcta.`);
+      }
+    }
+
     let parseo: ParseoFichaCafci;
     try {
-      parseo = await parsearFichaCafci(json, fondo, fechaFetch);
+      parseo = await parsearFichaCafci(items, fechaDatos, nombreFondo, nombreClase);
     } catch (err) {
       throw new HttpsError('invalid-argument', err instanceof Error ? err.message : String(err));
     }
 
-    if (parseo.advertenciaIntegridad) {
-      console.warn(`[importarCafciManual] ${fondo.nombre}: suma share = ${parseo.totalPct.toFixed(2)} (fuera de [98,102])`);
+    if (parseo.advertenciaSuma) {
+      console.warn(`[importarCafciManual] ${fondo.nombre}: suma porcentaje = ${parseo.totalPct.toFixed(2)} (fuera de [98,102])`);
+    }
+    if (parseo.advertenciaCobertura) {
+      console.warn(`[importarCafciManual] ${fondo.nombre}: cobertura identificada = ${parseo.coberturaIdentificada.toFixed(2)} (< ${UMBRAL_COBERTURA_MINIMA}, Resto de Activos = ${parseo.pesoResto.toFixed(2)})`);
     }
 
     const docId = `${fondo.fondoId}_${parseo.fechaDatos}`;
@@ -3566,7 +3627,10 @@ export const importarCafciManual = onCall(
       fechaFetch,
       posiciones: parseo.posiciones,
       totalPct: parseo.totalPct,
-      ...(parseo.advertenciaIntegridad ? { advertenciaIntegridad: true } : {}),
+      pesoResto: parseo.pesoResto,
+      coberturaIdentificada: parseo.coberturaIdentificada,
+      ...(parseo.advertenciaSuma ? { advertenciaSuma: true } : {}),
+      ...(parseo.advertenciaCobertura ? { advertenciaCobertura: true } : {}),
       origen: 'manual',
       fechaIngesta: fechaFetch,
     });

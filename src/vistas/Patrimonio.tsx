@@ -2279,7 +2279,8 @@ function PegarJsonModal({ fondo, onImportar, onClose }: {
   const [json, setJson] = useState('');
   const [importando, setImportando] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const url = `https://api.pub.cafci.org.ar/fondo/${fondo.fondoId}/clase/${fondo.claseId}/ficha`;
+  const url = `https://estadisticas.cafci.org.ar/fondos/${fondo.fondoId}?clase=${fondo.claseId}`;
+  const snippet = "copy(document.querySelector('[data-pie-chart-items-value]').dataset.pieChartItemsValue)";
 
   async function importar() {
     if (!json.trim() || importando) return;
@@ -2300,16 +2301,19 @@ function PegarJsonModal({ fondo, onImportar, onClose }: {
       <div style={{ background: 'var(--color-surface)', borderRadius: '18px 18px 0 0', padding: 16, width: '100%', maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', boxSizing: 'border-box' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Pegar JSON — {fondo.nombre}</div>
         <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginBottom: 10, lineHeight: 1.5 }}>
-          1. Abrí la URL en el navegador (te va a pedir login/CAPTCHA si CloudFront bloquea el fetch automático).
-          2. Copiá el JSON completo de la respuesta. 3. Pegalo abajo.
+          1. Abrí la URL en el navegador. 2. Abrí la consola (F12) y pegá el snippet de abajo —
+          copia la cartera al portapapeles. 3. Pegala en el cuadro de acá abajo.
         </div>
         <a href={url} target="_blank" rel="noreferrer" style={{ display: 'block', fontSize: 11.5, color: 'var(--color-accent)', wordBreak: 'break-all', marginBottom: 10, textDecoration: 'underline' }}>
           {url}
         </a>
+        <code style={{ display: 'block', fontSize: 10.5, background: 'var(--gf-gray-50)', border: '1px solid var(--gf-gray-100)', borderRadius: 8, padding: '7px 9px', marginBottom: 10, wordBreak: 'break-all', lineHeight: 1.4 }}>
+          {snippet}
+        </code>
         <textarea
           value={json}
           onChange={e => setJson(e.target.value)}
-          placeholder="Pegá acá el JSON completo de la ficha…"
+          placeholder="Pegá acá lo que copió el snippet (o el JSON completo de la ficha vieja)…"
           rows={8}
           style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--gf-gray-200)', fontSize: 11.5, fontFamily: 'monospace', resize: 'vertical' }}
         />
@@ -2546,9 +2550,17 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
         </Card>
       )}
 
-      {carteras.some(c => c.advertenciaIntegridad) && (
+      {carteras.some(c => c.advertenciaSuma) && (
         <div style={{ fontSize: 11.5, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 10, padding: '8px 12px', lineHeight: 1.5 }}>
-          ⚠️ {carteras.filter(c => c.advertenciaIntegridad).map(c => c.nombre).join(', ')} — la suma de shares está fuera de [98, 102]. Los datos pueden ser parciales.
+          ⚠️ {carteras.filter(c => c.advertenciaSuma).map(c => c.nombre).join(', ')} — la suma de porcentajes está fuera de [98, 102]. Los datos pueden ser parciales.
+        </div>
+      )}
+
+      {/* F9.104 — cobertura identificada baja: el pie chart de origen truncó la cola en "Resto
+          de Activos" y ese resto pesa demasiado para tratar la cartera como conocida. */}
+      {carteras.some(c => c.advertenciaCobertura) && (
+        <div style={{ fontSize: 11.5, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 10, padding: '8px 12px', lineHeight: 1.5 }}>
+          ⚠️ {carteras.filter(c => c.advertenciaCobertura).map(c => `${c.nombre} (${(c.coberturaIdentificada ?? 0).toFixed(1)}%)`).join(', ')} — cartera con cobertura identificada baja (cola agrupada en "Resto de Activos"). El benchmark de esos fondos es parcial.
         </div>
       )}
 
@@ -3445,10 +3457,10 @@ export default function Patrimonio() {
     }
   }
 
-  // F9.102.2 4b — ingesta manual de JSON CAFCI: red de seguridad para el bloqueo de
-  // CloudFront. Tira si falla — el modal de "Pegar JSON" muestra el mensaje inline (más
-  // accionable ahí que en un toast lejos del textarea); solo el éxito pasa por el toast
-  // compartido, igual que sincronizarCafci.
+  // F9.102.2 4b — ingesta manual de JSON/array CAFCI: red de seguridad si el fetch automático
+  // falla (sitio caído, cambio de estructura, etc. — F9.104). Tira si falla — el modal de
+  // "Pegar JSON" muestra el mensaje inline (más accionable ahí que en un toast lejos del
+  // textarea); solo el éxito pasa por el toast compartido, igual que sincronizarCafci.
   async function handleImportarCafciManual(fondoId: string, claseId: string, json: string) {
     const result = await importarCafciManualCallable(fondoId, claseId, json);
     const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(), cargarMappings()]);

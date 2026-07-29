@@ -470,6 +470,76 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `api.argentinadatos.com` sale sin bloqueo desde la Cloud Function, algo que no se puede probar
   sin el deploy) → si el solapamiento cierra, correr "Completar histórico" → Optim → Recalcular y
   confirmar cuántos `.BA` entran.
+- F9.104 — Migración de la ingesta CAFCI al sitio nuevo (cierra F9.102.1/.2: los 403 nunca fueron
+  CloudFront bloqueando por IP/ASN de compute — CAFCI migró de sitio y dio de baja la API vieja;
+  hasta el propio sitio oficial se pega 403 contra su API muerta). Ver
+  `docs/prompts/F9.104-migracion-cafci-sitio-nuevo.md`. **Auditoría previa (obligatoria por el
+  spec, hecha con `curl` contra producción antes de tocar código):** confirmado que
+  `estadisticas.cafci.org.ar/fondos/{fondoId}?clase={claseId}` responde 200 sin bot-detection
+  para los 3 casos de prueba (incl. el borde `fondoId===claseId`); la cartera viaja en
+  `<canvas data-pie-chart-items-value="[{&quot;nombre&quot;:...,&quot;porcentaje&quot;:...}]">`
+  (HTML-escapado); la fecha de CARTERA vive en `<div id="cartera">…<div class="valores">Valores
+  al DD/MM/YYYY</div>`, distinta de la fecha de VALORIZACIÓN del fondo (`#titlePage`,
+  "información al…") — confundirlas habría ensuciado `fechaDatos` en silencio. Verificado con
+  HTML real de Alpha Pesos (money market) y Galileo Acciones. **1. Módulo puro nuevo
+  `functions/src/cafciHtml.ts`** (sin imports de SDK, mismo patrón que `matchLogica.ts`):
+  `extraerItemsCartera(html)` (regex sobre `data-pie-chart-items-value`, decodifica entidades
+  HTML antes de `JSON.parse`, falla explícito si el atributo falta / no parsea / da array vacío)
+  y `extraerFechaCartera(html)` (regex acotada a `#cartera`, `null` si no matchea — el caller
+  decide si eso es fatal). Self-test sin framework `cafciHtml.test.ts` (no hay jest/vitest en
+  `functions/`, no se justifica sumarlo para 4 casos — mismo criterio que `correrTests()` del
+  cliente): entidades escapadas, atributo ausente, JSON inválido, array vacío, más 2 casos bonus
+  (fecha ausente no explota, no confunde valorización con cartera) — los 8 corren contra
+  fragmentos reales auditados. Correr: `npx tsx functions/src/cafciHtml.test.ts`.
+  **2. `sincronizarCafci`** (`functions/src/index.ts`): URL nueva, `Accept: text/html`, sin
+  `Origin`/`Referer` (spoofeo para la API vieja); en error, loguea el `status` + primeros 300
+  caracteres del body REAL en vez de un mensaje interpretado fijo ("CloudFront bloqueó") — esa
+  suposición escrita en el código costó tres sesiones de investigación en F9.102.1/.2; el mismo
+  criterio se aplica en `importarCafciManual`. Si no se puede extraer `fechaDatos`, falla el
+  fondo (no el lote) en vez de caer a `fechaFetch` — evita ensuciar la clave del `docId` con una
+  fecha equivocada de forma difícil de detectar después. **3. Bucket de desconocido
+  (`parsearFichaCafci`):** el pie chart de origen es un componente de UI que trunca la cola en
+  un item literal `"Resto de Activos"` — un money market puede tener hasta ~10% ahí (medido:
+  Alpha Pesos 8%, Galileo Acciones 1.6% en el HTML auditado). Se persiste como posición propia
+  (`categoria: 'RESTO'`, `ticker: null`, nunca pendiente de mapeo, nunca prorrateado).
+  `advertenciaIntegridad` (único chequeo `totalPct∉[98,102]`) se reemplaza por DOS
+  independientes: `advertenciaSuma` (mismo chequeo, detecta HTML roto) y `advertenciaCobertura`
+  (`coberturaIdentificada = totalPct − pesoResto` bajo `UMBRAL_COBERTURA_MINIMA=95`, constante
+  nombrada — detecta truncamiento severo). Verificado end-to-end contra el HTML real de Alpha
+  Pesos: dispara `advertenciaCobertura` (92.1% < 95) SIN disparar `advertenciaSuma` (100.1% ∈
+  [98,102]) — exactamente el caso que antes pasaba silencioso y la razón de ser del cambio.
+  **4. `parsePosicionCafci`:** agrega alias `nombre` (campo del sitio nuevo) delante de
+  `nombreActivo`, sin tocar el resto — retrocompat con `share`/`nombreActivo` intacta.
+  **5. `importarCafciManual`:** ahora acepta DOS formatos pegados a mano — array directo (el
+  snippet de consola `copy(document.querySelector('[data-pie-chart-items-value]').dataset
+  .pieChartItemsValue)` del sitio nuevo) o el envoltorio `{success, data:{info:{semanal}}}` de
+  la API vieja (retrocompat con JSON ya guardado). El array directo no trae fecha de cartera
+  propia — usa la fecha de ingesta (decisión de esta sesión, documentada: es la red de
+  seguridad, no el camino primario, que sí extrae la fecha real del HTML). El chequeo
+  best-effort de `fondoId` en el payload solo aplica al formato viejo (el array no lo trae).
+  **6. Cierre del experimento de región:** `region: 'us-central1'` eliminado de
+  `sincronizarCafci` (vuelve a `southamerica-east1` vía `setGlobalOptions`); `functionsUsCentral`
+  + su `connectFunctionsEmulator` eliminados de `src/firebase.ts`; `sincronizarCafci()` (cliente,
+  `patrimonioCafci.ts`) vuelve a usar `functions`. **7. UI (`Patrimonio.tsx`):** banner existente
+  de `advertenciaSuma` (antes `advertenciaIntegridad`) intacto en texto/estilo; banner nuevo de
+  `advertenciaCobertura` con el % de cobertura por fondo. `PegarJsonModal`: URL apunta al sitio
+  nuevo, instrucciones cambian de "copiá el JSON de la respuesta" a "pegá el snippet de consola
+  en F12, copiá el resultado". Comentarios obsoletos que seguían atribuyendo el problema a
+  CloudFront (en `Patrimonio.tsx` e `index.ts`) corregidos para no repetir la suposición que
+  esta sesión cerró. `CafciCartera`/`CafciPosicion` (client) y `ParseoFichaCafci` (functions)
+  actualizados con los campos nuevos; `'RESTO'` sumado a la unión de categorías.
+  **Fuera de alcance (documentado en el spec, no de esta sesión):** ingesta de `pb_get` y
+  reconstrucción del universo de fondos (F9.105); corrección del seed de fondos (Pionero
+  15/15 resuelve al fondo equivocado, 10× más chico) — **antes de dar por buena una corrida**,
+  corregir a mano esa entrada en `configPatrimonio/cafci` vía la UI existente (botón "×" +
+  "Agregar fondo" en el card de Config), si no la sync trae la cartera equivocada sin avisar.
+  `tsc --noEmit` (cliente y `functions/`): 41 errores pre-existentes en cliente (mismo baseline
+  de F9.102.2/F9.103/F9.106), 0 nuevos; 0 en functions. `vite build` y `functions build`: OK.
+  **Pendiente de cierre manual (no deployo yo):** `cd functions && npm run build` → `firebase
+  deploy --only functions,hosting` → Sincronizar desde Config → `firebase functions:list`
+  (confirmar `sincronizarCafci` una sola vez, en `southamerica-east1`) → revisar el reporte de
+  sincronizados/errores/cobertura → corregir Pionero en la config antes de confiar en el
+  benchmark.
 - F9.106 — Asignación de factura a gasto esperado por **mes de pago** (no de emisión) + automatismo
   graduado por confianza. Ver `docs/prompts/F9.106.spec.md`. **Bug de origen:** una factura del
   próximo período subida dentro del mes en curso se clasificaba "pago adicional" en vez de
