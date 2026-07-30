@@ -55,3 +55,20 @@ export function diaDeAgenda(e: AgendaEntry): number {
   if (e.kind === 'suelto') return e.mov.fecha.getDate();
   return e.ci.item.diaVencimiento ?? 99;
 }
+
+// F9.108 — grupo de agenda con su mes, para el picker de conciliación multi-mes.
+export type GrupoAgenda = { mes: string; entradas: AgendaEntry[] };
+
+// F9.108 — candidatos del picker: los cubiertos (pagado/automático/confirmado) NO se ofrecen
+// más, ni grises. Orden: vencidos primero, después por día de vencimiento ascendente.
+export function pendientesOrdenados(entradas: AgendaEntry[]): AgendaEntry[] {
+  return entradas
+    .filter(e => !agendaCubierto(e))
+    .slice()
+    .sort((a, b) => {
+      const aVenc = a.kind === 'esperado' && a.ci.estado === 'vencido' ? 0 : 1;
+      const bVenc = b.kind === 'esperado' && b.ci.estado === 'vencido' ? 0 : 1;
+      if (aVenc !== bVenc) return aVenc - bVenc;
+      return diaDeAgenda(a) - diaDeAgenda(b);
+    });
+}

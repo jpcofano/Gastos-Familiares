@@ -10,7 +10,7 @@ import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import { calcularChecklist, mesActualStr } from '../datos/checklist';
-import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, diaDeAgenda, type AgendaEntry } from '../datos/agenda';
+import { construirAgenda, sueltosFuturosDelMes, pendientesOrdenados, type AgendaEntry, type GrupoAgenda } from '../datos/agenda';
 import { Icon } from '../design-system/Icon';
 import { Card, Badge, Message, Button } from '../design-system/components';
 import { Fab } from '../design-system/shell';
@@ -136,9 +136,10 @@ function DatosResumen({ d }: { d: DatosExtraidos }) {
 interface PropuestaProps {
   comp: Comprobante;
   items: ExpectedItem[];
-  // F9.99.9 — agenda unificada del mes actual (checklist ∪ sueltos), fuente del picker de
-  // conciliación manual — ver src/datos/agenda.ts.
-  agenda: AgendaEntry[];
+  // F9.99.9 — agenda unificada (checklist ∪ sueltos), fuente del picker de conciliación
+  // manual — ver src/datos/agenda.ts. F9.108: array de grupos, uno por mes (mes actual +
+  // mes siguiente), para poder ofrecer también obligaciones del mes que viene.
+  agenda: GrupoAgenda[];
   memberId: string;
   miembro: import('../types').FamiliaMiembro;
   esAdmin: boolean;
@@ -158,8 +159,26 @@ function montoAgenda(e: AgendaEntry): { monto: number | null; moneda: 'ARS' | 'U
     ? { monto: e.ci.item.montoEsperado, moneda: e.ci.item.moneda }
     : { monto: e.mov.monto, moneda: e.mov.moneda };
 }
-function candKey(e: AgendaEntry): string {
-  return e.kind === 'esperado' ? `esperado:${e.ci.item.id}` : `suelto:${e.mov.id}`;
+function candKey(e: AgendaEntry, mes: string): string {
+  return e.kind === 'esperado' ? `esperado:${mes}:${e.ci.item.id}` : `suelto:${e.mov.id}`;
+}
+// F9.108 — candidatos pendientes de un grupo (mes), filtrados a Gasto + misma moneda del
+// comprobante; los cubiertos ya no se ofrecen (pendientesOrdenados los excluye).
+function candidatosDeGrupo(entradas: AgendaEntry[], moneda: string): AgendaEntry[] {
+  return pendientesOrdenados(entradas.filter(e => e.kind === 'esperado'
+    ? e.ci.item.tipo === 'Gasto' && e.ci.item.moneda === moneda
+    : e.mov.moneda === moneda));
+}
+// F9.108 — parseo robusto de la selección del picker: los itemId pueden contener ':', no
+// se puede partir a ciegas por el primer ':' (reemplaza el parseo previo que sí lo hacía).
+function parsePickerSel(sel: string): { kind: 'esperado' | 'suelto' | null; mes: string; id: string } {
+  if (sel.startsWith('esperado:')) {
+    const resto = sel.slice('esperado:'.length);
+    const i = resto.indexOf(':');
+    return { kind: 'esperado', mes: resto.slice(0, i), id: resto.slice(i + 1) };
+  }
+  if (sel.startsWith('suelto:')) return { kind: 'suelto', mes: '', id: sel.slice('suelto:'.length) };
+  return { kind: null, mes: '', id: '' };
 }
 
 function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAbrir }: PropuestaProps) {
@@ -185,6 +204,9 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
   // F9.106 — mes editable en la card de confirmación (banda 0.7-0.9); vacío = usar el default
   // calculado (mes del 1er vencimiento). Auto-silenciosa (≥0.9): flag de error para fallback manual.
   const [mesElegido,    setMesElegido]    = useState<string>('');
+  // F9.108 — sin obligación abierta: fuerza el itemEsperadoId al derivar al alta prellenada
+  // (el callable de alta manual no admite payload a mano, ver handleConciliar más abajo).
+  const [esperadoForzado, setEsperadoForzado] = useState<string>('');
   const [errorAutoSilencioso, setErrorAutoSilencioso] = useState<string | null>(null);
   const [autoFallidoManual,   setAutoFallidoManual]   = useState(false);
   const autoConfirmadoRef = useRef(false);
@@ -364,7 +386,18 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
 
   const esperado = itemEsperadoEfectivo ? items.find(i => i.id === itemEsperadoEfectivo) : undefined;
 
-  const preload = pm.rama === 2
+  // F9.108 — `esperadoForzado` (picker sin obligación abierta) tiene prioridad sobre la
+  // rama 2: es el usuario eligiendo explícitamente, no el match automático.
+  const itemForzado = esperadoForzado ? items.find(i => i.id === esperadoForzado) : undefined;
+  const preload = esperadoForzado
+    ? {
+        ...preloadBase,
+        banco:          undefined,
+        itemEsperadoId: esperadoForzado,
+        categoria:      itemForzado?.categoria    ?? preloadBase.categoria,
+        subcategoria:   itemForzado?.subcategoria ?? preloadBase.subcategoria,
+      }
+    : pm.rama === 2
     ? {
         ...preloadBase,
         banco:          undefined,
@@ -409,43 +442,30 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     </span>
   );
 
-  // F9.99.9 — picker "Conciliar con gasto esperado" / "Asignar a otro gasto": disponible para
-  // TODO documento de gasto (antes solo transferencia/comprobante_pago), rama 3 y rama 2
-  // (secundario/colapsado). Candidatos = agenda unificada del mes actual (checklist ∪ sueltos),
-  // filtrada a Gasto + misma moneda; no-cubiertos primero (vencidos antes que el resto) por
-  // día de vencimiento ascendente, cubiertos al fondo y no seleccionables.
-  const candidatosAgenda = agenda
-    .filter(e => e.kind === 'esperado'
-      ? e.ci.item.tipo === 'Gasto' && e.ci.item.moneda === d.moneda
-      : e.mov.moneda === d.moneda)
-    .slice()
-    .sort((a, b) => {
-      const aCub = agendaCubierto(a) ? 1 : 0, bCub = agendaCubierto(b) ? 1 : 0;
-      if (aCub !== bCub) return aCub - bCub;
-      const aVenc = a.kind === 'esperado' && a.ci.estado === 'vencido' ? 0 : 1;
-      const bVenc = b.kind === 'esperado' && b.ci.estado === 'vencido' ? 0 : 1;
-      if (aVenc !== bVenc) return aVenc - bVenc;
-      return diaDeAgenda(a) - diaDeAgenda(b);
-    });
-  const pickerKind: 'esperado' | 'suelto' | null =
-    pickerSel.startsWith('esperado:') ? 'esperado' : pickerSel.startsWith('suelto:') ? 'suelto' : null;
-  const pickerId = pickerKind ? pickerSel.slice(pickerSel.indexOf(':') + 1) : '';
+  // F9.99.9/F9.108 — picker "Conciliar con gasto esperado" / "Asignar a otro gasto": disponible
+  // para TODO documento de gasto (antes solo transferencia/comprobante_pago), rama 3 y rama 2
+  // (secundario/colapsado). Candidatos = agenda unificada de dos meses (mes actual + siguiente),
+  // uno por grupo (ver render); los cubiertos (pagado/automático/confirmado) ya no se ofrecen.
+  const { kind: pickerKind, mes: pickerMes, id: pickerId } = parsePickerSel(pickerSel);
 
   // F9.99.7 Parte 2 — al elegir un esperado, busca sus obligaciones abiertas (mismo mes + futuras,
   // F9.99.9 Parte 4: piso mesComp−1) para que el usuario elija cuál salda este pago. Un suelto
   // es un único movimiento — no tiene "qué mes", se confirma directo (ver handleConciliar).
+  // F9.108 — el mes de referencia es el de la FILA elegida (pickerMes), no el del comprobante:
+  // una fila de agosto sigue mostrando obligaciones abiertas de julio (buscarObligacionesAbiertas
+  // pisa en mesDesde−1), cada una con su propio mes visible en el sub-picker.
   useEffect(() => {
     if (pickerKind !== 'esperado' || !pickerId) { setObligaciones([]); setObligacionSel(''); return; }
     let cancelado = false;
     setBuscandoObligaciones(true);
     setObligacionSel('');
-    buscarObligacionesAbiertas(pickerId, mesPagoDefault).then(obs => {
+    buscarObligacionesAbiertas(pickerId, pickerMes || mesPagoDefault).then(obs => {
       if (cancelado) return;
       setObligaciones(obs);
       setBuscandoObligaciones(false);
     });
     return () => { cancelado = true; };
-  }, [pickerKind, pickerId, mesPagoDefault]);
+  }, [pickerKind, pickerId, pickerMes, mesPagoDefault]);
 
   async function handleConciliar() {
     if (!pickerSel) return;
@@ -465,18 +485,16 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
       setPickerCargando(false);
       if (!res.ok) setErrorLocal(res.error.message);
     } else {
-      const itemEsp = items.find(i => i.id === pickerId);
-      const payload = {
-        ...preloadBase,
-        itemEsperadoId: pickerId,
-        categoria:      itemEsp?.categoria  ?? preloadBase.categoria,
-        subcategoria:   itemEsp?.subcategoria ?? preloadBase.subcategoria,
-        banco:          undefined,
-      };
-      const res = await cargarMovimientoDesdeComprobante(comp.id, payload);
+      // F9.108 — sin obligación abierta: NO se arma el payload a mano. El callable exige
+      // creadoPor/monto:number/fechaMs/mes (index.ts:1756-1770) y preloadBase no los tiene
+      // (esta rama fallaba siempre con invalid-argument). Se deriva al alta prellenada, que es
+      // el único lugar que arma el payload válido y resuelve TC para USD.
+      setMesElegido(pickerMes || mesPagoDefault);
+      setEsperadoForzado(pickerId);
       setPickerCargando(false);
-      if (!res.ok) setErrorLocal(res.error.message);
-      else setMostrarPicker(false);
+      setMostrarPicker(false);
+      setMostrarAlta(true);
+      return;
     }
   }
 
@@ -568,25 +586,38 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Elegí qué gasto salda este comprobante</span>
           <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {candidatosAgenda.length === 0 && (
-              <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Sin candidatos este mes.</span>
-            )}
-            {candidatosAgenda.map(e => {
-              const key = candKey(e);
-              const cubiertoE = agendaCubierto(e);
-              const vencidoE = e.kind === 'esperado' && e.ci.estado === 'vencido';
-              const { monto, moneda } = montoAgenda(e);
+            {agenda.map((grupo, idx) => {
+              const candidatos = candidatosDeGrupo(grupo.entradas, d.moneda);
+              const esMesSiguiente = idx === 1;
               return (
-                <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', cursor: cubiertoE ? 'default' : 'pointer', opacity: cubiertoE ? 0.5 : 1 }}>
-                  <input type="radio" name={`picker-${comp.id}`} value={key} checked={pickerSel === key} disabled={cubiertoE} onChange={() => setPickerSel(key)} />
-                  <Icon name={cubiertoE ? 'check' : vencidoE ? 'alert-circle' : 'clock'} size={13} color={cubiertoE ? 'var(--gf-income)' : vencidoE ? 'var(--gf-expense)' : 'var(--gf-gray-400)'} />
-                  <span style={{ flex: 1 }}>
-                    {labelAgenda(e)}
-                    {e.kind === 'suelto' && <Badge tone="neutral">Sin plantilla</Badge>}
-                    {vencidoE && <span style={{ color: 'var(--gf-expense)', marginLeft: 6, fontWeight: 700 }}>Venció día {e.ci.item.diaVencimiento}</span>}
-                    {monto != null && <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6 }}>{fmtMonto(monto, moneda)}</span>}
+                <div key={grupo.mes} style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: idx > 0 ? 6 : 0, paddingTop: idx > 0 ? 6 : 0, borderTop: idx > 0 ? '1px solid var(--gf-gray-100)' : undefined }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-sec)', textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                    {esMesSiguiente ? `Mes siguiente · ${formatMesCorto(grupo.mes)}` : `Este mes · ${formatMesCorto(grupo.mes)}`}
                   </span>
-                </label>
+                  {esMesSiguiente && (
+                    <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>Si esta factura se paga el mes que viene, elegí acá.</span>
+                  )}
+                  {candidatos.length === 0 && (
+                    <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Nada pendiente en {formatMesCorto(grupo.mes)}.</span>
+                  )}
+                  {candidatos.map(e => {
+                    const key = candKey(e, grupo.mes);
+                    const vencidoE = e.kind === 'esperado' && e.ci.estado === 'vencido';
+                    const { monto, moneda } = montoAgenda(e);
+                    return (
+                      <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', cursor: 'pointer' }}>
+                        <input type="radio" name={`picker-${comp.id}`} value={key} checked={pickerSel === key} onChange={() => setPickerSel(key)} />
+                        <Icon name={vencidoE ? 'alert-circle' : 'clock'} size={13} color={vencidoE ? 'var(--gf-expense)' : 'var(--gf-gray-400)'} />
+                        <span style={{ flex: 1 }}>
+                          {labelAgenda(e)}
+                          {e.kind === 'suelto' && <Badge tone="neutral">Sin plantilla</Badge>}
+                          {vencidoE && <span style={{ color: 'var(--gf-expense)', marginLeft: 6, fontWeight: 700 }}>Venció día {e.ci.item.diaVencimiento}</span>}
+                          {monto != null && <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6 }}>{fmtMonto(monto, moneda)}</span>}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
@@ -662,7 +693,7 @@ function ComprobanteCard({
 }: {
   comp:     Comprobante;
   items:    ExpectedItem[];
-  agenda:   AgendaEntry[];
+  agenda:   GrupoAgenda[];
   memberId: string;
   miembro:  import('../types').FamiliaMiembro;
   esAdmin:  boolean;
@@ -919,10 +950,18 @@ export default function Comprobantes() {
   // conciliación manual (decisión del dueño: alcance = mes actual + vencidos, NO la ventana
   // amplia [mes−1..mes+3] que usa el match automático). No-admin igual llama al hook (no puede
   // condicionar hooks), pero el picker está gateado a esAdmin — el resultado no se usa.
+  // F9.108 — mes siguiente sumado al picker (grupo separado, rotulado, debajo del mes
+  // actual): una factura del mes que viene no tenía candidato antes de este cambio.
   const mesAct = mesActualStr();
+  const mesSig = sumarMeses(mesAct, 1);
   const { movimientos: movsMesActual } = useMovimientosDelMes(mesAct, esAdmin ? undefined : memberId);
+  const { movimientos: movsMesSig }    = useMovimientosDelMes(mesSig, esAdmin ? undefined : memberId);
   const checklistMesActual = calcularChecklist(items, movsMesActual, mesAct);
-  const agendaPicker = construirAgenda(checklistMesActual, sueltosFuturosDelMes(movsMesActual, checklistMesActual, new Date()));
+  const checklistMesSig    = calcularChecklist(items, movsMesSig, mesSig);
+  const agendaPicker: GrupoAgenda[] = [
+    { mes: mesAct, entradas: construirAgenda(checklistMesActual, sueltosFuturosDelMes(movsMesActual, checklistMesActual, new Date())) },
+    { mes: mesSig, entradas: construirAgenda(checklistMesSig,   sueltosFuturosDelMes(movsMesSig,   checklistMesSig,   new Date())) },
+  ];
 
   // ── ShareLanding (F9.51) — cubre el arranque en frío cuando llega por
   // Web Share Target. Se monta apenas IDB devuelve el File; sus fases las

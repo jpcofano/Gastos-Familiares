@@ -574,6 +574,44 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   **Pendiente de cierre manual (no deployo yo):** `firebase deploy --only functions,hosting` →
   probar con una factura real de próximo período (caso Edenor del spec) → si no refresca en el
   celu, borrar datos del sitio (mata el service worker).
+- F9.108 — Picker de conciliación manual: mes siguiente visible y pagados fuera. Ver
+  `docs/prompts/F9.108-picker-mes-siguiente-sin-pagados.md`. Frontend únicamente
+  (`src/vistas/Comprobantes.tsx`, `src/datos/agenda.ts`), cero cambios en `functions/`.
+  **1. Dos meses en el picker:** `agenda.ts` gana `GrupoAgenda = {mes, entradas}` y
+  `pendientesOrdenados(entradas)` (filtra cubiertos, ordena vencidos primero luego por
+  `diaDeAgenda`) — puras, no tocan `construirAgenda`/`agendaCubierto`/`pendienteDeEntrada`
+  existentes (Resumen/Card HOY sin cambio de comportamiento). `Comprobantes()` arma
+  `agendaPicker: GrupoAgenda[]` con dos hooks fijos de `useMovimientosDelMes` (mes actual +
+  `sumarMeses(mesAct, 1)`, sin condicionales — regla de hooks), reemplazando la prop `agenda`
+  (antes `AgendaEntry[]`, ahora `GrupoAgenda[]`) de `PropuestaProps`/`ComprobanteCard`.
+  **2. Ya pagados fuera del picker:** el render agrupado usa `candidatosDeGrupo()` (filtra
+  Gasto + misma moneda, delega a `pendientesOrdenados`) — los cubiertos ya no se listan
+  grises/deshabilitados, se excluyen. Cada grupo tiene encabezado siempre visible ("Este mes ·
+  {mes}" / "Mes siguiente · {mes}" + línea "Si esta factura se paga el mes que viene, elegí
+  acá.") y estado vacío explícito ("Nada pendiente en {mes}.") en vez de una lista muda; un solo
+  radio group (`name="picker-${comp.id}"`) abarca ambos grupos. **3. Clave con mes:**
+  `candKey(e, mes)` → `esperado:<mes>:<itemId>` | `suelto:<movId>`; `parsePickerSel(sel)`
+  reemplaza el parseo por el primer `:` (rompía si el itemId traía `:`) por un split explícito
+  esperado/suelto. **4. Obligaciones abiertas por la fila:** `buscarObligacionesAbiertas(pickerId,
+  pickerMes || mesPagoDefault)` usa el mes de la fila elegida, no el del comprobante — una fila
+  de mes siguiente sigue mostrando obligaciones de meses anteriores (la función ya pisa en
+  `mesDesde−1`). **5. Fix bloqueante (hallazgo de auditoría, rama "esperado sin obligación
+  abierta"):** esa rama de `handleConciliar` armaba el payload a mano y llamaba a
+  `cargarMovimientoDesdeComprobante` directo — el callable exige `creadoPor`/`monto:number`/
+  `fechaMs`/`mes` (`functions/src/index.ts:1756-1770`) que ese payload nunca tuvo, fallaba
+  siempre con `invalid-argument` en producción (justo la rama que más pega con el mes
+  siguiente, que normalmente no tiene obligación creada todavía). Reemplazada por derivar al
+  alta prellenada: `setMesElegido(pickerMes || mesPagoDefault)` + `setEsperadoForzado(pickerId)`
+  + `setMostrarAlta(true)` — `AltaMovimiento` es el único lugar que arma el payload válido
+  (incl. `creadoPor`/`fechaMs`/`mes`/TC para USD). Estado nuevo `esperadoForzado` en
+  `PropuestaCard`, con prioridad sobre la rama 2 en el cálculo de `preload` (es el usuario
+  eligiendo explícito, no el match automático). `tsc --noEmit` (cliente y `functions/`): 41
+  errores pre-existentes en cliente (mismo baseline, verificado idéntico antes/después —
+  0 nuevos); 0 en functions. `vite build`: OK. **Pendiente de cierre manual (no deployo yo):**
+  `firebase deploy --only hosting` → probar en incógnito/borrar datos del sitio (mata el
+  service worker): dos grupos rotulados, ningún pagado en la lista, elegir fila de mes
+  siguiente sin obligación abre el alta con fecha/mes correctos y guarda con `itemEsperadoId`
+  seteado (verificar en Firestore).
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
