@@ -9,6 +9,7 @@ import {
   type NuevoItemEsperado,
 } from '../datos/itemsEsperados';
 import { useMiembroCtx } from '../contexto/MiembroContext';
+import { LARGO_MINIMO_TOKEN } from '../datos/checklist';
 import type { ExpectedItem, FamiliaConfig } from '../types';
 import './ConfigEsperados.css';
 
@@ -94,12 +95,17 @@ interface ChipEditorProps {
 function ChipEditor({ chips, input, onInputChange, onAdd, onRemove, placeholder }: ChipEditorProps) {
   return (
     <div className="cfg-chips-area">
-      {chips.map(c => (
-        <span key={c} className="cfg-chip-tag">
-          {c}
-          <button type="button" onClick={() => onRemove(c)} aria-label={`Quitar ${c}`}>×</button>
-        </span>
-      ))}
+      {chips.map(c => {
+        // F9.111 — tokens cortos ya guardados no se ocultan (rompería configuración vieja
+        // sin avisar); se marcan para que el admin decida si los corrige o los borra.
+        const corto = c.length < LARGO_MINIMO_TOKEN;
+        return (
+          <span key={c} className="cfg-chip-tag" style={corto ? { color: 'var(--gf-out)' } : undefined}>
+            {c}{corto && ' (se ignora)'}
+            <button type="button" onClick={() => onRemove(c)} aria-label={`Quitar ${c}`}>×</button>
+          </span>
+        );
+      })}
       <input
         className="cfg-chips-input"
         type="text"
@@ -171,6 +177,12 @@ function FormItemEsperado({
   ) {
     const chip = val.trim().toLowerCase();
     if (!chip || list.includes(chip)) { setInput(''); return; }
+    // F9.111 — un token por debajo del largo mínimo matchea cualquier cosa (coincideToken lo
+    // ignora en checklist.ts/matchLogica.ts); se rechaza al agregar en vez de guardarlo inerte.
+    if (chip.length < LARGO_MINIMO_TOKEN) {
+      setErrorMsg(`Mínimo ${LARGO_MINIMO_TOKEN} caracteres — un token más corto matchea cualquier cosa.`);
+      return;
+    }
     setList([...list, chip]);
     setInput('');
   }

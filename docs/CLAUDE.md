@@ -698,6 +698,62 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   límite de palabra/largo mínimo (misma causa raíz del falso positivo de F9.109, requiere
   revisar todos los `incluye` existentes antes de cambiar semántica); alerta o job de
   limpieza para movimientos con `itemEsperadoId` colgado; periodicidades no mensuales.
+- F9.111 — Arbitraje de movimientos sin dueño + `matchTexto` con límite de palabra. Ver
+  `docs/prompts/F9.111-arbitraje-y-tokens.md`. Depende de F9.110 (mismas dos garantías, no
+  las revierte: dueño explícito no se comparte, huérfano no se pierde). **Hueco que dejaba
+  F9.110:** solo resolvía "dueño explícito vs. heurística" — si NINGÚN ítem tenía
+  `itemEsperadoId` en el movimiento (caso real verificado contra producción: los dos AySA de
+  agosto 2026 no tenían `itemEsperadoId` seteado, pese a que el dueño creía que sí — la
+  premisa del spec de F9.110 estaba equivocada), dos ítems con `matchTexto` solapado lo
+  seguían contando dos veces, porque la rama de `matchTexto` ignoraba categoría/subcategoría
+  por completo. **1. Resolvedor con arbitraje** (`src/datos/checklist.ts`): reemplaza la
+  vieja `movimientosDelItem` (evaluada independiente por ítem) por `calcularChecklist` en dos
+  pases sobre TODOS los movimientos a la vez. Pase 1 = vínculo directo por `itemEsperadoId`
+  (igual que F9.110, el ítem no participa del pase 2). Pase 2 = cada movimiento libre se
+  reparte a UN solo ítem vía `puntajeReclamo()` (nuevo, no exportado): `tarjetaCodigo` 8 ·
+  categoría exacta +2 · subcategoría exacta +2 · `matchTexto` +1 (ya no comodín de cat/subcat:
+  ahora SUMA si además coinciden) · persona en Ingreso +1; empate en el máximo score se
+  resuelve por menor id (determinístico) y se registra en `CheckItem.disputas` (nuevo campo
+  opcional `{movId, otros}[]`) para mostrarlo, no ocultarlo. `movimientosDelItem` se borró
+  (único call site real era `calcularChecklist`, verificado con grep). **2. Badge "Ambiguo"**
+  (`ItemChecklistCard`, `Resumen.tsx`): cuando `ci.disputas?.length`, badge tono warning +
+  línea "Asignalo a mano al gasto esperado que corresponda para fijarlo."; desaparece solo al
+  vincular el movimiento a mano (pasa a pase 1). **3. `coincideToken`** (nuevo, exportado de
+  `checklist.ts` + copia gemela en `functions/src/matchLogica.ts` `evaluarMatchTexto`, mismo
+  patrón de sync manual que el normalizador): límite de palabra (sin lookbehind, por
+  compatibilidad de WebView viejo) + `LARGO_MINIMO_TOKEN = 3` — antes `'glob'` matcheaba
+  "BODEGON EL GLOBITO SRL" (causa raíz compartida con el falso positivo de F9.109) y `'sa'`
+  matcheaba cualquier razón social. Fallback: si NINGÚN token de `incluye` llega al mínimo,
+  el ítem cae a categoría+subcategoría en `puntajeReclamo` (no deja de matchear en silencio);
+  en `matchLogica.ts` (solo hace matcheo por texto, sin fallback de cat/subcat posible ahí)
+  simplemente no se propone por texto — documentado inline, es la única divergencia real
+  entre los dos gemelos. **4. Aviso en Config → Esperados** (`ConfigEsperados.tsx`): chip
+  nuevo con menos de 3 caracteres se rechaza al agregar (`addChip`, mensaje inline reusando
+  `errorMsg`); chips ya guardados por debajo del mínimo se pintan en `var(--gf-out)` con
+  sufijo " (se ignora)" en vez de ocultarse. **5. Gate de datos** — `scripts/auditarTokens.ts`
+  (nuevo, Admin SDK, copia local de `coincideToken`/`LARGO_MINIMO_TOKEN` por el mismo
+  criterio de no-import-cruzado): compara `includes()` crudo vs. `coincideToken()` sobre los
+  15 ítems con `matchTexto` × 1196 movimientos de los últimos 6 meses de producción (bug de
+  paso encontrado y corregido en la propia auditoría: `setMonth` restando un mes a la vez
+  sobre un día 30 podía rebotar en meses cortos como febrero y saltear un mes entero —
+  arreglado fijando el día en 1 antes de restar). Resultado real: **0 PIERDE, 0 GANA, 0
+  ítems con todos los tokens cortos** — cambio de semántica sin impacto sobre configuración
+  ya cargada, mergeable sin ajustar ningún token existente. **Verificación contra producción
+  (agosto 2026, antes de borrar el ítem de prueba):** los dos movimientos AySA (`itemEsperadoId`
+  ambos `undefined`, confirmado por query directa — no como asumía el spec original) quedan
+  cada uno en su ítem correcto (`Auto › Agua` $22.974,79 · `Casa › Agua` $50.946,84, matchea
+  el `categoria` propio de cada movimiento vía el score de especificidad); `checklist.flatMap
+  (matches).map(id)` sin duplicados verificado end-to-end contra Firestore real. Empate
+  forzado verificado con datos sintéticos (dos ítems sin cat/subcat, mismo `matchTexto`,
+  mismo score): gana el de menor id, `disputas` queda poblado con el perdedor. `tsc --noEmit`
+  (cliente y `functions/`): 41 pre-existentes en cliente (mismo baseline), 0 nuevos; 0 en
+  functions. `vite build` y `functions build`: OK. **Pendiente de cierre manual (no deployo
+  yo):** `cd functions && npm run build && firebase deploy --only functions,hosting` (site
+  real: `gastos-familiares-jmsf`, NO el default `gastos-familiares-e6415` del proyecto — ver
+  `firebase.json` → `hosting.site`) → verificar en incógnito/borrar datos del sitio: el
+  checklist de agosto ya no duplica los $73.922, badge Ambiguo aparece solo en empates reales
+  → limpieza de datos aparte del código (después de verificar): borrar o `activo:false` el
+  ítem de prueba `Auto › Agua`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

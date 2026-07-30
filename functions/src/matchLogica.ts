@@ -115,13 +115,36 @@ export function normalizarDestino(raw: string): { tipo: 'cbu' | 'cuit' | 'alias'
 const TOLERANCIA_MONTO = 0.05;
 const VENTANA_MS       = 7 * 24 * 60 * 60 * 1000;
 
+// F9.111 — matcheo de tokens con límite de palabra, gemelo de coincideToken() en
+// src/datos/checklist.ts (puntajeReclamo). Sync manual si se toca una: se tocan las dos.
+// Antes era includes() crudo: 'glob' matcheaba "BODEGON EL GLOBITO SRL" y 'sa' matcheaba
+// cualquier razón social. Sin lookbehind a propósito: no está disponible en todos los
+// WebView de Android/iOS viejos.
+const LARGO_MINIMO_TOKEN = 3;
+const esAlfanum = (c: string) => /[\p{L}\p{N}]/u.test(c);
+
+function coincideToken(texto: string, patron: string): boolean {
+  const p = patron.trim().toLowerCase();
+  if (p.length < LARGO_MINIMO_TOKEN) return false; // token demasiado corto: se ignora
+  const t = texto.toLowerCase();
+  for (let i = t.indexOf(p); i !== -1; i = t.indexOf(p, i + 1)) {
+    const antes = i === 0 ? '' : t[i - 1];
+    const desp = t[i + p.length] ?? '';
+    if ((!antes || !esAlfanum(antes)) && (!desp || !esAlfanum(desp))) return true;
+  }
+  return false;
+}
+
 /**
- * Espeja la lógica de matchTexto de movimientosDelItem() en src/vistas/Resumen.tsx.
- * Sync manual si la lógica del cliente cambia.
+ * Espeja la lógica de matchTexto de calcularChecklist()/puntajeReclamo() en
+ * src/datos/checklist.ts. Sync manual si la lógica del cliente cambia.
+ * F9.111 — fallback: si ningún token de incluye llega al largo mínimo, evalúa como si no
+ * hubiera matchTexto (retorna false acá; el caller matchConEsperados ya filtra items sin
+ * incluye.length>0, así que un ítem con solo tokens cortos deja de proponerse por texto —
+ * mismo criterio que puntajeReclamo, que en ese caso cae a categoría+subcategoría).
  */
 export function evaluarMatchTexto(texto: string, mt: MatchTexto): boolean {
-  const t = texto.toLowerCase();
-  return mt.incluye.some(p => t.includes(p.trim().toLowerCase())) && !mt.excluye.some(p => t.includes(p.trim().toLowerCase()));
+  return mt.incluye.some(p => coincideToken(texto, p)) && !mt.excluye.some(p => coincideToken(texto, p));
 }
 
 function montoScore(montoMov: number, datos: DatosExtractosMin): number {

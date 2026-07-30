@@ -5,45 +5,63 @@
 import type { EstadoChecklist } from '../design-system/components';
 import type { Movement, ExpectedItem } from '../types';
 
-export function movimientosDelItem(
-  item: ExpectedItem,
-  movs: Movement[],
-  idsConocidos?: ReadonlySet<string>,
-): Movement[] {
-  // Rama 0: vínculo directo por itemEsperadoId (manda sobre todo)
-  const directos = movs.filter(m => m.itemEsperadoId === item.id);
-  if (directos.length > 0) return directos;
+// F9.111 — matcheo de tokens con límite de palabra. Antes era includes() crudo, así que
+// 'glob' matcheaba "BODEGON EL GLOBITO SRL" y 'sa' matcheaba cualquier razón social.
+// Sin lookbehind a propósito: no está disponible en todos los WebView de Android/iOS viejos.
+export const LARGO_MINIMO_TOKEN = 3;
 
-  // F9.110 — un movimiento con dueño explícito NO puede ser reclamado por la heurística de
-  // otro ítem (antes, dos ítems con matchTexto solapado contaban los mismos movimientos y el
-  // pendiente se duplicaba). Los ids DESCONOCIDOS (ítem borrado) siguen disponibles: si no,
-  // el movimiento quedaría huérfano y desaparecería del checklist.
-  const libres = idsConocidos
-    ? movs.filter(m => !m.itemEsperadoId
-        || m.itemEsperadoId === item.id
-        || !idsConocidos.has(m.itemEsperadoId))
-    : movs;
+const esAlfanum = (c: string) => /[\p{L}\p{N}]/u.test(c);
 
-  // Rama 1: tarjeta por código — identidad fuerte, no categoria/subcategoria
+export function coincideToken(texto: string, patron: string): boolean {
+  const p = patron.trim().toLowerCase();
+  if (p.length < LARGO_MINIMO_TOKEN) return false; // token demasiado corto: se ignora
+  const t = texto.toLowerCase();
+  for (let i = t.indexOf(p); i !== -1; i = t.indexOf(p, i + 1)) {
+    const antes = i === 0 ? '' : t[i - 1];
+    const desp = t[i + p.length] ?? '';
+    if ((!antes || !esAlfanum(antes)) && (!desp || !esAlfanum(desp))) return true;
+  }
+  return false;
+}
+
+// F9.111 — puntaje de especificidad de un reclamo. null = el ítem no reclama el movimiento.
+// El predicado replica el de la vieja movimientosDelItem (rama 1 tarjeta, rama 2 matchTexto/
+// cat+subcat); lo nuevo es el score, que decide quién gana cuando más de un ítem reclama el
+// mismo movimiento libre (sin itemEsperadoId propio).
+// Fallback (§4.2 del spec): si NINGÚN token de incluye llega al largo mínimo, el ítem se trata
+// como si no tuviera matchTexto (cae a categoría+subcategoría) en vez de dejar de matchear todo.
+function puntajeReclamo(item: ExpectedItem, m: Movement): number | null {
   if (item.tarjetaCodigo) {
-    return libres.filter(m => m.subtipo === 'TarjetaPago' && m.tarjetaCodigo === item.tarjetaCodigo && m.moneda === item.moneda);
+    return (m.subtipo === 'TarjetaPago' && m.tarjetaCodigo === item.tarjetaCodigo && m.moneda === item.moneda) ? 8 : null;
+  }
+  if (m.tipo !== item.tipo) return null;
+  if (m.moneda !== item.moneda) return null;
+
+  const cat = item.categoria !== null && m.categoria === item.categoria;
+  const subcat = item.subcategoria !== null && m.subcategoria === item.subcategoria;
+
+  const tokensUtiles = item.matchTexto ? item.matchTexto.incluye.filter(t => t.trim().length >= LARGO_MINIMO_TOKEN) : [];
+  if (item.matchTexto && tokensUtiles.length > 0) {
+    const desc = (m.descripcion ?? '').toLowerCase();
+    if (!item.matchTexto.incluye.some(t => coincideToken(desc, t))) return null;
+    if (item.matchTexto.excluye.some(t => coincideToken(desc, t))) return null;
+    return 1 + (cat ? 2 : 0) + (subcat ? 2 : 0); // el texto solo es lo MENOS específico
   }
 
-  // Rama 2: matchTexto manda (relaja cat/subcat) — o, sin matchTexto, clave cat+subcat
-  return libres.filter(m => {
-    if (m.tipo !== item.tipo) return false;
-    if (m.moneda !== item.moneda) return false;
-    if (item.matchTexto) {
-      const desc = (m.descripcion ?? '').toLowerCase();
-      const inc = item.matchTexto.incluye.some(t => desc.includes(t.trim().toLowerCase()));
-      const exc = item.matchTexto.excluye.some(t => desc.includes(t.trim().toLowerCase()));
-      return inc && !exc;
-    }
-    if (item.categoria !== null && m.categoria !== item.categoria) return false;
-    if (item.subcategoria !== null && m.subcategoria !== item.subcategoria) return false;
-    if (item.tipo === 'Ingreso' && item.persona !== null && m.persona !== item.persona) return false;
-    return true;
-  });
+  if (item.categoria !== null && m.categoria !== item.categoria) return null;
+  if (item.subcategoria !== null && m.subcategoria !== item.subcategoria) return null;
+  if (item.tipo === 'Ingreso' && item.persona !== null && m.persona !== item.persona) return null;
+  return (cat ? 2 : 0) + (subcat ? 2 : 0) + (item.tipo === 'Ingreso' && item.persona !== null ? 1 : 0);
+}
+
+function push<K>(mapa: Map<K, Movement[]>, clave: K, m: Movement): void {
+  const arr = mapa.get(clave);
+  if (arr) arr.push(m); else mapa.set(clave, [m]);
+}
+
+function pushDisputa(mapa: Map<string, DisputaChecklist[]>, clave: string, d: DisputaChecklist): void {
+  const arr = mapa.get(clave);
+  if (arr) arr.push(d); else mapa.set(clave, [d]);
 }
 
 export function aplicaEnMes(_item: ExpectedItem, _mes: string): boolean {
@@ -97,21 +115,76 @@ export const ORDEN_ESTADO: Record<EstadoChecklist, number> = {
   pagado: 7, no_aplica: 8,
 };
 
-export interface CheckItem { item: ExpectedItem; matches: Movement[]; estado: EstadoChecklist; }
+// F9.111 — empate arbitrado: más de un ítem reclamó este movimiento con el mismo score máximo.
+export interface DisputaChecklist { movId: string; otros: string[] }
+
+export interface CheckItem {
+  item: ExpectedItem;
+  matches: Movement[];
+  estado: EstadoChecklist;
+  disputas?: DisputaChecklist[];
+}
 
 export function mesActualStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// F9.111 — resolvedor con arbitraje, reemplaza la vieja movimientosDelItem (cada ítem se
+// evaluaba de forma independiente, así que N ítems podían devolver el mismo movimiento).
+// Regla nueva: un movimiento lo reclama un solo ítem. Pase 1 preserva la garantía de F9.110
+// (dueño explícito por itemEsperadoId manda sobre todo, sin participar de la heurística).
+// Pase 2 arbitra entre las heurísticas: gana el reclamo más específico; empate en el máximo
+// se resuelve por menor id (determinístico) y se deja registrado en `disputas` para mostrarlo,
+// no para ocultarlo. Un itemEsperadoId colgado (ítem borrado) no se asigna en el pase 1: queda
+// libre para el pase 2 y no se pierde del checklist.
 export function calcularChecklist(items: ExpectedItem[], movs: Movement[], mes: string): CheckItem[] {
   const mesHoy = mesActualStr();
-  const idsConocidos = new Set(items.map(i => i.id)); // F9.110 — activos + inactivos
-  return items
-    .filter(i => i.activo)
+  const idsConocidos = new Set(items.map(i => i.id)); // activos + inactivos: un ítem
+  const activos = items.filter(i => i.activo); // desactivado sigue siendo dueño (pase 1)
+
+  const porItem = new Map<string, Movement[]>();
+  const disputas = new Map<string, DisputaChecklist[]>();
+  const asignados = new Set<string>();
+
+  // Pase 1 — vínculo directo (manda sobre todo).
+  for (const m of movs) {
+    if (m.itemEsperadoId && idsConocidos.has(m.itemEsperadoId)) {
+      push(porItem, m.itemEsperadoId, m);
+      asignados.add(m.id);
+    }
+  }
+
+  // Un ítem con vínculo directo NO participa de la heurística del pase 2.
+  const candidatos = activos.filter(i => (porItem.get(i.id)?.length ?? 0) === 0);
+
+  // Pase 2 — arbitraje: cada movimiento libre va a UN solo ítem.
+  for (const m of movs) {
+    if (asignados.has(m.id)) continue;
+    const reclamos = candidatos
+      .map(i => ({ id: i.id, score: puntajeReclamo(i, m) }))
+      .filter((r): r is { id: string; score: number } => r.score !== null);
+    if (reclamos.length === 0) continue;
+
+    // Mayor score gana; empate ⇒ menor id lexicográfico (determinístico e independiente
+    // del orden en que Firestore devuelva los ítems).
+    reclamos.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
+    const ganador = reclamos[0];
+    push(porItem, ganador.id, m);
+    asignados.add(m.id);
+
+    // Solo es ambigüedad cuando EMPATAN en el máximo: ahí el desempate es arbitrario y hay
+    // que mostrarlo. Si el ganador gana por score, el arbitraje es correcto y no molesta.
+    const empatados = reclamos.filter(r => r.score === ganador.score);
+    if (empatados.length > 1) {
+      pushDisputa(disputas, ganador.id, { movId: m.id, otros: empatados.slice(1).map(r => r.id) });
+    }
+  }
+
+  return activos
     .map(item => {
-      const matches = movimientosDelItem(item, movs, idsConocidos);
-      return { item, matches, estado: estadoItem(item, matches, mesHoy, mes) };
+      const matches = porItem.get(item.id) ?? [];
+      return { item, matches, estado: estadoItem(item, matches, mesHoy, mes), disputas: disputas.get(item.id) };
     })
     .sort((a, b) => ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado]);
 }

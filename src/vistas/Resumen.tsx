@@ -657,6 +657,9 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
   onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
 }) {
   const { item, matches, estado } = ci;
+  // F9.111 — total de ítems que disputaron algún movimiento de este ítem (unión de `otros`
+  // a través de todas las disputas, no solo la primera).
+  const disputaCount = new Set(ci.disputas?.flatMap(d => d.otros) ?? []).size;
   const [registrando, setRegistrando] = useState(false);
   const [montoVal, setMontoVal] = useState('');
   const [fechaVal, setFechaVal] = useState('');
@@ -697,7 +700,19 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               {item.persona && <Badge tone="neutral">{nombrePersona(item.persona, config)}</Badge>}
               <StatusBadge state={estado} />
+              {/* F9.111 — empate arbitrado: la ambigüedad se muestra, no se duplica en silencio.
+                  El vínculo directo (pase 1) gana siempre y el empate desaparece al asignar. */}
+              {disputaCount > 0 && (
+                <Badge tone="warning">
+                  Ambiguo · lo reclama{disputaCount > 1 ? 'n' : ''} {disputaCount} ítem{disputaCount > 1 ? 's' : ''}
+                </Badge>
+              )}
             </div>
+            {disputaCount > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>
+                Asignalo a mano al gasto esperado que corresponda para fijarlo.
+              </div>
+            )}
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
             {!tieneMatch && !item.tarjetaCodigo
