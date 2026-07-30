@@ -659,6 +659,45 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   desapareció (log `[desvincularDestinoItem] … limpiados=[…]`) y en `itemsEsperados` que
   `matchTexto.excluye` incorporó el payee si aplica → repetir con otro comprobante del mismo
   payee y confirmar que ya no se propone contra ese ítem.
+- F9.110 — Doble conteo en el checklist de fijos + copy del banner "Al día". Ver
+  `docs/prompts/F9.110-doble-conteo-checklist.md`. **Bug de origen:** dos ítems con
+  `matchTexto` solapado (o cat/subcat solapada) contaban los mismos movimientos — un
+  movimiento vinculado a mano (`itemEsperadoId`) a un ítem A podía además ser reclamado por
+  la heurística de otro ítem B, duplicando el pendiente (caso real: `Auto › Agua` y
+  `Casa › Agua` mostraban los mismos $73.922 de AySA). **1. `movimientosDelItem`**
+  (`src/datos/checklist.ts`) gana tercer parámetro opcional `idsConocidos`: en las ramas
+  heurísticas (tarjeta por código, matchTexto/cat+subcat) descarta movimientos cuyo
+  `itemEsperadoId` ya apunta a OTRO ítem conocido — un movimiento con dueño explícito no
+  puede ser reclamado por la heurística de otro. Movimientos con `itemEsperadoId` colgado
+  (ítem borrado, id no en `idsConocidos`) siguen disponibles para no quedar huérfanos.
+  Parámetro opcional a propósito: sin él el comportamiento es el de antes, no rompe callers
+  externos. `calcularChecklist` arma `idsConocidos` desde TODOS los items (activos +
+  inactivos — `ItemsEsperadosContext` no filtra por `activo`, verificado) antes del filtro
+  `.filter(i => i.activo)`, así un ítem desactivado sigue siendo dueño de sus movimientos.
+  **2. Banner "Al día" (`Resumen.tsx`), tres estados** en vez de dos: con pendientes sin
+  cargar sigue igual (rojo, "Revisar pendientes del mes"); con `porRevisar===0` se distingue
+  ahora `cubiertos===total` (check verde, "Todo confirmado · n/n") de `cubiertos<total`
+  (reloj gris, "Nada vencido · n/n confirmados · $X a confirmar") — antes ambos casos
+  mostraban check verde y "Al día", aunque hubiera $X sin confirmar (contradicción real:
+  "✅ Al día · 0/22 · $435.479 a confirmar"). KPI de `GastosFijosSeccion`: eyebrow
+  "Al día" → "Confirmados" (mismo número). **3. No-regresión:** `estadoItem`,
+  `ORDEN_ESTADO`, `ACCIONABLE`, `pendienteDeEntrada`, `pendienteAgenda`, `construirAgenda`
+  sin cambios; `matchLogica.ts:119` (server-side, resuelve comprobante→ítem, no
+  movimiento→ítem) no se tocó. Frontend puro (`checklist.ts` + `Resumen.tsx`), sin cambios
+  de Rules/Functions — los tres call sites reales (`Resumen.tsx`, `Comprobantes.tsx`,
+  `perfil/Notificaciones.tsx`) siguen compilando igual, la firma no cambia para ellos.
+  `tsc --noEmit`: 41 errores pre-existentes (mismo baseline), 0 nuevos. `vite build`: OK.
+  **Pendiente de cierre manual (no deployo yo):** `firebase deploy --only hosting` →
+  verificar en incógnito/borrar datos del sitio → en agosto 2026, `Auto › Agua` deja de
+  mostrar $73.922 duplicado (pasa a `programado`/`no_registrado`), `Casa › Agua` conserva
+  los dos AySA; el PENDIENTE del mes baja exactamente $73.922; ningún movimiento de "Por
+  día" desaparece; banner en un mes futuro con 0 confirmados lee "Nada vencido · 0/22
+  confirmados · $X a confirmar" sin check verde. **Limpieza de datos aparte del código**
+  (después de verificar): borrar o pasar a `activo:false` el ítem de prueba `Auto › Agua`
+  en `itemsEsperados`. **Fuera de alcance (documentado en el spec):** `matchTexto` sin
+  límite de palabra/largo mínimo (misma causa raíz del falso positivo de F9.109, requiere
+  revisar todos los `incluye` existentes antes de cambiar semántica); alerta o job de
+  limpieza para movimientos con `itemEsperadoId` colgado; periodicidades no mensuales.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

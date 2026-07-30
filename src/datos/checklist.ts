@@ -5,18 +5,32 @@
 import type { EstadoChecklist } from '../design-system/components';
 import type { Movement, ExpectedItem } from '../types';
 
-export function movimientosDelItem(item: ExpectedItem, movs: Movement[]): Movement[] {
+export function movimientosDelItem(
+  item: ExpectedItem,
+  movs: Movement[],
+  idsConocidos?: ReadonlySet<string>,
+): Movement[] {
   // Rama 0: vínculo directo por itemEsperadoId (manda sobre todo)
   const directos = movs.filter(m => m.itemEsperadoId === item.id);
   if (directos.length > 0) return directos;
 
+  // F9.110 — un movimiento con dueño explícito NO puede ser reclamado por la heurística de
+  // otro ítem (antes, dos ítems con matchTexto solapado contaban los mismos movimientos y el
+  // pendiente se duplicaba). Los ids DESCONOCIDOS (ítem borrado) siguen disponibles: si no,
+  // el movimiento quedaría huérfano y desaparecería del checklist.
+  const libres = idsConocidos
+    ? movs.filter(m => !m.itemEsperadoId
+        || m.itemEsperadoId === item.id
+        || !idsConocidos.has(m.itemEsperadoId))
+    : movs;
+
   // Rama 1: tarjeta por código — identidad fuerte, no categoria/subcategoria
   if (item.tarjetaCodigo) {
-    return movs.filter(m => m.subtipo === 'TarjetaPago' && m.tarjetaCodigo === item.tarjetaCodigo && m.moneda === item.moneda);
+    return libres.filter(m => m.subtipo === 'TarjetaPago' && m.tarjetaCodigo === item.tarjetaCodigo && m.moneda === item.moneda);
   }
 
   // Rama 2: matchTexto manda (relaja cat/subcat) — o, sin matchTexto, clave cat+subcat
-  return movs.filter(m => {
+  return libres.filter(m => {
     if (m.tipo !== item.tipo) return false;
     if (m.moneda !== item.moneda) return false;
     if (item.matchTexto) {
@@ -92,10 +106,11 @@ export function mesActualStr(): string {
 
 export function calcularChecklist(items: ExpectedItem[], movs: Movement[], mes: string): CheckItem[] {
   const mesHoy = mesActualStr();
+  const idsConocidos = new Set(items.map(i => i.id)); // F9.110 — activos + inactivos
   return items
     .filter(i => i.activo)
     .map(item => {
-      const matches = movimientosDelItem(item, movs);
+      const matches = movimientosDelItem(item, movs, idsConocidos);
       return { item, matches, estado: estadoItem(item, matches, mesHoy, mes) };
     })
     .sort((a, b) => ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado]);

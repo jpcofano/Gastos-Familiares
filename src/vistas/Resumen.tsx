@@ -338,27 +338,42 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           pendiente TOTAL de la agenda (vencidos + por_confirmar a monto real + sueltos), vía
           pendienteAgenda() compartida con GastosFijosSeccion — el disparador (porRevisar===0)
           no cambia. */}
-      {/* F9.102 2 — con porRevisar===0 el texto ahora muestra alDia/total (mismos cálculos que
-          el header de GastosFijosSeccion) + el pendiente a confirmar si pendienteAgenda > 0. */}
-      <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-        {porRevisar === 0 ? (
-          <span style={{ width: 17, height: 17, borderRadius: 999, background: 'var(--gf-income)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Icon name="check" size={11} color="#fff" />
-          </span>
-        ) : (
-          <Icon name="alert-circle" size={17} color="var(--gf-out)" />
-        )}
-        <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: porRevisar === 0 ? 'var(--gf-income)' : 'var(--color-text)' }}>
-          {porRevisar === 0 ? (
-            <>
-              Al día con los gastos fijos · {agenda.filter(agendaCubierto).length}/{agenda.length}
-              {pendienteAgenda(agenda) > 0 && (
-                <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {fmtArs(pendienteAgenda(agenda))} a confirmar</span>
+      {/* F9.110 — el banner ya no dice "al día" cuando quedan ítems por confirmar (aunque
+          porRevisar, que solo cuenta lo SIN CARGAR, ya esté en 0). Tres estados: pendientes
+          por cargar (rojo) · todo confirmado (verde) · nada vencido pero falta confirmar
+          (reloj neutro), este último es el caso que antes mentía "al día". */}
+      {(() => {
+        const cubiertos = agenda.filter(agendaCubierto).length;
+        const total = agenda.length;
+        const todoConfirmado = porRevisar === 0 && cubiertos === total;
+        return (
+          <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            {porRevisar > 0 ? (
+              <Icon name="alert-circle" size={17} color="var(--gf-out)" />
+            ) : todoConfirmado ? (
+              <span style={{ width: 17, height: 17, borderRadius: 999, background: 'var(--gf-income)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon name="check" size={11} color="#fff" />
+              </span>
+            ) : (
+              <Icon name="clock" size={17} color="var(--gf-gray-400)" />
+            )}
+            <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: todoConfirmado ? 'var(--gf-income)' : 'var(--color-text)' }}>
+              {porRevisar > 0 ? (
+                `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendienteAgenda(agenda))}`
+              ) : todoConfirmado ? (
+                `Todo confirmado · ${cubiertos}/${total}`
+              ) : (
+                <>
+                  Nada vencido · {cubiertos}/{total} confirmados
+                  {pendienteAgenda(agenda) > 0 && (
+                    <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {fmtArs(pendienteAgenda(agenda))} a confirmar</span>
+                  )}
+                </>
               )}
-            </>
-          ) : `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendienteAgenda(agenda))}`}
-        </span>
-      </Card>
+            </span>
+          </Card>
+        );
+      })()}
 
       {/* F9.99.8.1 — Card Hoy pasa a usar la MISMA fila que "Gastos por día" (DiaRowShell):
           chips de banco, total grande/chico, expandible. El contenido expandido agrega
@@ -832,7 +847,7 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
         <Card eyebrow="Pendiente" style={{ flex: 1 }}>
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-expense)', fontVariantNumeric: 'tabular-nums' }}>{fmtArs(pendiente)}</span>
         </Card>
-        <Card eyebrow="Al día" style={{ flex: '0 0 96px', textAlign: 'center' }}>
+        <Card eyebrow="Confirmados" style={{ flex: '0 0 96px', textAlign: 'center' }}>
           <span style={{ fontSize: 'var(--text-xl)', fontWeight: 700 }}>{alDia}<span style={{ fontSize: 14, color: 'var(--gf-gray-400)' }}>/{agenda.length}</span></span>
         </Card>
       </div>
