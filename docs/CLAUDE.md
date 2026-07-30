@@ -612,6 +612,53 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   service worker): dos grupos rotulados, ningún pagado en la lista, elegir fila de mes
   siguiente sin obligación abre el alta con fecha/mes correctos y guarda con `itemEsperadoId`
   seteado (verificar en Firestore).
+- F9.109 — "Asignar como movimiento nuevo" desde rama 2 + desaprendizaje. Ver
+  `docs/prompts/F9.109-desasociar-esperado-y-desaprender.md`. Depende de F9.108 (mismo
+  `preload`/misma card). **Bug de origen:** un comprobante propuesto en rama 2 contra un gasto
+  esperado que NO corresponde (ej. una transferencia matcheada por `matchTexto` o por destino
+  aprendido contra el ítem equivocado) solo tenía dos salidas — "Asignar a otro gasto" (a OTRO
+  esperado) o "Revisar y cargar" (con el vínculo malo) — y el vínculo mal aprendido en
+  `/destinos` era permanente: `aprenderDestino` (`functions/src/index.ts:679`) solo ESCRIBE
+  `itemEsperadoId` cuando lo hay, nunca lo borra; guardar sin vínculo no desaprendía nada.
+  **1. Transparencia (hallazgo bloqueante, §Parte 0):** en rama 2 por `matchTexto` (sin banda de
+  confianza 0.7-0.9) el usuario decidía a ciegas — el chip/badge solo mostraban
+  "Obligación de {mes}"/"Pago adicional", nunca el ítem. `labelEsperado` (antes solo usado en
+  el texto del modo auto) se adelanta y se suma siempre que `pm.rama === 2 && itemEsperadoEfectivo`:
+  "Obligación de Julio 2026 · Expensas Consorcio" (chip inline + badge del Hero). Fallback al
+  `itemEsperadoId` crudo si el ítem no está en `items` (inactivo/borrado), nunca vacío.
+  **2. Callable nueva `desvincularDestinoItem`** (`functions/src/index.ts`, junto a
+  `upsertDestino`, mismo bloque de auth admin): saca SOLO el `itemEsperadoId` de los docs
+  `/destinos` que matcheen `destinoCbu/Cuit/Alias/Nombre` (mismo orden de precedencia que
+  `aprenderDestino`/`matchPorDestino`) Y que ya apuntaran a ese `itemEsperadoId` (no pisa un
+  vínculo distinto); no borra el doc, no crea nada, no toca categoría/confianza (el prefill de
+  categoría sigue sirviendo — `matchPorDestino` cae a rama 3 sin item). Idempotente. Wrapper
+  cliente en `src/datos/destinos.ts`. **3. UI — tercera salida:** botón "Asignar como movimiento
+  nuevo" junto a "Asignar a otro gasto" (mismo gate `pm.rama === 2 && itemEsperadoEfectivo &&
+  esAdmin`); estado `desvincular` con prioridad sobre TODO en `preload` (incluido
+  `esperadoForzado` de F9.108) — fuerza `itemEsperadoId: undefined` (gasto suelto) y
+  `labelRama2 = 'Movimiento nuevo'`; aviso "No lo vamos a volver a proponer como {ítem}." junto
+  al alta. **4. Aprendizaje fail-soft, al guardar** (`onGuardarPayload`, solo si `res.ok` y
+  `desvincular`): `corregirAprendizaje()` hace dos correcciones independientes, cada una en su
+  propio try/catch — (a) `desvincularDestinoItem` siempre (no-op si no aplica); (b) si el match
+  NO vino por destino (`pm.origenDestino !== true`, o sea matcheó por `matchTexto`), agrega el
+  payee a `item.matchTexto.excluye` vía `actualizarItemEsperado` (admin-writable desde cliente),
+  solo si el token está efectivamente contenido en el texto que evalúa `matchConEsperados` —
+  nunca inventa tokens, nunca toca `incluye`. El movimiento YA quedó guardado antes de intentar
+  esto; si falla, `console.error` + advertencia chica en la card, sin deshacer la carga. `d`/`pm`
+  (narrowed por el guard `if (!pm || !d) return null`) se fijan en consts (`datosCorreccion`/
+  `pmCorreccion`) antes de la función anidada — TS no preserva narrowing de closures, hacía
+  falta para no reventar con `| undefined`. **5. No-regresión:** rama 1, rama 3, el picker de
+  F9.108, `confirmarRama1`, `confirmarSueltoDesdeComprobante`, el modo auto, `aprenderDestino` y
+  `upsertDestino`/`eliminarDestino` sin cambios (diff verificado: única adición nueva en
+  `index.ts`, sin tocar líneas existentes). `tsc --noEmit` (cliente y `functions/`): 41 errores
+  pre-existentes en cliente (mismo baseline, verificado idéntico antes/después), 0 nuevos; 0 en
+  functions. `vite build` y `functions build`: OK. **Pendiente de cierre manual (no deployo
+  yo):** `cd functions && npm run build && firebase deploy --only functions,hosting` → probar:
+  comprobante rama 2 muestra el ítem en el chip/badge → tocar "Asignar como movimiento nuevo" →
+  el movimiento guarda con `itemEsperadoId: null` → verificar en `/destinos` que el vínculo
+  desapareció (log `[desvincularDestinoItem] … limpiados=[…]`) y en `itemsEsperados` que
+  `matchTexto.excluye` incorporó el payee si aplica → repetir con otro comprobante del mismo
+  payee y confirmar que ya no se propone contra ese ítem.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

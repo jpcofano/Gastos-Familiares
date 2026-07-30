@@ -50,3 +50,13 @@ export async function eliminarDestino(id: string): Promise<void> {
   const fn = httpsCallable(functions, 'eliminarDestino');
   await fn({ id });
 }
+
+// F9.109 — desaprendizaje: saca el vínculo item↔destino sin borrar el doc ni tocar categoría/confianza.
+export async function desvincularDestinoItem(
+  raws: (string | null | undefined)[],
+  itemEsperadoId: string,
+): Promise<{ ok: boolean; limpiados: string[] }> {
+  const fn  = httpsCallable(functions, 'desvincularDestinoItem');
+  const res = await fn({ raws: raws.filter(Boolean), itemEsperadoId });
+  return res.data as { ok: boolean; limpiados: string[] };
+}

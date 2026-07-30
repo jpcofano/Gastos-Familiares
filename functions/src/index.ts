@@ -3043,6 +3043,41 @@ export const upsertDestino = onCall(
   },
 );
 
+// F9.109 — desaprendizaje explícito: el usuario dijo "este payee NO es ese gasto esperado".
+// Sólo saca el vínculo item↔destino; NO borra el doc, NO toca categoría/confianza (el prefill
+// de categoría aprendido sigue sirviendo: matchPorDestino cae a rama 3). No crea docs.
+export const desvincularDestinoItem = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { raws, itemEsperadoId } = (request.data ?? {}) as { raws?: unknown; itemEsperadoId?: string };
+    if (!Array.isArray(raws) || raws.length === 0) throw new HttpsError('invalid-argument', 'raws requerido');
+    if (!itemEsperadoId || typeof itemEsperadoId !== 'string') throw new HttpsError('invalid-argument', 'itemEsperadoId requerido');
+
+    const limpiados: string[] = [];
+    for (const raw of raws) {
+      if (typeof raw !== 'string' || !raw.trim()) continue;
+      const parsed = normalizarDestino(raw);
+      if (!parsed) continue;
+      const ref  = db.collection('destinos').doc(idDestinoNorm(parsed.norm));
+      const snap = await ref.get();
+      if (!snap.exists) continue;                                   // no crear
+      if (snap.data()?.itemEsperadoId !== itemEsperadoId) continue; // no pisar otro vínculo
+      await ref.update({ itemEsperadoId: FieldValue.delete(), actualizadoEn: FieldValue.serverTimestamp() });
+      limpiados.push(ref.id);
+    }
+    console.log(`[desvincularDestinoItem] item=${itemEsperadoId} → limpiados=[${limpiados.join(',')}] (por ${email})`);
+    return { ok: true, limpiados };
+  },
+);
+
 export const eliminarDestino = onCall(
   { region: 'southamerica-east1' },
   async (request) => {

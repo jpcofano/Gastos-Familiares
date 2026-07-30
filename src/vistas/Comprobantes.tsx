@@ -11,6 +11,8 @@ import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import { calcularChecklist, mesActualStr } from '../datos/checklist';
 import { construirAgenda, sueltosFuturosDelMes, pendientesOrdenados, type AgendaEntry, type GrupoAgenda } from '../datos/agenda';
+import { desvincularDestinoItem } from '../datos/destinos';
+import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
 import { Card, Badge, Message, Button } from '../design-system/components';
 import { Fab } from '../design-system/shell';
@@ -207,6 +209,10 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
   // F9.108 — sin obligación abierta: fuerza el itemEsperadoId al derivar al alta prellenada
   // (el callable de alta manual no admite payload a mano, ver handleConciliar más abajo).
   const [esperadoForzado, setEsperadoForzado] = useState<string>('');
+  // F9.109 — "Asignar como movimiento nuevo": el usuario dice que el gasto esperado propuesto
+  // (rama 2) NO corresponde. Prioridad sobre esperadoForzado — es una corrección explícita.
+  const [desvincular, setDesvincular] = useState(false);
+  const [avisoDesaprendizaje, setAvisoDesaprendizaje] = useState<string | null>(null);
   const [errorAutoSilencioso, setErrorAutoSilencioso] = useState<string | null>(null);
   const [autoFallidoManual,   setAutoFallidoManual]   = useState(false);
   const autoConfirmadoRef = useRef(false);
@@ -385,11 +391,20 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
   const itemEsperadoEfectivo = necesitaElegirRama2 ? (rama2Sel || undefined) : pm.itemEsperadoId;
 
   const esperado = itemEsperadoEfectivo ? items.find(i => i.id === itemEsperadoEfectivo) : undefined;
+  // F9.109 — nombre del ítem para mostrar SIEMPRE que haya un itemEsperadoEfectivo (antes solo
+  // aparecía en la banda de confianza 0.7-0.9 o en el texto del modo auto; en rama 2 por
+  // matchTexto el usuario decidía a ciegas). Fallback al id crudo si el ítem no está en `items`
+  // (inactivo/borrado) — nunca vacío.
+  const labelEsperado = esperado
+    ? ([esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ') || esperado.notas || esperado.id)
+    : (itemEsperadoEfectivo || 'gasto esperado');
 
-  // F9.108 — `esperadoForzado` (picker sin obligación abierta) tiene prioridad sobre la
-  // rama 2: es el usuario eligiendo explícitamente, no el match automático.
+  // F9.109 — `desvincular` ("Asignar como movimiento nuevo") tiene prioridad sobre todo lo
+  // demás, incluido `esperadoForzado` de F9.108: es la corrección explícita del usuario.
   const itemForzado = esperadoForzado ? items.find(i => i.id === esperadoForzado) : undefined;
-  const preload = esperadoForzado
+  const preload = desvincular
+    ? { ...preloadBase, itemEsperadoId: undefined }
+    : esperadoForzado
     ? {
         ...preloadBase,
         banco:          undefined,
@@ -409,8 +424,13 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
 
   // F9.106 — "Obligación de {mes}" reemplaza el genérico "Gasto esperado" (visibilidad del mes
   // de pago pedida por el dueño); "Pago adicional" se mantiene solo para el caso real (§3 fila 3).
-  const labelRama2 = pm.rama === 2
-    ? (pm.esAdicional ? 'Pago adicional' : `Obligación de ${formatMesCorto(mesPagoEfectivo)}`)
+  // F9.109 — `desvincular` fuerza "Movimiento nuevo" (refleja lo que se va a guardar); rama 2
+  // suma siempre el nombre del ítem (chip + badge del Hero, antes solo visible en la banda de
+  // confianza 0.7-0.9 o en texto sin botones del modo auto).
+  const labelRama2 = desvincular
+    ? 'Movimiento nuevo'
+    : pm.rama === 2
+    ? `${pm.esAdicional ? 'Pago adicional' : `Obligación de ${formatMesCorto(mesPagoEfectivo)}`}${itemEsperadoEfectivo ? ` · ${labelEsperado}` : ''}`
     : 'Movimiento nuevo';
 
   // F9.79 — badge Pre-clasificado + Gasto esperado persiste del splash al Hero del confirm
@@ -498,12 +518,46 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     }
   }
 
+  // F9.109 — desaprendizaje fail-soft: el movimiento YA se guardó (se llama solo si res.ok);
+  // esto nunca puede bloquear ni deshacer esa carga. Dos correcciones independientes, cada
+  // una en su propio try/catch — la falla de una no cancela la otra.
+  // `d`/`pm` ya están narrowed (no-undefined) acá por el guard de arriba, pero TS no
+  // preserva ese narrowing dentro de una función anidada — se fijan en consts aparte para
+  // que su tipo quede resuelto de una vez (sin `| undefined`).
+  const datosCorreccion = d;
+  const pmCorreccion = pm;
+  async function corregirAprendizaje(itemId: string) {
+    let fallo = false;
+    try {
+      await desvincularDestinoItem([datosCorreccion.destinoCbu, datosCorreccion.destinoCuit, datosCorreccion.destinoAlias, datosCorreccion.destinoNombre], itemId);
+    } catch (e) {
+      console.error('[F9.109] desvincularDestinoItem falló:', e);
+      fallo = true;
+    }
+    // matchTexto: solo si el match no vino por destino (origen texto) — origenDestino ya
+    // se corrige con desvincularDestinoItem de arriba.
+    if (pmCorreccion.origenDestino !== true) {
+      try {
+        const item  = items.find(i => i.id === itemId);
+        const texto = [datosCorreccion.comercioRazonSocial, datosCorreccion.destinoNombre].filter(Boolean).join(' ').toLowerCase();
+        const token = (payeeDeDatos(datosCorreccion) ?? '').trim().toLowerCase();
+        if (item?.matchTexto && token && texto.includes(token) && !item.matchTexto.excluye.includes(token)) {
+          const res = await actualizarItemEsperado(itemId, {
+            matchTexto: { incluye: item.matchTexto.incluye, excluye: [...item.matchTexto.excluye, token] },
+          });
+          if (!res.ok) { console.error('[F9.109] actualizarItemEsperado falló:', res.error); fallo = true; }
+        }
+      } catch (e) {
+        console.error('[F9.109] corrección de matchTexto falló:', e);
+        fallo = true;
+      }
+    }
+    if (fallo) setAvisoDesaprendizaje('El movimiento se guardó, pero no se pudo registrar la corrección.');
+  }
+
   // F9.106 — confianza ≥ UMBRAL_AUTO (rama 2 vía destino): alta silenciosa, sin card ni tap.
   // Si onErrorAuto dispara, autoFallidoManual cae a modoAuto=false y muestra el camino manual.
   const modoAuto = pm.rama === 2 && pm.requiereConfirmacion === false && !autoFallidoManual;
-  const labelEsperado = esperado
-    ? ([esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ') || esperado.notas || esperado.id)
-    : 'gasto esperado';
 
   return (
     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -580,6 +634,13 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
       {esAdmin && !mostrarAlta && (!necesitaElegirRama2 || rama2Sel) && (
         <Button variant="ghost" size="sm" onClick={() => { setMostrarPicker(p => !p); setPickerSel(''); setErrorLocal(null); }}>
           <Icon name="git-compare" size={13} /> {pm.rama === 2 ? 'Asignar a otro gasto' : 'Conciliar con gasto esperado'}
+        </Button>
+      )}
+      {/* F9.109 — tercera salida cuando la rama 2 propone un gasto esperado que NO corresponde:
+          carga el movimiento suelto (sin itemEsperadoId) y desaprende el vínculo al guardar. */}
+      {esAdmin && pm.rama === 2 && !!itemEsperadoEfectivo && !mostrarAlta && (
+        <Button variant="ghost" size="sm" onClick={() => { setDesvincular(true); setMostrarPicker(false); setMostrarAlta(true); }}>
+          <Icon name="plus" size={13} /> Asignar como movimiento nuevo
         </Button>
       )}
       {mostrarPicker && esAdmin && (
@@ -661,6 +722,13 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
       )}
       </>
       )}
+      {/* F9.109 — junto al alta: aclara que la corrección de aprendizaje va a acompañar la carga. */}
+      {desvincular && mostrarAlta && (
+        <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>No lo vamos a volver a proponer como {labelEsperado}.</span>
+      )}
+      {avisoDesaprendizaje && (
+        <span style={{ fontSize: 12, color: 'var(--gf-warn-text)' }}>{avisoDesaprendizaje}</span>
+      )}
       {mostrarAlta && (
         <AltaMovimiento
           key={comp.id}
@@ -676,6 +744,11 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
           } : undefined}
           onGuardarPayload={async (payload) => {
             const res = await cargarMovimientoDesdeComprobante(comp.id, payload);
+            // F9.109 — desaprendizaje fail-soft: solo si el movimiento se guardó bien y el
+            // usuario pidió explícitamente "Asignar como movimiento nuevo".
+            if (res.ok && desvincular && itemEsperadoEfectivo) {
+              void corregirAprendizaje(itemEsperadoEfectivo);
+            }
             return { ok: res.ok, error: res.ok ? undefined : res.error };
           }}
           onGuardado={() => setMostrarAlta(false)}
