@@ -3393,6 +3393,17 @@ type ParseoFichaCafci = {
 // para entrar al benchmark (elección de diseño, no constante técnica — ver spec §5).
 const UMBRAL_COBERTURA_MINIMA = 95;
 
+// F9.112 — CloudFront rechaza con 403 el UA recortado 'Mozilla/5.0'. Medido el 31/07/2026:
+// misma IP y mismo POP (EZE50-P7), sólo cambiando headers → 403 vs 200. NO es bloqueo por
+// origen/ASN (se reproduce desde IP residencial argentina). Este set es el que devolvió 200.
+// NO agregar 'Accept-Encoding': undici lo maneja y lo decodifica solo; forzarlo devuelve
+// bytes comprimidos sin decodificar.
+const HEADERS_NAVEGADOR = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'es-AR,es;q=0.9',
+} as const;
+
 async function parsearFichaCafci(
   items: Array<Record<string, unknown>>,
   fechaDatos: string,
@@ -3491,26 +3502,32 @@ export const sincronizarCafci = onCall(
     const pendientesMapeo: string[] = [];
     const errores: Array<{ fondo: string; mensaje: string }> = [];
     const fechaFetch = new Date().toISOString();
+    const inicioLote = Date.now();
+    const TIMEOUT_FETCH_MS = 15_000;  // F9.112 — por fondo, evita que un fetch colgado se coma el presupuesto
+    const PRESUPUESTO_MS = 100_000;   // F9.112 — del lote, con margen sobre los 120s de la función
 
     for (const fondo of fondos) {
       try {
+        if (Date.now() - inicioLote > PRESUPUESTO_MS) {
+          errores.push({ fondo: fondo.nombre, mensaje: 'Sin tiempo en el lote — reintentá o usá "Pegar JSON".' });
+          continue;
+        }
         // F9.104 — sitio nuevo: HTML server-rendered, no JSON de API. El esquema de IDs
         // se conserva (fondoId/claseId), verificado contra 3 fondos incl. el caso borde
         // fondoId===claseId. Origin/Referer eran spoofeo para la API vieja, ya no aplican.
         const url = `https://estadisticas.cafci.org.ar/fondos/${fondo.fondoId}?clase=${fondo.claseId}`;
         const res = await fetch(url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0',
-            'Accept': 'text/html,application/xhtml+xml',
-          },
+          headers: HEADERS_NAVEGADOR,
+          signal: AbortSignal.timeout(TIMEOUT_FETCH_MS),
         });
         if (!res.ok) {
           // F9.104 — logueo de lo observado, sin interpretarlo (el mensaje fijo anterior,
           // "CloudFront bloqueó", resultó estar mal: costó tres frentes de investigación
           // que el body real habría resuelto desde el primer día).
-          const body = (await res.text()).slice(0, 300);
-          console.error(`[sincronizarCafci] ${fondo.nombre}: HTTP ${res.status} — ${body}`);
-          throw new Error(`HTTP ${res.status}: ${body.slice(0, 150)}`);
+          const body = await res.text();
+          const title = body.match(/<TITLE>([^<]*)<\/TITLE>/i)?.[1]?.trim() ?? '';
+          console.error(`[sincronizarCafci] ${fondo.nombre}: HTTP ${res.status} — ${title || '(sin title)'} — ${body.slice(0, 300)}`);
+          throw new Error(`HTTP ${res.status}${title ? ` — ${title}` : ''}: ${body.slice(0, 120)}`);
         }
 
         const html = await res.text();
