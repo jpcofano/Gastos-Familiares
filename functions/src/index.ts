@@ -3508,7 +3508,7 @@ export const sincronizarCafci = onCall(
 
     for (const fondo of fondos) {
       try {
-        if (Date.now() - inicioLote > PRESUPUESTO_MS) {
+        if (Date.now() - inicioLote > PRESUPUESTO_MS - TIMEOUT_FETCH_MS) {
           errores.push({ fondo: fondo.nombre, mensaje: 'Sin tiempo en el lote — reintentá o usá "Pegar JSON".' });
           continue;
         }
