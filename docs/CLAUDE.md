@@ -754,6 +754,38 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   checklist de agosto ya no duplica los $73.922, badge Ambiguo aparece solo en empates reales
   → limpieza de datos aparte del código (después de verificar): borrar o `activo:false` el
   ítem de prueba `Auto › Agua`.
+- F9.112 — CAFCI: headers de navegador completos + timeout por fetch + error legible. Ver
+  `docs/prompts/F9.112-cafci-headers-y-timeout.md`. Absorbe F9.107 (timeout de fetch
+  pendiente). **Causa raíz medida, no inferida:** dos `curl` a la misma URL, misma IP
+  residencial argentina, mismo POP de CloudFront (`EZE50-P7`), con 22s de diferencia —
+  único cambio entre 403 y 200 fueron los headers (`User-Agent` recortado a `'Mozilla/5.0'`
+  dispara el bloqueo de CloudFront; un UA de Chrome real completo con `Accept`/
+  `Accept-Language` completos pasa). Descarta de nuevo el origen/ASN de compute como causa
+  (la hipótesis que costó F9.102.x) — esta vez con medición, no razonamiento. **1. Headers:**
+  constante `HEADERS_NAVEGADOR` (`functions/src/index.ts`, junto a
+  `UMBRAL_COBERTURA_MINIMA`) con el UA/Accept/Accept-Language completos que midieron 200;
+  comentario inline documenta no agregar `Accept-Encoding` (undici ya lo maneja, forzarlo
+  devuelve bytes comprimidos sin decodificar) ni `Origin`/`Referer` (spoofeo de la API vieja,
+  sin evidencia de que hagan falta acá). **2. Timeout + presupuesto de lote:** `fetch` gana
+  `signal: AbortSignal.timeout(15_000)` por fondo; guard `Date.now() - inicioLote >
+  PRESUPUESTO_MS` (100s, margen sobre los 120s de la función) antes de cada fetch — si se
+  agota, registra el fondo en `errores` con mensaje explícito y sigue el loop (no corta en
+  seco); un fetch colgado ya no se come el presupuesto entero de los 13 fondos en serie.
+  **3. Error legible:** el body de la respuesta 403 de CloudFront trae un `<TITLE>` con el
+  único texto informativo de esa página de error — antes el `slice(0,150)` cortaba justo
+  antes; ahora se extrae con regex y se antepone al mensaje (`HTTP 403 — ERROR: The request
+  could not be satisfied`) tanto en el log como en el `throw` que ve el cliente. `tsc
+  --noEmit` (`functions/`): 0 errores nuevos. **Pendiente de cierre manual (no deployo yo):**
+  `npm --prefix functions run build && firebase deploy --only functions:sincronizarCafci`
+  (si sale `Skipped (No changes detected)`, `rm -rf functions/lib` y repetir) → confirmar
+  que el binding IAM `allUsers → roles/run.invoker` sigue en pie sobre el servicio
+  `sincronizarcafci` (se arregló a mano el 31/07; un deploy que recrea el servicio lo
+  resetea — sin él, la callable vuelve `internal` sin logs de ejecución) → botón Sincronizar
+  → toast esperado `CAFCI: 13/13 fondos` sin errores de HTTP → si algún fondo sigue en 403,
+  el mensaje ahora trae el `<TITLE>` real, pegarlo en vez de volver a suponer. **Riesgo
+  asumido a propósito:** esto es scraping contra un WAF, la regla puede endurecerse de
+  nuevo — `importarCafciManual` ("Pegar JSON") sigue como camino de respaldo sin depender de
+  la red de la función.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
