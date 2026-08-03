@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, Sheet, Message, MerchantLogo, type SheetOption } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import { fmtMoney } from '../datos/money';
+import { cargarTCReciente, tcEfectivoDe } from '../datos/tcDiario';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useMovimientosDelAnio } from '../hooks/useMovimientosDelAnio';
@@ -731,6 +732,14 @@ export default function Dashboard() {
   const [paletaIdx] = usePaletaIdx();
   const paleta = CHART_PALETTES[paletaIdx].colores;
 
+  const [tcHoy, setTcHoy] = useState<number | null>(null);
+  useEffect(() => {
+    cargarTCReciente(1)
+      .then(h => setTcHoy(h[0]?.tcUsdArs ?? null))
+      .catch(err => { console.warn('[Dashboard] tcHoy falló:', err); setTcHoy(null); });
+  }, []);
+  const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);
+
   const { config } = useFamiliaConfig();
   const { movimientos: movsMes,     cargando: cargandoMes }    = useMovimientosDelMes(mes, persona);
   const { movimientos: movsMesPrev, cargando: cargandoMesPrev } = useMovimientosDelMes(mesAnterior(mes), persona);
@@ -739,8 +748,12 @@ export default function Dashboard() {
 
   const cargandoSec = sec === 'mensual' ? (cargandoMes || cargandoMesPrev) : (cargandoAnio || cargandoAnioPrev);
 
-  const dashMensual = agregarMensual(movsMes, mes, config, movsMesPrev);
-  const dashAnual = agregarAnual(movsAnio, anio, movsAnioPrev);
+  // F9.114 — el TC de los agregados caía a `?? 1` cuando el período no tenía ningún
+  // movimiento en USD, y el "equivalente USD" quedaba igual al monto en pesos. Ahora el
+  // fallback es la cascada compartida: /tcDiario → cache del último leído → TC_FALLBACK,
+  // y si no es el TC real de hoy la pantalla lo dice (avisoTc).
+  const dashMensual = agregarMensual(movsMes, mes, config, movsMesPrev, tcEfectivo);
+  const dashAnual = agregarAnual(movsAnio, anio, movsAnioPrev, tcEfectivo);
   const tcAnual = [...movsAnio].filter(m => m.tcUsdArs).sort((a, b) => b.fecha.getTime() - a.fecha.getTime())[0]?.tcUsdArs ?? dashMensual.tc;
 
   const periodosMes = mesesDisponibles();
@@ -811,6 +824,10 @@ export default function Dashboard() {
           onCancelar={() => setEditandoMovimiento(null)}
         />
       )}
+
+      {/* F9.114 — nunca un valor plausible sin marcar: si el TC no es el real de /tcDiario,
+          se dice de qué día es el número. */}
+      {avisoTc && <p style={{ fontSize: 11.5, color: 'var(--gf-out)', margin: '0 4px' }}>{avisoTc}</p>}
 
       {cargandoSec ? (
         <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Cargando…</p>

@@ -4,15 +4,15 @@
 
 export type Moneda = 'ARS' | 'USD';
 
-// Fallback de TC USD→ARS para datos de EJEMPLO (sin tocar Firestore en esta
-// fase). La fuente real es el último doc de /tcDiario (ver datos/tcDiario.ts,
-// tcParaFecha) — cuando una pantalla cablea datos reales, usa ese valor en vez
-// de este literal. Si se deja un literal de referencia, que sea el último MEP
-// real (~1454), no un valor inventado.
-export const TC_DEFAULT = 1454;
+// F9.114 — último escalón de la cascada de TC (ver datos/tcDiario.ts, tcEfectivoDe):
+// /tcDiario → último TC leído con éxito (cache de localStorage) → este literal. Sólo
+// se llega acá en una instalación nueva que nunca pudo leer /tcDiario, y la pantalla
+// que lo use TIENE que decir que es un valor de referencia. Si se actualiza, que sea
+// al último MEP real, no a un valor inventado.
+export const TC_FALLBACK = 1454;
 
 export function fmtMoney(monto: number, opts: { from: Moneda; to: Moneda; tc?: number }): string {
-  const tc = opts.tc ?? TC_DEFAULT;
+  const tc = opts.tc ?? TC_FALLBACK;
   const valor = opts.from === opts.to
     ? monto
     : opts.from === 'USD' ? monto * tc : monto / tc;

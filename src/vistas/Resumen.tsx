@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
@@ -9,6 +9,8 @@ import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
 import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
 import { fmtMoney } from '../datos/money';
+import { cargarTCReciente, tcDeFecha, tcEfectivoDe } from '../datos/tcDiario';
+import { cargarTCRango } from '../datos/patrimonioOptimizacion';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
 import { calcularChecklist, cubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
@@ -67,7 +69,50 @@ const DIA_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 function fmtArs(n: number): string { return fmtMoney(n, { from: 'ARS', to: 'ARS' }); }
 function fmtUsdEq(n: number): string { return fmtMoney(n, { from: 'USD', to: 'USD' }); }
 
-function arsEq(m: Movement): number { return m.moneda === 'ARS' ? m.monto : (m.tcUsdArs ? m.monto * m.tcUsdArs : 0); }
+// ── F9.114 — valuación en USD ────────────────────────────────────────────────
+// Regla (docs/prompts/F9.114-valuacion-usd.md §1): lo que YA se movió se valúa al TC de su
+// día y queda congelado; lo que TODAVÍA está vivo —esperados no pagados, ingresos del mes
+// en curso, que siguen en el banco— al TC de hoy. Antes toda conversión visible usaba el
+// literal de fallback (fmtMoney sin tc) o un TC único del mes que caía a 1 sin movimientos
+// en USD: el "equivalente USD" quedaba igual al monto en pesos.
+
+function isoLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+type TcDeMov = (m: Movement) => number;
+
+// `esVivo` = ingreso del mes en curso. Los gastos pagados NUNCA son vivos, ni siquiera en
+// el mes en curso: ya se pagaron al dólar de ese día.
+function crearTcDeMovimiento(mapaTc: Record<string, number>, tcEfectivo: number, esMesActual: boolean): TcDeMov {
+  return m => {
+    const esVivo = esMesActual && m.tipo === 'Ingreso';
+    if (esVivo) return tcEfectivo;
+    return tcDeFecha(mapaTc, isoLocal(m.fecha)) ?? tcEfectivo;
+  };
+}
+
+// Par ARS/USD de un movimiento: los totales acumulan las DOS monedas por movimiento, en vez
+// de dividir el total por un TC único (si no, un día con ingreso y gasto mezcla criterios).
+interface Eq { ars: number; usd: number }
+const EQ0: Eq = { ars: 0, usd: 0 };
+function sumaEq(a: Eq, b: Eq): Eq { return { ars: a.ars + b.ars, usd: a.usd + b.usd }; }
+
+// La dirección USD→ARS sigue mandándola el snapshot del día (m.tcUsdArs): un gasto en USD
+// de marzo se muestra en pesos al TC de marzo. tcDeMov entra sólo para ARS→USD y para el
+// movimiento en USD SIN snapshot (F9.114 Parte 5) — que antes valía 0 y desaparecía.
+function eqDe(m: Movement, tcDeMov: TcDeMov): Eq {
+  if (m.moneda === 'ARS') {
+    const tc = tcDeMov(m);
+    return { ars: m.monto, usd: tc ? m.monto / tc : 0 };
+  }
+  const tc = m.tcUsdArs ?? tcDeMov(m);
+  return { ars: m.monto * tc, usd: m.monto };
+}
+
+function arsEq(m: Movement, tcDeMov: TcDeMov): number { return eqDe(m, tcDeMov).ars; }
+
+function sinTcPropio(m: Movement): boolean { return m.moneda === 'USD' && !m.tcUsdArs; }
 
 function nombrePersona(memberId: string | null, config: FamiliaConfig | null): string {
   if (!memberId) return '—';
@@ -79,51 +124,50 @@ function nombrePersona(memberId: string | null, config: FamiliaConfig | null): s
 interface Kpis {
   ingArsEq: number; gasArsEq: number; netArsEq: number;
   ingUsdEq: number; gasUsdEq: number; netUsdEq: number;
-  pesosDisp: number; faltanteUsd: number; tc: number;
+  pesosDisp: number; faltanteUsd: number; tcEfectivo: number;
 }
 
-function calcularKpis(movs: Movement[]): Kpis {
-  let ingArs = 0, ingUsd = 0, gasArs = 0, gasUsd = 0;
+// F9.114 — se acumula POR MOVIMIENTO (cada uno con el TC que le corresponde), no aplicando
+// un TC único a los agregados. `tcEfectivo` es el TC de hoy (o su cascada de fallback) y se
+// usa sólo para las cifras vivas: cobertura del mes y pendiente de la agenda.
+function calcularKpis(movs: Movement[], tcDeMov: TcDeMov, tcEfectivo: number): Kpis {
+  let ing = EQ0, gas = EQ0, ingArs = 0, gasArs = 0;
   for (const m of movs) {
-    if (m.tipo === 'Ingreso') { if (m.moneda === 'USD') ingUsd += m.monto; else ingArs += m.monto; }
-    else { if (m.moneda === 'USD') gasUsd += m.monto; else gasArs += m.monto; }
+    const eq = eqDe(m, tcDeMov);
+    if (m.tipo === 'Ingreso') { ing = sumaEq(ing, eq); if (m.moneda === 'ARS') ingArs += m.monto; }
+    else { gas = sumaEq(gas, eq); if (m.moneda === 'ARS') gasArs += m.monto; }
   }
-  // tc representativo para los "eq": el más reciente entre los movimientos en USD del mes
-  const conTc = movs.filter(m => m.moneda === 'USD' && m.tcUsdArs).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
-  const tc = conTc[0]?.tcUsdArs ?? 1;
-  const ingArsEq = ingArs + ingUsd * tc, gasArsEq = gasArs + gasUsd * tc;
-  const ingUsdEq = ingUsd + (tc ? ingArs / tc : 0), gasUsdEq = gasUsd + (tc ? gasArs / tc : 0);
   return {
-    ingArsEq, gasArsEq, netArsEq: ingArsEq - gasArsEq,
-    ingUsdEq, gasUsdEq, netUsdEq: ingUsdEq - gasUsdEq,
-    pesosDisp: ingArs, faltanteUsd: tc ? (ingArs - gasArs) / tc : 0, tc,
+    ingArsEq: ing.ars, gasArsEq: gas.ars, netArsEq: ing.ars - gas.ars,
+    ingUsdEq: ing.usd, gasUsdEq: gas.usd, netUsdEq: ing.usd - gas.usd,
+    pesosDisp: ingArs, faltanteUsd: tcEfectivo ? (ingArs - gasArs) / tcEfectivo : 0, tcEfectivo,
   };
 }
 
-interface DiaAgregado { day: number; date: Date; eqArs: number; banks: Record<string, number>; }
+interface DiaAgregado { day: number; date: Date; eq: Eq; banks: Record<string, Eq>; }
 
-function porDia(movs: Movement[], medios?: FamiliaConfig['bancos']): DiaAgregado[] {
+function porDia(movs: Movement[], tcDeMov: TcDeMov, medios?: FamiliaConfig['bancos']): DiaAgregado[] {
   const map = new Map<number, DiaAgregado>();
   for (const m of movs) {
     if (m.tipo !== 'Gasto') continue;
     const d = m.fecha.getDate();
-    if (!map.has(d)) map.set(d, { day: d, date: m.fecha, eqArs: 0, banks: {} });
+    if (!map.has(d)) map.set(d, { day: d, date: m.fecha, eq: EQ0, banks: {} });
     const e = map.get(d)!;
-    const v = arsEq(m);
+    const v = eqDe(m, tcDeMov);
     const banco = medioCanonico(m.banco ?? 'Sin medio', medios);
-    e.eqArs += v;
-    e.banks[banco] = (e.banks[banco] ?? 0) + v;
+    e.eq = sumaEq(e.eq, v);
+    e.banks[banco] = sumaEq(e.banks[banco] ?? EQ0, v);
   }
   return [...map.values()].sort((a, b) => a.day - b.day);
 }
 
-function porPersonaIngreso(movs: Movement[]): [string, number][] {
-  const map: Record<string, number> = {};
+function porPersonaIngreso(movs: Movement[], tcDeMov: TcDeMov): [string, Eq][] {
+  const map: Record<string, Eq> = {};
   for (const m of movs.filter(x => x.tipo === 'Ingreso')) {
     const p = m.persona ?? '—';
-    map[p] = (map[p] ?? 0) + arsEq(m);
+    map[p] = sumaEq(map[p] ?? EQ0, eqDe(m, tcDeMov));
   }
-  return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  return Object.entries(map).sort((a, b) => b[1].ars - a[1].ars);
 }
 
 // ── KPI block (compartido entre secciones) ───────────────────────────────────
@@ -172,7 +216,7 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cubierto ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
             {cubierto
               ? 'Cubierto'
-              : `Sin cubrir · −${fmtUsdEq(faltanteArs / c.tc)}`}
+              : `Sin cubrir · −${fmtUsdEq(faltanteArs / c.tcEfectivo)}`}
           </span>
         </Card>
       </div>
@@ -186,13 +230,13 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
 function DiaRowShell({ dayBig, daySub, banks, totalNode, highlight, expanded, onToggle, config, fmtChip, children }: {
   dayBig: string;
   daySub: string;
-  banks: [string, number][];
+  banks: [string, Eq][];
   totalNode: ReactNode;
   highlight?: boolean;
   expanded: boolean;
   onToggle: () => void;
   config: FamiliaConfig | null;
-  fmtChip: (v: number) => string;
+  fmtChip: (v: Eq) => string;
   children?: ReactNode;
 }) {
   return (
@@ -226,7 +270,7 @@ function DiaRowShell({ dayBig, daySub, banks, totalNode, highlight, expanded, on
 
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, onIrAGastos }: {
+function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, mapaTc, tcEfectivo, avisoTc, onIrAGastos }: {
   movs: Movement[];
   porRevisar: number;
   onIrAGastos: () => void;
@@ -238,18 +282,33 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   sueltosFuturos: Movement[];
   agenda: AgendaEntry[];
   mes: string;
+  mapaTc: Record<string, number>;
+  tcEfectivo: number;
+  avisoTc: string | null;
 }) {
-  const cajaMov = movs.filter(m => m.incluirResumenMes);
-  const c = calcularKpis(cajaMov);
-  const dias = porDia(cajaMov, config?.bancos);
-  const personas = porPersonaIngreso(cajaMov);
-  const totalMesEq = dias.reduce((s, d) => s + d.eqArs, 0);
   const hoy = new Date();
+  const mesActualHoy = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
+  const esMesActual = mes === mesActualHoy;
+  // F9.114 — un único resolutor de TC para toda la sección; nada se convierte a mano.
+  const tcDeMov = crearTcDeMovimiento(mapaTc, tcEfectivo, esMesActual);
+
+  const cajaMov = movs.filter(m => m.incluirResumenMes);
+  const c = calcularKpis(cajaMov, tcDeMov, tcEfectivo);
+  const dias = porDia(cajaMov, tcDeMov, config?.bancos);
+  const personas = porPersonaIngreso(cajaMov, tcDeMov);
+  const totalMesEq = dias.reduce((s, d) => sumaEq(s, d.eq), EQ0);
+  // F9.114 Parte 5 — movimientos en USD sin snapshot propio: ya no valen 0, se valúan con
+  // el TC de su fecha, y se dice cuántos son.
+  const sinTc = cajaMov.filter(sinTcPropio).length;
   // ARS: como está hoy (ARS principal, USD chico). USD: invertido (USD principal, ARS chico).
-  const fmtBig = (ars: number) => cur === 'ARS' ? fmtArs(ars) : fmtMoney(ars, { from: 'ARS', to: 'USD' });
-  const fmtSmall = (ars: number) => cur === 'ARS' ? fmtMoney(ars, { from: 'ARS', to: 'USD' }) : fmtArs(ars);
+  const fmtBig = (e: Eq) => cur === 'ARS' ? fmtArs(e.ars) : fmtUsdEq(e.usd);
+  const fmtSmall = (e: Eq) => cur === 'ARS' ? fmtUsdEq(e.usd) : fmtArs(e.ars);
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
   const [hoyExpandido, setHoyExpandido] = useState(true);
+  // Cifras vivas que no vienen de un movimiento (esperados no pagados): TC de hoy, siempre.
+  const eqVivo = (monto: number, moneda: Moneda): Eq => moneda === 'ARS'
+    ? { ars: monto, usd: tcEfectivo ? monto / tcEfectivo : 0 }
+    : { ars: monto * tcEfectivo, usd: monto };
 
   // Card HOY (solo para el mes actual). F9.99.8 — unión de:
   //  (a) esperados con diaVencimiento === hoy (comportamiento pre-existente),
@@ -257,8 +316,6 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   //  (c) futuros sueltos (gastos manuales sin plantilla) con fecha === hoy.
   // Vencidos primero, sin duplicar si un ítem cae en (a) y (b) a la vez (no puede pasar: 'vencido'
   // exige diaVencimiento < hoy.getDate()).
-  const mesActualHoy = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
-  const esMesActual = mes === mesActualHoy;
   const hoyEsperados: CheckItem[] = [];
   if (esMesActual) {
     const vistos = new Set<string>();
@@ -296,40 +353,53 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // F9.102 1b — la rama 'esperado' usa pendienteDeEntrada (monto REAL de los matches cuando
   // por_confirmar/parcial) en vez de leer item.montoEsperado directamente — antes un
   // por_confirmar con montoEsperado null quedaba en $0 pese a tener un match real cargado.
-  const hoyPendienteArsEq = hoyItems
+  // F9.114 — el pendiente de un esperado es plata que TODAVÍA no salió → TC de hoy (eqVivo).
+  const hoyPendienteEq = hoyItems
     .filter(e => !hoyEntryCubierto(e))
     .reduce((s, e) => {
-      if (e.kind !== 'esperado') return s + arsEq(e.mov);
-      const raw = pendienteDeEntrada(e);
-      return s + (e.ci.item.moneda === 'ARS' ? raw : raw * c.tc);
-    }, 0);
+      if (e.kind !== 'esperado') return sumaEq(s, eqDe(e.mov, tcDeMov));
+      return sumaEq(s, eqVivo(pendienteDeEntrada(e), e.ci.item.moneda));
+    }, EQ0);
   const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(hoyEntryCubierto);
   // F9.102 1b — total pagado del día (todos los ítems, incluidos los reales) para mostrar
   // junto al check "Al día" cuando todoPagadoHoy.
-  const hoyTotalArsEq = hoyItems.reduce((s, e) => {
-    if (e.kind === 'esperado') return s + e.ci.matches.reduce((a, m) => a + arsEq(m), 0);
-    return s + arsEq(e.mov);
-  }, 0);
+  const hoyTotalEq = hoyItems.reduce((s, e) => {
+    if (e.kind === 'esperado') return e.ci.matches.reduce((a, m) => sumaEq(a, eqDe(m, tcDeMov)), s);
+    return sumaEq(s, eqDe(e.mov, tcDeMov));
+  }, EQ0);
 
   // F9.92.1 — desglose por banco de lo ya conciliado hoy (los pendientes sin match no tienen banco).
   // F9.102 1b — suma también los 'real' (comparten forma con 'suelto': ambos tienen .mov).
-  const hoyPorBanco = new Map<string, number>();
+  const hoyPorBanco = new Map<string, Eq>();
   for (const e of hoyItems) {
     if (e.kind === 'esperado') {
       const banco = e.ci.matches[0]?.banco;
       if (!banco) continue;
-      const monto = e.ci.matches.reduce((s, m) => s + arsEq(m), 0);
-      hoyPorBanco.set(banco, (hoyPorBanco.get(banco) ?? 0) + monto);
+      const monto = e.ci.matches.reduce((s, m) => sumaEq(s, eqDe(m, tcDeMov)), EQ0);
+      hoyPorBanco.set(banco, sumaEq(hoyPorBanco.get(banco) ?? EQ0, monto));
     } else {
       if (!hoyEntryCubierto(e) || !e.mov.banco) continue;
-      hoyPorBanco.set(e.mov.banco, (hoyPorBanco.get(e.mov.banco) ?? 0) + arsEq(e.mov));
+      hoyPorBanco.set(e.mov.banco, sumaEq(hoyPorBanco.get(e.mov.banco) ?? EQ0, eqDe(e.mov, tcDeMov)));
     }
   }
-  const hoyBancos = [...hoyPorBanco.entries()].sort((a, b) => b[1] - a[1]);
+  const hoyBancos = [...hoyPorBanco.entries()].sort((a, b) => b[1].ars - a[1].ars);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <KpiCards c={c} cur={cur} />
+
+      {/* F9.114 — la pantalla SIEMPRE dice con qué TC está valuando cuando no es el real de
+          /tcDiario, y cuántos movimientos se valuaron sin snapshot propio. */}
+      {(avisoTc || sinTc > 0) && (
+        <div style={{ margin: '-4px 4px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {avisoTc && <span style={{ fontSize: 11.5, color: 'var(--gf-out)' }}>{avisoTc}</span>}
+          {sinTc > 0 && (
+            <span style={{ fontSize: 11.5, color: 'var(--gf-gray-400)' }}>
+              {sinTc} movimiento{sinTc > 1 ? 's' : ''} en USD sin TC propio — valuado{sinTc > 1 ? 's' : ''} con el TC de esa fecha.
+            </span>
+          )}
+        </div>
+      )}
 
       {/* F9.17 — fila limpia con badge de cantidad, reemplaza el banner amarillo */}
       {/* F9.62 — clickeable: lleva a la solapa Gastos Fijos */}
@@ -388,12 +458,12 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--gf-income)', fontWeight: 700, fontSize: 13 }}>
               <Icon name="check" size={13} color="var(--gf-income)" /> Al día
             </span>
-            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtBig(hoyTotalArsEq)}</div>
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtBig(hoyTotalEq)}</div>
           </>
         ) : (
           <>
-            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>{fmtBig(hoyPendienteArsEq)}</div>
-            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(hoyPendienteArsEq)}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>{fmtBig(hoyPendienteEq)}</div>
+            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(hoyPendienteEq)}</div>
           </>
         )}
         highlight
@@ -476,7 +546,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
             <Icon name="users-round" size={13} color="var(--gf-gray-400)" /> Distribución de ingresos
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            {personas.map(([p, v]) => {
+            {personas.map(([p, eq]) => {
               const nombre = nombrePersona(p, config);
               const col = colorHash(nombre);
               return (
@@ -485,8 +555,8 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                     <span style={{ width: 9, height: 9, borderRadius: 999, background: col }} />
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-strong)' }}>{nombre}</span>
                   </div>
-                  <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(v)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(v)}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(eq)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(eq)}</div>
                 </div>
               );
             })}
@@ -507,13 +577,13 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {dias.map(d => {
               const isHoy   = d.date.toDateString() === hoy.toDateString();
-              const banks   = Object.entries(d.banks).sort((a, b) => b[1] - a[1]);
+              const banks   = Object.entries(d.banks).sort((a, b) => b[1].ars - a[1].ars);
               const expanded = diasExpandidos.has(d.day);
               const movsDelDia = cajaMov.filter(m => m.tipo === 'Gasto' && m.fecha.getDate() === d.day && m.fecha.toDateString() === d.date.toDateString());
               const totalNode = (
                 <>
-                  <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(d.eqArs)}</div>
-                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(d.eqArs)}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(d.eq)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(d.eq)}</div>
                 </>
               );
               return (
@@ -556,9 +626,13 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                             <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-out)' }}>
                               {fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
                             </div>
-                            {m.moneda === 'USD' && m.tcUsdArs && (
+                            {/* F9.114 — el equivalente en pesos se muestra también cuando el
+                                movimiento en USD no trae snapshot propio (antes esa fila valía
+                                0 y desaparecía de los totales): se marca "TC estimado". */}
+                            {m.moneda === 'USD' && (
                               <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>
-                                {fmtArs(arsEq(m))}
+                                {fmtArs(arsEq(m, tcDeMov))}
+                                {sinTcPropio(m) && <span style={{ marginLeft: 5, color: 'var(--gf-out)' }}>TC estimado</span>}
                               </div>
                             )}
                           </div>
@@ -906,6 +980,29 @@ function ResumenVisual() {
   const [editandoMovimiento, setEditandoMovimiento] = useState<Movement | null>(null);
   const tabs: { id: 'dia' | 'fijos'; label: string }[] = [{ id: 'dia', label: 'Por día' }, { id: 'fijos', label: 'Gastos Fijos' }];
 
+  // F9.114 — dos fuentes distintas, a propósito:
+  //  · mapaTc: fecha → TC, para valuar lo YA movido al dólar de su día (congelado).
+  //  · tcHoy: para lo VIVO (esperados no pagados + ingresos del mes en curso).
+  // El rango arranca 10 días antes del mes para que el día 1 tenga un TC anterior aunque
+  // caiga en fin de semana o feriado (tcDeFecha busca hacia atrás).
+  const [mapaTc, setMapaTc] = useState<Record<string, number>>({});
+  const [tcHoy, setTcHoy] = useState<number | null>(null);
+
+  useEffect(() => {
+    const [y, m] = mes.split('-').map(Number);
+    const desde = new Date(y, m - 1, 1);
+    desde.setDate(desde.getDate() - 10);
+    const hasta = new Date(y, m, 0);
+    cargarTCRango(isoLocal(desde), isoLocal(hasta))
+      .then(setMapaTc)
+      .catch(err => { console.warn('[Resumen] tcRango falló:', err); setMapaTc({}); });
+    cargarTCReciente(1)
+      .then(h => setTcHoy(h[0]?.tcUsdArs ?? null))
+      .catch(err => { console.warn('[Resumen] tcHoy falló:', err); setTcHoy(null); });
+  }, [mes]);
+
+  const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);
+
   const { memberId, miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
   const { config } = useFamiliaConfig();
@@ -999,7 +1096,7 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} agenda={agenda} mes={mes} onIrAGastos={() => setSec('fijos')} />
+        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} agenda={agenda} mes={mes} mapaTc={mapaTc} tcEfectivo={tcEfectivo} avisoTc={avisoTc} onIrAGastos={() => setSec('fijos')} />
       ) : (
         <GastosFijosSeccion
           agenda={agenda}

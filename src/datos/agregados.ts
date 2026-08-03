@@ -142,6 +142,7 @@ export function agregarMensual(
   mes: string,
   config: FamiliaConfig | null,
   movsMesAnterior: Movement[],
+  tcRef = 0,
 ): DashMensual {
   const visibles = movs.filter(m => !m.excluirDash);
   const gastos = visibles.filter(m => m.tipo === 'Gasto');
@@ -149,8 +150,11 @@ export function agregarMensual(
 
   // TC representativo: el más reciente entre los movimientos del mes.
   // Se calcula primero para usarlo como fallback en movimientos ARS sin tcUsdArs.
+  // F9.114 — el fallback era `?? 1`: un mes sin ningún movimiento en USD (todos los gastos
+  // en pesos) dejaba el "equivalente USD" igual al monto en pesos. Ahora cae en `tcRef`, el
+  // TC efectivo de la cascada que le pasa Dashboard (/tcDiario → cache → TC_FALLBACK).
   const conTc = visibles.filter(m => m.tcUsdArs).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
-  const tc = conTc[0]?.tcUsdArs ?? 1;
+  const tc = conTc[0]?.tcUsdArs ?? tcRef;
 
   const ingresosUsd = ingresos.reduce((s, m) => s + usdEq(m, tc), 0);
   const salidasUsd = gastos.reduce((s, m) => s + usdEq(m, tc), 0);
@@ -265,14 +269,16 @@ export function agregarMensual(
 
 // ── Anual ─────────────────────────────────────────────────────────────────
 
-export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: Movement[]): DashAnual {
+export function agregarAnual(movs: Movement[], anio: number, movsAnioAnterior: Movement[], tcRef = 0): DashAnual {
   const visibles = movs.filter(m => !m.excluirDash);
   const gastos = visibles.filter(m => m.tipo === 'Gasto');
   const ingresos = visibles.filter(m => m.tipo === 'Ingreso');
 
   // TC representativo del año (más reciente con TC propio), usado como fallback para movs ARS sin TC.
+  // F9.114 — con `?? 0` un año sin movimientos en USD dejaba TODO en 0 (usdEq devuelve 0 sin
+  // tc); ahora cae en el TC efectivo de la cascada que pasa Dashboard.
   const conTc = visibles.filter(m => m.tcUsdArs).sort((a, b) => b.fecha.getTime() - a.fecha.getTime());
-  const tc = conTc[0]?.tcUsdArs ?? 0;
+  const tc = conTc[0]?.tcUsdArs ?? tcRef;
 
   const ingresosUsd = ingresos.reduce((s, m) => s + usdEq(m, tc), 0);
   const salidasUsd = gastos.reduce((s, m) => s + usdEq(m, tc), 0);

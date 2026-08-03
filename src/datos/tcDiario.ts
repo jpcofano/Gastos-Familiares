@@ -2,6 +2,7 @@ import { collection, doc, getDoc, getDocs, query, orderBy, limit, documentId, st
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
 import { claveSemanaISO } from './patrimonioOptimizacion';
+import { TC_FALLBACK } from './money';
 
 export async function tcParaFecha(fecha: Date): Promise<number | null> {
   const dateStr = fecha.toISOString().slice(0, 10);
@@ -43,11 +44,18 @@ export async function cargarTCReciente(n = 10): Promise<TCDiarioItem[]> {
     origen: d.data().origen as TCDiarioItem['origen'],
   });
 
+  // F9.114 — cada lectura exitosa refresca el cache de localStorage, que es el segundo
+  // escalón de la cascada (ver tcEfectivoDe): así el fallback se actualiza solo.
+  const cachear = (items: TCDiarioItem[]): TCDiarioItem[] => {
+    if (items[0]?.tcUsdArs) guardarTcCache(items[0].fecha, items[0].tcUsdArs);
+    return items;
+  };
+
   try {
     const snap = await getDocs(
       query(collection(db, 'tcDiario'), orderBy(documentId(), 'desc'), limit(n)),
     );
-    return snap.docs.map(aItem);
+    return cachear(snap.docs.map(aItem));
   } catch (err) {
     // F9.113 — fallback sin índice: el id ES la fecha (YYYY-MM-DD), así que ordenar en
     // cliente da el mismo resultado. La colección es chica (un doc por día) y es la misma
@@ -55,11 +63,51 @@ export async function cargarTCReciente(n = 10): Promise<TCDiarioItem[]> {
     // dejar la pantalla sin valor de TC.
     console.warn('[cargarTCReciente] consulta ordenada falló, uso fallback sin índice:', err);
     const snap = await getDocs(collection(db, 'tcDiario'));
-    return snap.docs
-      .map(aItem)
-      .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
-      .slice(0, n);
+    return cachear(
+      snap.docs
+        .map(aItem)
+        .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+        .slice(0, n),
+    );
   }
+}
+
+// F9.114 — TC de una fecha contra un mapa ya cargado (cargarTCRango): exacto, o el más
+// reciente anterior (fines de semana y feriados no tienen doc). null si no hay ninguno
+// anterior — el mapa se carga con margen hacia atrás para que el día 1 del mes tenga uno.
+// NOTA: se respeta la convención existente del cron (la key D guarda el cierre de D−1);
+// acá NO se corrige ni se desplaza — sólo se lee como está.
+export function tcDeFecha(mapa: Record<string, number>, fecha: string): number | null {
+  if (mapa[fecha]) return mapa[fecha];
+  const anteriores = Object.keys(mapa).filter(k => k < fecha).sort();
+  const ultima = anteriores[anteriores.length - 1];
+  return ultima ? mapa[ultima] : null;
+}
+
+// F9.114 — cache del último TC leído con éxito. Mismo patrón try/catch que
+// comerciosLogos.ts:15-16 (el storage puede estar bloqueado). Se reescribe en cada
+// lectura exitosa, así el fallback se actualiza solo todos los días.
+const KEY_TC_CACHE = 'gf-tc-ultimo';
+
+export function guardarTcCache(fecha: string, tc: number) {
+  try { localStorage.setItem(KEY_TC_CACHE, JSON.stringify({ fecha, tc })); } catch { /* storage bloqueado */ }
+}
+
+export function leerTcCache(): { fecha: string; tc: number } | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(KEY_TC_CACHE) ?? 'null');
+    return raw && typeof raw.tc === 'number' && raw.tc > 0 ? raw : null;
+  } catch { return null; }
+}
+
+// F9.114 — cascada de TC para valuar lo VIVO (esperados no pagados, ingresos del mes en
+// curso). Tres niveles, y la pantalla SIEMPRE dice cuál está usando: nunca un valor
+// plausible sin marcar. `aviso` null = el TC es el real de /tcDiario.
+export function tcEfectivoDe(tcHoy: number | null): { tc: number; aviso: string | null } {
+  if (tcHoy) return { tc: tcHoy, aviso: null };
+  const cache = leerTcCache();
+  if (cache) return { tc: cache.tc, aviso: `TC del ${cache.fecha} — no se pudo leer el de hoy.` };
+  return { tc: TC_FALLBACK, aviso: 'Sin TC — valor de referencia.' };
 }
 
 // F9.103 — estado de cobertura para la card "Tipo de cambio" en Patrimonio › Config.

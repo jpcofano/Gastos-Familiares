@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { cargarTCReciente, cargarEstadoTcDiario, backfillTcDiario, type EstadoTcDiario, type ResultadoBackfillTc } from '../datos/tcDiario';
-import { TC_DEFAULT } from '../datos/money';
+import { cargarTCReciente, cargarEstadoTcDiario, backfillTcDiario, tcEfectivoDe, type EstadoTcDiario, type ResultadoBackfillTc } from '../datos/tcDiario';
 import { Card, MerchantLogo } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import {
@@ -3249,7 +3248,9 @@ type TabId = typeof TABS[number][0];
 
 export default function Patrimonio() {
   const [tab, setTab] = useState<TabId>('resumen');
-  const [tc, setTc] = useState(TC_DEFAULT);
+  // F9.114 — valor inicial por la cascada (cache del último TC leído → TC_FALLBACK), no el
+  // literal pelado; abajo lo pisa /tcDiario cuando llega.
+  const [tc, setTc] = useState(() => tcEfectivoDe(null).tc);
 
   const [posiciones,        setPosiciones]        = useState<Posicion[]>([]);
   const [activosFijos,      setActivosFijos]      = useState<ActivoFijo[]>([]);

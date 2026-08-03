@@ -813,6 +813,45 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   crear ningún índice, y si hay que crearlo va también en `firestore.indexes.json` en el mismo
   commit (un índice hecho a mano por el link de la consola no está en el archivo y un deploy
   posterior puede proponer borrarlo).
+- F9.114 — Valuación en USD: TC del día para lo ya movido, TC de hoy para lo vivo. Ver
+  `docs/prompts/F9.114-valuacion-usd.md`. **Regla de negocio (la definió el dueño; el criterio
+  NO es "mes actual vs mes viejo" sino plata que ya se movió vs plata que todavía está):**
+  gasto ya pagado → TC del **día del movimiento** (ya saliste de esos pesos a ese dólar,
+  congelado) · ingreso ya recibido en meses cerrados → TC del **día del movimiento** ·
+  gasto esperado **no pagado** → **TC de hoy** (lo vas a pagar con pesos de hoy) · ingreso del
+  **mes en curso** → **TC de hoy** (está en el banco desvalorizándose). **Cierre de mes
+  (opción A, decisión explícita):** al pasar de mes los ingresos dejan de valuarse al TC de hoy
+  y quedan congelados al TC de su día — se asume que esa plata ya se gastó, porque la app no
+  trackea saldos de cuentas. **Consecuencia aceptada: el valor en USD de un ingreso SALTA el
+  día 1 del mes siguiente. Es deliberado, no un bug.** La opción B (congelar al gastarse) exige
+  saldos de cuentas y va con la feature de flujos. **Dirección USD→ARS sin cambios:** manda
+  `movimiento.tcUsdArs`, el snapshot del día — un gasto en USD de marzo se sigue mostrando en
+  pesos al TC de marzo. **Implementación:** `tcDeFecha(mapa, fecha)` en `src/datos/tcDiario.ts`
+  resuelve exacto o el más reciente anterior (sábados/feriados no tienen doc) contra el mapa que
+  devuelve `cargarTCRango` (reusado de `patrimonioOptimizacion.ts`, cargado desde 10 días antes
+  del mes para que el día 1 tenga un anterior); `crearTcDeMovimiento` en `Resumen.tsx` es el
+  único lugar que decide el TC de cada movimiento; los totales acumulan el par ARS/USD **por
+  movimiento** (`Eq`/`eqDe`) en vez de dividir el total del día por un TC único — si no, un día
+  con ingreso y gasto mezclaba criterios. `calcularKpis` ya no calcula un TC único del mes: el
+  `?? 1` que dejaba el "equivalente USD" igual al monto en pesos cuando el mes no tenía ningún
+  movimiento en USD (agosto 2026: todos ARS) desapareció. **Cascada de fallback** (`TC_DEFAULT`
+  renombrado a `TC_FALLBACK`, `tcEfectivoDe` en `tcDiario.ts`): `/tcDiario` sin aviso → último TC
+  leído con éxito, cacheado en `localStorage` (`gf-tc-ultimo`, reescrito en cada lectura exitosa
+  de `cargarTCReciente`, así se actualiza solo) con aviso `TC del {fecha} — no se pudo leer el de
+  hoy.` → `TC_FALLBACK = 1454` con aviso `Sin TC — valor de referencia.`. Nunca un valor plausible
+  sin marcar. **Movimiento en USD sin `tcUsdArs` propio** (`AltaMovimiento` sólo lo guarda para
+  USD, y su lookup puede fallar) ya no vale 0 —desaparecía de los totales en silencio—: se valúa
+  con el TC de su fecha, con badge `TC estimado` en la fila y conteo bajo los KPIs. **Dashboard
+  (auditoría de la Parte 6):** su `tc` no venía de `TC_DEFAULT` **ni** de `/tcDiario`, sino del
+  mismo defecto `?? 1` en `agregados.ts:153` (y `?? 0` en el anual, que dejaba todo el año en 0);
+  `agregarMensual`/`agregarAnual` reciben ahora `tcRef` con el TC efectivo de la cascada. **Límite
+  conocido, no arreglado acá:** Dashboard sigue agregando en base USD con un TC representativo
+  único por período (no por día de cada movimiento) — llevarlo a la regla completa implica
+  refactorizar `agregados.ts` entero, fuera del alcance de esta fase. `tsc --noEmit`: 41
+  pre-existentes en cliente, 0 nuevos. `vite build`: OK. **Pendiente de cierre manual (no deployo
+  yo):** `npm run build && firebase deploy --only hosting` → verificar en incógnito: agosto 2026
+  con $316.492 muestra ~U$S 218 (no U$S 316.492); un gasto de mes cerrado no cambia su USD de un
+  día al otro; un esperado no pagado sí.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
