@@ -852,6 +852,39 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   yo):** `npm run build && firebase deploy --only hosting` → verificar en incógnito: agosto 2026
   con $316.492 muestra ~U$S 218 (no U$S 316.492); un gasto de mes cerrado no cambia su USD de un
   día al otro; un esperado no pagado sí.
+- F9.115 — Patrimonio: exportar corrida vigente (.txt) y dossier (.json). Ver
+  `docs/prompts/F9.115-exportar-corrida-y-dossier.md`. La app ingería corridas pero no las
+  devolvía: el `.txt` existía sólo donde el usuario lo hubiera guardado al generarlo. **1.**
+  `exportarCorridaTxt(fechaCorrida?)` en `src/datos/patrimonio.ts` arma un `CorraidaJSON` desde
+  Firestore mapeando `Posicion → PosicionRaw` (descarta los tres derivados: `valorUsd`,
+  `tcUsado`, `fechaCorrida`); el round-trip es determinístico porque la ingesta los recalcula
+  con `tcParaFecha(fecha_corrida)`. Sin argumento usa la vigente; con argumento, cualquier
+  corrida histórica (el id del doc de `snapshotsPortafolio` **es** la fecha). `meta.fuentes`
+  cae a `['export']` y nunca vacío: el validador de la ingesta exige `fuentes` no vacío y
+  `total_declarado_usd > 0`, si no el archivo exportado sería irreimportable. **2.**
+  `exportarDossierJson()` — propósito distinto, NO re-importable: corrida + manuales + flujos
+  (Timestamp→ISO) + historial (24) + retorno. Fail-soft por bloque: cada `cargar*` que falla
+  loguea el error real y deja su bloque vacío sin abortar el dossier. `retorno` es `null` sin
+  flujos registrados a propósito — sin flujos el número es variación de valor, no retorno
+  (misma distinción que ya hace la card de Resumen). **3.** Dos botones en la card de informes
+  de `ResumenTab`, con `URL.revokeObjectURL` (el `descargar()` viejo del prompt de chat no lo
+  hace; no se tocó, sólo no se repitió la omisión). El toast de CAFCI se renombró de
+  `toastCafci` a `toast` porque ahora lo comparten las dos features. **Pendiente de cierre
+  manual (no deployo yo):** deploy `--only hosting` → exportar la corrida vigente, subirla a la
+  ingesta y confirmar diff vacío en el Paso 3.
+- F9.116 §1 — `calcMetrics` extraída a `src/datos/patrimonioMetricas.ts` (con
+  `sectorDisplay`/`SECTOR_DISPLAY`, de las que depende). Estaba dentro de un archivo de ~4.100
+  líneas y sin exportar: no se podía reusar ni verificar aislada. Refactor puro — el cuerpo
+  movido `diff`ea vacío contra `HEAD:src/vistas/Patrimonio.tsx:139-182`. **§2-§6 frenadas a
+  propósito** por el tripwire del propio spec ("si aparecen `escenario`/`tolerancia`, frenar y
+  reportar"): el `grep` propuesto es case-sensitive y no ve `STRESS_ESCENARIOS`
+  (`Patrimonio.tsx:207`) ni `calcStress()` (`:245`), que ya calculan pérdida por escenario y se
+  consumen en la card de la solapa Plan (`:1129`) **y** en el informe PDF (`:3721`), que ya
+  tiene sección de estrés. La premisa "la app no mide pérdida esperable" es falsa; construir un
+  segundo motor con ids nuevos dejaría dos fuentes de números distintos para la misma pregunta
+  en la misma pantalla. Lo que sí falta y no existe: `tolerancia`, brecha, bandas por
+  posición/driver/caja y mix objetivo. Decisión pendiente: unificar sobre el motor existente o
+  mantener dos.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

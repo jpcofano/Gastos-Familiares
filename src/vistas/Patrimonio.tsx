@@ -8,6 +8,7 @@ import {
   cargarHistorialSnapshots,
   guardarActivoFijo, eliminarActivoFijo,
   guardarPosicionManual, eliminarPosicionManual,
+  exportarCorridaTxt, exportarDossierJson,
   type SnapshotResumen,
 } from '../datos/patrimonio';
 import {
@@ -47,32 +48,9 @@ import {
   type ResultadoImportarCafciManual,
 } from '../datos/patrimonioCafci';
 import PatrimonioIngesta from './PatrimonioIngesta';
-
-// ── Sector crudo → display ────────────────────────────────────────────────────
-const SECTOR_DISPLAY: Record<string, string> = {
-  energia:             'Energía',
-  bancos:              'Bancos',
-  cripto:              'Cripto',
-  cer_pesos:           'Renta fija',
-  deuda_soberana_ar:   'Renta fija',
-  deuda_soberana_usd:  'Renta fija',
-  on:                  'ONs',
-  cash:                'Cash',
-  tecnologia:          'Tecnología',
-  tech:                'Tecnología',
-  consumo:             'Consumo',
-  real_estate:         'Real Estate',
-  materiales:          'Materiales',
-  agro:                'Agro',
-  fci:                 'FCI',
-  global:              'Global',
-};
-
-function sectorDisplay(sector: string, pais_riesgo: string): string {
-  const base = SECTOR_DISPLAY[sector] ?? sector;
-  if (sector === 'cripto' || sector === 'cash' || sector === 'global') return base;
-  return base + (pais_riesgo === 'AR' ? ' AR' : pais_riesgo === 'global' ? ' Global' : '');
-}
+// F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
+// reusable; la lógica no cambió.
+import { calcMetrics, sectorDisplay, SECTOR_DISPLAY } from '../datos/patrimonioMetricas';
 
 const SECTOR_COL: Record<string, string> = {
   'Energía AR':       '#f5a623',
@@ -133,51 +111,6 @@ function manualToPosicion(m: PosicionManual): Posicion {
     titular: null, moneda_origen: 'USD', valor_origen: m.valorUsd,
     cantidad: m.cantidad, fuente: 'manual', revisar: false,
     valorUsd: m.valorUsd, tcUsado: null, fechaCorrida: m.fechaValuacion,
-  };
-}
-
-function calcMetrics(posiciones: Posicion[]): PatMetrics {
-  const total = posiciones.reduce((s, p) => s + p.valorUsd, 0);
-  const bySector: Record<string, number> = {};
-  const byTipo:   Record<string, number> = {};
-  const byPais = { AR: 0, global: 0 };
-
-  for (const p of posiciones) {
-    const sec = sectorDisplay(p.sector, p.pais_riesgo);
-    bySector[sec]  = (bySector[sec]  ?? 0) + p.valorUsd;
-    byTipo[p.tipo] = (byTipo[p.tipo] ?? 0) + p.valorUsd;
-    byPais[p.pais_riesgo] += p.valorUsd;
-  }
-
-  // Concentración por ticker (GLOB CEDEAR + GLOB manual se suman)
-  const byTickerAll: Record<string, number> = {};
-  const byTickerNoCripto: Record<string, number> = {};
-  for (const p of posiciones) {
-    byTickerAll[p.ticker] = (byTickerAll[p.ticker] ?? 0) + p.valorUsd;
-    if (p.tipo !== 'cripto') byTickerNoCripto[p.ticker] = (byTickerNoCripto[p.ticker] ?? 0) + p.valorUsd;
-  }
-  const tickerAllEntries    = Object.entries(byTickerAll).sort((a, b) => b[1] - a[1]);
-  const tickerNoCriptoEntries = Object.entries(byTickerNoCripto).sort((a, b) => b[1] - a[1]);
-
-  const top1Entry = tickerNoCriptoEntries[0] ?? tickerAllEntries[0] ?? ['—', 0];
-  const top1 = total > 0 ? top1Entry[1] / total : 0;
-  const top3 = total > 0 ? tickerAllEntries.slice(0, 3).reduce((s, [, v]) => s + v, 0) / total : 0;
-  const top5 = total > 0 ? tickerAllEntries.slice(0, 5).reduce((s, [, v]) => s + v, 0) / total : 0;
-  const hhi  = total > 0 ? tickerAllEntries.reduce((s, [, v]) => s + (v / total) ** 2, 0) : 0;
-
-  const sectorEntry = Object.entries(bySector).sort((a, b) => b[1] - a[1])[0] ?? ['—', 0];
-  const cripto = total > 0 ? (byTipo.cripto ?? 0) / total : 0;
-  const rvUsd  = posiciones
-    .filter(p => p.tipo === 'accion' || p.tipo === 'cedear' || p.tipo === 'cripto')
-    .reduce((s, p) => s + p.valorUsd, 0);
-
-  return {
-    total, bySector, byTipo, byPais,
-    nombreTop: { ticker: top1Entry[0] },
-    top1, top3, top5, hhi,
-    sectorTop: { nombre: sectorEntry[0], pct: total > 0 ? sectorEntry[1] / total : 0 },
-    paisAr: total > 0 ? byPais.AR / total : 0,
-    cripto, rvPct: total > 0 ? rvUsd / total : 0,
   };
 }
 
@@ -719,7 +652,7 @@ function OpcionCard({ opcion, posiciones, onRegistrarDecision }: { opcion: Opcio
 }
 
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme }: {
+function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
   historial: SnapshotResumen[];
@@ -727,7 +660,27 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
   informes: InformeAnterior[];
   generandoInforme: boolean;
   onGenerarInforme: () => void;
+  onToast: (texto: string, error: boolean) => void;
 }) {
+  // F9.115 — descargas de la corrida vigente. El patrón blob/a.download es el de
+  // descargar() (:3127), pero acá SÍ se libera el object URL.
+  const [descargando, setDescargando] = useState<'txt' | 'json' | null>(null);
+
+  async function descargarExport(cual: 'txt' | 'json') {
+    setDescargando(cual);
+    const res = cual === 'txt' ? await exportarCorridaTxt() : await exportarDossierJson();
+    setDescargando(null);
+    if (!res) {
+      onToast('No hay corrida cargada para exportar (si hay datos, revisá la consola).', true);
+      return;
+    }
+    const blob = new Blob([res.contenido], { type: cual === 'txt' ? 'text/plain' : 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = res.nombre; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const fijosUsd   = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
   const patrimTotal = M.total + fijosUsd;
   const corrPrev = historial.length > 1 ? historial[1] : null;
@@ -891,6 +844,31 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
         )}
         <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: informes.length > 0 ? 8 : 4, lineHeight: 1.4 }}>
           Bajo demanda · incluye análisis IA cacheados
+        </div>
+
+        {/* F9.115 — la corrida vuelve a salir de la app: .txt re-importable en la ingesta,
+            y dossier .json para análisis externo (no re-importable). */}
+        <div style={{ borderTop: '1px solid var(--gf-gray-100)', marginTop: 12, paddingTop: 12, display: 'flex', gap: 8 }}>
+          {([
+            { id: 'txt' as const,  label: 'Descargar corrida (.txt)',  sub: 'Re-importable en la ingesta' },
+            { id: 'json' as const, label: 'Descargar dossier (.json)', sub: 'Corrida + manuales + flujos + historial' },
+          ]).map(b => {
+            const busy = descargando === b.id;
+            return (
+              <button
+                key={b.id}
+                onClick={() => descargarExport(b.id)}
+                disabled={descargando !== null}
+                style={{ flex: 1, minWidth: 0, textAlign: 'left', padding: '9px 11px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', cursor: descargando !== null ? 'default' : 'pointer', fontFamily: 'var(--font-base)', opacity: descargando !== null && !busy ? .5 : 1 }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--color-text)' }}>
+                  <Icon name="download" size={12} color="var(--color-text-sec)" />
+                  {busy ? 'Generando…' : b.label}
+                </span>
+                <span style={{ display: 'block', fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 2, lineHeight: 1.3 }}>{b.sub}</span>
+              </button>
+            );
+          })}
         </div>
       </Card>
     </div>
@@ -3312,7 +3290,7 @@ export default function Patrimonio() {
   const [resultadoActualizarTodo, setResultadoActualizarTodo] = useState<string[] | null>(null);
   const [toastIngestaOk,   setToastIngestaOk]   = useState(false);
   // F9.102 3b — feedback real de "Sincronizar CAFCI" (antes fail-silent).
-  const [toastCafci, setToastCafci] = useState<{ texto: string; error: boolean } | null>(null);
+  const [toast, setToast] = useState<{ texto: string; error: boolean } | null>(null);
 
   useEffect(() => {
     cargarTCReciente(1).then(h => { if (h[0]) setTc(h[0].tcUsdArs); });
@@ -3447,11 +3425,11 @@ export default function Patrimonio() {
       const partes = [`CAFCI: ${result.sincronizados}/${configCafci.fondos.length} fondos`];
       if (result.pendientesMapeo.length > 0) partes.push(`${result.pendientesMapeo.length} especies sin mapear`);
       if (result.errores.length > 0) partes.push(`${result.errores.length} con error (${result.errores[0].fondo}: ${result.errores[0].mensaje})`);
-      setToastCafci({ texto: partes.join(' · '), error: result.errores.length > 0 });
+      setToast({ texto: partes.join(' · '), error: result.errores.length > 0 });
       return result;
     } catch (e) {
       console.error('[sincronizarCafci]', e);
-      setToastCafci({ texto: `Sincronizar CAFCI: falló (${e instanceof Error ? e.message : String(e)})`, error: true });
+      setToast({ texto: `Sincronizar CAFCI: falló (${e instanceof Error ? e.message : String(e)})`, error: true });
       return null;
     } finally {
       setSincronizandoCafci(false);
@@ -3469,7 +3447,7 @@ export default function Patrimonio() {
     setCafciMappings(mappings);
     const partes = [`Importado: ${result.especies} especies · datos al ${result.fechaDatos}`];
     if (result.pendientesMapeo.length > 0) partes.push(`${result.pendientesMapeo.length} sin mapear`);
-    setToastCafci({ texto: partes.join(' · '), error: false });
+    setToast({ texto: partes.join(' · '), error: false });
     return result;
   }
 
@@ -3818,6 +3796,7 @@ export default function Patrimonio() {
               informes={informes}
               generandoInforme={generandoInforme}
               onGenerarInforme={handleGenerarInforme}
+              onToast={(texto, error) => setToast({ texto, error })}
             />
           )}
           {tab === 'tenencias' && (
@@ -4027,12 +4006,13 @@ export default function Patrimonio() {
         </div>
       )}
 
-      {/* F9.102 3b — toast mínimo de resultado de "Sincronizar CAFCI" (éxito o error) */}
-      {toastCafci && (
+      {/* F9.102 3b — toast mínimo de resultado (éxito o error). F9.115 — lo comparten
+          "Sincronizar CAFCI" y las descargas de corrida/dossier. */}
+      {toast && (
         <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 60, maxWidth: 480, margin: '0 auto', background: 'var(--gf-ink)', color: '#fff', borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10, boxShadow: 'var(--shadow-card)' }}>
-          <Icon name={toastCafci.error ? 'triangle-alert' : 'check'} size={16} color={toastCafci.error ? '#fca5a5' : 'var(--gf-emerald-line, #0a7d5e)'} style={{ marginTop: 2, flexShrink: 0 }} />
-          <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.4 }}>{toastCafci.texto}</div>
-          <button onClick={() => setToastCafci(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+          <Icon name={toast.error ? 'triangle-alert' : 'check'} size={16} color={toast.error ? '#fca5a5' : 'var(--gf-emerald-line, #0a7d5e)'} style={{ marginTop: 2, flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.4 }}>{toast.texto}</div>
+          <button onClick={() => setToast(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
             <Icon name="x" size={15} color="#fff" />
           </button>
         </div>

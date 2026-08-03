@@ -1,9 +1,10 @@
 import {
-  collection, doc, getDocs, setDoc, deleteDoc,
+  collection, doc, getDoc, getDocs, setDoc, deleteDoc,
   query, orderBy, where, limit, writeBatch, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { Posicion, ActivoFijo, MetaCorrida, PosicionManual } from '../types/patrimonio';
+import { cargarFlujos, calcRetorno } from './patrimonioFlujos';
+import type { Posicion, ActivoFijo, MetaCorrida, PosicionManual, PosicionRaw, CorraidaJSON } from '../types/patrimonio';
 
 const ACTIVOS_SEED: ActivoFijo[] = [
   { id: 'propiedad', nombre: 'Propiedad', valorUsd: 220000, pais: 'AR', notas: '' },
@@ -139,4 +140,141 @@ export async function confirmarIngesta(
   });
 
   await batch.commit();
+}
+
+// ── F9.115 — Exportar corrida y dossier ───────────────────────────────────────
+// La app ingería corridas pero no las devolvía: el .txt existía sólo donde el usuario lo
+// hubiera guardado al generarlo. Los datos estaban en Firestore pero eran inaccesibles
+// fuera de la UI.
+
+// Posicion → PosicionRaw: se descartan los tres campos derivados que agrega la ingesta
+// (valorUsd, tcUsado, fechaCorrida) y quedan los 11 del schema. Al reimportar, la ingesta
+// los recalcula con tcParaFecha(fecha_corrida), así que el round-trip da el mismo valorUsd.
+function aPosicionRaw(p: Posicion): PosicionRaw {
+  return {
+    cuenta: p.cuenta,
+    titular: p.titular,
+    ticker: p.ticker,
+    tipo: p.tipo,
+    sector: p.sector,
+    pais_riesgo: p.pais_riesgo,
+    moneda_origen: p.moneda_origen,
+    valor_origen: p.valor_origen,
+    cantidad: p.cantidad,
+    fuente: p.fuente,
+    revisar: p.revisar,
+  };
+}
+
+// Arma el CorraidaJSON de una corrida (la vigente si no se pasa fecha). Compartido por el
+// export .txt y el dossier. Devuelve null si esa corrida no existe; no lanza — cualquier
+// fallo real se loguea con el error de verdad y también devuelve null.
+async function armarCorrida(fechaCorrida?: string): Promise<{ fechaCorrida: string; corrida: CorraidaJSON } | null> {
+  try {
+    let fecha = fechaCorrida;
+    let totalInvertibleUsd: number;
+    let fuentes: string[];
+
+    if (fecha) {
+      const snap = await getDoc(doc(db, 'snapshotsPortafolio', fecha));
+      if (!snap.exists()) return null;
+      const d = snap.data();
+      totalInvertibleUsd = (d.totalInvertibleUsd as number) ?? 0;
+      fuentes = (d.fuentes as string[]) ?? [];
+    } else {
+      const vigente = await cargarSnapshotVigente();
+      if (!vigente) return null;
+      fecha = vigente.fechaCorrida;
+      totalInvertibleUsd = vigente.totalInvertibleUsd;
+      fuentes = vigente.fuentes;
+    }
+
+    const posSnap = await getDocs(
+      query(collection(db, 'posicionesPatrimonio'), where('fechaCorrida', '==', fecha))
+    );
+    const posiciones = posSnap.docs.map(d => aPosicionRaw(d.data() as Posicion));
+    if (posiciones.length === 0) return null;
+
+    const meta: MetaCorrida = {
+      fecha_corrida: fecha,
+      entidad: 'familia',
+      // El validador de la ingesta exige fuentes no vacío y total > 0: si el snapshot no
+      // los trae, el archivo exportado sería irreimportable.
+      fuentes: fuentes.length > 0 ? fuentes : ['export'],
+      total_declarado_usd: totalInvertibleUsd,
+    };
+    return { fechaCorrida: fecha, corrida: { meta, posiciones } };
+  } catch (err) {
+    console.error('[armarCorrida] falló la lectura de la corrida:', err);
+    return null;
+  }
+}
+
+// Corrida vigente (o la que se pida) como .txt re-importable en la ingesta.
+export async function exportarCorridaTxt(
+  fechaCorrida?: string,
+): Promise<{ nombre: string; contenido: string } | null> {
+  const armada = await armarCorrida(fechaCorrida);
+  if (!armada) return null;
+  return {
+    nombre: `patrimonio_${armada.fechaCorrida}.txt`,
+    contenido: JSON.stringify(armada.corrida, null, 2),
+  };
+}
+
+export type Dossier = {
+  generadoEn: string;
+  corrida: CorraidaJSON;
+  manuales: PosicionManual[];
+  flujos: Array<{ fecha: string; tipo: 'aporte' | 'retiro'; montoUsd: number; cuenta: string | null; nota: string }>;
+  historial: SnapshotResumen[];
+  retorno: ReturnType<typeof calcRetorno>;
+};
+
+// Dossier para análisis externo. Propósito distinto al .txt: NO es re-importable.
+// Fail-soft por bloque: un bloque caído (flujos, historial, manuales) nunca aborta el
+// dossier — se exporta vacío y se loguea el error real, nunca un mensaje hardcodeado.
+export async function exportarDossierJson(
+  fechaCorrida?: string,
+): Promise<{ nombre: string; contenido: string } | null> {
+  const armada = await armarCorrida(fechaCorrida);
+  if (!armada) return null;
+
+  const manuales = await cargarPosicionesManuales().catch(err => {
+    console.error('[exportarDossierJson] cargarPosicionesManuales falló:', err);
+    return [] as PosicionManual[];
+  });
+  const flujosRaw = await cargarFlujos().catch(err => {
+    console.error('[exportarDossierJson] cargarFlujos falló:', err);
+    return [];
+  });
+  const historial = await cargarHistorialSnapshots(24).catch(err => {
+    console.error('[exportarDossierJson] cargarHistorialSnapshots falló:', err);
+    return [] as SnapshotResumen[];
+  });
+
+  const flujos = flujosRaw.map(f => ({
+    fecha: f.fecha.toDate().toISOString(),
+    tipo: f.tipo,
+    montoUsd: f.montoUsd,
+    cuenta: f.cuenta,
+    nota: f.nota,
+  }));
+
+  // Sin flujos registrados el número no es un retorno sino una variación de valor bruta
+  // (misma distinción que ya hace la card de Resumen): se devuelve null antes que un dato
+  // que parece retorno y no lo es.
+  const dossier: Dossier = {
+    generadoEn: new Date().toISOString(),
+    corrida: armada.corrida,
+    manuales,
+    flujos,
+    historial,
+    retorno: flujosRaw.length > 0 ? calcRetorno(historial, flujosRaw) : null,
+  };
+
+  return {
+    nombre: `dossier_patrimonio_${armada.fechaCorrida}.json`,
+    contenido: JSON.stringify(dossier, null, 2),
+  };
 }
