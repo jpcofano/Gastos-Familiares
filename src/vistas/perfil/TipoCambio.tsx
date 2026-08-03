@@ -78,7 +78,18 @@ export default function TipoCambio() {
         {cargando ? (
           <span style={{ fontSize: 14, color: 'var(--color-text-sec)' }}>Cargando…</span>
         ) : errorCarga ? (
-          <span style={{ fontSize: 14, color: 'var(--gf-err-text)' }}>Error al cargar: {errorCarga}</span>
+          // F9.113 — el volcado crudo del error de Firestore no se podía ni leer ni copiar en
+          // celular. Mensaje humano + detalle plegado y seleccionable + reintento.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 14, color: 'var(--gf-err-text)' }}>
+              No se pudo leer el tipo de cambio. Podés cargarlo a mano acá abajo.
+            </span>
+            <details style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
+              <summary style={{ cursor: 'pointer' }}>Ver detalle técnico</summary>
+              <span style={{ display: 'block', marginTop: 4, wordBreak: 'break-all', userSelect: 'text' }}>{errorCarga}</span>
+            </details>
+            <Button variant="secondary" size="sm" onClick={recargar}>Reintentar</Button>
+          </div>
         ) : !actual ? (
           <span style={{ fontSize: 14, color: 'var(--color-text-sec)' }}>Sin datos de /tcDiario todavía.</span>
         ) : (
@@ -98,6 +109,12 @@ export default function TipoCambio() {
       <Card>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-strong)' }}>Cargar / corregir TC manual</span>
+          {errorCarga && (
+            // F9.113 — actualizarTCManual es una callable: no depende de la consulta que falló.
+            <span style={{ fontSize: 11.5, color: 'var(--gf-gray-400)' }}>
+              La carga manual funciona igual — la lectura del histórico es lo que falló.
+            </span>
+          )}
           <span style={{ fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
             Respaldo del refresco automático (dolarapi-MEP). Pisa el valor de ese día puntual — el
             cron del día siguiente vuelve a poner el automático.
@@ -119,9 +136,16 @@ export default function TipoCambio() {
       </Card>
 
       <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '0 0 8px 4px' }}>Histórico (últimos {hist.length})</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '0 0 8px 4px' }}>Histórico{errorCarga ? '' : ` (últimos ${hist.length})`}</div>
         <Card padding="var(--space-2)">
-          {hist.length === 0 ? (
+          {errorCarga ? (
+            // F9.113 — con la lectura rota, "Sin histórico todavía" es falso: no es que no
+            // haya datos, es que no los pudimos leer.
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '11px 10px' }}>
+              <p style={{ fontSize: 13, color: 'var(--color-text-sec)', margin: 0 }}>No se pudo leer el histórico.</p>
+              <Button variant="secondary" size="sm" onClick={recargar}>Reintentar</Button>
+            </div>
+          ) : hist.length === 0 ? (
             <p style={{ fontSize: 13, color: 'var(--color-text-sec)', padding: '11px 10px' }}>Sin histórico todavía.</p>
           ) : hist.map((h, i) => (
             <div key={h.fecha} style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between', padding: '11px 10px', borderBottom: i < hist.length - 1 ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 14 }}>

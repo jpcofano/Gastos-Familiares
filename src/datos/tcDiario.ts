@@ -37,14 +37,29 @@ export interface TCDiarioItem {
 // de /tcDiario, para mostrar el valor actual + histórico real (reemplaza el
 // mock de "por mes" — tcDiario es diario, no mensual).
 export async function cargarTCReciente(n = 10): Promise<TCDiarioItem[]> {
-  const snap = await getDocs(
-    query(collection(db, 'tcDiario'), orderBy(documentId(), 'desc'), limit(n)),
-  );
-  return snap.docs.map(d => ({
+  const aItem = (d: { id: string; data: () => any }): TCDiarioItem => ({
     fecha: d.id,
     tcUsdArs: d.data().tcUsdArs as number,
     origen: d.data().origen as TCDiarioItem['origen'],
-  }));
+  });
+
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'tcDiario'), orderBy(documentId(), 'desc'), limit(n)),
+    );
+    return snap.docs.map(aItem);
+  } catch (err) {
+    // F9.113 — fallback sin índice: el id ES la fecha (YYYY-MM-DD), así que ordenar en
+    // cliente da el mismo resultado. La colección es chica (un doc por día) y es la misma
+    // lectura completa que ya hace cargarEstadoTcDiario. Preferimos leer de más antes que
+    // dejar la pantalla sin valor de TC.
+    console.warn('[cargarTCReciente] consulta ordenada falló, uso fallback sin índice:', err);
+    const snap = await getDocs(collection(db, 'tcDiario'));
+    return snap.docs
+      .map(aItem)
+      .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+      .slice(0, n);
+  }
 }
 
 // F9.103 — estado de cobertura para la card "Tipo de cambio" en Patrimonio › Config.

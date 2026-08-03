@@ -786,6 +786,33 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   asumido a propósito:** esto es scraping contra un WAF, la regla puede endurecerse de
   nuevo — `importarCafciManual` ("Pegar JSON") sigue como camino de respaldo sin depender de
   la red de la función.
+- F9.113 — Tipo de cambio: fallback sin índice + error accionable. Ver
+  `docs/prompts/F9.113-tc-fallback-sin-indice.md`. Frontend puro (`src/datos/tcDiario.ts`,
+  `src/vistas/perfil/TipoCambio.tsx`); **no se tocó `firestore.indexes.json`**. **1. Fallback:**
+  `cargarTCReciente` envuelve la consulta `orderBy(documentId(),'desc') + limit(n)` en un
+  `try/catch`; si falla por lo que sea (índice, red), lee la colección entera y ordena en
+  cliente — el id de `tcDiario` **es** la fecha `YYYY-MM-DD`, así que el orden lexicográfico
+  es el cronológico, y es la misma lectura completa que ya hace `cargarEstadoTcDiario`. Una
+  consulta fallida ya no deja la pantalla sin valor de TC. **2. Error accionable:** el volcado
+  crudo del mensaje de Firestore (link `create_composite` que en celular quedaba cortado por el
+  borde, sin poder leerse ni copiarse) se reemplaza por "No se pudo leer el tipo de cambio.
+  Podés cargarlo a mano acá abajo." + `<details>` con el detalle técnico (`wordBreak:
+  break-all`, `userSelect: text`) + botón Reintentar; el bloque de histórico deja de decir
+  `ÚLTIMOS 0` / `Sin histórico todavía` (falso: no es que no haya datos, es que no se
+  pudieron leer) y dice "No se pudo leer el histórico." con su propio Reintentar; el
+  formulario manual avisa que sigue funcionando (`actualizarTCManual` es callable, no depende
+  de esa consulta). **3. Índice — no se agregó, a propósito:** ninguna consulta a `tcDiario`
+  en `main` requiere índice compuesto (`cargarTCReciente`, `tcParaFecha` con `desc + startAt`,
+  y `cargarTCRango` con `orderBy(__name__) + startAt/endAt` se sirven todas con el índice
+  automático), y `firestore.indexes.json` no declara nada de esa colección. La hipótesis viva
+  es bundle cacheado en el cliente. `tsc --noEmit`: 41 pre-existentes en cliente, 0 nuevos.
+  `vite build`: OK. **Pendiente de cierre manual (no deployo yo):** `npm run build &&
+  firebase deploy --only hosting` → recargar en incógnito (o borrar datos del sitio): si el
+  error desaparece era bundle cacheado y se cierra sin tocar índices; si persiste, copiar el
+  texto **completo** del error de la consola (ahora se puede, con el `<details>`) antes de
+  crear ningún índice, y si hay que crearlo va también en `firestore.indexes.json` en el mismo
+  commit (un índice hecho a mano por el link de la consola no está en el archivo y un deploy
+  posterior puede proponer borrarlo).
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
