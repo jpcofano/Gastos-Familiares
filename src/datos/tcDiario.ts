@@ -112,8 +112,8 @@ export function leerTcCache(): { fecha: string; tc: number } | null {
 export type EstadoTcHoy =
   | { estado: 'cargando' }
   | { estado: 'ok'; tc: number }
-  | { estado: 'vacio' }      // la consulta anduvo, /tcDiario no tiene nada para hoy
-  | { estado: 'error' };     // la consulta falló — el error real se loguea en la vista
+  | { estado: 'vacio' }              // la consulta resolvió sin registros
+  | { estado: 'error'; err: unknown }; // la consulta falló — el error real viaja con el estado
 
 export function tcEfectivoDe(e: EstadoTcHoy): { tc: number; aviso: string | null } {
   if (e.estado === 'ok' && e.tc) return { tc: e.tc, aviso: null };
@@ -121,23 +121,25 @@ export function tcEfectivoDe(e: EstadoTcHoy): { tc: number; aviso: string | null
   const cache = leerTcCache();
   const tc = cache?.tc ?? TC_FALLBACK;
 
-  // Mientras carga no se afirma nada: se usa el mejor valor disponible y se calla. Si la
-  // lectura termina mal, el aviso aparece entonces — que es cuando ya es verdad.
+  // Mientras carga no se afirma nada: se usa el mismo valor de siempre para que los números no
+  // salten, y el aviso queda en null. Si la lectura termina mal, el aviso aparece entonces —
+  // que es cuando ya es verdad.
   if (e.estado === 'cargando') return { tc, aviso: null };
 
+  // "Resolvió vacío" y "falló la consulta" son cosas distintas y se dicen distinto.
   if (cache) {
     return {
       tc: cache.tc,
       aviso: e.estado === 'vacio'
         ? `TC del ${cache.fecha} — todavía no hay TC de hoy.`
-        : `TC del ${cache.fecha} — no se pudo leer el de hoy.`,
+        : `TC del ${cache.fecha} — falló la lectura del TC de hoy.`,
     };
   }
   return {
     tc: TC_FALLBACK,
     aviso: e.estado === 'vacio'
-      ? 'Sin TC en /tcDiario — valor de referencia.'
-      : 'No se pudo leer el TC — valor de referencia.',
+      ? 'Sin TC — valor de referencia.'
+      : 'Sin TC — falló la lectura.',
   };
 }
 

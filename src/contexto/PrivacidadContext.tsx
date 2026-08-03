@@ -32,8 +32,13 @@ export function usePrivacidad(): PrivacidadCtx {
 // Un porcentaje sin base declarada no significa nada: cada pantalla define la suya y la
 // muestra en el encabezado (ver BasePrivacidad). `base` es el denominador ya resuelto.
 export function fmtPct(valor: number, base: number): string {
-  if (!base) return '—';
+  // Base cero o ausente (mes sin ingresos): nunca `NaN%` ni `Infinity%`.
+  if (!base || !Number.isFinite(base) || !Number.isFinite(valor)) return '—';
   const p = (valor / base) * 100;
+  // Un monto distinto de cero que redondea a 0% NO puede mostrarse como 0%: se vería igual que
+  // un cero real, que es justo la confusión que este modo no debe introducir. El signo se
+  // conserva en los negativos.
+  if (valor !== 0 && Math.abs(p) < 1) return p < 0 ? '>-1%' : '<1%';
   // Un decimal abajo del 10% — la diferencia entre 3% y 3,4% importa cuando es lo único que se ve.
   const txt = Math.abs(p) < 10 ? p.toFixed(1).replace('.', ',') : String(Math.round(p));
   return `${txt}%`;

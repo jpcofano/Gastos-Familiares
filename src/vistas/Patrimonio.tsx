@@ -3945,7 +3945,7 @@ export default function Patrimonio() {
         posiciones, activosFijos, manuales: posicionesManuales,
         historial, tc, fechaCorrida, M,
         stressResults, opcionResults, riesgo,
-        privacidad: sinMontos,
+        soloPorcentajes: sinMontos,
       });
       setInformes(prev => [nuevo, ...prev].slice(0, 5));
     } finally {

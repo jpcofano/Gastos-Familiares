@@ -56,11 +56,11 @@ export type InformeParams = {
   stressResults: StressResult[];
   opcionResults: OpcionResult[];
   riesgo?: RiesgoInforme | null;
-  // F9.120 — variante sin montos: cada USD se expresa como % de la cartera. Es una opción
-  // EXPLÍCITA al generar, no el toggle de pantalla: el PDF queda archivado en Storage y meses
-  // después nadie podría saber por qué ese informe no tiene números. El archivo lo declara en
-  // la portada y en el nombre.
-  privacidad?: boolean;
+  // F9.119/F9.120 — variante sin montos: cada USD se expresa como % de la cartera. Es una
+  // opción EXPLÍCITA al generar, no el toggle de pantalla: el PDF queda archivado en Storage y
+  // meses después nadie podría saber por qué ese informe no tiene números. El archivo lo
+  // declara en la portada y en el nombre.
+  soloPorcentajes?: boolean;
 };
 
 export type InformeAnterior = {
@@ -155,14 +155,26 @@ export async function cargarInformesAnteriores(limite = 10): Promise<InformeAnte
 
 // ── Generador y archivador ────────────────────────────────────────────────────
 export async function generarYArchivarInforme(params: InformeParams): Promise<InformeAnterior> {
-  const { posiciones, activosFijos, manuales, historial, tc, fechaCorrida, M, stressResults, opcionResults, riesgo, privacidad } = params;
+  const { posiciones, activosFijos, manuales, historial, tc, fechaCorrida, M, stressResults, opcionResults, riesgo, soloPorcentajes } = params;
 
-  // F9.120 — con la variante sin montos, `fmtUsd` pasa a devolver el % de la cartera. Se
+  // F9.119 — con la variante sin montos, `fmtUsd` pasa a devolver el % de la cartera. Se
   // sombrea el helper del módulo a propósito: así toda sección del informe queda cubierta sin
   // tener que tocar cada llamada (y sin riesgo de que una se escape mostrando el número real).
   // La base es M.total (cartera financiera), declarada en la portada.
-  const fmtUsd = privacidad
-    ? (n: number) => (M.total ? `${(Math.abs(n / M.total) * 100 < 10 ? (n / M.total * 100).toFixed(1).replace('.', ',') : String(Math.round(n / M.total * 100)))}%` : '—')
+  // Fail-soft por ítem: si el porcentaje de UNO falla, ese ítem muestra `—` y el informe se
+  // genera igual — un informe entero perdido por un valor raro sería peor que un guion.
+  const fmtUsd = soloPorcentajes
+    ? (n: number) => {
+        try {
+          if (!M.total || !Number.isFinite(M.total) || !Number.isFinite(n)) return '—';
+          const p = (n / M.total) * 100;
+          if (n !== 0 && Math.abs(p) < 1) return p < 0 ? '>-1%' : '<1%';
+          return `${Math.abs(p) < 10 ? p.toFixed(1).replace('.', ',') : String(Math.round(p))}%`;
+        } catch (e) {
+          console.error('[informe] no se pudo porcentualizar un ítem:', e);
+          return '—';
+        }
+      }
     : fmtUsdAbs;
 
   const fijosUsd = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
@@ -218,8 +230,8 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
 
   // 1. Portada
   content.push(
-    { text: `Informe de Patrimonio — Familia${privacidad ? ' (sin montos)' : ''}`, style: 'portadaTitulo', margin: [0, 60, 0, 16] },
-    ...(privacidad
+    { text: `Informe de Patrimonio — Familia${soloPorcentajes ? ' (sin montos)' : ''}`, style: 'portadaTitulo', margin: [0, 60, 0, 16] },
+    ...(soloPorcentajes
       ? [{ text: 'Variante sin montos: todos los valores están expresados como % de la cartera financiera. No es el informe completo.', style: 'note', margin: [0, 0, 0, 10] } as Content]
       : []),
     { text: `Corrida: ${fmtFecha(fechaCorrida)}`, style: 'portadaSub' },
@@ -742,7 +754,7 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
   a.href = url;
   // F9.120 — el nombre dice qué variante es: el archivo queda archivado y meses después nadie
   // podría distinguir un informe sin montos de uno incompleto.
-  const sufijoPriv = privacidad ? '-sin-montos' : '';
+  const sufijoPriv = soloPorcentajes ? '-sin-montos' : '';
   a.download = `patrimonio-${fechaCorrida}${sufijoPriv}.pdf`;
   document.body.appendChild(a);
   a.click();

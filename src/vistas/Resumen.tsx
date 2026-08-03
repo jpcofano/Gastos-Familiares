@@ -399,7 +399,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* F9.120 — la base del porcentaje se declara acá: un 43% sin base no significa nada. */}
-      {privado && <BasePrivacidad texto="% del ingreso del mes" />}
+      {privado && <BasePrivacidad texto="% de los ingresos del mes" />}
 
       <KpiCards c={c} cur={cur} />
 
@@ -961,7 +961,7 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {privado && <BasePrivacidad texto="% del ingreso del mes" />}
+      {privado && <BasePrivacidad texto="% de los ingresos del mes" />}
       <div style={{ display: 'flex', gap: 10 }}>
         <Card eyebrow="Pendiente" style={{ flex: 1 }}>
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-expense)', fontVariantNumeric: 'tabular-nums' }}>{fmtMonto(pendiente)}</span>
@@ -1033,7 +1033,7 @@ function ResumenVisual() {
         const tc = h[0]?.tcUsdArs;
         setTcHoy(tc ? { estado: 'ok', tc } : { estado: 'vacio' });
       })
-      .catch(err => { console.error('[Resumen] tcHoy falló:', err); setTcHoy({ estado: 'error' }); });
+      .catch(err => { console.warn('[Resumen] tcHoy falló:', err); setTcHoy({ estado: 'error', err }); });
   }, [mes]);
 
   const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);
@@ -1122,13 +1122,16 @@ function ResumenVisual() {
             %
           </button>
           <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3 }}>
+            {/* F9.120/F9.119 — con los montos tapados el toggle de moneda no cambia nada;
+                dejarlo habilitado sugiere lo contrario. */}
             {(['ARS', 'USD'] as const).map(id => {
               const on = cur === id;
               return (
-                <button key={id} onClick={() => setCur(id)} style={{
-                  padding: '5px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)',
-                  fontSize: 12, fontWeight: 700, background: on ? 'var(--color-surface)' : 'transparent',
-                  color: on ? 'var(--color-text)' : 'var(--color-text-sec)', boxShadow: on ? 'var(--shadow-sm)' : 'none', transition: '.15s',
+                <button key={id} onClick={() => setCur(id)} disabled={privadoShell} title={privadoShell ? 'Sin efecto con los montos ocultos' : undefined} style={{
+                  padding: '5px 12px', borderRadius: 999, border: 'none', cursor: privadoShell ? 'default' : 'pointer', fontFamily: 'var(--font-base)',
+                  fontSize: 12, fontWeight: 700, background: on && !privadoShell ? 'var(--color-surface)' : 'transparent',
+                  color: on ? 'var(--color-text)' : 'var(--color-text-sec)', boxShadow: on && !privadoShell ? 'var(--shadow-sm)' : 'none', transition: '.15s',
+                  opacity: privadoShell ? .45 : 1,
                 }}>{id === 'ARS' ? '$ ARS' : 'USD'}</button>
               );
             })}

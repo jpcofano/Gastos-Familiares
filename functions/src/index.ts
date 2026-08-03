@@ -2776,10 +2776,13 @@ export const editarMovimiento = onCall(
         update.mes = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}`;
         update.mesManual = false;
       } else {
+        // El valor recibido va en el mensaje: si no, un "2026-13" y un "agosto" quedan
+        // indistinguibles en el log y el que debuguea no sabe qué mandó el cliente.
         if (typeof ms !== 'string' || !/^\d{4}-\d{2}$/.test(ms))
-          throw new HttpsError('invalid-argument', 'mes inválido (YYYY-MM o null)');
+          throw new HttpsError('invalid-argument', `mes inválido: ${JSON.stringify(ms)} (se espera YYYY-MM o null)`);
         const mm = Number(ms.slice(5));
-        if (mm < 1 || mm > 12) throw new HttpsError('invalid-argument', 'mes inválido (mes fuera de rango)');
+        if (mm < 1 || mm > 12)
+          throw new HttpsError('invalid-argument', `mes inválido: ${JSON.stringify(ms)} (mes fuera de rango 01-12)`);
         update.mes = ms;
         update.mesManual = true;
       }
@@ -2890,7 +2893,12 @@ export const editarMovimiento = onCall(
     update.actualizadoEn = FieldValue.serverTimestamp();
     await movRef.update(update);
 
-    console.log(`[editarMovimiento] ${id} — campos: ${Object.keys(update).join(', ')} (por ${email})`);
+    // F9.118 — el cambio de mes se loguea explícito: mueve el movimiento de un resumen mensual
+    // a otro, así que si después no cuadra un mes hay que poder ver quién lo movió y desde dónde.
+    const traza = update.mes !== undefined && update.mes !== mov.mes
+      ? ` · mes ${mov.mes} → ${update.mes}${update.mesManual === true ? ' (manual)' : ' (derivado de la fecha)'}`
+      : '';
+    console.log(`[editarMovimiento] ${id} — campos: ${Object.keys(update).join(', ')}${traza} (por ${email})`);
     return { ok: true };
   },
 );

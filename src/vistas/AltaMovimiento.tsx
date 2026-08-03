@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { cargarSubcategorias, cargarEtiquetas, type SubcategoriaItem, type EtiquetaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig } from '../familia';
-import { crearMovimiento, existeNumeroComprobante } from '../datos/movimientos';
+import { crearMovimiento, existeNumeroComprobante, mesesAdyacentes, etiquetaMes } from '../datos/movimientos';
 import { tcParaFecha } from '../datos/tcDiario';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
@@ -406,21 +406,22 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
 
           {/* F9.118 — el mes en el que cuenta puede no ser el de la fecha: un ingreso cargado
               con fecha de julio puede corresponder a agosto. */}
-          <FieldRow label="Mes en el que cuenta" last={false}>
+          <FieldRow label="Mes en el que se cuenta" last={false}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-              <input
-                type="month" value={mesImputacion}
-                onChange={e => { if (e.target.value) { setMesTocado(true); setMesImputacion(e.target.value); } }}
+              <select
+                value={mesImputacion}
+                onChange={e => { setMesTocado(e.target.value !== mesDeFecha); setMesImputacion(e.target.value); }}
                 style={selectStyle}
-              />
+              >
+                {mesesAdyacentes(mesDeFecha).map(m2 => (
+                  <option key={m2} value={m2}>{etiquetaMes(m2)}{m2 === mesDeFecha ? ' (de la fecha)' : ''}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'right', lineHeight: 1.35 }}>
+                Define en qué resumen mensual aparece. Por defecto es el mes de la fecha.
+              </span>
               {mesTocado && (
-                <button
-                  type="button"
-                  onClick={() => { setMesTocado(false); setMesImputacion(mesDeFecha); }}
-                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 11, fontWeight: 700, color: 'var(--color-accent)' }}
-                >
-                  Volver a seguir la fecha ({mesDeFecha})
-                </button>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-out)', background: 'var(--gf-gray-100)', borderRadius: 5, padding: '1px 6px' }}>manual</span>
               )}
             </div>
           </FieldRow>

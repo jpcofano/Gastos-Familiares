@@ -25,8 +25,9 @@ type Moneda = 'ARS' | 'USD';
 
 function nfes(n: number): string { return Math.round(n).toLocaleString('es-AR'); }
 
-// F9.120 — modo privacidad. La base de Dashboard es el GASTO del período: es contra eso que se
-// leen las categorías, los días y los bancos, que es casi todo lo que muestra esta pantalla.
+// F9.119/F9.120 — modo privacidad. La base es el INGRESO del período, la misma que usa Resumen:
+// leer las categorías contra el gasto total sería más natural acá, pero que las dos pantallas
+// respondan "% de qué" con el mismo denominador vale más que la conveniencia de cada una.
 // Se declara en el encabezado. El equivalente en la otra moneda se omite: sería el mismo %.
 type Priv = { privado: boolean; base: number };
 
@@ -164,9 +165,9 @@ function TreemapChart({ cats, onClickTile }: { cats: CatSlice[]; onClickTile?: (
 
 function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: DashMensual; cur: Moneda; movsMes: Movement[]; esAdmin: boolean; onEditar: (m: Movement) => void; paleta: string[] }) {
   const tc = d.tc;
-  // F9.120 — base del período: el gasto total. Ver el comentario de curBig.
+  // F9.119 — base del período: los ingresos, igual que Resumen. Ver el comentario de curBig.
   const { privado } = usePrivacidad();
-  const priv: Priv = { privado, base: d.salidasUsd };
+  const priv: Priv = { privado, base: d.ingresosUsd };
   const [compartirInfo, setCompartirInfo] = useState(false);
   const [openCatMes, setOpenCatMes] = useState<string | null>(null);
   const [openOtrasCat, setOpenOtrasCat] = useState<string | null>(null);
@@ -517,7 +518,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
 
 function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda }) {
   const { privado } = usePrivacidad();
-  const priv: Priv = { privado, base: a.salidasUsd };
+  const priv: Priv = { privado, base: a.ingresosUsd };
   const [openCat, setOpenCat] = useState<string | null>(null);
   const hayProyeccion = a.mesActualIdx < 11;
   const maxSal = Math.max(...a.salidasPorMes, ...a.salidasProyeccion, 1);
@@ -754,7 +755,7 @@ export default function Dashboard() {
         const tc = h[0]?.tcUsdArs;
         setTcHoy(tc ? { estado: 'ok', tc } : { estado: 'vacio' });
       })
-      .catch(err => { console.error('[Dashboard] tcHoy falló:', err); setTcHoy({ estado: 'error' }); });
+      .catch(err => { console.warn('[Dashboard] tcHoy falló:', err); setTcHoy({ estado: 'error', err }); });
   }, []);
   const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);
   const { privado: privadoShell, alternar: alternarPrivado } = usePrivacidad();
@@ -787,10 +788,12 @@ export default function Dashboard() {
   const curPill = (id: Moneda) => {
     const on = cur === id;
     return (
-      <button key={id} onClick={() => setCur(id)} style={{
-        padding: '5px 12px', borderRadius: 999, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)',
-        fontSize: 12, fontWeight: 700, background: on ? 'var(--color-surface)' : 'transparent',
-        color: on ? 'var(--color-text)' : 'var(--color-text-sec)', boxShadow: on ? 'var(--shadow-sm)' : 'none', transition: '.15s',
+      // F9.119 — con los montos tapados el toggle de moneda no cambia nada.
+      <button key={id} onClick={() => setCur(id)} disabled={privadoShell} title={privadoShell ? 'Sin efecto con los montos ocultos' : undefined} style={{
+        padding: '5px 12px', borderRadius: 999, border: 'none', cursor: privadoShell ? 'default' : 'pointer', fontFamily: 'var(--font-base)',
+        fontSize: 12, fontWeight: 700, background: on && !privadoShell ? 'var(--color-surface)' : 'transparent',
+        color: on ? 'var(--color-text)' : 'var(--color-text-sec)', boxShadow: on && !privadoShell ? 'var(--shadow-sm)' : 'none', transition: '.15s',
+        opacity: privadoShell ? .45 : 1,
       }}>{id === 'ARS' ? '$ ARS' : 'USD'}</button>
     );
   };
@@ -866,7 +869,7 @@ export default function Dashboard() {
       {avisoTc && <p style={{ fontSize: 11.5, color: 'var(--gf-out)', margin: '0 4px' }}>{avisoTc}</p>}
 
       {/* F9.120 — la base del porcentaje, declarada. */}
-      {privadoShell && <BasePrivacidad texto="% del gasto del período" />}
+      {privadoShell && <BasePrivacidad texto={sec === 'mensual' ? '% de los ingresos del mes' : '% de los ingresos del año'} />}
 
       {cargandoSec ? (
         <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Cargando…</p>

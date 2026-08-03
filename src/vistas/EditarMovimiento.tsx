@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig } from '../familia';
-import { llamarEditarMovimiento, llamarEliminarMovimiento, type CambiosMovimiento } from '../datos/movimientos';
+import { llamarEditarMovimiento, llamarEliminarMovimiento, mesesAdyacentes, etiquetaMes, type CambiosMovimiento } from '../datos/movimientos';
 import { tcParaFecha } from '../datos/tcDiario';
 import { mediosVisibles } from '../datos/medios';
 import { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar } from '../design-system/shell';
@@ -181,27 +181,34 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
 
           {/* F9.118 — mes de imputación: el mes en el que el movimiento CUENTA, que no siempre
               es el de su fecha. Los pagos que entran el 29/30 tienen que poder caer en el mes
-              que corresponde, y un ingreso cargado con fecha de julio puede ser de agosto. */}
-          <FieldRow label="Mes en el que cuenta" last={false}>
+              que corresponde, y un ingreso cargado con fecha de julio puede ser de agosto.
+              Acotado a mes−1 / mes / mes+1 a propósito: cubre el caso real sin habilitar un
+              campo libre que deje mandar un movimiento a 2019 con un scroll. */}
+          <FieldRow label="Mes en el que se cuenta" last={false}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-              <input
-                type="month" value={mesImputacion}
-                onChange={e => { if (e.target.value) { setMesTocado(true); setMesImputacion(e.target.value); } }}
+              <select
+                value={mesImputacion}
+                onChange={e => { setMesTocado(e.target.value !== mesDeFecha); setMesImputacion(e.target.value); }}
                 style={selectStyle}
-              />
-              <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'right' }}>
-                {!mesTocado
-                  ? 'Sigue la fecha: si cambiás la fecha, cambia solo.'
-                  : `Fijado a mano · la fecha cae en ${mesDeFecha}`}
+              >
+                {mesesAdyacentes(mesDeFecha).map(m2 => (
+                  <option key={m2} value={m2}>{etiquetaMes(m2)}{m2 === mesDeFecha ? ' (de la fecha)' : ''}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'right', lineHeight: 1.35 }}>
+                Define en qué resumen mensual aparece. Por defecto es el mes de la fecha.
               </span>
               {mesTocado && (
-                <button
-                  type="button"
-                  onClick={() => { setMesTocado(false); setMesImputacion(mesDeFecha); }}
-                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 11, fontWeight: 700, color: 'var(--color-accent)' }}
-                >
-                  Volver a seguir la fecha
-                </button>
+                <>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-out)', background: 'var(--gf-gray-100)', borderRadius: 5, padding: '1px 6px' }}>manual</span>
+                  <button
+                    type="button"
+                    onClick={() => { setMesTocado(false); setMesImputacion(mesDeFecha); }}
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 11, fontWeight: 700, color: 'var(--color-accent)' }}
+                  >
+                    Volver al automático
+                  </button>
+                </>
               )}
             </div>
           </FieldRow>

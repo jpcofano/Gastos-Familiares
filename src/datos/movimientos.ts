@@ -6,6 +6,25 @@ import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
 import type { Movement, ExpectedItem } from '../types';
 
+// F9.118 — opciones del selector de mes de imputación: el mes de la fecha y los dos adyacentes.
+// Ese rango cubre el caso real (el pago del 29/30 que va al mes siguiente, el ingreso de fin de
+// mes que corresponde al anterior) sin habilitar un campo libre que deje mandar un movimiento a
+// un año cualquiera de un scroll.
+export function mesesAdyacentes(mes: string): string[] {
+  const [y, m] = mes.split('-').map(Number);
+  return [-1, 0, 1].map(d => {
+    const fecha = new Date(y, m - 1 + d, 1);
+    return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+  });
+}
+
+const MESES_ETIQUETA = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+export function etiquetaMes(mes: string): string {
+  const [y, m] = mes.split('-');
+  return `${MESES_ETIQUETA[Number(m) - 1] ?? mes} ${y}`;
+}
+
 export function docAMovimiento(id: string, data: DocumentData): Movement {
   return {
     id,

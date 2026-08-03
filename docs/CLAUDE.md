@@ -945,6 +945,32 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   leerlo mal. Renombrarla es decisión del dueño. `tsc`: 41 pre-existentes, 0 nuevos; `vite build`
   y `functions build` OK. **Pendiente de cierre manual (no deployo yo):** F9.118 toca Functions →
   `npm --prefix functions run build && firebase deploy --only functions:editarMovimiento,functions:cargarMovimientoDesdeComprobante,hosting`.
+- F9.117/F9.118/F9.119 (specs formales) — llegaron auditadas sobre `82e2233`, **después** de que
+  el backlog `docs/prompts/backlog-post-F9.116.md` ya hubiera implementado las tres features
+  (commits `9d6b6d9` y `6fd1fce`). **Los tres tripwires dispararon** y se reportaron; lo que se
+  ejecutó fueron los **deltas** de cada spec formal contra lo ya construido. Ver
+  `docs/prompts/F9.117-aviso-tc-durante-carga.md`, `F9.118-mes-de-imputacion-editable.md` y
+  `F9.119-modo-privacidad.md`. **F9.117:** `EstadoTcHoy` pasa a llevar el error real
+  (`{ estado:'error'; err:unknown }`) y los cuatro avisos se alinean palabra por palabra con la
+  tabla de la spec — en particular `error` con cache dice "falló la lectura del TC de hoy",
+  distinto de `vacio`. **F9.118:** el `<input type="month">` se reemplaza por un **selector
+  acotado a mes−1/mes/mes+1** (`mesesAdyacentes`/`etiquetaMes` en `datos/movimientos.ts`), con la
+  razón que da la spec: un campo libre deja mandar un movimiento a 2019 de un scroll. Suma la
+  línea de ayuda con el efecto concreto, la marca "manual", el valor recibido dentro del mensaje
+  de `invalid-argument` (un `"2026-13"` y un `"agosto"` ya no son indistinguibles en el log) y el
+  log del cambio de mes (`mes X → Y (manual|derivado)`). Verificado lo que pedía §4: el camino de
+  esperados (`registrarPagoChecklist`) pasa `item.tipo` y el `mes` del ítem sin discriminar
+  Gasto/Ingreso — ya estaba cableado igual para los dos. **F9.119:** el inventario obligatorio dio
+  **55 call sites fuera de `Money`** (umbral de la spec: ~15), lo que confirma que el modo no
+  podía implementarse dentro de `Money` sin un refactor mayor; queda documentado. Deltas: `<1%` /
+  `>-1%` cuando el monto no es cero pero redondea a 0% (si no, un gasto chico y un cero se ven
+  igual), el toggle ARS/USD **deshabilitado** con el modo activo, la base de Inicio corregida a
+  "% de los ingresos del mes" para que las dos pantallas respondan "% de qué" con el mismo
+  denominador, fail-soft por ítem en el PDF (`—` y sigue) y el parámetro renombrado a
+  `soloPorcentajes`. **Diferencias deliberadas que quedan:** el contexto expone `{ privado }` y no
+  `{ oculto }` (renombrar tocaría 8 consumidores sin cambiar nada), y la solapa Patrimonio sigue
+  sin cubrir en pantalla (sí su PDF) — está anotada como pendiente, no como hecha. `tsc`: 41
+  pre-existentes, 0 nuevos; `vite build` y `functions build` OK.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
