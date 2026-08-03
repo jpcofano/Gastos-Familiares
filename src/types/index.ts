@@ -6,7 +6,13 @@ export interface Movement {
   idLegacy: string;
   fecha: Date;
   fechaConsumoOriginal: Date | null;
+  // Mes de IMPUTACIÓN (YYYY-MM). Es el campo por el que consultan todas las vistas
+  // (where('mes','==',…)), así que es el mes en el que el movimiento cuenta, no
+  // necesariamente el de su fecha.
   mes: string;
+  // F9.118 — el mes lo fijó una persona a mano. Mientras esté en true, editar la fecha NO
+  // recalcula `mes`: un pago del 30/8 que corresponde a septiembre se queda en septiembre.
+  mesManual: boolean;
   descripcion: string;
   descripcionOriginal: string | null;
   monto: number;

@@ -9,7 +9,7 @@ import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
 import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
 import { fmtMoney } from '../datos/money';
-import { cargarTCReciente, tcDeFecha, tcEfectivoDe } from '../datos/tcDiario';
+import { cargarTCReciente, tcDeFecha, tcEfectivoDe, type EstadoTcHoy } from '../datos/tcDiario';
 import { cargarTCRango } from '../datos/patrimonioOptimizacion';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
@@ -986,19 +986,24 @@ function ResumenVisual() {
   // El rango arranca 10 días antes del mes para que el día 1 tenga un TC anterior aunque
   // caiga en fin de semana o feriado (tcDeFecha busca hacia atrás).
   const [mapaTc, setMapaTc] = useState<Record<string, number>>({});
-  const [tcHoy, setTcHoy] = useState<number | null>(null);
+  // F9.117 — estado explícito: mientras carga no se muestra ningún aviso de TC.
+  const [tcHoy, setTcHoy] = useState<EstadoTcHoy>({ estado: 'cargando' });
 
   useEffect(() => {
     const [y, m] = mes.split('-').map(Number);
     const desde = new Date(y, m - 1, 1);
     desde.setDate(desde.getDate() - 10);
     const hasta = new Date(y, m, 0);
+    setTcHoy({ estado: 'cargando' });
     cargarTCRango(isoLocal(desde), isoLocal(hasta))
       .then(setMapaTc)
       .catch(err => { console.warn('[Resumen] tcRango falló:', err); setMapaTc({}); });
     cargarTCReciente(1)
-      .then(h => setTcHoy(h[0]?.tcUsdArs ?? null))
-      .catch(err => { console.warn('[Resumen] tcHoy falló:', err); setTcHoy(null); });
+      .then(h => {
+        const tc = h[0]?.tcUsdArs;
+        setTcHoy(tc ? { estado: 'ok', tc } : { estado: 'vacio' });
+      })
+      .catch(err => { console.error('[Resumen] tcHoy falló:', err); setTcHoy({ estado: 'error' }); });
   }, [mes]);
 
   const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);

@@ -901,6 +901,37 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   motor de escenarios). `tsc`: 41 pre-existentes, 0 nuevos. `vite build`: OK. **Pendiente de
   cierre manual (no deployo yo):** paridad de números en pantalla, card con datos reales y
   fail-soft renderizado.
+- F9.117/F9.118/F9.119 — backlog post-F9.116. Ver `docs/prompts/backlog-post-F9.116.md`.
+  **F9.117:** `tcEfectivoDe` recibe un `EstadoTcHoy` explícito (`cargando`|`ok`|`vacio`|`error`)
+  en vez de `number | null`, que significaba "todavía no cargó" y "no hay TC" a la vez — el
+  banner "no se pudo leer el de hoy" aparecía en cada entrada aunque el TC existiera. Mientras
+  carga no se afirma nada; "resolvió vacío" y "falló" dicen cosas distintas.
+  **F9.118 — mes de imputación editable.** Corrección al diagnóstico del backlog: `mesComp`
+  (`functions/src/index.ts:307`) alimenta la **ventana de reconciliación**, no el `mes` que se
+  persiste; tocar esa línea no arreglaba nada. El `mes` lo fijan `AltaMovimiento.tsx:237`,
+  `crearMovimiento` y la callable `cargarMovimientoDesdeComprobante`. Y para un ingreso no hay
+  mes de pago derivable (`mesDePago` sale de `vencimientos[0]`, un recibo de sueldo no trae),
+  así que la respuesta es el **override explícito**, no una regla automática inventada. `mes`
+  sigue siendo el único campo consultable y el override se escribe ahí mismo — un
+  `mesImputacion` paralelo habría quedado fuera de todos los `where('mes','==',…)` y el
+  movimiento no aparecería en el mes al que se lo movió. `mesManual:boolean` marca el pin: con
+  el pin puesto, editar la fecha ya no pisa el mes (antes lo pisaba siempre); se suelta con
+  `mes: null`. La callable `editarMovimiento` acepta `mes` e `incluirResumenMes` validados
+  server-side. Control "Mes en el que cuenta" en alta y edición, y toggle "Entra en el resumen
+  del mes" en la edición (existía al crear, no había forma de cambiarlo). Va hacia adelante: sin
+  backfill, sin tocar `MES_CORTE_SEMANTICA_PAGOS`.
+  **F9.119 — ingresos esperados:** era mucho más chica de lo que suponía el backlog. La UI de
+  Perfil ya tenía solapas Gasto/Ingreso y el matcheo ya discriminaba por tipo (`checklist.ts:37`,
+  `:53-54`); un cobro esperado ya entraba al checklist y a la agenda. Lo único que los dejaba
+  afuera era el flujo de comprobantes: `candidatosDeGrupo` filtraba el picker a `'Gasto'` y
+  `preloadBase.tipo` estaba hardcodeado. Ahora el picker ofrece los dos y el tipo del movimiento
+  lo manda el ítem elegido. **F9.120 (modo privacidad) no se ejecutó:** sus cuatro decisiones de
+  diseño siguen abiertas. **Duda de auditoría resuelta:** "Pesos disponibles" son los **ingresos
+  en ARS del mes** (`Resumen.tsx:143`, `pesosDisp: ingArs`), no un remanente — por eso coincide
+  con INGRESOS cuando todo el ingreso es en pesos. El número está bien; la etiqueta induce a
+  leerlo mal. Renombrarla es decisión del dueño. `tsc`: 41 pre-existentes, 0 nuevos; `vite build`
+  y `functions build` OK. **Pendiente de cierre manual (no deployo yo):** F9.118 toca Functions →
+  `npm --prefix functions run build && firebase deploy --only functions:editarMovimiento,functions:cargarMovimientoDesdeComprobante,hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

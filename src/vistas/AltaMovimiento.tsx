@@ -103,6 +103,15 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [incluirResumenMes, setIncluirResumenMes] = useState(
     () => (preload?.fecha ?? hoyISO()) > hoyISO()
   );
+  // F9.118 — mes de imputación: sigue a la fecha hasta que alguien lo fije a mano.
+  const [mesImputacion, setMesImputacion] = useState(() => (preload?.fecha ?? hoyISO()).slice(0, 7));
+  const [mesTocado,     setMesTocado]     = useState(false);
+  const mesDeFecha = fecha.slice(0, 7);
+
+  // F9.118 — sin pin, el mes de imputación sigue a la fecha.
+  useEffect(() => {
+    if (!mesTocado) setMesImputacion(mesDeFecha);
+  }, [mesDeFecha, mesTocado]);
 
   const subcatInitCatRef = useRef(preload?.categoria ?? null); // categoría preloadeada: no limpiar mientras coincida
   const suggestionRef    = useRef(false); // señal para que el reset no borre la subcategoría sugerida
@@ -234,7 +243,11 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
       origenComprobanteId:  preload?.origenComprobanteId,
       // F6.9.11 — usados solo por la callable (vía onGuardarPayload); crearMovimiento los ignora
       fechaMs: new Date(fecha + 'T12:00:00').getTime(),
-      mes:     `${new Date(fecha + 'T12:00:00').getFullYear()}-${String(new Date(fecha + 'T12:00:00').getMonth() + 1).padStart(2, '0')}`,
+      // F9.118 — el mes de IMPUTACIÓN puede no ser el de la fecha: un ingreso cargado con
+      // fecha de julio puede corresponder a agosto, y un pago del 29/30 al mes siguiente.
+      // Éste es el campo por el que consultan todas las vistas.
+      mes:       mesImputacion,
+      mesManual: mesImputacion !== mesDeFecha,
     };
 
     if (preload?.esManual) {
@@ -390,6 +403,28 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
           )}
 
           <SectionLabel>Estado</SectionLabel>
+
+          {/* F9.118 — el mes en el que cuenta puede no ser el de la fecha: un ingreso cargado
+              con fecha de julio puede corresponder a agosto. */}
+          <FieldRow label="Mes en el que cuenta" last={false}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <input
+                type="month" value={mesImputacion}
+                onChange={e => { if (e.target.value) { setMesTocado(true); setMesImputacion(e.target.value); } }}
+                style={selectStyle}
+              />
+              {mesTocado && (
+                <button
+                  type="button"
+                  onClick={() => { setMesTocado(false); setMesImputacion(mesDeFecha); }}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 11, fontWeight: 700, color: 'var(--color-accent)' }}
+                >
+                  Volver a seguir la fecha ({mesDeFecha})
+                </button>
+              )}
+            </div>
+          </FieldRow>
+
           <FieldRow label="Incluir en resumen del mes" last>
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
               <span style={{ fontSize: 15, color: 'var(--color-text-sec)', fontWeight: 600 }}>{incluirResumenMes ? 'Sí' : 'No'}</span>

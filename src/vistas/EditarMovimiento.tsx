@@ -37,6 +37,11 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   const [fecha,       setFecha]       = useState(isoFecha(m.fecha));
+  // F9.118 — mes de imputación. Mientras nadie lo toque sigue a la fecha; en cuanto se fija a
+  // mano queda pineado y editar la fecha ya no lo mueve (mesManual, del lado del server).
+  const [mesImputacion,  setMesImputacion]  = useState(m.mes);
+  const [mesTocado,      setMesTocado]      = useState(m.mesManual);
+  const [incluirResumen, setIncluirResumen] = useState(m.incluirResumenMes);
   const [tipo,        setTipo]        = useState<'Gasto' | 'Ingreso'>(m.tipo);
   const [descripcion, setDescripcion] = useState(m.descripcion);
   const [monto,       setMonto]       = useState(String(m.monto));
@@ -70,6 +75,12 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
     subcatInitCatRef.current = null;
     setSubcategoria('');
   }, [categoria]);
+
+  // F9.118 — sin pin, el mes de imputación sigue a la fecha.
+  const mesDeFecha = fecha.slice(0, 7);
+  useEffect(() => {
+    if (!mesTocado) setMesImputacion(mesDeFecha);
+  }, [mesDeFecha, mesTocado]);
 
   // TC cuando cambia fecha o moneda
   useEffect(() => {
@@ -105,6 +116,12 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
     if (subcategoria !== (m.subcategoria ?? '')) cambios.subcat = subcategoria || null;
     if (persona !== (m.persona ?? ''))         cambios.persona = persona || null;
     if (banco !== (m.banco ?? ''))             cambios.medio = banco || null;
+
+    // F9.118 — `mes: null` suelta el pin y vuelve a derivarlo de la fecha; un YYYY-MM lo fija.
+    // Sin pin no se manda nada: si cambió la fecha, el server ya recalcula el mes.
+    if (mesTocado && mesImputacion !== m.mes)  cambios.mes = mesImputacion;
+    else if (!mesTocado && m.mesManual)        cambios.mes = null;
+    if (incluirResumen !== m.incluirResumenMes) cambios.incluirResumenMes = incluirResumen;
 
     if (Object.keys(cambios).length === 0) { onGuardado(); return; }
 
@@ -160,6 +177,44 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
 
           <FieldRow label="Fecha" last={false}>
             <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} required style={selectStyle} />
+          </FieldRow>
+
+          {/* F9.118 — mes de imputación: el mes en el que el movimiento CUENTA, que no siempre
+              es el de su fecha. Los pagos que entran el 29/30 tienen que poder caer en el mes
+              que corresponde, y un ingreso cargado con fecha de julio puede ser de agosto. */}
+          <FieldRow label="Mes en el que cuenta" last={false}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <input
+                type="month" value={mesImputacion}
+                onChange={e => { if (e.target.value) { setMesTocado(true); setMesImputacion(e.target.value); } }}
+                style={selectStyle}
+              />
+              <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'right' }}>
+                {!mesTocado
+                  ? 'Sigue la fecha: si cambiás la fecha, cambia solo.'
+                  : `Fijado a mano · la fecha cae en ${mesDeFecha}`}
+              </span>
+              {mesTocado && (
+                <button
+                  type="button"
+                  onClick={() => { setMesTocado(false); setMesImputacion(mesDeFecha); }}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 11, fontWeight: 700, color: 'var(--color-accent)' }}
+                >
+                  Volver a seguir la fecha
+                </button>
+              )}
+            </div>
+          </FieldRow>
+
+          {/* F9.118 — existía al crear (AltaMovimiento) pero no había forma de cambiarlo después. */}
+          <FieldRow label="Entra en el resumen del mes" last={false}>
+            <button
+              type="button"
+              onClick={() => setIncluirResumen(v => !v)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}
+            >
+              <Icon name={incluirResumen ? 'toggle-right' : 'toggle-left'} size={28} color={incluirResumen ? 'var(--color-accent)' : 'var(--gf-gray-400)'} />
+            </button>
           </FieldRow>
 
           <div style={{ padding: '14px 0', borderBottom: '1px solid var(--gf-gray-100)' }}>

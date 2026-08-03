@@ -13,6 +13,7 @@ export function docAMovimiento(id: string, data: DocumentData): Movement {
     fecha:                  data.fecha?.toDate()                  ?? new Date(0),
     fechaConsumoOriginal:   data.fechaConsumoOriginal?.toDate()   ?? null,
     mes:                    data.mes,
+    mesManual:              data.mesManual                       ?? false,
     descripcion:            data.descripcion,
     descripcionOriginal:    data.descripcionOriginal              ?? null,
     monto:                  data.monto,
@@ -72,6 +73,9 @@ export interface NuevoMovimiento {
   persona: string;
   creadoPor: string;
   incluirResumenMes: boolean;
+  // F9.118 — mes de imputación fijado a mano al crear (la callable lo persiste; el
+  // crearMovimiento client-side lo ignora, como el resto de los campos de payload).
+  mesManual?: boolean;
   pagado?: boolean;
   itemEsperadoId?: string;
   numeroComprobante?: string;
@@ -109,10 +113,14 @@ export async function crearMovimiento(payload: NuevoMovimiento): Promise<Resulta
     const fechaISO = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const pagadoPorFechaDefault = fechaISO(payload.fecha) <= fechaISO(new Date());
     // F9.99.7 — mes override explícito (Registrar pago: mes del ítem ≠ mes de la fecha real de pago).
-    const mes = payload.mes ?? `${payload.fecha.getFullYear()}-${String(payload.fecha.getMonth() + 1).padStart(2, '0')}`;
+    const mesDeFecha = `${payload.fecha.getFullYear()}-${String(payload.fecha.getMonth() + 1).padStart(2, '0')}`;
+    const mes = payload.mes ?? mesDeFecha;
+    // F9.118 — el mes quedó fijado a mano si difiere del que sale de la fecha (o si el caller
+    // lo dice explícitamente). Con el pin puesto, editar la fecha después no lo mueve.
+    const mesManual = payload.mesManual ?? (mes !== mesDeFecha);
     const docRef = await addDoc(collection(db, 'movimientos'), {
       fecha:             Timestamp.fromDate(payload.fecha),
-      mes,
+      mes, mesManual,
       tipo:              payload.tipo,
       descripcion:       payload.descripcion,
       descripcionOriginal: payload.descripcionOriginal ?? null,
@@ -289,6 +297,12 @@ export interface CambiosMovimiento {
   subcat?: string | null;
   persona?: string | null;   // memberId, null = familiar
   medio?: string | null;     // nombre del banco; server aplica medioCanonico
+  // F9.118 — mes de imputación explícito (YYYY-MM). `null` suelta el pin y vuelve a
+  // derivarlo de la fecha. Es el mes por el que consultan todas las vistas.
+  mes?: string | null;
+  // F9.118 — si el movimiento entra o no en el resumen del mes. Existía al crear
+  // (AltaMovimiento) pero no había forma de cambiarlo después.
+  incluirResumenMes?: boolean;
 }
 
 export async function llamarEditarMovimiento(id: string, cambios: CambiosMovimiento): Promise<{ ok: boolean; error?: Error }> {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, Sheet, Message, MerchantLogo, type SheetOption } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import { fmtMoney } from '../datos/money';
-import { cargarTCReciente, tcEfectivoDe } from '../datos/tcDiario';
+import { cargarTCReciente, tcEfectivoDe, type EstadoTcHoy } from '../datos/tcDiario';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useMovimientosDelAnio } from '../hooks/useMovimientosDelAnio';
@@ -732,11 +732,15 @@ export default function Dashboard() {
   const [paletaIdx] = usePaletaIdx();
   const paleta = CHART_PALETTES[paletaIdx].colores;
 
-  const [tcHoy, setTcHoy] = useState<number | null>(null);
+  // F9.117 — estado explícito: mientras carga no se afirma que no se pudo leer el TC.
+  const [tcHoy, setTcHoy] = useState<EstadoTcHoy>({ estado: 'cargando' });
   useEffect(() => {
     cargarTCReciente(1)
-      .then(h => setTcHoy(h[0]?.tcUsdArs ?? null))
-      .catch(err => { console.warn('[Dashboard] tcHoy falló:', err); setTcHoy(null); });
+      .then(h => {
+        const tc = h[0]?.tcUsdArs;
+        setTcHoy(tc ? { estado: 'ok', tc } : { estado: 'vacio' });
+      })
+      .catch(err => { console.error('[Dashboard] tcHoy falló:', err); setTcHoy({ estado: 'error' }); });
   }, []);
   const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);
 

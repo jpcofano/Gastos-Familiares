@@ -3413,7 +3413,7 @@ export default function Patrimonio() {
   const [tab, setTab] = useState<TabId>('resumen');
   // F9.114 — valor inicial por la cascada (cache del último TC leído → TC_FALLBACK), no el
   // literal pelado; abajo lo pisa /tcDiario cuando llega.
-  const [tc, setTc] = useState(() => tcEfectivoDe(null).tc);
+  const [tc, setTc] = useState(() => tcEfectivoDe({ estado: 'cargando' }).tc);
 
   const [posiciones,        setPosiciones]        = useState<Posicion[]>([]);
   const [activosFijos,      setActivosFijos]      = useState<ActivoFijo[]>([]);

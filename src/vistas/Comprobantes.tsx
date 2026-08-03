@@ -166,9 +166,13 @@ function candKey(e: AgendaEntry, mes: string): string {
 }
 // F9.108 — candidatos pendientes de un grupo (mes), filtrados a Gasto + misma moneda del
 // comprobante; los cubiertos ya no se ofrecen (pendientesOrdenados los excluye).
+// F9.119 — el filtro a `tipo === 'Gasto'` dejaba los cobros esperados fuera del picker: el
+// modelo, la UI de Perfil y el matcheo del checklist ya los soportaban, pero no había forma de
+// asignarles un comprobante. Ahora se ofrecen los dos y el tipo del movimiento lo define el
+// ítem elegido (ver `preload` más abajo).
 function candidatosDeGrupo(entradas: AgendaEntry[], moneda: string): AgendaEntry[] {
   return pendientesOrdenados(entradas.filter(e => e.kind === 'esperado'
-    ? e.ci.item.tipo === 'Gasto' && e.ci.item.moneda === moneda
+    ? e.ci.item.moneda === moneda
     : e.mov.moneda === moneda));
 }
 // F9.108 — parseo robusto de la selección del picker: los itemId pueden contener ':', no
@@ -409,6 +413,9 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
         ...preloadBase,
         banco:          undefined,
         itemEsperadoId: esperadoForzado,
+        // F9.119 — el tipo lo manda el ítem elegido: asignar un comprobante a un cobro
+        // esperado tiene que crear un Ingreso, no un Gasto.
+        tipo:           itemForzado?.tipo         ?? preloadBase.tipo,
         categoria:      itemForzado?.categoria    ?? preloadBase.categoria,
         subcategoria:   itemForzado?.subcategoria ?? preloadBase.subcategoria,
       }
@@ -416,6 +423,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     ? {
         ...preloadBase,
         banco:          undefined,
+        tipo:           esperado?.tipo         ?? preloadBase.tipo,
         categoria:      esperado?.categoria    ?? undefined,
         subcategoria:   esperado?.subcategoria ?? undefined,
         itemEsperadoId: itemEsperadoEfectivo,

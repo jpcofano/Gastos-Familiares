@@ -102,12 +102,43 @@ export function leerTcCache(): { fecha: string; tc: number } | null {
 
 // F9.114 — cascada de TC para valuar lo VIVO (esperados no pagados, ingresos del mes en
 // curso). Tres niveles, y la pantalla SIEMPRE dice cuál está usando: nunca un valor
-// plausible sin marcar. `aviso` null = el TC es el real de /tcDiario.
-export function tcEfectivoDe(tcHoy: number | null): { tc: number; aviso: string | null } {
-  if (tcHoy) return { tc: tcHoy, aviso: null };
+// plausible sin marcar. `aviso` null = el TC es el real de /tcDiario, o todavía no sabemos.
+//
+// F9.117 — el estado es explícito porque `number | null` significaba dos cosas a la vez:
+// "todavía no cargó" y "no hay TC". Como la función corre en cada render y el fetch es
+// asincrónico, durante la ventana de carga el banner afirmaba algo falso ("no se pudo leer
+// el de hoy") aunque el TC existiera y apareciera un segundo después. Además "resolvió
+// vacío" y "falló la consulta" son cosas distintas y ahora se dicen distinto.
+export type EstadoTcHoy =
+  | { estado: 'cargando' }
+  | { estado: 'ok'; tc: number }
+  | { estado: 'vacio' }      // la consulta anduvo, /tcDiario no tiene nada para hoy
+  | { estado: 'error' };     // la consulta falló — el error real se loguea en la vista
+
+export function tcEfectivoDe(e: EstadoTcHoy): { tc: number; aviso: string | null } {
+  if (e.estado === 'ok' && e.tc) return { tc: e.tc, aviso: null };
+
   const cache = leerTcCache();
-  if (cache) return { tc: cache.tc, aviso: `TC del ${cache.fecha} — no se pudo leer el de hoy.` };
-  return { tc: TC_FALLBACK, aviso: 'Sin TC — valor de referencia.' };
+  const tc = cache?.tc ?? TC_FALLBACK;
+
+  // Mientras carga no se afirma nada: se usa el mejor valor disponible y se calla. Si la
+  // lectura termina mal, el aviso aparece entonces — que es cuando ya es verdad.
+  if (e.estado === 'cargando') return { tc, aviso: null };
+
+  if (cache) {
+    return {
+      tc: cache.tc,
+      aviso: e.estado === 'vacio'
+        ? `TC del ${cache.fecha} — todavía no hay TC de hoy.`
+        : `TC del ${cache.fecha} — no se pudo leer el de hoy.`,
+    };
+  }
+  return {
+    tc: TC_FALLBACK,
+    aviso: e.estado === 'vacio'
+      ? 'Sin TC en /tcDiario — valor de referencia.'
+      : 'No se pudo leer el TC — valor de referencia.',
+  };
 }
 
 // F9.103 — estado de cobertura para la card "Tipo de cambio" en Patrimonio › Config.

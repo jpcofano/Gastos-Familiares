@@ -1781,6 +1781,11 @@ export const cargarMovimientoDesdeComprobante = onCall(
 
     batch.set(movRef, {
       fecha, mes,
+      // F9.118 — el mes de imputación quedó fijado a mano si no es el que sale de la fecha
+      // (ej. un pago del 30/8 que corresponde a septiembre). Con el pin puesto, editar la
+      // fecha más tarde no lo mueve.
+      mesManual: (payload as { mesManual?: boolean }).mesManual
+        ?? (mes !== new Date(fechaMs).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).slice(0, 7)),
       tipo, descripcion,
       descripcionOriginal: payload.descripcionOriginal ?? null,
       monto, moneda,
@@ -2690,11 +2695,12 @@ function medioCanonicoBancos(nombre: string, bancos: Array<{ id: string; nombre:
 }
 
 // editarMovimiento — campos editables: descripcion, monto, fecha, tipo, moneda,
-// categoria, subcat, persona, medio.
+// categoria, subcat, persona, medio, mes (F9.118), incluirResumenMes (F9.118).
 // Invariantes forzados: persona=memberId válido o vacío (=familiar); medio→
 // canónico (Efectivo→Mercado Pago); categoria+subcat validados contra taxonomía;
-// TC recomputado si cambia moneda/fecha; mes recomputado si cambia fecha;
-// itemEsperadoId desvinculado si identidad cambia sustancialmente.
+// TC recomputado si cambia moneda/fecha; mes recomputado si cambia fecha SALVO que esté
+// pineado a mano (mesManual, F9.118); itemEsperadoId desvinculado si identidad cambia
+// sustancialmente.
 export const editarMovimiento = onCall(
   { region: 'southamerica-east1' },
   async (request) => {
@@ -2749,7 +2755,40 @@ export const editarMovimiento = onCall(
         throw new HttpsError('invalid-argument', 'fecha inválida (YYYY-MM-DD o ms)');
       }
       update.fecha = Timestamp.fromDate(fechaDate);
-      update.mes   = `${fechaDate.getFullYear()}-${String(fechaDate.getMonth() + 1).padStart(2, '0')}`;
+      // F9.118 — si el mes fue fijado a mano, cambiar la fecha NO lo pisa. Un pago que entra
+      // el 30/8 pero corresponde a septiembre tiene que quedarse en septiembre aunque después
+      // se corrija el día. El pin se suelta explícitamente mandando `mes: null`.
+      const pineado = mov.mesManual === true && !('mes' in cambios);
+      if (!pineado) {
+        update.mes = `${fechaDate.getFullYear()}-${String(fechaDate.getMonth() + 1).padStart(2, '0')}`;
+      }
+    }
+
+    // F9.118 — mes de IMPUTACIÓN explícito: el mes en el que el movimiento cuenta, que no
+    // siempre es el de su fecha (ingresos de fin de mes, pagos del 29/30 que corresponden al
+    // mes siguiente). Es el campo por el que consultan todas las vistas, así que el override
+    // se escribe en `mes` mismo — un campo paralelo quedaría fuera de todos los where().
+    if ('mes' in cambios) {
+      const ms = cambios.mes;
+      if (ms === null || ms === '') {
+        // Soltar el pin: vuelve a derivarse de la fecha (la nueva si vino, si no la que tiene).
+        const base = fechaDate ?? (mov.fecha as FirebaseFirestore.Timestamp)?.toDate() ?? new Date();
+        update.mes = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}`;
+        update.mesManual = false;
+      } else {
+        if (typeof ms !== 'string' || !/^\d{4}-\d{2}$/.test(ms))
+          throw new HttpsError('invalid-argument', 'mes inválido (YYYY-MM o null)');
+        const mm = Number(ms.slice(5));
+        if (mm < 1 || mm > 12) throw new HttpsError('invalid-argument', 'mes inválido (mes fuera de rango)');
+        update.mes = ms;
+        update.mesManual = true;
+      }
+    }
+
+    if ('incluirResumenMes' in cambios) {
+      const inc = cambios.incluirResumenMes;
+      if (typeof inc !== 'boolean') throw new HttpsError('invalid-argument', 'incluirResumenMes debe ser boolean');
+      update.incluirResumenMes = inc;
     }
 
     if ('tipo' in cambios) {
