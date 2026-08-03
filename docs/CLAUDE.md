@@ -872,19 +872,35 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `toastCafci` a `toast` porque ahora lo comparten las dos features. **Pendiente de cierre
   manual (no deployo yo):** deploy `--only hosting` → exportar la corrida vigente, subirla a la
   ingesta y confirmar diff vacío en el Paso 3.
-- F9.116 §1 — `calcMetrics` extraída a `src/datos/patrimonioMetricas.ts` (con
-  `sectorDisplay`/`SECTOR_DISPLAY`, de las que depende). Estaba dentro de un archivo de ~4.100
-  líneas y sin exportar: no se podía reusar ni verificar aislada. Refactor puro — el cuerpo
-  movido `diff`ea vacío contra `HEAD:src/vistas/Patrimonio.tsx:139-182`. **§2-§6 frenadas a
-  propósito** por el tripwire del propio spec ("si aparecen `escenario`/`tolerancia`, frenar y
-  reportar"): el `grep` propuesto es case-sensitive y no ve `STRESS_ESCENARIOS`
-  (`Patrimonio.tsx:207`) ni `calcStress()` (`:245`), que ya calculan pérdida por escenario y se
-  consumen en la card de la solapa Plan (`:1129`) **y** en el informe PDF (`:3721`), que ya
-  tiene sección de estrés. La premisa "la app no mide pérdida esperable" es falsa; construir un
-  segundo motor con ids nuevos dejaría dos fuentes de números distintos para la misma pregunta
-  en la misma pantalla. Lo que sí falta y no existe: `tolerancia`, brecha, bandas por
-  posición/driver/caja y mix objetivo. Decisión pendiente: unificar sobre el motor existente o
-  mantener dos.
+- F9.116 — Riesgo: escenarios unificados, brecha de tolerancia y bandas. Ver
+  `docs/prompts/F9.116-riesgo-escenarios-y-bandas.md`. **§1:** `calcMetrics` (+`sectorDisplay`,
+  `SECTOR_DISPLAY`, `manualToPosicion`) extraída a `src/datos/patrimonioMetricas.ts`; refactor
+  puro, el cuerpo movido `diff`ea vacío contra `HEAD:src/vistas/Patrimonio.tsx:139-182`.
+  **Tripwire disparado — cambió el diseño de §2:** el `grep` del spec es case-sensitive y no ve
+  `STRESS_ESCENARIOS` ni `calcStress()`, que ya calculaban pérdida por escenario y se consumían
+  en la solapa Plan **y** en el informe PDF (que ya tenía sección de estrés). La premisa "la app
+  no mide pérdida esperable" era falsa. **Decisión del dueño: unificar.** Los 4 escenarios
+  idiosincráticos se movieron sin cambiar un solo shock a `src/datos/patrimonioRiesgo.ts` y
+  conviven ahí con 4 sistémicos nuevos definidos por **bloque de riesgo** (el driver: acciones
+  AR / global / cripto / soberano AR / renta fija / cash) y beta documentada — `global20`
+  (S&P −20% × beta), `crash2020` (−34/−44/−50 observados en marzo 2020), `localAr` (agosto 2019:
+  −57% en USD en un mes sin crisis global) y `rally` (+20% simétrico: mostrar sólo el downside es
+  información sesgada). Un solo registro de 8, un solo motor, y el PDF **no** ganó una segunda
+  sección de estrés: la brecha y las bandas entraron en la sección 7 que ya existía. **§3:**
+  card "Política de riesgo" en Config → `configPatrimonio/riesgo` (tolerancia 20%, tope por
+  posición 8%, por driver 35%, piso de caja 5%); sin doc usa los defaults y lo dice en pantalla.
+  **§4:** card "Riesgo y escenarios" en Resumen — titular de brecha con semáforo, tabla de los 8
+  escenarios expandible a contribución por bloque, bandas fuera de política con el exceso en USD,
+  y mix objetivo colapsado que muestra **siempre** el upside resignado junto al recorte.
+  Fail-soft por sección vía `intentar()`. **Convención de unidades:** todo el módulo de riesgo va
+  en fracciones (0.20 = 20%), igual que el resto de las métricas; el formulario convierte en su
+  borde. **Desvío consciente:** el semáforo de la brecha no reusa `banda()` — sus umbrales son
+  absolutos y los de la brecha son relativos a la tolerancia declarada; se reusan los colores,
+  no los cortes. **§6:** `npx tsx scripts/verificarRiesgo.ts` — 7 OK / 0 FAIL (los 5 del spec +
+  que el mix efectivamente recorte cuando no cumple + que las bandas sean independientes del
+  motor de escenarios). `tsc`: 41 pre-existentes, 0 nuevos. `vite build`: OK. **Pendiente de
+  cierre manual (no deployo yo):** paridad de números en pantalla, card con datos reales y
+  fail-soft renderizado.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

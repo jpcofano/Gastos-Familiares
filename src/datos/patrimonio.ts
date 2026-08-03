@@ -4,6 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cargarFlujos, calcRetorno } from './patrimonioFlujos';
+import { RIESGO_DEFAULTS, type TopesRiesgo } from './patrimonioRiesgo';
 import type { Posicion, ActivoFijo, MetaCorrida, PosicionManual, PosicionRaw, CorraidaJSON } from '../types/patrimonio';
 
 const ACTIVOS_SEED: ActivoFijo[] = [
@@ -140,6 +141,30 @@ export async function confirmarIngesta(
   });
 
   await batch.commit();
+}
+
+// ── F9.116 §3 — Política de riesgo ────────────────────────────────────────────
+// Los cuatro números que declara el titular. Se guardan como FRACCIÓN (0.20 = 20%), la
+// convención de patrimonioRiesgo.ts; el formulario convierte en su borde.
+// Sin doc en Firestore la app usa RIESGO_DEFAULTS y la card lo aclara en pantalla.
+export async function cargarConfigRiesgo(): Promise<{ topes: TopesRiesgo; configurado: boolean }> {
+  const snap = await getDoc(doc(db, 'configPatrimonio', 'riesgo'));
+  if (!snap.exists()) return { topes: RIESGO_DEFAULTS, configurado: false };
+  const d = snap.data();
+  const num = (k: keyof TopesRiesgo) => (typeof d[k] === 'number' ? (d[k] as number) : RIESGO_DEFAULTS[k]);
+  return {
+    topes: {
+      toleranciaCaidaPct: num('toleranciaCaidaPct'),
+      topePosicionPct:    num('topePosicionPct'),
+      topeDriverPct:      num('topeDriverPct'),
+      pisoCajaPct:        num('pisoCajaPct'),
+    },
+    configurado: true,
+  };
+}
+
+export async function guardarConfigRiesgo(topes: TopesRiesgo): Promise<void> {
+  await setDoc(doc(db, 'configPatrimonio', 'riesgo'), topes, { merge: true });
 }
 
 // ── F9.115 — Exportar corrida y dossier ───────────────────────────────────────

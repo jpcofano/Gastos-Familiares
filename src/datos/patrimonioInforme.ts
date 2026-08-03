@@ -32,6 +32,19 @@ export type OpcionResult = {
   despues: PatMetrics;
 };
 
+// F9.116 §5 — brecha de tolerancia y bandas fuera de política. Va DENTRO de la sección de
+// escenarios que ya existía (que ahora se alimenta del motor unificado), no en una sección
+// aparte: dos secciones de estrés en el mismo PDF darían dos respuestas a la misma pregunta.
+export type RiesgoInforme = {
+  toleranciaPct: number;
+  perdidaTitularPct: number;
+  perdidaTitularUsd: number;
+  nombreTitular: string;
+  cumple: boolean;
+  brechaPct: number;
+  violaciones: { tipo: 'posicion' | 'driver' | 'caja'; nombre: string; actual: number; tope: number; excesoUsd: number }[];
+};
+
 export type InformeParams = {
   posiciones: Posicion[];
   activosFijos: ActivoFijo[];
@@ -42,6 +55,7 @@ export type InformeParams = {
   M: PatMetrics;
   stressResults: StressResult[];
   opcionResults: OpcionResult[];
+  riesgo?: RiesgoInforme | null;
 };
 
 export type InformeAnterior = {
@@ -133,7 +147,7 @@ export async function cargarInformesAnteriores(limite = 10): Promise<InformeAnte
 
 // ── Generador y archivador ────────────────────────────────────────────────────
 export async function generarYArchivarInforme(params: InformeParams): Promise<InformeAnterior> {
-  const { posiciones, activosFijos, manuales, historial, tc, fechaCorrida, M, stressResults, opcionResults } = params;
+  const { posiciones, activosFijos, manuales, historial, tc, fechaCorrida, M, stressResults, opcionResults, riesgo } = params;
 
   const fijosUsd = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
   const patrimTotal = M.total + fijosUsd;
@@ -375,7 +389,40 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
       { text: fmtUsd(s.totalResultante), fontSize: 9 },
     ])
   ));
-  content.push(note('Escenarios ilustrativos con shocks fijos. No son predicciones ni probabilidades.'));
+  content.push(note('Escenarios ilustrativos con shocks fijos y betas constantes documentadas. No son predicciones ni probabilidades.'));
+
+  // F9.116 §5 — brecha contra la tolerancia declarada + bandas fuera de política.
+  // Redacción: opciones con trade-off, sin imperativos. La decisión es del titular.
+  if (riesgo) {
+    const bandaBrecha: 'verde'|'amarillo'|'rojo' = riesgo.cumple
+      ? 'verde'
+      : (riesgo.toleranciaPct > 0 && Math.abs(riesgo.perdidaTitularPct) / riesgo.toleranciaPct <= 1.5) ? 'amarillo' : 'rojo';
+    content.push({
+      text: `Tolerancia declarada: ${pct(riesgo.toleranciaPct)} de caída. ${riesgo.nombreTitular}: ${pct(Math.abs(riesgo.perdidaTitularPct))} (${fmtUsd(riesgo.perdidaTitularUsd)}).`,
+      fontSize: 9, bold: true, color: semColor(bandaBrecha), margin: [0, 6, 0, 2],
+    });
+    content.push({
+      text: riesgo.cumple
+        ? 'La pérdida del escenario entra dentro de lo declarado.'
+        : `La pérdida excede lo declarado en ${pct(riesgo.brechaPct)} del portafolio. Cerrar esa brecha implica resignar upside en los bloques recortados; sostenerla implica aceptar una caída mayor a la declarada. Las dos son opciones, con costos distintos.`,
+      fontSize: 9, color: '#475569', margin: [0, 0, 0, 6],
+    });
+
+    if (riesgo.violaciones.length > 0) {
+      content.push(tableOf(['Banda', 'Tipo', 'Actual', 'Límite', 'Exceso USD'],
+        riesgo.violaciones.map(v => [
+          { text: v.nombre, fontSize: 9 },
+          { text: v.tipo === 'caja' ? 'piso de caja' : v.tipo, fontSize: 9 },
+          { text: pct(v.actual), fontSize: 9 },
+          { text: pct(v.tope), fontSize: 9 },
+          { text: fmtUsd(v.excesoUsd), color: '#DC2626', bold: true, fontSize: 9 },
+        ])
+      ));
+      content.push(note('En el piso de caja el "exceso" es lo que falta para alcanzarlo, no un sobrante.'));
+    } else {
+      content.push(note('Ninguna banda de concentración fuera de política.'));
+    }
+  }
 
   // 9. Opciones de rebalanceo
   content.push(pageBreak(), h1('8. Opciones de rebalanceo'));

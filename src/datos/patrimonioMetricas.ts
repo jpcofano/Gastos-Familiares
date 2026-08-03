@@ -3,7 +3,19 @@
 // módulo de datos ni verificar de forma aislada. Este módulo es puro: sin Firestore, sin
 // React, sin Date.now(). La lógica de cálculo se movió TAL CUAL — cualquier diferencia
 // numérica en la solapa Resumen respecto de antes del refactor es un bug, no una mejora.
-import type { Posicion, PatMetrics } from '../types/patrimonio';
+import type { Posicion, PatMetrics, PosicionManual } from '../types/patrimonio';
+
+// La "lente invertible" mira corrida + manuales juntas: una posición manual se proyecta a
+// Posicion para entrar a las métricas y a los escenarios de riesgo.
+export function manualToPosicion(m: PosicionManual): Posicion {
+  return {
+    ticker: m.ticker, tipo: m.tipo, sector: m.sector,
+    pais_riesgo: m.pais_riesgo, cuenta: m.cuenta,
+    titular: null, moneda_origen: 'USD', valor_origen: m.valorUsd,
+    cantidad: m.cantidad, fuente: 'manual', revisar: false,
+    valorUsd: m.valorUsd, tcUsado: null, fechaCorrida: m.fechaValuacion,
+  };
+}
 
 // ── Sector crudo → display ────────────────────────────────────────────────────
 // Acompaña a calcMetrics porque las claves de bySector son las de display (no las crudas).

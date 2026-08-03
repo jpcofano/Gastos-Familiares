@@ -9,6 +9,7 @@ import {
   guardarActivoFijo, eliminarActivoFijo,
   guardarPosicionManual, eliminarPosicionManual,
   exportarCorridaTxt, exportarDossierJson,
+  cargarConfigRiesgo, guardarConfigRiesgo,
   type SnapshotResumen,
 } from '../datos/patrimonio';
 import {
@@ -50,7 +51,14 @@ import {
 import PatrimonioIngesta from './PatrimonioIngesta';
 // F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
 // reusable; la lógica no cambió.
-import { calcMetrics, sectorDisplay, SECTOR_DISPLAY } from '../datos/patrimonioMetricas';
+import { calcMetrics, sectorDisplay, SECTOR_DISPLAY, manualToPosicion } from '../datos/patrimonioMetricas';
+// F9.116 §2 — motor único de escenarios: los cuatro idiosincráticos que vivían acá se
+// movieron al módulo y conviven con los sistémicos por beta. Una sola fuente de números.
+import {
+  ESCENARIOS, calcEscenarios, calcBrecha, calcMixObjetivo, violacionesBandas,
+  RIESGO_DEFAULTS, ESCENARIO_TITULAR, BLOQUE_LABEL,
+  type ResultadoEscenario, type ViolacionBanda, type MixObjetivo, type TopesRiesgo, type Bloque,
+} from '../datos/patrimonioRiesgo';
 
 const SECTOR_COL: Record<string, string> = {
   'Energía AR':       '#f5a623',
@@ -101,19 +109,6 @@ function fmtFecha(iso: string): string {
 }
 const pct = (x: number) => Math.round(x * 100) + '%';
 
-// ── Motor de métricas (lente invertible, agrega manuales) ────────────────────
-
-// Convierte PosicionManual a Posicion para métricas
-function manualToPosicion(m: PosicionManual): Posicion {
-  return {
-    ticker: m.ticker, tipo: m.tipo, sector: m.sector,
-    pais_riesgo: m.pais_riesgo, cuenta: m.cuenta,
-    titular: null, moneda_origen: 'USD', valor_origen: m.valorUsd,
-    cantidad: m.cantidad, fuente: 'manual', revisar: false,
-    valorUsd: m.valorUsd, tcUsado: null, fechaCorrida: m.fechaValuacion,
-  };
-}
-
 // ── Semáforos ─────────────────────────────────────────────────────────────────
 type BandaNombre = 'nombre' | 'sector' | 'pais' | 'cripto' | 'hhi';
 const BANDAS: Record<BandaNombre, [number, number]> = {
@@ -132,54 +127,6 @@ const SEM = {
   amarillo: { dot: 'var(--gf-out)',      bg: 'var(--gf-gray-100)' },
   rojo:     { dot: 'var(--gf-expense)',  bg: 'var(--gf-gray-100)' },
 } as const;
-
-// ── Escenarios de estrés ──────────────────────────────────────────────────────
-const STABLECOINS = new Set(['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD']);
-type ShockFn = (p: Posicion) => number;
-
-const STRESS_ESCENARIOS: { id: string; nombre: string; shock: ShockFn }[] = [
-  {
-    id: 'energia_ar',
-    nombre: 'Corrección energía AR',
-    shock: p => (p.sector === 'energia' && p.pais_riesgo === 'AR' && p.tipo === 'accion' ? -0.30 : 0),
-  },
-  {
-    id: 'cripto',
-    nombre: 'Invierno cripto',
-    shock: p => (p.tipo === 'cripto' && !STABLECOINS.has(p.ticker) ? -0.50 : 0),
-  },
-  {
-    id: 'soberano_ar',
-    nombre: 'Evento soberano AR',
-    shock: p => {
-      if (p.pais_riesgo !== 'AR') return 0;
-      if (p.tipo === 'accion' || p.tipo === 'cedear') return -0.40;
-      if (p.tipo === 'bono' || p.tipo === 'on') return -0.25;
-      if (p.tipo === 'fci') return -0.30;
-      return 0;
-    },
-  },
-  {
-    id: 'tormenta',
-    nombre: 'Tormenta perfecta',
-    shock: p => {
-      let s = 0;
-      if (p.pais_riesgo === 'AR') {
-        if (p.tipo === 'accion' || p.tipo === 'cedear') s = -0.40;
-        else if (p.tipo === 'bono' || p.tipo === 'on') s = -0.25;
-        else if (p.tipo === 'fci') s = -0.30;
-      }
-      if (p.tipo === 'cripto' && !STABLECOINS.has(p.ticker)) s = -0.50;
-      return s;
-    },
-  },
-];
-
-function calcStress(posiciones: Posicion[], shockFn: ShockFn) {
-  const total = posiciones.reduce((s, p) => s + p.valorUsd, 0);
-  const perdidaUsd = posiciones.reduce((s, p) => s + p.valorUsd * shockFn(p), 0);
-  return { perdidaUsd, totalResultante: total + perdidaUsd, total };
-}
 
 // ── Simulación de opciones de rebalanceo ──────────────────────────────────────
 type Corte = { tipo: 'ticker' | 'sector'; key: string; targetPct: number };
@@ -651,10 +598,194 @@ function OpcionCard({ opcion, posiciones, onRegistrarDecision }: { opcion: Opcio
   );
 }
 
+// F9.116 §4 — Riesgo y escenarios. La app medía composición (HHI, top1/3/5) pero un HHI de
+// 0,070 no le dice a nadie cuánto cae la cartera en una corrección. Acá se cruza la pérdida
+// esperable contra la caída que el titular declaró que banca: la brecha es lo accionable.
+//
+// Fail-soft por sección: cada bloque se calcula por separado y un fallo se registra y se
+// omite. Una sección caída nunca tumba la card ni la solapa Resumen.
+function intentar<T>(fn: () => T, ctx: string): T | null {
+  try { return fn(); } catch (e) { console.error(`[RiesgoCard] ${ctx} falló:`, e); return null; }
+}
+
+function RiesgoCard({ posiciones, manuales, topes, configurado }: {
+  posiciones: Posicion[];
+  manuales: PosicionManual[];
+  topes: TopesRiesgo;
+  configurado: boolean;
+}) {
+  const [escenarioSel, setEscenarioSel] = useState<string>(ESCENARIO_TITULAR);
+  const [verMix, setVerMix] = useState(false);
+
+  const escenarios: ResultadoEscenario[] | null = intentar(() => calcEscenarios(posiciones, manuales), 'calcEscenarios');
+  const violaciones: ViolacionBanda[] | null = intentar(() => violacionesBandas(posiciones, manuales, topes), 'violacionesBandas');
+
+  const titular = escenarios?.find(e => e.id === ESCENARIO_TITULAR) ?? null;
+  const brecha = titular ? intentar(() => calcBrecha(titular.perdidaPct, topes.toleranciaCaidaPct), 'calcBrecha') : null;
+  const sel = escenarios?.find(e => e.id === escenarioSel) ?? null;
+  const mix: MixObjetivo | null = verMix
+    ? intentar(() => calcMixObjetivo(posiciones, manuales, topes.toleranciaCaidaPct, escenarioSel), 'calcMixObjetivo')
+    : null;
+
+  if (!escenarios && !violaciones) return null;
+
+  // El semáforo de la brecha NO puede salir de banda(): esos umbrales son absolutos y éste
+  // es relativo a la tolerancia declarada. Se reusan los colores, no los cortes.
+  const sem: 'verde' | 'amarillo' | 'rojo' = !brecha ? 'amarillo'
+    : brecha.cumple ? 'verde'
+    : brecha.factor <= 1.5 ? 'amarillo'
+    : 'rojo';
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Riesgo y escenarios</div>
+
+      {/* 1. Titular de brecha */}
+      {titular && brecha ? (
+        <div style={{ background: SEM[sem].bg, borderRadius: 12, padding: '12px 13px', marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 999, background: SEM[sem].dot, flexShrink: 0 }} />
+            <span style={{ fontSize: 13.5, fontWeight: 700 }}>
+              Bancás −{pct(topes.toleranciaCaidaPct)}. En una corrección global perdés {pct(titular.perdidaPct)}.
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', marginTop: 5, lineHeight: 1.45 }}>
+            {brecha.cumple
+              ? `La pérdida del escenario entra dentro de lo declarado (${fmtUsd(titular.perdidaUsd)}).`
+              : `Son ${pct(brecha.brechaPct)} del portafolio por encima de lo declarado — ${fmtUsd(titular.perdidaUsd)} contra un límite de ${fmtUsd(-topes.toleranciaCaidaPct * titular.total)}.`}
+            {!configurado && ' Tolerancia por defecto: declarala en Config › Política de riesgo.'}
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginTop: 8 }}>
+          No se pudo calcular la brecha (ver consola).
+        </div>
+      )}
+
+      {/* 2. Tabla de escenarios — tap para ver la contribución por bloque */}
+      {escenarios && (
+        <div style={{ marginTop: 12 }}>
+          {escenarios.map((e, i) => {
+            const abierto = e.id === escenarioSel;
+            const gana = e.perdidaUsd >= 0;
+            return (
+              <div key={e.id} style={{ borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : '1px solid var(--gf-gray-100)' }}>
+                <button
+                  onClick={() => setEscenarioSel(abierto ? '' : e.id)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-base)' }}
+                >
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600 }}>{e.nombre}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: gana ? 'var(--gf-income)' : 'var(--gf-expense)', flexShrink: 0 }}>
+                    {fmtUsd(e.perdidaUsd)}
+                  </span>
+                  <span style={{ width: 46, textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-gray-400)', flexShrink: 0 }}>
+                    {pct(e.perdidaPct)}
+                  </span>
+                  <Icon name={abierto ? 'chevron-down' : 'chevron-right'} size={13} color="var(--gf-gray-300)" />
+                </button>
+                {/* 3. Contribución por bloque del escenario seleccionado */}
+                {abierto && sel && (
+                  <div style={{ padding: '0 0 10px 0' }}>
+                    <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginBottom: 5, lineHeight: 1.4 }}>{sel.descripcion}</div>
+                    {sel.contribucion.filter(c => c.perdidaUsd !== 0).map(c => (
+                      <div key={c.bloque} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 11.5 }}>
+                        <span style={{ flex: 1, minWidth: 0, color: 'var(--color-text-sec)' }}>{c.nombre}</span>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{fmtUsd(c.perdidaUsd)}</span>
+                        <span style={{ width: 46, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{pct(c.aporteFrac)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 4. Bandas violadas */}
+      {violaciones && violaciones.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--gf-gray-100)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 5 }}>
+            Bandas fuera de política ({violaciones.length})
+          </div>
+          {violaciones.map(v => (
+            <div key={`${v.tipo}-${v.nombre}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: 11.5 }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <strong>{v.nombre}</strong>
+                <span style={{ color: 'var(--gf-gray-400)' }}>
+                  {' '}· {v.tipo === 'caja' ? `piso ${pct(v.tope)}` : `tope ${pct(v.tope)}`} · actual {pct(v.actual)}
+                </span>
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--gf-expense)', flexShrink: 0 }}>
+                {v.tipo === 'caja' ? 'faltan ' : '+'}{fmtUsd(v.excesoUsd)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {violaciones && violaciones.length === 0 && (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gf-gray-100)' }}>
+          Ninguna banda fuera de política.
+        </div>
+      )}
+
+      {/* 5. Mix objetivo, colapsado */}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gf-gray-100)' }}>
+        <button
+          onClick={() => setVerMix(v => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)' }}
+        >
+          <Icon name={verMix ? 'chevron-down' : 'chevron-right'} size={13} color="var(--color-accent)" />
+          Mix objetivo para entrar en la tolerancia
+        </button>
+        {verMix && (mix ? (
+          <div style={{ marginTop: 8 }}>
+            {mix.ventaNecesariaUsd <= 0 ? (
+              <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
+                El escenario ya entra en la tolerancia: no hace falta recortar nada.
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5, marginBottom: 6 }}>
+                  Pasar <strong style={{ color: 'var(--color-text)' }}>{fmtUsd(mix.ventaNecesariaUsd)}</strong> a caja
+                  llevaría la pérdida del escenario justo al límite declarado. Al alza eso cuesta{' '}
+                  <strong style={{ color: 'var(--color-text)' }}>{pct(mix.upsideResignadoPct)}</strong> del portafolio
+                  en un rally simétrico. Es una medición, no una recomendación: la decisión es tuya.
+                </div>
+                {(Object.entries(mix.pesosObjetivo) as [Bloque, number][])
+                  .filter(([, v]) => v > 0.0005)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([b, v]) => (
+                    <div key={b} style={{ display: 'flex', gap: 8, padding: '3px 0', fontSize: 11.5 }}>
+                      <span style={{ flex: 1, color: 'var(--color-text-sec)' }}>{BLOQUE_LABEL[b]}</span>
+                      <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{pct(v)}</span>
+                    </div>
+                  ))}
+              </>
+            )}
+          </div>
+        ) : (
+          <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginTop: 8 }}>
+            No se pudo calcular el mix objetivo (ver consola).
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 10, lineHeight: 1.4 }}>
+        Escenarios ilustrativos con shocks fijos y betas constantes documentadas; no son predicciones ni probabilidades.
+      </div>
+    </Card>
+  );
+}
+
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast }: {
+function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
+  posiciones: Posicion[];
+  manuales: PosicionManual[];
+  topesRiesgo: TopesRiesgo;
+  riesgoConfigurado: boolean;
   historial: SnapshotResumen[];
   flujos: FlujoPatrimonio[];
   informes: InformeAnterior[];
@@ -807,6 +938,9 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
           </Card>
         );
       })()}
+
+      {/* 4b. Riesgo y escenarios (F9.116) */}
+      <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} />
 
       {/* 5. Informe PDF */}
       <Card>
@@ -1104,26 +1238,25 @@ function RiesgoTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] })
       {/* Escenarios de estrés */}
       <Card>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>¿Qué pasa si...?</div>
-        {STRESS_ESCENARIOS.map((e, i) => {
-          const { perdidaUsd, totalResultante, total } = calcStress(posiciones, e.shock);
-          return (
-            <div key={e.id} style={{ padding: '10px 0', borderTop: i === 0 ? '1px solid var(--gf-gray-100)' : '1px solid var(--gf-gray-100)', marginTop: i === 0 ? 10 : 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5 }}>{e.nombre}</div>
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12.5 }}>
-                <span>
-                  <span style={{ color: 'var(--gf-gray-400)' }}>Pérdida </span>
-                  <strong style={{ color: 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtUsd(perdidaUsd)} ({pct(perdidaUsd / (total || 1))})
-                  </strong>
-                </span>
-                <span>
-                  <span style={{ color: 'var(--gf-gray-400)' }}>Resultante </span>
-                  <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(totalResultante)}</strong>
-                </span>
-              </div>
+        {/* F9.116 — el registro es único (sistémicos por beta + idiosincráticos), así que
+            acá aparecen los ocho. El signo lo pone el escenario: el rally suma. */}
+        {calcEscenarios(posiciones, []).map((r, i) => (
+          <div key={r.id} style={{ padding: '10px 0', borderTop: '1px solid var(--gf-gray-100)', marginTop: i === 0 ? 10 : 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 5 }}>{r.nombre}</div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12.5 }}>
+              <span>
+                <span style={{ color: 'var(--gf-gray-400)' }}>{r.perdidaUsd >= 0 ? 'Ganancia ' : 'Pérdida '}</span>
+                <strong style={{ color: r.perdidaUsd >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums' }}>
+                  {fmtUsd(r.perdidaUsd)} ({pct(r.perdidaPct)})
+                </strong>
+              </span>
+              <span>
+                <span style={{ color: 'var(--gf-gray-400)' }}>Resultante </span>
+                <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(r.totalFinal)}</strong>
+              </span>
             </div>
-          );
-        })}
+          </div>
+        ))}
         <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 10, lineHeight: 1.4 }}>
           Escenarios ilustrativos con shocks fijos; no son predicciones ni probabilidades.
         </div>
@@ -2675,9 +2808,60 @@ function TipoCambioCard() {
   );
 }
 
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarCafciManual }: {
+// F9.116 §3 — Política de riesgo: los cuatro números que declara el titular. Sin ellos, la
+// concentración es un dato sin consecuencia; con ellos la app puede señalar la brecha.
+// La UI trabaja en enteros (20 = 20%) y convierte en el borde: adentro todo es fracción.
+function PoliticaRiesgoCard({ topes, configurado, onGuardar }: {
+  topes: TopesRiesgo;
+  configurado: boolean;
+  onGuardar: (t: TopesRiesgo) => void;
+}) {
+  const CAMPOS: { k: keyof TopesRiesgo; label: string; sub: string }[] = [
+    { k: 'toleranciaCaidaPct', label: 'Caída que bancás',   sub: 'Máxima pérdida tolerada en un escenario' },
+    { k: 'topePosicionPct',    label: 'Tope por posición',  sub: 'Por ticker consolidado entre cuentas' },
+    { k: 'topeDriverPct',      label: 'Tope por driver',    sub: 'Por bloque que se mueve junto en una crisis' },
+    { k: 'pisoCajaPct',        label: 'Piso de caja',       sub: 'Cash y stablecoins — es un piso, no un tope' },
+  ];
+
+  function editar(k: keyof TopesRiesgo, valor: string) {
+    const n = Number(valor);
+    if (!Number.isFinite(n) || n < 0 || n > 100) return;
+    onGuardar({ ...topes, [k]: n / 100 });
+  }
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>Política de riesgo</div>
+      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2, marginBottom: 10 }}>
+        {configurado ? 'Configurada' : 'Sin configurar · se usan los valores por defecto'}
+      </div>
+      {CAMPOS.map((c, i) => (
+        <div key={c.k} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{c.label}</div>
+            <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', lineHeight: 1.3 }}>{c.sub}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            <input
+              type="number" inputMode="numeric" min={0} max={100}
+              value={Math.round(topes[c.k] * 100)}
+              onChange={e => editar(c.k, e.target.value)}
+              style={{ width: 58, textAlign: 'right', fontSize: 13, fontVariantNumeric: 'tabular-nums', border: '1px solid var(--gf-gray-300)', borderRadius: 8, padding: '5px 7px', fontFamily: 'var(--font-base)' }}
+            />
+            <span style={{ fontSize: 12, color: 'var(--gf-gray-400)' }}>%</span>
+          </div>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarCafciManual }: {
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
+  topesRiesgo: TopesRiesgo;
+  riesgoConfigurado: boolean;
+  onGuardarRiesgo: (t: TopesRiesgo) => void;
   configIA: ConfigIA;
   fechaCorrida: string;
   flujos: FlujoPatrimonio[];
@@ -2704,6 +2888,7 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
       <AportesRetirosCard flujos={flujos} onAdd={onAddFlujo} onEdit={onEditFlujo} />
       <CafciFondosCard configCafci={configCafci} carteras={cafciCarteras} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} onImportarManual={onImportarCafciManual} />
       <TipoCambioCard />
+      <PoliticaRiesgoCard topes={topesRiesgo} configurado={riesgoConfigurado} onGuardar={onGuardarRiesgo} />
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -3258,6 +3443,10 @@ export default function Patrimonio() {
   const [showModalFlujo,   setShowModalFlujo]   = useState(false);
   const [editFlujo,        setEditFlujo]        = useState<FlujoPatrimonio | null>(null);
 
+  // F9.116 §3 — política de riesgo declarada por el titular (fracciones, ver patrimonioRiesgo.ts)
+  const [topesRiesgo,       setTopesRiesgo]       = useState<TopesRiesgo>(RIESGO_DEFAULTS);
+  const [riesgoConfigurado, setRiesgoConfigurado] = useState(false);
+
   const [configCafci,        setConfigCafci]        = useState<ConfigCafci>({ fondos: [] });
   const [cafciCarteras,      setCafciCarteras]      = useState<CafciCartera[]>([]);
   const [cafciMappings,      setCafciMappings]      = useState<Record<string, string | null>>({});
@@ -3318,8 +3507,14 @@ export default function Patrimonio() {
       cargarInformesAnteriores(5),
       cargarDecisiones(),
       cargarFlujos(),
+      // F9.116 §3 — sin doc configurado devuelve los defaults y `configurado:false`, que la
+      // card usa para aclararlo en pantalla.
+      cargarConfigRiesgo().catch(err => {
+        console.error('[Patrimonio] cargarConfigRiesgo falló:', err);
+        return { topes: RIESGO_DEFAULTS, configurado: false };
+      }),
     ])
-      .then(([pos, fijos, manuales, hist, infs, decs, flujos]) => {
+      .then(([pos, fijos, manuales, hist, infs, decs, flujos, riesgo]) => {
         setPosiciones(pos);
         setActivosFijos(fijos);
         setPosicionesManuales(manuales);
@@ -3327,6 +3522,8 @@ export default function Patrimonio() {
         setInformes(infs);
         setDecisiones(decs);
         setFlujos(flujos);
+        setTopesRiesgo(riesgo.topes);
+        setRiesgoConfigurado(riesgo.configurado);
         if (pos.length > 0) setFechaCorrida(pos[0].fechaCorrida);
       })
       .finally(() => setLoading(false));
@@ -3686,6 +3883,18 @@ export default function Patrimonio() {
     setShowModalRevision(null);
   }
 
+  // F9.116 §3 — optimista: el input responde ya y el guardado va detrás. Si Firestore
+  // rechaza, se avisa por el toast compartido y queda el valor en pantalla para reintentar.
+  async function handleGuardarRiesgo(t: TopesRiesgo) {
+    setTopesRiesgo(t);
+    setRiesgoConfigurado(true);
+    try {
+      await guardarConfigRiesgo(t);
+    } catch (e) {
+      setToast({ texto: `No se pudo guardar la política de riesgo: ${e instanceof Error ? e.message : String(e)}`, error: true });
+    }
+  }
+
   async function handleToggleIA(val: boolean) {
     const next = { habilitado: val };
     setConfigIA(next);
@@ -3696,18 +3905,35 @@ export default function Patrimonio() {
     if (!M || generandoInforme) return;
     setGenerandoInforme(true);
     try {
-      const stressResults: StressResult[] = STRESS_ESCENARIOS.map(e => {
-        const { perdidaUsd, totalResultante, total } = calcStress(todasPosiciones, e.shock);
-        return { nombre: e.nombre, perdidaUsd, perdidaPct: total > 0 ? perdidaUsd / total : 0, totalResultante, total };
-      });
+      const stressResults: StressResult[] = calcEscenarios(posiciones, posicionesManuales).map(r => ({
+        nombre: r.nombre, perdidaUsd: r.perdidaUsd, perdidaPct: r.perdidaPct,
+        totalResultante: r.totalFinal, total: r.total,
+      }));
       const opcionResults: OpcionResult[] = OPCIONES_CONFIG.map(o => {
         const { liberadoUsd, movimientos, antes, despues, total } = simularOpcion(todasPosiciones, o);
         return { id: o.id, titulo: o.titulo, descripcion: o.descripcion, liberadoUsd, total, riesgos: o.riesgos, movimientos, antes, despues };
       });
+      // F9.116 §5 — si el bloque de riesgo falla, el informe se genera igual sin esa parte.
+      const riesgo = intentar(() => {
+        const escenarios = calcEscenarios(posiciones, posicionesManuales);
+        const titular = escenarios.find(e => e.id === ESCENARIO_TITULAR);
+        if (!titular) return null;
+        const b = calcBrecha(titular.perdidaPct, topesRiesgo.toleranciaCaidaPct);
+        return {
+          toleranciaPct: topesRiesgo.toleranciaCaidaPct,
+          perdidaTitularPct: titular.perdidaPct,
+          perdidaTitularUsd: titular.perdidaUsd,
+          nombreTitular: titular.nombre,
+          cumple: b.cumple,
+          brechaPct: b.brechaPct,
+          violaciones: violacionesBandas(posiciones, posicionesManuales, topesRiesgo),
+        };
+      }, 'riesgo del informe');
+
       const nuevo = await generarYArchivarInforme({
         posiciones, activosFijos, manuales: posicionesManuales,
         historial, tc, fechaCorrida, M,
-        stressResults, opcionResults,
+        stressResults, opcionResults, riesgo,
       });
       setInformes(prev => [nuevo, ...prev].slice(0, 5));
     } finally {
@@ -3797,6 +4023,10 @@ export default function Patrimonio() {
               generandoInforme={generandoInforme}
               onGenerarInforme={handleGenerarInforme}
               onToast={(texto, error) => setToast({ texto, error })}
+              posiciones={posiciones}
+              manuales={posicionesManuales}
+              topesRiesgo={topesRiesgo}
+              riesgoConfigurado={riesgoConfigurado}
             />
           )}
           {tab === 'tenencias' && (
@@ -3957,6 +4187,9 @@ export default function Patrimonio() {
               configCafci={configCafci}
               cafciCarteras={cafciCarteras}
               sincronizandoCafci={sincronizandoCafci}
+              topesRiesgo={topesRiesgo}
+              riesgoConfigurado={riesgoConfigurado}
+              onGuardarRiesgo={handleGuardarRiesgo}
               onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
               onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
               onEditManual={pm => { setEditManual(pm); setShowModalManual(true); }}
