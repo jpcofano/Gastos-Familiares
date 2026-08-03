@@ -141,9 +141,30 @@ El único punto que los dejaba afuera era el flujo de comprobantes:
 
 Ambos corregidos: el picker ofrece los dos y el tipo del movimiento lo manda el ítem elegido.
 
-### F9.120 — no ejecutada
+### F9.120 — hecha, con las decisiones tomadas por el dueño
 
-Las cuatro decisiones de diseño del propio backlog siguen abiertas. No se especifica sola.
+1. **Base por pantalla, declarada en el encabezado.** Resumen: % del ingreso del mes.
+   Dashboard: % del gasto del período. Ambas solapas de Resumen usan el MISMO denominador
+   (`baseIngresoMes`, calculado con el mismo `tcDeMov` que los KPIs) para que no aparezcan dos
+   bases distintas en la misma pantalla.
+2. **Conteos intactos.** Sólo se porcentualizan montos: "15 sin pagar · 12%" mantiene el 15.
+3. **No persiste, arranca apagado siempre.** Vive en `PrivacidadContext` (memoria, no
+   `localStorage`). El estado sí es compartido entre vistas: si se prende en Resumen y se
+   navega a Dashboard, sigue tapado — un toggle por pantalla haría que navegar destape.
+4. **PDF: opción explícita al generar.** Checkbox "Sin montos" junto al botón, independiente
+   del toggle de pantalla. El archivo lo declara en el título de portada, en una nota y en el
+   nombre (`patrimonio-<fecha>-sin-montos.pdf`, y el mismo sufijo en el `storagePath`), porque
+   queda archivado en Storage y meses después nadie distinguiría un informe sin montos de uno
+   incompleto. Base del PDF: % de la cartera financiera. Implementado sombreando `fmtUsd`
+   dentro de `generarYArchivarInforme`, para que ninguna sección se escape mostrando el número
+   real.
+
+También se ocultan los montos de las tarjetas del checklist y de los sueltos, incluido el campo
+editable de monto: un input con el número real adentro haría inútil el modo.
+
+**Fuera de lo hecho:** la solapa Patrimonio no está cubierta. No tiene toggle ARS/USD al lado
+del cual poner el de privacidad, y su pasada de privacidad es un trabajo aparte sobre un archivo
+de ~4.100 líneas. El informe PDF de Patrimonio sí quedó cubierto por la opción al generar.
 
 ### Duda de auditoría — resuelta
 

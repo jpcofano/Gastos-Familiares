@@ -3,6 +3,7 @@ import { Card, Sheet, Message, MerchantLogo, type SheetOption } from '../design-
 import { Icon } from '../design-system/Icon';
 import { fmtMoney } from '../datos/money';
 import { cargarTCReciente, tcEfectivoDe, type EstadoTcHoy } from '../datos/tcDiario';
+import { usePrivacidad, fmtPct, BasePrivacidad } from '../contexto/PrivacidadContext';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useMovimientosDelAnio } from '../hooks/useMovimientosDelAnio';
@@ -23,10 +24,18 @@ type Moneda = 'ARS' | 'USD';
 // helper único fmtMoney (F9.8), sin TC propio ni sufijo "eq" ─────────────────
 
 function nfes(n: number): string { return Math.round(n).toLocaleString('es-AR'); }
-function curBig(usd: number, cur: Moneda, tc: number): string {
+
+// F9.120 — modo privacidad. La base de Dashboard es el GASTO del período: es contra eso que se
+// leen las categorías, los días y los bancos, que es casi todo lo que muestra esta pantalla.
+// Se declara en el encabezado. El equivalente en la otra moneda se omite: sería el mismo %.
+type Priv = { privado: boolean; base: number };
+
+function curBig(usd: number, cur: Moneda, tc: number, priv?: Priv): string {
+  if (priv?.privado) return fmtPct(usd, priv.base);
   return fmtMoney(usd, { from: 'USD', to: cur, tc });
 }
-function curEq(usd: number, cur: Moneda, tc: number): string {
+function curEq(usd: number, cur: Moneda, tc: number, priv?: Priv): string {
+  if (priv?.privado) return '';
   return fmtMoney(usd, { from: 'USD', to: cur === 'USD' ? 'ARS' : 'USD', tc });
 }
 
@@ -155,6 +164,9 @@ function TreemapChart({ cats, onClickTile }: { cats: CatSlice[]; onClickTile?: (
 
 function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: DashMensual; cur: Moneda; movsMes: Movement[]; esAdmin: boolean; onEditar: (m: Movement) => void; paleta: string[] }) {
   const tc = d.tc;
+  // F9.120 — base del período: el gasto total. Ver el comentario de curBig.
+  const { privado } = usePrivacidad();
+  const priv: Priv = { privado, base: d.salidasUsd };
   const [compartirInfo, setCompartirInfo] = useState(false);
   const [openCatMes, setOpenCatMes] = useState<string | null>(null);
   const [openOtrasCat, setOpenOtrasCat] = useState<string | null>(null);
@@ -190,8 +202,8 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,.6)' }}>Balance del período</span>
           <span style={{ fontSize: 12, fontWeight: 700, color: d.balancePositivo ? 'var(--gf-emerald-100)' : 'var(--gf-on-ink-neg)' }}>{d.balancePositivo ? '↑ positivo' : '↓ negativo'}</span>
         </div>
-        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{curBig(d.balanceUsd, cur, tc)}</div>
-        <div style={{ fontSize: 14, color: 'var(--gf-gray-400)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{curEq(d.balanceUsd, cur, tc)}</div>
+        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{curBig(d.balanceUsd, cur, tc, priv)}</div>
+        <div style={{ fontSize: 14, color: 'var(--gf-gray-400)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{curEq(d.balanceUsd, cur, tc, priv)}</div>
       </div>
 
       {/* Ingresos / Salidas */}
@@ -201,8 +213,8 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
             <div style={{ height: 4, background: x.c }} />
             <div style={{ padding: '12px 10px' }}>
               <Eyebrow>{x.e}</Eyebrow>
-              <div style={{ fontSize: 19, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(x.v, cur, tc)}</div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-sec)', fontVariantNumeric: 'tabular-nums' }}>{curEq(x.v, cur, tc)}</div>
+              <div style={{ fontSize: 19, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(x.v, cur, tc, priv)}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-sec)', fontVariantNumeric: 'tabular-nums' }}>{curEq(x.v, cur, tc, priv)}</div>
             </div>
           </Card>
         ))}
@@ -212,7 +224,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
       <Card variant="flat" padding="0" style={{ display: 'flex' }}>
         {[
           { eyebrow: 'Movimientos', value: d.movimientos, sub: 'en el mes' },
-          { eyebrow: 'Gasto prom.', value: curBig(d.gastoPromedioUsd, cur, tc), sub: `${d.diasConGasto} días` },
+          { eyebrow: 'Gasto prom.', value: curBig(d.gastoPromedioUsd, cur, tc, priv), sub: `${d.diasConGasto} días` },
           { eyebrow: 'Cat. top', value: d.categoriaTop.nombre, sub: `${d.categoriaTop.pct}% del total` },
         ].map((x, i) => (
           <div key={x.eyebrow} style={{ flex: 1, minWidth: 0, padding: '10px 8px', textAlign: 'center', borderLeft: i > 0 ? '1px solid var(--gf-gray-100)' : 'none' }}>
@@ -232,7 +244,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
               <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
               <Icon name="pencil" size={12} color="var(--gf-gray-300)" />
             </div>
-            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{curBig(d.movMasAlto.usd, cur, tc, priv)}</div>
             <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2, textAlign: 'center' }}>{d.movMasAlto.desc}</div>
           </Card>
         </button>
@@ -240,7 +252,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
         <Card variant="flat" padding="var(--space-3)">
           <div style={{ textAlign: 'center' }}>
             <Eyebrow icon="trending-up">Mov. más alto</Eyebrow>
-            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc)}</div>
+            <div style={{ fontSize: 17, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(d.movMasAlto.usd, cur, tc, priv)}</div>
             <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>{d.movMasAlto.desc}</div>
           </div>
         </Card>
@@ -295,7 +307,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                       <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
                       <span style={{ fontWeight: 600 }}>{c.nombre}</span>
                       <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 6px' }}>{c.pct === 0 && c.usd > 0 ? '<1%' : `${c.pct}%`}</span>
-                      <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+                      <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc, priv)}</span>
                       {canDrill && <Icon name={isOpenMes ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />}
                     </div>
                     <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
@@ -317,7 +329,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                                 <span style={{ width: 9, height: 9, borderRadius: 3, background: cat.color, flexShrink: 0 }} />
                                 <span style={{ fontWeight: 600 }}>{cat.nombre}</span>
                                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 6px' }}>{cat.pct === 0 && cat.usd > 0 ? '<1%' : `${cat.pct}%`}</span>
-                                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(cat.usd, cur, tc)}</span>
+                                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(cat.usd, cur, tc, priv)}</span>
                                 {catCanDrill && <Icon name={isCatOpen ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />}
                               </div>
                               <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
@@ -333,7 +345,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                                         <div style={{ flex: 1, height: 5, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
                                           <div style={{ height: '100%', width: `${Math.max((s.usd / catMaxSubUsd) * 100, 5)}%`, background: cat.color, opacity: 0.6, borderRadius: 3 }} />
                                         </div>
-                                        <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc)}</span>
+                                        <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc, priv)}</span>
                                         <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{sPct === 0 && s.usd > 0 ? '<1%' : `${sPct}%`}</span>
                                       </div>
                                     );
@@ -356,7 +368,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                               <div style={{ flex: 1, height: 5, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
                                 <div style={{ height: '100%', width: `${Math.max((s.usd / maxSubUsd) * 100, 5)}%`, background: c.color, opacity: 0.6, borderRadius: 3 }} />
                               </div>
-                              <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc)}</span>
+                              <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc, priv)}</span>
                               <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{sPct === 0 && s.usd > 0 ? '<1%' : `${sPct}%`}</span>
                             </div>
                           );
@@ -412,7 +424,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: s.color, flexShrink: 0 }} />
                 <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.nombre}</span>
                 <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(s.valor, cur, tc)}</span>
+                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(s.valor, cur, tc, priv)}</span>
                   <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px', fontVariantNumeric: 'tabular-nums' }}>{s.pct}%</span>
                 </span>
               </div>
@@ -446,7 +458,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
       <div style={{ display: 'flex', gap: 10 }}>
         <Kpi eyebrow="Días con gasto" value={d.diasConGasto} />
         <Kpi eyebrow="Fin de semana" value={`${d.finDeSemanaPct}%`} sub="del gasto del mes" />
-        <Kpi eyebrow="Promedio diario" value={curBig(d.promedioDiarioUsd, cur, tc)} />
+        <Kpi eyebrow="Promedio diario" value={curBig(d.promedioDiarioUsd, cur, tc, priv)} />
       </div>
       <Card variant="flat" padding="var(--space-3)">
         <div style={{ textAlign: 'center' }}>
@@ -459,7 +471,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
       {/* Insight cards */}
       <div style={{ display: 'flex', gap: 10 }}>
         <Kpi eyebrow="Banco dominante" value={d.bancoDominante} />
-        <Kpi eyebrow="Día pico" value={`${d.picoDia.fecha} · ${d.picoDia.dow}`} sub={curBig(d.picoDia.usd, cur, tc)} />
+        <Kpi eyebrow="Día pico" value={`${d.picoDia.fecha} · ${d.picoDia.dow}`} sub={curBig(d.picoDia.usd, cur, tc, priv)} />
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
         <Kpi eyebrow="Vs mes anterior" value={`${d.vsMesAnteriorPct}%`} sub={d.vsMesLabel} accent={d.vsMesAnteriorPct < 0 ? 'var(--gf-income)' : 'var(--gf-expense)'} />
@@ -476,7 +488,7 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
               <span style={{ width: 18, fontSize: 12, fontWeight: 700, color: 'var(--gf-gray-400)' }}>{i + 1}</span>
               <MerchantLogo nombre={x.desc} size={30} radius={8} />
               <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.desc}</span>
-              <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: 13 }}>{curBig(x.usd, cur, tc)}</span>
+              <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontSize: 13 }}>{curBig(x.usd, cur, tc, priv)}</span>
             </div>
           ))}
         </div>
@@ -504,6 +516,8 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
 // ── Anual (histórico) ─────────────────────────────────────────────────────────
 
 function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda }) {
+  const { privado } = usePrivacidad();
+  const priv: Priv = { privado, base: a.salidasUsd };
   const [openCat, setOpenCat] = useState<string | null>(null);
   const hayProyeccion = a.mesActualIdx < 11;
   const maxSal = Math.max(...a.salidasPorMes, ...a.salidasProyeccion, 1);
@@ -520,8 +534,8 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
       {/* Balance anual */}
       <div style={{ background: 'linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)', borderRadius: 'var(--radius-card)', padding: '22px 18px', textAlign: 'center', color: '#fff', boxShadow: 'var(--shadow-soft)' }}>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,.6)', marginBottom: 8 }}>Balance del año · {a.anio}</div>
-        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{curBig(a.balanceUsd, cur, tc)}</div>
-        <div style={{ fontSize: 14, color: 'var(--gf-gray-400)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{curEq(a.balanceUsd, cur, tc)}</div>
+        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{curBig(a.balanceUsd, cur, tc, priv)}</div>
+        <div style={{ fontSize: 14, color: 'var(--gf-gray-400)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{curEq(a.balanceUsd, cur, tc, priv)}</div>
       </div>
 
       {/* Ingresos / Salidas */}
@@ -531,8 +545,8 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
             <div style={{ height: 4, background: x.c }} />
             <div style={{ padding: '12px 10px' }}>
               <Eyebrow>{x.e}</Eyebrow>
-              <div style={{ fontSize: 19, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(x.v, cur, tc)}</div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-sec)', fontVariantNumeric: 'tabular-nums' }}>{curEq(x.v, cur, tc)}</div>
+              <div style={{ fontSize: 19, fontWeight: 800, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{curBig(x.v, cur, tc, priv)}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-sec)', fontVariantNumeric: 'tabular-nums' }}>{curEq(x.v, cur, tc, priv)}</div>
             </div>
           </Card>
         ))}
@@ -571,13 +585,13 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
           })}
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-          <Kpi eyebrow="Promedio mensual" value={curBig(a.promedioMensualUsd, cur, tc)} />
+          <Kpi eyebrow="Promedio mensual" value={curBig(a.promedioMensualUsd, cur, tc, priv)} />
           <Kpi eyebrow="Mes más alto" value={a.mesMasAlto} />
           <Kpi eyebrow="Mes más bajo" value={a.mesMasBajo} />
         </div>
         {hayProyeccion && (
           <div style={{ marginTop: 10 }}>
-            <Kpi eyebrow="Proy. resto del año" value={curBig(a.proyeccionRestoAnioUsd, cur, tc)} sub="estimado, según la tendencia" />
+            <Kpi eyebrow="Proy. resto del año" value={curBig(a.proyeccionRestoAnioUsd, cur, tc, priv)} sub="estimado, según la tendencia" />
           </div>
         )}
       </Card>
@@ -589,7 +603,7 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
             <div style={{ fontSize: 16, fontWeight: 800 }}>Por categoría</div>
             <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>del año</div>
           </div>
-          <span style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{cur === 'USD' ? 'U$S ' + nfes(totalCat) : '$' + nfes(totalCat * tc / 1000) + 'k'}</span>
+          <span style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{privado ? fmtPct(totalCat, priv.base) : cur === 'USD' ? 'U$S ' + nfes(totalCat) : '$' + nfes(totalCat * tc / 1000) + 'k'}</span>
         </div>
         <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', margin: '14px 0' }}>
           {a.categorias.map(c => (
@@ -609,7 +623,7 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
                   <span style={{ width: 9, height: 9, borderRadius: 3, background: c.color, flexShrink: 0 }} />
                   <span style={{ fontWeight: 600 }}>{c.nombre}</span>
                   {totalCat > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 6px', marginLeft: 'auto' }}>{Math.round(c.usd / totalCat * 100) === 0 && c.usd > 0 ? '<1%' : `${Math.round(c.usd / totalCat * 100)}%`}</span>}
-                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc)}</span>
+                  <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(c.usd, cur, tc, priv)}</span>
                   <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-400)" />
                 </div>
                 <div style={{ height: 6, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
@@ -623,7 +637,7 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
                         <div style={{ flex: 1, height: 5, background: 'var(--gf-gray-100)', borderRadius: 3, overflow: 'hidden' }}>
                           <div style={{ height: '100%', width: `${Math.max(c.usd > 0 ? (s.usd / c.usd) * 100 : 0, 3)}%`, background: c.color, opacity: 0.6, borderRadius: 3 }} />
                         </div>
-                        <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc)}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{curBig(s.usd, cur, tc, priv)}</span>
                         <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', width: 30, textAlign: 'right', flexShrink: 0 }}>{s.pct === 0 && s.usd > 0 ? '<1%' : `${s.pct}%`}</span>
                       </div>
                     ))}
@@ -682,7 +696,7 @@ function DashboardAnual({ a, tc, cur }: { a: DashAnual; tc: number; cur: Moneda 
               <div style={{ flex: 1, height: 8, background: 'var(--gf-gray-100)', borderRadius: 4, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${(m.usd / maxMM) * 100}%`, background: 'var(--color-accent)', borderRadius: 4 }} />
               </div>
-              <span style={{ width: 64, textAlign: 'right', fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(m.usd, cur, tc)}</span>
+              <span style={{ width: 64, textAlign: 'right', fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{curBig(m.usd, cur, tc, priv)}</span>
               <span style={{ width: 44, textAlign: 'right', fontSize: 11, fontWeight: 700, color: m.delta == null ? 'var(--gf-gray-300)' : m.delta < 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums' }}>
                 {m.delta == null ? '—' : (m.delta > 0 ? '+' : '') + m.delta + '%'}
               </span>
@@ -743,6 +757,7 @@ export default function Dashboard() {
       .catch(err => { console.error('[Dashboard] tcHoy falló:', err); setTcHoy({ estado: 'error' }); });
   }, []);
   const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);
+  const { privado: privadoShell, alternar: alternarPrivado } = usePrivacidad();
 
   const { config } = useFamiliaConfig();
   const { movimientos: movsMes,     cargando: cargandoMes }    = useMovimientosDelMes(mes, persona);
@@ -802,8 +817,25 @@ export default function Dashboard() {
             {periodoLabel}
             <Icon name="chevron-down" size={15} color="var(--gf-gray-400)" />
           </button>
-          <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3 }}>
-            {(['ARS', 'USD'] as const).map(curPill)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* F9.120 — toggle de privacidad al lado del de moneda. Arranca apagado y no persiste. */}
+            <button
+              onClick={alternarPrivado}
+              aria-label={privadoShell ? 'Mostrar montos' : 'Ocultar montos'}
+              title={privadoShell ? 'Mostrar montos' : 'Ocultar montos'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 999,
+                border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 700,
+                background: privadoShell ? 'var(--gf-ink)' : 'var(--gf-gray-200)',
+                color: privadoShell ? '#fff' : 'var(--color-text-sec)', transition: '.15s',
+              }}
+            >
+              <Icon name={privadoShell ? 'eye-off' : 'eye'} size={13} color={privadoShell ? '#fff' : 'var(--color-text-sec)'} />
+              %
+            </button>
+            <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3 }}>
+              {(['ARS', 'USD'] as const).map(curPill)}
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4, background: 'var(--gf-gray-200)', borderRadius: 14, padding: 4 }}>
@@ -832,6 +864,9 @@ export default function Dashboard() {
       {/* F9.114 — nunca un valor plausible sin marcar: si el TC no es el real de /tcDiario,
           se dice de qué día es el número. */}
       {avisoTc && <p style={{ fontSize: 11.5, color: 'var(--gf-out)', margin: '0 4px' }}>{avisoTc}</p>}
+
+      {/* F9.120 — la base del porcentaje, declarada. */}
+      {privadoShell && <BasePrivacidad texto="% del gasto del período" />}
 
       {cargandoSec ? (
         <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Cargando…</p>

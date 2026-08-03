@@ -4,6 +4,7 @@ import { signInConGoogle, signOutUsuario } from './auth';
 import { useMiembro } from './hooks/useMiembro';
 import { MiembroContext } from './contexto/MiembroContext';
 import { ItemsEsperadosProvider } from './contexto/ItemsEsperadosContext';
+import { PrivacidadProvider } from './contexto/PrivacidadContext';
 import { DiccionarioProvider }    from './contexto/DiccionarioContext';
 import { AppBar, Screen, BottomNav, InstallBanner, type BottomNavItem } from './design-system/shell';
 import { useTheme } from './datos/theme';
@@ -112,7 +113,9 @@ export default function AppShell() {
     <MiembroContext.Provider value={{ memberId: memberId!, miembro: miembro! }}>
     <DiccionarioProvider>
     <ItemsEsperadosProvider>
+    <PrivacidadProvider>
       <ShellFrame esAdmin={esAdmin} esDueno={esDueno} nombre={miembro!.nombre} navItems={navItems} />
+    </PrivacidadProvider>
     </ItemsEsperadosProvider>
     </DiccionarioProvider>
     </MiembroContext.Provider>

@@ -925,8 +925,21 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `:53-54`); un cobro esperado ya entraba al checklist y a la agenda. Lo único que los dejaba
   afuera era el flujo de comprobantes: `candidatosDeGrupo` filtraba el picker a `'Gasto'` y
   `preloadBase.tipo` estaba hardcodeado. Ahora el picker ofrece los dos y el tipo del movimiento
-  lo manda el ítem elegido. **F9.120 (modo privacidad) no se ejecutó:** sus cuatro decisiones de
-  diseño siguen abiertas. **Duda de auditoría resuelta:** "Pesos disponibles" son los **ingresos
+  lo manda el ítem elegido. **F9.120 — modo privacidad** (decisiones tomadas por el dueño): toggle
+  `%`/ojo al lado del de ARS/USD en Resumen y Dashboard, estado en `PrivacidadContext`
+  (memoria, **no** persiste y arranca apagado siempre — que quede prendido sin darte cuenta es
+  peor que prenderlo cada vez; el estado sí es compartido entre vistas para que navegar no
+  destape). **Base declarada por pantalla** en el encabezado, porque un 43% sin base no
+  significa nada: Resumen usa % del ingreso del mes (las dos solapas comparten
+  `baseIngresoMes`, calculado con el mismo `tcDeMov` que los KPIs), Dashboard % del gasto del
+  período. Los conteos no se tocan; sólo los montos. En el checklist también se tapa el campo
+  editable de monto — un input con el número real adentro haría inútil el modo. **PDF:** opción
+  explícita "Sin montos" al generar, independiente del toggle de pantalla, porque el informe
+  queda archivado en Storage; el archivo lo declara en portada, en una nota y en el nombre
+  (`-sin-montos`, también en el `storagePath`). Se implementa sombreando `fmtUsd` dentro de
+  `generarYArchivarInforme` para que ninguna sección se escape con el número real; base = % de
+  la cartera. **No cubierto:** la solapa Patrimonio (no tiene toggle de moneda donde colgarlo y
+  es una pasada aparte sobre ~4.100 líneas). **Duda de auditoría resuelta:** "Pesos disponibles" son los **ingresos
   en ARS del mes** (`Resumen.tsx:143`, `pesosDisp: ingArs`), no un remanente — por eso coincide
   con INGRESOS cuando todo el ingreso es en pesos. El número está bien; la etiqueta induce a
   leerlo mal. Renombrarla es decisión del dueño. `tsc`: 41 pre-existentes, 0 nuevos; `vite build`

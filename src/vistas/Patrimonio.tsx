@@ -790,12 +790,13 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
   flujos: FlujoPatrimonio[];
   informes: InformeAnterior[];
   generandoInforme: boolean;
-  onGenerarInforme: () => void;
+  onGenerarInforme: (sinMontos: boolean) => void;
   onToast: (texto: string, error: boolean) => void;
 }) {
   // F9.115 — descargas de la corrida vigente. El patrón blob/a.download es el de
   // descargar() (:3127), pero acá SÍ se libera el object URL.
   const [descargando, setDescargando] = useState<'txt' | 'json' | null>(null);
+  const [sinMontos, setSinMontos] = useState(false);   // F9.120 — variante del informe
 
   async function descargarExport(cual: 'txt' | 'json') {
     setDescargando(cual);
@@ -947,7 +948,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: informes.length > 0 ? 10 : 0 }}>
           <span style={{ fontSize: 13, fontWeight: 700 }}>Informe PDF</span>
           <button
-            onClick={onGenerarInforme}
+            onClick={() => onGenerarInforme(sinMontos)}
             disabled={generandoInforme}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', background: generandoInforme ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: generandoInforme ? 'var(--gf-gray-400)' : '#fff', fontSize: 12.5, fontWeight: 700, cursor: generandoInforme ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
           >
@@ -976,6 +977,16 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
             })}
           </>
         )}
+        {/* F9.120 — opción EXPLÍCITA al generar, no el toggle de pantalla: el PDF queda
+            archivado en Storage y después nadie sabría por qué ese informe no tiene números.
+            El archivo lo dice en la portada y en el nombre. */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={sinMontos} onChange={e => setSinMontos(e.target.checked)} />
+          <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
+            Sin montos <span style={{ color: 'var(--gf-gray-400)' }}>· todo como % de la cartera, para compartir</span>
+          </span>
+        </label>
+
         <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: informes.length > 0 ? 8 : 4, lineHeight: 1.4 }}>
           Bajo demanda · incluye análisis IA cacheados
         </div>
@@ -3901,7 +3912,7 @@ export default function Patrimonio() {
     await guardarConfigIA(next);
   }
 
-  async function handleGenerarInforme() {
+  async function handleGenerarInforme(sinMontos = false) {
     if (!M || generandoInforme) return;
     setGenerandoInforme(true);
     try {
@@ -3934,6 +3945,7 @@ export default function Patrimonio() {
         posiciones, activosFijos, manuales: posicionesManuales,
         historial, tc, fechaCorrida, M,
         stressResults, opcionResults, riesgo,
+        privacidad: sinMontos,
       });
       setInformes(prev => [nuevo, ...prev].slice(0, 5));
     } finally {

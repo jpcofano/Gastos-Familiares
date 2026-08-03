@@ -56,6 +56,11 @@ export type InformeParams = {
   stressResults: StressResult[];
   opcionResults: OpcionResult[];
   riesgo?: RiesgoInforme | null;
+  // F9.120 — variante sin montos: cada USD se expresa como % de la cartera. Es una opción
+  // EXPLÍCITA al generar, no el toggle de pantalla: el PDF queda archivado en Storage y meses
+  // después nadie podría saber por qué ese informe no tiene números. El archivo lo declara en
+  // la portada y en el nombre.
+  privacidad?: boolean;
 };
 
 export type InformeAnterior = {
@@ -71,7 +76,10 @@ export type InformeAnterior = {
 
 // ── Helpers de formato ────────────────────────────────────────────────────────
 const pct = (x: number) => Math.round(x * 100) + '%';
-const fmtUsd = (n: number) => `U$S ${Math.round(n).toLocaleString('es-AR')}`;
+const fmtUsdAbs = (n: number) => `U$S ${Math.round(n).toLocaleString('es-AR')}`;
+// F9.120 — el informe sombrea este helper cuando se pide la variante sin montos (ver
+// generarYArchivarInforme). Fuera de esa función, `fmtUsd` es siempre el valor absoluto.
+const fmtUsd = fmtUsdAbs;
 const fmtFecha = (iso: string) => { const [y,m,d] = iso.split('-'); return `${d}/${m}/${y}`; };
 const semColor = (b: 'verde'|'amarillo'|'rojo') =>
   b === 'verde' ? '#059669' : b === 'amarillo' ? '#D97706' : '#DC2626';
@@ -147,7 +155,15 @@ export async function cargarInformesAnteriores(limite = 10): Promise<InformeAnte
 
 // ── Generador y archivador ────────────────────────────────────────────────────
 export async function generarYArchivarInforme(params: InformeParams): Promise<InformeAnterior> {
-  const { posiciones, activosFijos, manuales, historial, tc, fechaCorrida, M, stressResults, opcionResults, riesgo } = params;
+  const { posiciones, activosFijos, manuales, historial, tc, fechaCorrida, M, stressResults, opcionResults, riesgo, privacidad } = params;
+
+  // F9.120 — con la variante sin montos, `fmtUsd` pasa a devolver el % de la cartera. Se
+  // sombrea el helper del módulo a propósito: así toda sección del informe queda cubierta sin
+  // tener que tocar cada llamada (y sin riesgo de que una se escape mostrando el número real).
+  // La base es M.total (cartera financiera), declarada en la portada.
+  const fmtUsd = privacidad
+    ? (n: number) => (M.total ? `${(Math.abs(n / M.total) * 100 < 10 ? (n / M.total * 100).toFixed(1).replace('.', ',') : String(Math.round(n / M.total * 100)))}%` : '—')
+    : fmtUsdAbs;
 
   const fijosUsd = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
   const patrimTotal = M.total + fijosUsd;
@@ -202,7 +218,10 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
 
   // 1. Portada
   content.push(
-    { text: 'Informe de Patrimonio — Familia', style: 'portadaTitulo', margin: [0, 60, 0, 16] },
+    { text: `Informe de Patrimonio — Familia${privacidad ? ' (sin montos)' : ''}`, style: 'portadaTitulo', margin: [0, 60, 0, 16] },
+    ...(privacidad
+      ? [{ text: 'Variante sin montos: todos los valores están expresados como % de la cartera financiera. No es el informe completo.', style: 'note', margin: [0, 0, 0, 10] } as Content]
+      : []),
     { text: `Corrida: ${fmtFecha(fechaCorrida)}`, style: 'portadaSub' },
     { text: `Generado: ${fmtFecha(generadoEn.slice(0, 10))}`, style: 'portadaSub' },
     { text: `TC: $ ${tc.toLocaleString('es-AR')}`, style: 'portadaSub', margin: [0, 2, 0, 20] },
@@ -721,14 +740,17 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `patrimonio-${fechaCorrida}.pdf`;
+  // F9.120 — el nombre dice qué variante es: el archivo queda archivado y meses después nadie
+  // podría distinguir un informe sin montos de uno incompleto.
+  const sufijoPriv = privacidad ? '-sin-montos' : '';
+  a.download = `patrimonio-${fechaCorrida}${sufijoPriv}.pdf`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 
   // Upload a Storage
-  const storagePath = `patrimonio/informes/${fechaCorrida}-${Date.now()}.pdf`;
+  const storagePath = `patrimonio/informes/${fechaCorrida}${sufijoPriv}-${Date.now()}.pdf`;
   const storageRef = ref(storage, storagePath);
   const { ref: uploadedRef } = await uploadBytes(storageRef, blob, { contentType: 'application/pdf' });
   const downloadURL = await getDownloadURL(uploadedRef);

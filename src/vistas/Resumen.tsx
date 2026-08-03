@@ -10,6 +10,7 @@ import { Icon } from '../design-system/Icon';
 import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
 import { fmtMoney } from '../datos/money';
 import { cargarTCReciente, tcDeFecha, tcEfectivoDe, type EstadoTcHoy } from '../datos/tcDiario';
+import { usePrivacidad, fmtPct, BasePrivacidad } from '../contexto/PrivacidadContext';
 import { cargarTCRango } from '../datos/patrimonioOptimizacion';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
@@ -178,14 +179,21 @@ function porPersonaIngreso(movs: Movement[], tcDeMov: TcDeMov): [string, Eq][] {
 //   paga gastos USD con dólares propios. El cálculo es el definido por el dueño.
 // F9.71 — card oscura centrada: Neto grande + eq, Ingresos/Gastos columnas con eq.
 function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
-  const netBig   = cur === 'ARS' ? c.netArsEq  : c.netUsdEq;
-  const netSmall = cur === 'ARS' ? c.netUsdEq  : c.netArsEq;
-  const fmt      = cur === 'ARS' ? fmtArs      : fmtUsdEq;
-  const fmtOtra  = cur === 'ARS' ? fmtUsdEq    : fmtArs;
-  const ingBig   = cur === 'ARS' ? c.ingArsEq  : c.ingUsdEq;
-  const ingSmall = cur === 'ARS' ? c.ingUsdEq  : c.ingArsEq;
-  const gasBig   = cur === 'ARS' ? c.gasArsEq  : c.gasUsdEq;
-  const gasSmall = cur === 'ARS' ? c.gasUsdEq  : c.gasArsEq;
+  // F9.120 — con modo privacidad todo se expresa como % del ingreso del mes, que es la base
+  // declarada de esta pantalla. El equivalente en la otra moneda se omite: sería el mismo %.
+  const { privado } = usePrivacidad();
+  const base = c.ingArsEq;
+  // Con privacidad se toman SIEMPRE las cifras en ARS-eq: son las que comparten base con el
+  // denominador. Porcentualizar el valor en USD contra una base en pesos daría cualquier cosa.
+  const enArs    = privado || cur === 'ARS';
+  const netBig   = enArs ? c.netArsEq  : c.netUsdEq;
+  const netSmall = enArs ? c.netUsdEq  : c.netArsEq;
+  const fmt      = privado ? ((n: number) => fmtPct(n, base)) : (cur === 'ARS' ? fmtArs : fmtUsdEq);
+  const fmtOtra  = privado ? (() => '')                       : (cur === 'ARS' ? fmtUsdEq : fmtArs);
+  const ingBig   = enArs ? c.ingArsEq  : c.ingUsdEq;
+  const ingSmall = enArs ? c.ingUsdEq  : c.ingArsEq;
+  const gasBig   = enArs ? c.gasArsEq  : c.gasUsdEq;
+  const gasSmall = enArs ? c.gasUsdEq  : c.gasArsEq;
   const netColor = netBig >= 0 ? 'var(--gf-emerald-100)' : 'var(--gf-on-ink-neg)';
   // faltanteArs: gastos totales ArsEq − pesos disponibles (ingresos ARS del mes)
   const faltanteArs = c.gasArsEq - c.pesosDisp;
@@ -210,13 +218,13 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
       </div>
       <div style={{ display: 'flex', gap: 10 }}>
         <Card eyebrow="Pesos disponibles" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtArs(c.pesosDisp)}</span>
+          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{privado ? fmtPct(c.pesosDisp, base) : fmtArs(c.pesosDisp)}</span>
         </Card>
         <Card eyebrow="Cobertura del mes" style={{ flex: 1 }}>
           <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cubierto ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
             {cubierto
               ? 'Cubierto'
-              : `Sin cubrir · −${fmtUsdEq(faltanteArs / c.tcEfectivo)}`}
+              : `Sin cubrir · −${privado ? fmtPct(faltanteArs, base) : fmtUsdEq(faltanteArs / c.tcEfectivo)}`}
           </span>
         </Card>
       </div>
@@ -286,6 +294,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   tcEfectivo: number;
   avisoTc: string | null;
 }) {
+  const { privado } = usePrivacidad();
   const hoy = new Date();
   const mesActualHoy = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
   const esMesActual = mes === mesActualHoy;
@@ -301,8 +310,11 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // el TC de su fecha, y se dice cuántos son.
   const sinTc = cajaMov.filter(sinTcPropio).length;
   // ARS: como está hoy (ARS principal, USD chico). USD: invertido (USD principal, ARS chico).
-  const fmtBig = (e: Eq) => cur === 'ARS' ? fmtArs(e.ars) : fmtUsdEq(e.usd);
-  const fmtSmall = (e: Eq) => cur === 'ARS' ? fmtUsdEq(e.usd) : fmtArs(e.ars);
+  // F9.120 — modo privacidad: la base de Resumen es el ingreso del mes (lo natural acá: cuánto
+  // de lo que entró se lleva cada cosa). Se declara en el encabezado — un 43% sin base no
+  // significa nada. El equivalente en la otra moneda se omite: en % sería el mismo número.
+  const fmtBig = (e: Eq) => privado ? fmtPct(e.ars, c.ingArsEq) : (cur === 'ARS' ? fmtArs(e.ars) : fmtUsdEq(e.usd));
+  const fmtSmall = (e: Eq) => privado ? '' : (cur === 'ARS' ? fmtUsdEq(e.usd) : fmtArs(e.ars));
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
   const [hoyExpandido, setHoyExpandido] = useState(true);
   // Cifras vivas que no vienen de un movimiento (esperados no pagados): TC de hoy, siempre.
@@ -386,6 +398,9 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* F9.120 — la base del porcentaje se declara acá: un 43% sin base no significa nada. */}
+      {privado && <BasePrivacidad texto="% del ingreso del mes" />}
+
       <KpiCards c={c} cur={cur} />
 
       {/* F9.114 — la pantalla SIEMPRE dice con qué TC está valuando cuando no es el real de
@@ -429,14 +444,14 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
             )}
             <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: todoConfirmado ? 'var(--gf-income)' : 'var(--color-text)' }}>
               {porRevisar > 0 ? (
-                `Revisar pendientes del mes · ${porRevisar} sin pagar · ${fmtArs(pendienteAgenda(agenda))}`
+                `Revisar pendientes del mes · ${porRevisar} sin pagar · ${(privado ? fmtPct(pendienteAgenda(agenda), c.ingArsEq) : fmtArs(pendienteAgenda(agenda)))}`
               ) : todoConfirmado ? (
                 `Todo confirmado · ${cubiertos}/${total}`
               ) : (
                 <>
                   Nada vencido · {cubiertos}/{total} confirmados
                   {pendienteAgenda(agenda) > 0 && (
-                    <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {fmtArs(pendienteAgenda(agenda))} a confirmar</span>
+                    <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {(privado ? fmtPct(pendienteAgenda(agenda), c.ingArsEq) : fmtArs(pendienteAgenda(agenda)))} a confirmar</span>
                   )}
                 </>
               )}
@@ -721,16 +736,18 @@ function mesDe(d: Date): string {
 
 // F9.99.7 Parte 4.2/4.4 — tarjeta de un ítem del checklist, reutilizada tanto en la lista
 // principal como en la sección "Débitos automáticos" (mismos estados/interacciones).
-function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago }: {
+function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago, basePriv }: {
   ci: CheckItem;
   mes: string;
   config: FamiliaConfig | null;
   esMesActual: boolean;
+  basePriv: number;
   onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
   onDesmarcar: (matches: Movement[]) => void;
   onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
 }) {
   const { item, matches, estado } = ci;
+  const { privado } = usePrivacidad();
   // F9.111 — total de ítems que disputaron algún movimiento de este ítem (unión de `otros`
   // a través de todas las disputas, no solo la primera).
   const disputaCount = new Set(ci.disputas?.flatMap(d => d.otros) ?? []).size;
@@ -789,7 +806,11 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
             )}
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
-            {!tieneMatch && !item.tarjetaCodigo
+            {/* F9.120 — con privacidad no se muestra el monto ni el campo editable: un input
+                con el número real adentro haría inútil el modo. */}
+            {privado
+              ? <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtPct(monto, basePriv)}</span>
+              : !tieneMatch && !item.tarjetaCodigo
               ? <MontoInlineEdit item={item} />
               : <Money value={monto} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
             }
@@ -853,13 +874,15 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
 // Sin estado de la state machine (no es ExpectedItem): check verde solo si confirmadoPago=true.
 // F9.99.8.1 — accionable: "Marcar pagado"/"Deshacer" edita el movimiento existente
 // (pagado + confirmadoPago) vía marcarPagadoSuelto/desmarcarPagadoSuelto — nunca crea uno nuevo.
-function SueltoAgendaCard({ mov, config, onMarcarPagado, onDeshacer }: {
+function SueltoAgendaCard({ mov, config, onMarcarPagado, onDeshacer, basePriv }: {
   mov: Movement;
   config: FamiliaConfig | null;
+  basePriv: number;
   onMarcarPagado: (mov: Movement) => Promise<void>;
   onDeshacer: (mov: Movement) => Promise<void>;
 }) {
   const pagado = mov.confirmadoPago === true;
+  const { privado } = usePrivacidad();
   const etiqueta = mov.descripcion || '(sin descripción)';
   const [guardando, setGuardando] = useState(false);
 
@@ -878,7 +901,9 @@ function SueltoAgendaCard({ mov, config, onMarcarPagado, onDeshacer }: {
               <Badge tone="neutral">Sin plantilla</Badge>
             </div>
           </div>
-          <Money value={mov.monto} currency={mov.moneda} colored={false} decimals={0} style={{ fontSize: 15, flexShrink: 0 }} />
+          {privado
+            ? <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{fmtPct(mov.monto, basePriv)}</span>
+            : <Money value={mov.monto} currency={mov.moneda} colored={false} decimals={0} style={{ fontSize: 15, flexShrink: 0 }} />}
         </div>
         <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6 }}>
           {pagado ? 'Conciliado' : `Vence ${fmtDDMM(mov.fecha)}`}
@@ -902,9 +927,10 @@ function SueltoAgendaCard({ mov, config, onMarcarPagado, onDeshacer }: {
   );
 }
 
-function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegistrarPago, onMarcarPagadoSuelto, onDeshacerSuelto, esMesActual, mes }: {
+function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegistrarPago, onMarcarPagadoSuelto, onDeshacerSuelto, esMesActual, mes, basePriv }: {
   agenda: AgendaEntry[];
   config: FamiliaConfig | null;
+  basePriv: number;
   onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
   onDesmarcar: (matches: Movement[]) => void;
   onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
@@ -917,6 +943,9 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
   // F9.62/F9.99.8 — "pendiente" = pendienteAgenda() compartida con PorDiaSeccion (F9.99.8.1),
   // ver src/datos/agenda.ts.
   const pendiente = pendienteAgenda(agenda);
+  // F9.120 — misma base que la solapa "Por día": % del ingreso del mes.
+  const { privado } = usePrivacidad();
+  const fmtMonto = (n: number) => privado ? fmtPct(n, basePriv) : fmtArs(n);
 
   // F9.99.7 Parte 4.2 — débitos automáticos: sección propia, mismas tarjetas/estados/acciones.
   // F9.99.8 — los sueltos nunca son pagoAutomatico, quedan siempre en "principales".
@@ -928,13 +957,14 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
     .slice()
     .sort((a, b) => diaDeAgenda(a) - diaDeAgenda(b));
   const automaticos  = agenda.filter((e): e is { kind: 'esperado'; ci: CheckItem } => e.kind === 'esperado' && e.ci.item.pagoAutomatico);
-  const cardProps = { mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago };
+  const cardProps = { mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago, basePriv };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {privado && <BasePrivacidad texto="% del ingreso del mes" />}
       <div style={{ display: 'flex', gap: 10 }}>
         <Card eyebrow="Pendiente" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-expense)', fontVariantNumeric: 'tabular-nums' }}>{fmtArs(pendiente)}</span>
+          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-expense)', fontVariantNumeric: 'tabular-nums' }}>{fmtMonto(pendiente)}</span>
         </Card>
         <Card eyebrow="Confirmados" style={{ flex: '0 0 96px', textAlign: 'center' }}>
           <span style={{ fontSize: 'var(--text-xl)', fontWeight: 700 }}>{alDia}<span style={{ fontSize: 14, color: 'var(--gf-gray-400)' }}>/{agenda.length}</span></span>
@@ -948,7 +978,7 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {principales.map(e => e.kind === 'esperado'
               ? <ItemChecklistCard key={e.ci.item.id} ci={e.ci} {...cardProps} />
-              : <SueltoAgendaCard key={e.mov.id} mov={e.mov} config={config} onMarcarPagado={onMarcarPagadoSuelto} onDeshacer={onDeshacerSuelto} />
+              : <SueltoAgendaCard key={e.mov.id} mov={e.mov} config={config} basePriv={basePriv} onMarcarPagado={onMarcarPagadoSuelto} onDeshacer={onDeshacerSuelto} />
             )}
           </div>
           {automaticos.length > 0 && (
@@ -1007,6 +1037,7 @@ function ResumenVisual() {
   }, [mes]);
 
   const { tc: tcEfectivo, aviso: avisoTc } = tcEfectivoDe(tcHoy);
+  const { privado: privadoShell, alternar: alternarPrivado } = usePrivacidad();
 
   const { memberId, miembro } = useMiembroCtx();
   const esAdmin = miembro.rol === 'admin';
@@ -1020,6 +1051,16 @@ function ResumenVisual() {
   // F9.99.8 — agenda unificada: checklist (sin cambios) ∪ futuros sueltos sin plantilla.
   const sueltosFuturos = sueltosFuturosDelMes(movimientos, checklist, new Date());
   const agenda = construirAgenda(checklist, sueltosFuturos);
+
+  // F9.120 — base declarada de Resumen: el ingreso del mes en ARS-eq, calculado con el MISMO
+  // criterio de valuación que los KPIs (mismo tcDeMov) para que las dos solapas hablen del
+  // mismo total y no aparezcan dos denominadores distintos en la misma pantalla.
+  const baseIngresoMes = (() => {
+    const tcDeMov = crearTcDeMovimiento(mapaTc, tcEfectivo, mes === mesActual());
+    return movimientos
+      .filter(m => m.incluirResumenMes && m.tipo === 'Ingreso')
+      .reduce((s, m) => s + arsEq(m, tcDeMov), 0);
+  })();
 
   async function handleConfirmar(item: ExpectedItem, matches: Movement[]) {
     const res = await confirmarPagoEsperado(item, matches);
@@ -1063,7 +1104,23 @@ function ResumenVisual() {
       </div>
 
       {sec === 'dia' && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          {/* F9.120 — toggle de privacidad al lado del de moneda. No persiste: arranca apagado
+              siempre, para que no quede prendido sin que te des cuenta. */}
+          <button
+            onClick={alternarPrivado}
+            aria-label={privadoShell ? 'Mostrar montos' : 'Ocultar montos'}
+            title={privadoShell ? 'Mostrar montos' : 'Ocultar montos'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 999,
+              border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 700,
+              background: privadoShell ? 'var(--gf-ink)' : 'var(--gf-gray-200)',
+              color: privadoShell ? '#fff' : 'var(--color-text-sec)', transition: '.15s',
+            }}
+          >
+            <Icon name={privadoShell ? 'eye-off' : 'eye'} size={13} color={privadoShell ? '#fff' : 'var(--color-text-sec)'} />
+            %
+          </button>
           <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-200)', borderRadius: 999, padding: 3 }}>
             {(['ARS', 'USD'] as const).map(id => {
               const on = cur === id;
@@ -1113,6 +1170,7 @@ function ResumenVisual() {
           onDeshacerSuelto={handleDeshacerSuelto}
           esMesActual={mes === mesActual()}
           mes={mes}
+          basePriv={baseIngresoMes}
         />
       )}
     </div>
