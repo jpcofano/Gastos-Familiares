@@ -7,7 +7,7 @@ import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
 import { confirmarPagoEsperado, desmarcarPago, registrarPagoChecklist, marcarPagadoSuelto, desmarcarPagadoSuelto } from '../datos/movimientos';
 import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
-import { Card, Money, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
+import { Card, Money, MoneyInput, StatusBadge, Badge, Button, BankLogo, MerchantLogo, type EstadoChecklist } from '../design-system/components';
 import { fmtMoney } from '../datos/money';
 import { cargarTCReciente, tcDeFecha, tcEfectivoDe, type EstadoTcHoy } from '../datos/tcDiario';
 import { usePrivacidad, fmtPct, BasePrivacidad } from '../contexto/PrivacidadContext';
@@ -683,32 +683,31 @@ const TINT: Record<EstadoChecklist, string> = {
 
 function MontoInlineEdit({ item }: { item: ExpectedItem }) {
   const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState('');
+  const [val, setVal] = useState<number | null>(null);
 
   function startEdit() {
-    setVal(item.montoEsperado != null ? String(item.montoEsperado) : '');
+    setVal(item.montoEsperado ?? null);
     setEditing(true);
   }
 
-  async function commit() {
+  async function commit(n: number | null) {
     setEditing(false);
-    const n = parseFloat(val.replace(',', '.'));
-    if (!isNaN(n) && n > 0 && n !== item.montoEsperado) {
+    // F9.107 — sin parseo acá: `val` ya es número. Si no parseó (null) no se guarda nada.
+    if (n !== null && n > 0 && n !== item.montoEsperado) {
       await actualizarItemEsperado(item.id, { montoEsperado: n });
     }
   }
 
   if (editing) {
     return (
-      <input
+      <MoneyInput
         autoFocus
-        type="text"
-        inputMode="decimal"
         value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
-        style={{ width: 90, fontSize: 14, fontVariantNumeric: 'tabular-nums', border: '1px solid var(--gf-gray-300)', borderRadius: 6, padding: '2px 6px', textAlign: 'right' }}
+        moneda={item.moneda}
+        onChange={setVal}
+        onBlur={() => commit(val)}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditing(false); }}
+        style={{ width: 90, fontSize: 14, border: '1px solid var(--gf-gray-300)', borderRadius: 6, padding: '2px 6px' }}
       />
     );
   }
@@ -752,7 +751,7 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
   // a través de todas las disputas, no solo la primera).
   const disputaCount = new Set(ci.disputas?.flatMap(d => d.otros) ?? []).size;
   const [registrando, setRegistrando] = useState(false);
-  const [montoVal, setMontoVal] = useState('');
+  const [montoVal, setMontoVal] = useState<number | null>(null);
   const [fechaVal, setFechaVal] = useState('');
   const [guardando, setGuardando] = useState(false);
 
@@ -767,14 +766,14 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
   const esAdelantado = estado === 'pagado' && pagadoEn != null && mesDe(pagadoEn) !== mes;
 
   function abrirRegistrar() {
-    setMontoVal(item.montoEsperado != null ? String(item.montoEsperado) : '');
+    setMontoVal(item.montoEsperado ?? null);
     setFechaVal(hoyISOLocal());
     setRegistrando(true);
   }
 
   async function confirmarRegistro() {
-    const n = parseFloat(montoVal.replace(',', '.'));
-    if (isNaN(n) || n <= 0) return;
+    const n = montoVal;
+    if (n === null || n <= 0) return;
     setGuardando(true);
     await onRegistrarPago(item, n, new Date(fechaVal + 'T12:00:00'));
     setGuardando(false);
@@ -845,8 +844,8 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
         {registrando && (
           <div style={{ marginTop: 9, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', gap: 6 }}>
-              <input
-                type="text" inputMode="decimal" autoFocus value={montoVal} onChange={e => setMontoVal(e.target.value)}
+              <MoneyInput
+                autoFocus value={montoVal} onChange={setMontoVal} moneda={item.moneda}
                 placeholder="Monto" style={{ flex: 1, fontSize: 13, border: '1px solid var(--gf-gray-300)', borderRadius: 8, padding: '6px 8px' }}
               />
               <input
@@ -855,7 +854,7 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
               />
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
-              <Button variant="green" size="sm" style={{ flex: 1 }} disabled={guardando || !montoVal} onClick={confirmarRegistro}>
+              <Button variant="green" size="sm" style={{ flex: 1 }} disabled={guardando || montoVal === null || montoVal <= 0} onClick={confirmarRegistro}>
                 {guardando ? 'Guardando…' : 'Confirmar'}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setRegistrando(false)}>Cancelar</Button>

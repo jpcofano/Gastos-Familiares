@@ -5,6 +5,7 @@ export { Button } from './core/Button';
 export { Card } from './core/Card';
 export { Message } from './core/Message';
 export { Money } from './core/Money';
+export { MoneyInput } from './core/MoneyInput';
 export { StatusBadge, type EstadoChecklist } from './core/StatusBadge';
 export { FieldRow } from './forms/FieldRow';
 export { Input } from './forms/Input';

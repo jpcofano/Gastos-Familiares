@@ -5,7 +5,7 @@ import { llamarEditarMovimiento, llamarEliminarMovimiento, mesesAdyacentes, etiq
 import { tcParaFecha } from '../datos/tcDiario';
 import { mediosVisibles } from '../datos/medios';
 import { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar } from '../design-system/shell';
-import { FieldRow, RadioChip, Button, Money } from '../design-system/components';
+import { FieldRow, RadioChip, Button, Money, MoneyInput } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import type { Movement, FamiliaConfig } from '../types';
 
@@ -44,7 +44,8 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
   const [incluirResumen, setIncluirResumen] = useState(m.incluirResumenMes);
   const [tipo,        setTipo]        = useState<'Gasto' | 'Ingreso'>(m.tipo);
   const [descripcion, setDescripcion] = useState(m.descripcion);
-  const [monto,       setMonto]       = useState(String(m.monto));
+  // F9.107 — número, no `String(m.monto)`: el parser solo ve tecleo humano.
+  const [monto,       setMonto]       = useState<number | null>(m.monto);
   const [moneda,      setMoneda]      = useState<'ARS' | 'USD'>(m.moneda);
   const [categoria,   setCategoria]   = useState(m.categoria ?? '');
   const [subcategoria,setSubcategoria]= useState(m.subcategoria ?? '');
@@ -102,8 +103,8 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
   const handleGuardar = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
-    const montoNum = parseFloat(monto.replace(',', '.'));
-    if (isNaN(montoNum) || montoNum <= 0) { setErrorMsg('El monto debe ser mayor que cero.'); return; }
+    const montoNum = monto;
+    if (montoNum === null || montoNum <= 0) { setErrorMsg('El monto debe ser mayor que cero.'); return; }
 
     const cambios: CambiosMovimiento = {};
 
@@ -151,7 +152,7 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
     );
   }
 
-  const montoNum = Number(monto.replace(',', '.')) || 0;
+  const montoNum = monto ?? 0; // solo para el Hero: lo que se guarda sale de handleGuardar
   const tags = [moneda, ...(banco ? [banco] : [])].filter(Boolean) as string[];
   const esDeTarjeta = Boolean(m.resumenTarjetaId);
 
@@ -232,11 +233,7 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
           <FieldRow label="Descripción" value={descripcion} onChange={e => setDescripcion(e.target.value)} placeholder="¿En qué?" required />
 
           <FieldRow label="Monto" required>
-            <input
-              type="text" inputMode="decimal" value={monto}
-              onChange={e => setMonto(e.target.value)}
-              placeholder="0.00" required style={selectStyle}
-            />
+            <MoneyInput value={monto} onChange={setMonto} moneda={moneda} required style={selectStyle} />
           </FieldRow>
 
           <FieldRow label="Moneda">

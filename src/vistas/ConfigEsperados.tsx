@@ -10,6 +10,7 @@ import {
 } from '../datos/itemsEsperados';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { LARGO_MINIMO_TOKEN } from '../datos/checklist';
+import { MoneyInput } from '../design-system/components';
 import type { ExpectedItem, FamiliaConfig } from '../types';
 import './ConfigEsperados.css';
 
@@ -141,7 +142,9 @@ function FormItemEsperado({
   const [persona,        setPersona]        = useState(item?.persona ?? '');
   const [moneda,         setMoneda]         = useState<'ARS' | 'USD'>(item?.moneda ?? 'ARS');
   const [tarjetaCodigo,  setTarjetaCodigo]  = useState(item?.tarjetaCodigo ?? '');
-  const [montoEsp,       setMontoEsp]       = useState(item?.montoEsperado?.toString() ?? '');
+  const [montoEsp,       setMontoEsp]       = useState<number | null>(item?.montoEsperado ?? null);
+  // F9.107 — el monto es opcional: null solo no distingue "vacío" de "escribió algo ilegible".
+  const [montoIlegible,  setMontoIlegible]  = useState(false);
   const [diaVenc,        setDiaVenc]        = useState(item?.diaVencimiento?.toString() ?? '');
   const [periodicidad,   setPeriodicidad]   = useState<string>(item?.periodicidad ?? 'mensual');
   const [pagoAuto,       setPagoAuto]       = useState(item?.pagoAutomatico ?? false);
@@ -194,8 +197,8 @@ function FormItemEsperado({
     if (!categoria)    { setErrorMsg('La categoría es obligatoria.');    return; }
     if (!subcategoria) { setErrorMsg('La subcategoría es obligatoria.'); return; }
 
-    const montoNum = montoEsp ? parseFloat(montoEsp.replace(',', '.')) : null;
-    if (montoEsp && (montoNum === null || isNaN(montoNum) || montoNum <= 0)) {
+    const montoNum = montoEsp;
+    if (montoIlegible || (montoNum !== null && montoNum <= 0)) {
       setErrorMsg('El monto esperado debe ser mayor que cero.');
       return;
     }
@@ -337,12 +340,11 @@ function FormItemEsperado({
           <div className="cfg-form-fila">
             <div className="cfg-campo">
               <label>Monto esperado (opcional)</label>
-              <input
-                type="text"
-                inputMode="decimal"
+              <MoneyInput
                 value={montoEsp}
-                onChange={e => setMontoEsp(e.target.value)}
-                placeholder="0.00"
+                onChange={setMontoEsp}
+                onInvalido={setMontoIlegible}
+                moneda={moneda}
               />
             </div>
             <div className="cfg-campo">

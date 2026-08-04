@@ -6,7 +6,8 @@ import { tcParaFecha } from '../datos/tcDiario';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar } from '../design-system/shell';
-import { FieldRow, RadioChip, Button, Money } from '../design-system/components';
+import { FieldRow, RadioChip, Button, Money, MoneyInput } from '../design-system/components';
+import { parseMonto } from '../design-system/utils/monto';
 import type { FamiliaConfig, FamiliaMiembro } from '../types';
 
 // F9.34 — re-skin mobile (FullModal/Hero/Drawer/CtaBar, kit ManualGasto.jsx).
@@ -93,7 +94,10 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [fecha,             setFecha]             = useState(preload?.fecha ?? hoyISO());
   const [tipo,              setTipo]              = useState<'Gasto' | 'Ingreso'>(preload?.tipo ?? 'Gasto');
   const [descripcion,       setDescripcion]       = useState(preload?.descripcion ?? '');
-  const [monto,             setMonto]             = useState(preload?.monto ?? '');
+  // F9.107 — el monto vive como número. El preload viene del OCR del comprobante como
+  // string: se parsea en el borde. Si el OCR trae algo no parseable queda null y el form
+  // pide el monto, en vez de guardar basura.
+  const [monto,             setMonto]             = useState<number | null>(() => parseMonto(preload?.monto ?? ''));
   const [moneda,            setMoneda]            = useState<'ARS' | 'USD'>(preload?.moneda ?? 'ARS');
   const [categoria,         setCategoria]         = useState(preload?.categoria ?? '');
   const [subcategoria,      setSubcategoria]      = useState(preload?.subcategoria ?? '');
@@ -205,8 +209,8 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
     if (!categoria)    { setErrorMsg('La categoría es obligatoria.');    return; }
     if (!subcategoria) { setErrorMsg('La subcategoría es obligatoria.'); return; }
 
-    const montoNum = parseFloat(monto.replace(',', '.'));
-    if (isNaN(montoNum) || montoNum <= 0) {
+    const montoNum = monto;
+    if (montoNum === null || montoNum <= 0) {
       setErrorMsg('El monto debe ser mayor que cero.');
       return;
     }
@@ -298,7 +302,7 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
     );
   }
 
-  const montoNum = Number(monto.replace(',', '.')) || 0;
+  const montoNum = monto ?? 0; // solo para el Hero: lo que se persiste sale de construirYGuardar
   const tags = [moneda, ...(banco ? [banco] : []), incluirResumenMes ? 'En resumen' : null].filter((t): t is string => Boolean(t));
 
   return (
@@ -338,13 +342,11 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
           />
 
           <FieldRow label="Monto" required>
-            <input
+            <MoneyInput
               id="alta-monto"
-              type="text"
-              inputMode="decimal"
               value={monto}
-              onChange={e => setMonto(e.target.value)}
-              placeholder="0.00"
+              onChange={setMonto}
+              moneda={moneda}
               required
               style={selectStyle}
             />

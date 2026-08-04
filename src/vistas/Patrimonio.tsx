@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
 import { cargarTCReciente, cargarEstadoTcDiario, backfillTcDiario, tcEfectivoDe, type EstadoTcDiario, type ResultadoBackfillTc } from '../datos/tcDiario';
-import { Card, MerchantLogo } from '../design-system/components';
+import { Card, MerchantLogo, MoneyInput } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import {
   cargarPosicionesVigentes, cargarActivosFijos, cargarPosicionesManuales,
@@ -2288,19 +2288,24 @@ function ModalFlujo({
     flujo ? flujo.fecha.toDate().toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10)
   );
   const [tipo, setTipo] = useState<'aporte' | 'retiro'>(flujo?.tipo ?? 'aporte');
-  const [montoStr, setMontoStr] = useState(flujo ? String(flujo.montoUsd) : '');
+  // F9.107 — el monto USD se tipea a mano: número desde el vamos, sin parseFloat casero.
+  const [monto, setMonto] = useState<number | null>(flujo ? flujo.montoUsd : null);
   const [cuenta, setCuenta] = useState(flujo?.cuenta ?? '');
   const [nota, setNota] = useState(flujo?.nota ?? '');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const monto = parseFloat(montoStr.replace(',', '.'));
-  const valid = fecha.length === 10 && !isNaN(monto) && monto > 0;
+  const valid = fecha.length === 10 && monto !== null && monto > 0;
 
   function guardar() {
-    if (!valid) return;
+    if (!valid || monto === null) return;
     const ts = Timestamp.fromDate(new Date(fecha + 'T12:00:00'));
     onGuardar({ fecha: ts, tipo, montoUsd: monto, cuenta: cuenta.trim() || null, nota: nota.trim() });
   }
+
+  const estiloCampo: React.CSSProperties = {
+    width: '100%', padding: '11px 13px', borderRadius: 11, border: '1px solid var(--gf-gray-200)',
+    fontSize: 14, fontFamily: 'var(--font-base)', background: 'var(--gf-gray-50)', boxSizing: 'border-box',
+  };
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'flex-end' }}>
@@ -2320,16 +2325,25 @@ function ModalFlujo({
           ))}
         </div>
 
+        <div style={{ marginBottom: 13 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', marginBottom: 5 }}>Fecha</div>
+          <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={estiloCampo} />
+        </div>
+
+        {/* El monto sale del map genérico: es el único campo numérico y necesita MoneyInput. */}
+        <div style={{ marginBottom: 13 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', marginBottom: 5 }}>Monto (USD)</div>
+          <MoneyInput value={monto} onChange={setMonto} moneda="USD" placeholder="1.000,00" style={estiloCampo} />
+        </div>
+
         {[
-          { label: 'Fecha', val: fecha, set: setFecha, type: 'date', placeholder: '' },
-          { label: 'Monto (USD)', val: montoStr, set: setMontoStr, type: 'text', placeholder: '1000' },
-          { label: 'Cuenta (opcional)', val: cuenta, set: setCuenta, type: 'text', placeholder: 'IOL, Balanz…' },
-          { label: 'Nota (opcional)', val: nota, set: setNota, type: 'text', placeholder: 'descripción libre' },
+          { label: 'Cuenta (opcional)', val: cuenta, set: setCuenta, placeholder: 'IOL, Balanz…' },
+          { label: 'Nota (opcional)', val: nota, set: setNota, placeholder: 'descripción libre' },
         ].map(f => (
           <div key={f.label} style={{ marginBottom: 13 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)', marginBottom: 5 }}>{f.label}</div>
-            <input type={f.type} value={f.val} placeholder={f.placeholder} onChange={e => f.set(e.target.value)}
-              style={{ width: '100%', padding: '11px 13px', borderRadius: 11, border: '1px solid var(--gf-gray-200)', fontSize: 14, fontFamily: 'var(--font-base)', background: 'var(--gf-gray-50)', boxSizing: 'border-box' }} />
+            <input type="text" value={f.val} placeholder={f.placeholder} onChange={e => f.set(e.target.value)}
+              style={estiloCampo} />
           </div>
         ))}
 

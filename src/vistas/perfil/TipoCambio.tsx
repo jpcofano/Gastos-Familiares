@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Badge, Button } from '../../design-system/components';
+import { Card, Badge, Button, MoneyInput } from '../../design-system/components';
 import { cargarTCReciente, type TCDiarioItem } from '../../datos/tcDiario';
 import { actualizarTCManual } from '../../datos/configFamilia';
 
@@ -33,7 +33,7 @@ export default function TipoCambio() {
   const [cargando, setCargando] = useState(true);
 
   const [fecha, setFecha] = useState(hoyAR());
-  const [valor, setValor] = useState('');
+  const [valor, setValor] = useState<number | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
@@ -52,9 +52,9 @@ export default function TipoCambio() {
   const actual = hist[0];
 
   async function guardar() {
-    const num = Number(valor.replace(',', '.'));
+    const num = valor;
     if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { setError('Fecha inválida.'); return; }
-    if (!Number.isFinite(num) || num <= 0) { setError('Ingresá un valor de TC válido.'); return; }
+    if (num === null || num <= 0) { setError('Ingresá un valor de TC válido.'); return; }
 
     const existente = hist.find(h => h.fecha === fecha);
     if (existente && !confirm(
@@ -68,7 +68,7 @@ export default function TipoCambio() {
     setGuardando(false);
     if (!res.ok) { setError(res.error.message); return; }
     setOk(true);
-    setValor('');
+    setValor(null);
     recargar();
   }
 
@@ -121,15 +121,15 @@ export default function TipoCambio() {
           </span>
           <div style={{ display: 'flex', gap: 8 }}>
             <input type="date" value={fecha} onChange={e => { setFecha(e.target.value); setOk(false); }} style={{ ...inputStyle, flex: 1 }} />
-            <input
-              type="number" inputMode="decimal" placeholder="$ por USD" value={valor}
-              onChange={e => { setValor(e.target.value); setOk(false); }}
+            <MoneyInput
+              placeholder="$ por USD" value={valor}
+              onChange={n => { setValor(n); setOk(false); }}
               style={{ ...inputStyle, flex: 1 }}
             />
           </div>
           {error && <p style={{ fontSize: 12, color: 'var(--gf-err-text)', margin: 0 }}>{error}</p>}
           {ok && <p style={{ fontSize: 12, color: 'var(--gf-ok-text)', margin: 0 }}>Guardado.</p>}
-          <Button variant="primary" size="cta" onClick={guardar} disabled={guardando || !valor}>
+          <Button variant="primary" size="cta" onClick={guardar} disabled={guardando || valor === null || valor <= 0}>
             {guardando ? 'Guardando…' : 'Guardar TC'}
           </Button>
         </div>
