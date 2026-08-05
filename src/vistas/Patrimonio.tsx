@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, createContext, useContext } from 'react';
 import { Timestamp } from 'firebase/firestore';
 import { cargarTCReciente, cargarEstadoTcDiario, backfillTcDiario, tcEfectivoDe, type EstadoTcDiario, type ResultadoBackfillTc } from '../datos/tcDiario';
 import { Card, MerchantLogo, MoneyInput } from '../design-system/components';
+import { usePrivacidad, fmtPct, BasePrivacidad } from '../contexto/PrivacidadContext';
 import { Icon } from '../design-system/Icon';
 import {
   cargarPosicionesVigentes, cargarActivosFijos, cargarPosicionesManuales,
@@ -103,6 +104,31 @@ const TIPO_LABEL: Record<string, string> = {
 // ── Formateo ──────────────────────────────────────────────────────────────────
 function fmtUsd(n: number): string { return `U$S ${Math.round(n).toLocaleString('es-AR')}`; }
 function fmtArs(n: number, tc: number): string { return `$ ${Math.round(n * tc).toLocaleString('es-AR')}`; }
+
+// F9.121 — modo privacidad en pantalla. Patrimonio no tiene un componente `Money` único (son
+// 4.300 líneas y 12 componentes con estilos propios), así que el modo se implementa acá: un
+// solo lugar decide si el número sale en plata o en %.
+//
+// La base viaja por contexto y no por parámetro: 7 de los 12 componentes que muestran plata no
+// reciben `M` (PosicionesManualesCard, ActivosFijosCard, AportesRetirosCard, OpcionCard, los
+// dos modales de decisiones y DiarioDecisiones). Pasarles un `base` por props obligaría a que
+// cada uno eligiera el suyo —y algunos tienen un total local a mano, que es justo el
+// denominador equivocado—. Con un provider único, la base es una sola por construcción, que es
+// lo que pide la Sección 2 del spec.
+const BaseDineroCtx = createContext(0);
+
+function useDinero() {
+  const { privado } = usePrivacidad();
+  const base = useContext(BaseDineroCtx);
+  return {
+    privado,
+    // Valor absoluto → % de la base, o el monto en USD.
+    // fmtPct ya resuelve base cero, signo y <1% / >-1% (F9.120): no se reimplementa nada acá.
+    usd: (n: number) => privado ? fmtPct(n, base) : fmtUsd(n),
+    // Gemelo en pesos: con el modo activo devuelve '' y la línea NO se renderiza.
+    ars: (n: number, tc: number) => privado ? '' : fmtArs(n, tc),
+  };
+}
 function fmtFecha(iso: string): string {
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${y}`;
@@ -236,6 +262,7 @@ function simularOpcion(posiciones: Posicion[], opcion: OpcionConfig) {
 
 // ── Barra apilada ─────────────────────────────────────────────────────────────
 function CompBar({ M }: { M: PatMetrics }) {
+  const $ = useDinero();
   const [mostrarOtros, setMostrarOtros] = useState(false);
   const segs = Object.entries(M.bySector).sort((a, b) => b[1] - a[1]);
   const mayores = segs.filter(([, v]) => v / M.total >= UMBRAL_OTROS);
@@ -253,8 +280,11 @@ function CompBar({ M }: { M: PatMetrics }) {
           <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <span style={{ width: 9, height: 9, borderRadius: 3, background: sectorColor(k), flexShrink: 0 }} />
             <span style={{ fontWeight: 600 }}>{k}</span>
-            <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(v)}</span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
+            {/* F9.121 — el chip de la derecha ya es el % sobre M.total, la misma base del modo
+                privacidad: convertir el absoluto mostraría el mismo número dos veces. Se oculta
+                (mismo criterio que la Sección 3 para las filas que ya traen un pct()). */}
+            {!$.privado && <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{$.usd(v)}</span>}
+            <span style={{ marginLeft: $.privado ? 'auto' : undefined, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
           </div>
         ))}
         {menores.length > 0 && (
@@ -265,16 +295,16 @@ function CompBar({ M }: { M: PatMetrics }) {
             >
               <span style={{ width: 9, height: 9, borderRadius: 3, background: 'var(--gf-gray-300)', flexShrink: 0 }} />
               <span style={{ fontWeight: 600, color: 'var(--color-text-sec)' }}>Otros ({menores.length})</span>
-              <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{fmtUsd(otrosUsd)}</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(otrosUsd / M.total)}</span>
+              {!$.privado && <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{$.usd(otrosUsd)}</span>}
+              <span style={{ marginLeft: $.privado ? 'auto' : undefined, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(otrosUsd / M.total)}</span>
               <Icon name={mostrarOtros ? 'chevron-up' : 'chevron-down'} size={13} color="var(--gf-gray-400)" />
             </div>
             {mostrarOtros && menores.map(([k, v]) => (
               <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, paddingLeft: 17 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 3, background: sectorColor(k), flexShrink: 0 }} />
                 <span style={{ fontWeight: 600, color: 'var(--color-text-sec)' }}>{k}</span>
-                <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{fmtUsd(v)}</span>
-                <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
+                {!$.privado && <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{$.usd(v)}</span>}
+                <span style={{ marginLeft: $.privado ? 'auto' : undefined, fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
               </div>
             ))}
           </>
@@ -369,6 +399,7 @@ function PosicionesManualesCard({ manuales, fechaCorrida, onEdit, onAdd }: {
   onEdit: (pm: PosicionManual) => void;
   onAdd: () => void;
 }) {
+  const $ = useDinero();
   const total = manuales.reduce((s, m) => s + m.valorUsd, 0);
   return (
     <Card>
@@ -387,7 +418,7 @@ function PosicionesManualesCard({ manuales, fechaCorrida, onEdit, onAdd }: {
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{m.ticker}</span>
                 <span style={{ fontSize: 12, color: 'var(--color-text-sec)', marginLeft: 6 }}>{m.cantidad} acc · {m.cuenta}</span>
               </span>
-              <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(m.valorUsd)}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{$.usd(m.valorUsd)}</span>
               <button onClick={() => onEdit(m)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
                 <Icon name="pencil" size={14} color="var(--gf-gray-400)" />
               </button>
@@ -403,7 +434,7 @@ function PosicionesManualesCard({ manuales, fechaCorrida, onEdit, onAdd }: {
       {manuales.length > 0 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 800, borderTop: '1px solid var(--gf-gray-200)', paddingTop: 8, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
           <span>Total manuales</span>
-          <span>{fmtUsd(total)}</span>
+          <span>{$.usd(total)}</span>
         </div>
       )}
       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
@@ -479,6 +510,7 @@ function ActivosFijosCard({ activosFijos, onEdit, onAdd }: {
   onEdit: (af: ActivoFijo) => void;
   onAdd: () => void;
 }) {
+  const $ = useDinero();
   const total = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
   return (
     <Card>
@@ -491,7 +523,7 @@ function ActivosFijosCard({ activosFijos, onEdit, onAdd }: {
       {activosFijos.map((af, i) => (
         <div key={af.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none' }}>
           <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{af.nombre}</span>
-          <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(af.valorUsd)}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{$.usd(af.valorUsd)}</span>
           <button onClick={() => onEdit(af)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
             <Icon name="pencil" size={14} color="var(--gf-gray-400)" />
           </button>
@@ -500,7 +532,7 @@ function ActivosFijosCard({ activosFijos, onEdit, onAdd }: {
       {activosFijos.length > 0 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 800, borderTop: '1px solid var(--gf-gray-200)', paddingTop: 8, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
           <span>Total fijos</span>
-          <span>{fmtUsd(total)}</span>
+          <span>{$.usd(total)}</span>
         </div>
       )}
       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
@@ -512,6 +544,7 @@ function ActivosFijosCard({ activosFijos, onEdit, onAdd }: {
 
 // ── Card de opción de rebalanceo ──────────────────────────────────────────────
 function OpcionCard({ opcion, posiciones, onRegistrarDecision }: { opcion: OpcionConfig; posiciones: Posicion[]; onRegistrarDecision: () => void }) {
+  const $ = useDinero();
   const { liberadoUsd, movimientos, antes, despues, total } = simularOpcion(posiciones, opcion);
   const metricas: { label: string; av: number; dv: number; b: BandaNombre | null }[] = [
     { label: 'Energía AR',             av: (antes.bySector['Energía AR'] ?? 0) / (antes.total || 1),   dv: (despues.bySector['Energía AR'] ?? 0) / (despues.total || 1),  b: 'sector' },
@@ -543,7 +576,7 @@ function OpcionCard({ opcion, posiciones, onRegistrarDecision }: { opcion: Opcio
                 {m.deltaUsd < 0 ? '↓' : '↑'} {m.desc}
               </span>
               <span style={{ color: m.deltaUsd < 0 ? 'var(--gf-expense)' : 'var(--gf-income)', fontWeight: 700 }}>
-                {m.deltaUsd < 0 ? '−' : '+'}{fmtUsd(Math.abs(m.deltaUsd))} · {pct(Math.abs(m.deltaUsd) / total)}
+                {m.deltaUsd < 0 ? '−' : '+'}{$.privado ? '' : `${$.usd(Math.abs(m.deltaUsd))} · `}{pct(Math.abs(m.deltaUsd) / total)}
               </span>
             </div>
           ))}
@@ -614,6 +647,7 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
   topes: TopesRiesgo;
   configurado: boolean;
 }) {
+  const $ = useDinero();
   const [escenarioSel, setEscenarioSel] = useState<string>(ESCENARIO_TITULAR);
   const [verMix, setVerMix] = useState(false);
 
@@ -651,8 +685,8 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', marginTop: 5, lineHeight: 1.45 }}>
             {brecha.cumple
-              ? `La pérdida del escenario entra dentro de lo declarado (${fmtUsd(titular.perdidaUsd)}).`
-              : `Son ${pct(brecha.brechaPct)} del portafolio por encima de lo declarado — ${fmtUsd(titular.perdidaUsd)} contra un límite de ${fmtUsd(-topes.toleranciaCaidaPct * titular.total)}.`}
+              ? `La pérdida del escenario entra dentro de lo declarado (${$.usd(titular.perdidaUsd)}).`
+              : `Son ${pct(brecha.brechaPct)} del portafolio por encima de lo declarado — ${$.usd(titular.perdidaUsd)} contra un límite de ${$.usd(-topes.toleranciaCaidaPct * titular.total)}.`}
             {!configurado && ' Tolerancia por defecto: declarala en Config › Política de riesgo.'}
           </div>
         </div>
@@ -676,7 +710,7 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
                 >
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600 }}>{e.nombre}</span>
                   <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: gana ? 'var(--gf-income)' : 'var(--gf-expense)', flexShrink: 0 }}>
-                    {fmtUsd(e.perdidaUsd)}
+                    {$.usd(e.perdidaUsd)}
                   </span>
                   <span style={{ width: 46, textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-gray-400)', flexShrink: 0 }}>
                     {pct(e.perdidaPct)}
@@ -690,7 +724,7 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
                     {sel.contribucion.filter(c => c.perdidaUsd !== 0).map(c => (
                       <div key={c.bloque} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 11.5 }}>
                         <span style={{ flex: 1, minWidth: 0, color: 'var(--color-text-sec)' }}>{c.nombre}</span>
-                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{fmtUsd(c.perdidaUsd)}</span>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{$.usd(c.perdidaUsd)}</span>
                         <span style={{ width: 46, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{pct(c.aporteFrac)}</span>
                       </div>
                     ))}
@@ -717,7 +751,7 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
                 </span>
               </span>
               <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'var(--gf-expense)', flexShrink: 0 }}>
-                {v.tipo === 'caja' ? 'faltan ' : '+'}{fmtUsd(v.excesoUsd)}
+                {v.tipo === 'caja' ? 'faltan ' : '+'}{$.usd(v.excesoUsd)}
               </span>
             </div>
           ))}
@@ -747,7 +781,7 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
             ) : (
               <>
                 <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5, marginBottom: 6 }}>
-                  Pasar <strong style={{ color: 'var(--color-text)' }}>{fmtUsd(mix.ventaNecesariaUsd)}</strong> a caja
+                  Pasar <strong style={{ color: 'var(--color-text)' }}>{$.usd(mix.ventaNecesariaUsd)}</strong> a caja
                   llevaría la pérdida del escenario justo al límite declarado. Al alza eso cuesta{' '}
                   <strong style={{ color: 'var(--color-text)' }}>{pct(mix.upsideResignadoPct)}</strong> del portafolio
                   en un rally simétrico. Es una medición, no una recomendación: la decisión es tuya.
@@ -795,8 +829,11 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
 }) {
   // F9.115 — descargas de la corrida vigente. El patrón blob/a.download es el de
   // descargar() (:3127), pero acá SÍ se libera el object URL.
+  const $ = useDinero();
   const [descargando, setDescargando] = useState<'txt' | 'json' | null>(null);
-  const [sinMontos, setSinMontos] = useState(false);   // F9.120 — variante del informe
+  // F9.120 — variante del informe. F9.121: es INDEPENDIENTE del modo privacidad de pantalla, a
+  // propósito — el modo de pantalla es efímero, el PDF es un archivo que se entrega y sobrevive.
+  const [sinMontos, setSinMontos] = useState(false);
 
   async function descargarExport(cual: 'txt' | 'json') {
     setDescargando(cual);
@@ -833,17 +870,26 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
             Portfolio invertible
           </div>
           <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', margin: '4px 0 2px', fontVariantNumeric: 'tabular-nums' }}>
-            {fmtUsd(M.total)}
+            {$.usd(M.total)}
           </div>
-          <div style={{ fontSize: 12, opacity: .5, fontVariantNumeric: 'tabular-nums', marginBottom: 8 }}>
-            {fmtArs(M.total, tc)}
-          </div>
+          {/* F9.121 — el gemelo en pesos no se renderiza con el modo activo: una línea vacía
+              dejaría un hueco y un salto de alto en el hero. */}
+          {!$.privado && (
+            <div style={{ fontSize: 12, opacity: .5, fontVariantNumeric: 'tabular-nums', marginBottom: 8 }}>
+              {$.ars(M.total, tc)}
+            </div>
+          )}
           {deltaInv !== null && corrPrev && (
-            <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-              <span style={{ color: deltaInv >= 0 ? '#4ade80' : '#f87171', fontWeight: 700 }}>
-                {deltaInv >= 0 ? '+' : ''}{fmtUsd(deltaInv)}
-              </span>
-              <span style={{ opacity: .55, marginLeft: 5 }}>
+            <div style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', marginTop: $.privado ? 8 : 0 }}>
+              {/* F9.121 — el delta ya trae su propio % al lado, calculado sobre OTRA base (el
+                  total de la corrida anterior). Con el modo activo se oculta el absoluto y
+                  queda sólo el paréntesis: nunca dos porcentajes distintos del mismo número. */}
+              {!$.privado && (
+                <span style={{ color: deltaInv >= 0 ? '#4ade80' : '#f87171', fontWeight: 700 }}>
+                  {deltaInv >= 0 ? '+' : ''}{$.usd(deltaInv)}
+                </span>
+              )}
+              <span style={{ opacity: .55, marginLeft: $.privado ? 0 : 5, color: $.privado ? (deltaInv >= 0 ? '#4ade80' : '#f87171') : undefined, fontWeight: $.privado ? 700 : undefined }}>
                 ({deltaInv >= 0 ? '+' : ''}{pct(deltaInv / (corrPrev.totalInvertibleUsd || 1))}) · vs {fmtFecha(corrPrev.fechaCorrida)}
               </span>
             </div>
@@ -855,10 +901,10 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
             Patrimonio total
           </div>
           <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
-            {fmtUsd(patrimTotal)}
+            {$.usd(patrimTotal)}
           </div>
           <div style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
-            {fmtArs(patrimTotal, tc)} · al {fmtFecha(fechaCorrida)}
+            {$.privado ? '' : `${$.ars(patrimTotal, tc)} · `}al {fmtFecha(fechaCorrida)}
           </div>
         </div>
         <div style={{ textAlign: 'center', fontSize: 10, opacity: .35, marginTop: 10 }}>
@@ -916,7 +962,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
               return (
                 <div key={s.fechaCorrida} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 13 }}>
                   <span style={{ color: 'var(--gf-gray-400)', minWidth: 54, fontSize: 12 }}>{fmtFecha(s.fechaCorrida)}</span>
-                  <span style={{ flex: 1, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(s.totalInvertibleUsd)}</span>
+                  <span style={{ flex: 1, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{$.usd(s.totalInvertibleUsd)}</span>
                   {delta !== null && (
                     <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: delta >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontWeight: 600 }}>
                       {delta >= 0 ? '+' : ''}{pct(delta / (prev!.totalInvertibleUsd || 1))}
@@ -1044,6 +1090,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
   agenda: AgendaMacro | null;
   sectorial: AnalisisSectorial | null;
 }) {
+  const $ = useDinero();
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
   const [analizando, setAnalizando] = useState<Set<string>>(new Set());
 
@@ -1121,7 +1168,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
                   </span>
                 </span>
                 <span style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <span style={{ display: 'block', fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(c.totalUsd)}</span>
+                  <span style={{ display: 'block', fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{$.usd(c.totalUsd)}</span>
                   <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{pct(c.totalUsd / M.total)}</span>
                 </span>
                 <Icon name={exp ? 'chevron-up' : 'chevron-down'} size={14} color="var(--gf-gray-400)" />
@@ -1147,7 +1194,9 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
                           <span style={{ fontSize: 13, fontWeight: 600 }}>{cta}</span>
                           {titular && <span style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginLeft: 5 }}>{titular}</span>}
                           <span style={{ display: 'flex', gap: 5, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
-                            {cant != null && (
+                            {/* F9.121 — los nominales se ocultan: revelan el tamaño de la
+                                posición y no tienen conversión a % que signifique algo. */}
+                            {cant != null && !$.privado && (
                               <span style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>{cant.toLocaleString('es-AR')} nom.</span>
                             )}
                             {fila.origen === 'manual' && (
@@ -1164,7 +1213,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
                           </span>
                         </span>
                         <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, paddingTop: 2 }}>
-                          {fmtUsd(val)}
+                          {$.usd(val)}
                         </span>
                       </div>
                     );
@@ -1198,7 +1247,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
       {/* Pie: total invertible (debe cuadrar con el hero) */}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, padding: '0 4px', fontVariantNumeric: 'tabular-nums' }}>
         <span style={{ color: 'var(--gf-gray-400)' }}>Total invertible</span>
-        <span>{fmtUsd(totalInvertible)}</span>
+        <span>{$.usd(totalInvertible)}</span>
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'center' }}>
@@ -1210,6 +1259,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
 
 // ── Solapa Riesgo ─────────────────────────────────────────────────────────────
 function RiesgoTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] }) {
+  const $ = useDinero();
   const criptoTickers = posiciones.filter(p => p.tipo === 'cripto').map(p => p.ticker).join(' + ') || 'sin cripto';
   const rows: { k: string; sub: string; v: string; b: 'verde' | 'amarillo' | 'rojo'; band: string }[] = [
     { k: 'Nombre más grande', sub: M.nombreTop.ticker + ' · cripto se mide aparte', v: pct(M.top1), b: banda('nombre', M.top1), band: '🟢 ≤5 · 🟡 5–10 · 🔴 >10%' },
@@ -1258,12 +1308,12 @@ function RiesgoTab({ M, posiciones }: { M: PatMetrics; posiciones: Posicion[] })
               <span>
                 <span style={{ color: 'var(--gf-gray-400)' }}>{r.perdidaUsd >= 0 ? 'Ganancia ' : 'Pérdida '}</span>
                 <strong style={{ color: r.perdidaUsd >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums' }}>
-                  {fmtUsd(r.perdidaUsd)} ({pct(r.perdidaPct)})
+                  {$.privado ? '' : `${$.usd(r.perdidaUsd)} `}({pct(r.perdidaPct)})
                 </strong>
               </span>
               <span>
                 <span style={{ color: 'var(--gf-gray-400)' }}>Resultante </span>
-                <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(r.totalFinal)}</strong>
+                <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{$.usd(r.totalFinal)}</strong>
               </span>
             </div>
           </div>
@@ -1285,6 +1335,7 @@ function ModalRegistrarDecision({
   onGuardar: (d: NuevaDecision) => void;
   onClose: () => void;
 }) {
+  const $ = useDinero();
   const [titulo, setTitulo] = useState('');
   const [razon, setRazon] = useState('');
   const [tickersStr, setTickersStr] = useState((preload?.tickers ?? []).join(', '));
@@ -1333,7 +1384,7 @@ function ModalRegistrarDecision({
         ))}
 
         <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginBottom: 16, lineHeight: 1.4 }}>
-          Foto de métricas actuales: {fmtUsd(metricasActuales.totalInvertibleUsd)} total · HHI {metricasActuales.hhi.toFixed(2)} · Cripto {pct(metricasActuales.criptoPct)}
+          Foto de métricas actuales: {$.privado ? '' : `${$.usd(metricasActuales.totalInvertibleUsd)} total · `}HHI {metricasActuales.hhi.toFixed(2)} · Cripto {pct(metricasActuales.criptoPct)}
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
@@ -1359,6 +1410,7 @@ function ModalRevision({
   onGuardar: (notas: string, metricas: MetricasSnap) => void;
   onClose: () => void;
 }) {
+  const $ = useDinero();
   const [quePaso, setQuePaso] = useState('');
   const [laVolveria, setLaVolveria] = useState('');
   const valid = quePaso.trim().length > 0;
@@ -1374,11 +1426,11 @@ function ModalRevision({
   function fmtDelta(a: number, b: number, kind: 'usd' | 'pct') {
     const d = b - a;
     const sign = d >= 0 ? '+' : '';
-    return kind === 'usd' ? `${sign}${fmtUsd(d)}` : `${sign}${(d * 100).toFixed(1)} pp`;
+    return kind === 'usd' ? `${sign}${$.usd(d)}` : `${sign}${(d * 100).toFixed(1)} pp`;
   }
 
   const metricas: { label: string; ent: string; hoy: string; delta: string }[] = [
-    { label: 'Total invertible', ent: fmtUsd(entonces.totalInvertibleUsd), hoy: fmtUsd(ahora.totalInvertibleUsd), delta: fmtDelta(entonces.totalInvertibleUsd, ahora.totalInvertibleUsd, 'usd') },
+    { label: 'Total invertible', ent: $.usd(entonces.totalInvertibleUsd), hoy: $.usd(ahora.totalInvertibleUsd), delta: fmtDelta(entonces.totalInvertibleUsd, ahora.totalInvertibleUsd, 'usd') },
     { label: 'Energía AR', ent: pct(entonces.energiaArPct), hoy: pct(ahora.energiaArPct), delta: fmtDelta(entonces.energiaArPct, ahora.energiaArPct, 'pct') },
     { label: 'País AR', ent: pct(entonces.paisArPct), hoy: pct(ahora.paisArPct), delta: fmtDelta(entonces.paisArPct, ahora.paisArPct, 'pct') },
     { label: 'Cripto', ent: pct(entonces.criptoPct), hoy: pct(ahora.criptoPct), delta: fmtDelta(entonces.criptoPct, ahora.criptoPct, 'pct') },
@@ -1432,8 +1484,8 @@ function ModalRevision({
             return (
               <div key={t} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', borderTop: '1px solid var(--gf-gray-100)', background: (metricas.length + i) % 2 ? 'var(--gf-gray-50)' : 'transparent' }}>
                 <div style={{ ...celStyle(), fontWeight: 700 }}>{t}</div>
-                <div style={celStyle('right')}>{fmtUsd(valA)}</div>
-                <div style={celStyle('right')}>{fmtUsd(valH)}</div>
+                <div style={celStyle('right')}>{$.usd(valA)}</div>
+                <div style={celStyle('right')}>{$.usd(valH)}</div>
                 <div style={{ ...celStyle('right'), color: 'var(--color-text-sec)' }}>{fmtDelta(valA, valH, 'usd')}</div>
               </div>
             );
@@ -1483,6 +1535,7 @@ function DiarioDecisiones({ decisiones, onNueva, onIniciarRevision }: {
   onNueva: () => void;
   onIniciarRevision: (d: DecisionPatrimonio, tipo: '30d' | '90d') => void;
 }) {
+  const $ = useDinero();
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
 
   function toggle(id: string) {
@@ -1559,9 +1612,9 @@ function DiarioDecisiones({ decisiones, onNueva, onIniciarRevision }: {
 
                 <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 4 }}>Al registrar</div>
                 <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', marginBottom: 10, lineHeight: 1.7 }}>
-                  {fmtUsd(d.metricasAlCrear.totalInvertibleUsd)} total · HHI {d.metricasAlCrear.hhi.toFixed(2)} · Cripto {pct(d.metricasAlCrear.criptoPct)} · País AR {pct(d.metricasAlCrear.paisArPct)}
+                  {$.privado ? '' : `${$.usd(d.metricasAlCrear.totalInvertibleUsd)} total · `}HHI {d.metricasAlCrear.hhi.toFixed(2)} · Cripto {pct(d.metricasAlCrear.criptoPct)} · País AR {pct(d.metricasAlCrear.paisArPct)}
                   {Object.entries(d.metricasAlCrear.valoresTickers).map(([t, v]) => (
-                    <span key={t}> · {t} {fmtUsd(v as number)}</span>
+                    <span key={t}> · {t} {$.usd(v as number)}</span>
                   ))}
                 </div>
 
@@ -1578,7 +1631,7 @@ function DiarioDecisiones({ decisiones, onNueva, onIniciarRevision }: {
                       <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{r.notas}</div>
                     )}
                     <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtUsd(r.metricasAlRevisar.totalInvertibleUsd)} total al revisar · Δ {r.metricasAlRevisar.totalInvertibleUsd - d.metricasAlCrear.totalInvertibleUsd >= 0 ? '+' : ''}{fmtUsd(r.metricasAlRevisar.totalInvertibleUsd - d.metricasAlCrear.totalInvertibleUsd)}
+                      {$.usd(r.metricasAlRevisar.totalInvertibleUsd)} total al revisar · Δ {r.metricasAlRevisar.totalInvertibleUsd - d.metricasAlCrear.totalInvertibleUsd >= 0 ? '+' : ''}{$.usd(r.metricasAlRevisar.totalInvertibleUsd - d.metricasAlCrear.totalInvertibleUsd)}
                     </div>
                   </div>
                 ))}
@@ -2378,6 +2431,7 @@ function AportesRetirosCard({ flujos, onAdd, onEdit }: {
   onAdd: () => void;
   onEdit: (f: FlujoPatrimonio) => void;
 }) {
+  const $ = useDinero();
   const fmtFechaTs = (ts: Timestamp) => { const d = ts.toDate(); const y = d.getFullYear(), m = d.getMonth()+1, dd = d.getDate(); return `${String(dd).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`; };
   return (
     <Card>
@@ -2395,7 +2449,9 @@ function AportesRetirosCard({ flujos, onAdd, onEdit }: {
           <span style={{ width: 8, height: 8, borderRadius: 999, background: f.tipo === 'aporte' ? 'var(--gf-income)' : 'var(--gf-expense)', flexShrink: 0 }} />
           <span style={{ fontSize: 12, color: 'var(--gf-gray-400)', minWidth: 52 }}>{fmtFechaTs(f.fecha)}</span>
           <span style={{ fontSize: 13, fontWeight: 600, flex: 1, textTransform: 'capitalize' }}>{f.tipo}{f.cuenta ? ` · ${f.cuenta}` : ''}</span>
-          <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: f.tipo === 'aporte' ? 'var(--gf-income)' : 'var(--gf-expense)' }}>{f.tipo === 'aporte' ? '+' : '−'}U$S {f.montoUsd.toLocaleString('es-AR')}</span>
+          {/* F9.121 — el único importe que no pasaba por ningún helper. Se conserva el signo y
+              el color por tipo; sólo cambia el número. */}
+          <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: f.tipo === 'aporte' ? 'var(--gf-income)' : 'var(--gf-expense)' }}>{f.tipo === 'aporte' ? '+' : '−'}{$.usd(f.montoUsd)}</span>
           <Icon name="chevron-right" size={14} color="var(--gf-gray-300)" />
         </button>
       ))}
@@ -3438,6 +3494,7 @@ export default function Patrimonio() {
   const [tab, setTab] = useState<TabId>('resumen');
   // F9.114 — valor inicial por la cascada (cache del último TC leído → TC_FALLBACK), no el
   // literal pelado; abajo lo pisa /tcDiario cuando llega.
+  const { privado, alternar: alternarPrivado } = usePrivacidad();
   const [tc, setTc] = useState(() => tcEfectivoDe({ estado: 'cargando' }).tc);
 
   const [posiciones,        setPosiciones]        = useState<Posicion[]>([]);
@@ -3977,19 +4034,44 @@ export default function Patrimonio() {
     : {};
 
   return (
+    // F9.121 — base única de toda la vista: el portfolio invertible. No `patrimTotal`: la
+    // pantalla ya muestra chips de % calculados sobre M.total (pesoEnCartera, pct(x/total)), y
+    // con otra base el monto convertido y el chip de la misma fila darían dos números distintos.
+    <BaseDineroCtx.Provider value={M?.total ?? 0}>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Cabecera */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px' }}>
           Portafolio
         </div>
-        <button
-          onClick={() => setShowIngesta(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)', color: 'var(--color-text)' }}
-        >
-          <Icon name="upload" size={13} color="var(--color-text-sec)" /> Actualizar posiciones
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* F9.121 — mismo patrón que Resumen/Inicio. El estado viene del PrivacidadProvider
+              de AppShell: prenderlo en Inicio y venir acá tiene que llegar tapado. */}
+          <button
+            onClick={alternarPrivado}
+            aria-label={privado ? 'Mostrar montos' : 'Ocultar montos'}
+            title={privado ? 'Mostrar montos' : 'Ocultar montos'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 999,
+              border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 700,
+              background: privado ? 'var(--gf-ink)' : 'var(--gf-gray-200)',
+              color: privado ? '#fff' : 'var(--color-text-sec)', transition: '.15s',
+            }}
+          >
+            <Icon name={privado ? 'eye-off' : 'eye'} size={13} color={privado ? '#fff' : 'var(--color-text-sec)'} />
+            %
+          </button>
+          <button
+            onClick={() => setShowIngesta(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)', color: 'var(--color-text)' }}
+          >
+            <Icon name="upload" size={13} color="var(--color-text-sec)" /> Actualizar posiciones
+          </button>
+        </div>
       </div>
+
+      {/* F9.121 — la base declarada, una sola vez para toda la vista: un % sin base es ruido. */}
+      {privado && <BasePrivacidad texto="% del portfolio invertible" />}
 
       {/* Segmentado de solapas */}
       <div style={{ display: 'flex', gap: 3, background: 'var(--gf-gray-100)', borderRadius: 11, padding: 3 }}>
@@ -4335,5 +4417,6 @@ export default function Patrimonio() {
         />
       )}
     </div>
+    </BaseDineroCtx.Provider>
   );
 }

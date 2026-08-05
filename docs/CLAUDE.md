@@ -971,6 +971,30 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `{ oculto }` (renombrar tocaría 8 consumidores sin cambiar nada), y la solapa Patrimonio sigue
   sin cubrir en pantalla (sí su PDF) — está anotada como pendiente, no como hecha. `tsc`: 41
   pre-existentes, 0 nuevos; `vite build` y `functions build` OK.
+- F9.121 — Modo privacidad en la solapa Patrimonio (pantalla). Ver
+  `docs/prompts/F9.121-privacidad-patrimonio-en-pantalla.md`. Cierra el hueco que dejaron
+  F9.119/F9.120: Patrimonio era la única vista donde prender el modo no tapaba nada, y es la que
+  más expone. Peor que no tenerlo: ver el ojo tachado y creer que está tapado. **Helper único**
+  `useDinero()` junto a `fmtUsd`/`fmtArs` (que no se tocan y siguen puros): `$.usd(n)` devuelve
+  el % o el monto, `$.ars(n, tc)` devuelve `''` con el modo activo. Cubre los 35 call sites de
+  los 12 componentes. **Desvío de la firma del spec, deliberado:** la base viaja por un contexto
+  local (`BaseDineroCtx`) en vez de `useDinero(base)` — 7 de los 12 componentes no reciben `M` y
+  varios tienen un total local a mano, que es justo el denominador equivocado; con un provider
+  único la base es una sola **por construcción**, que es lo que pide §2. **Base = `M.total`**
+  (portfolio invertible), no `patrimTotal`, porque la vista ya muestra chips de % sobre `M.total`
+  y con otra base la misma fila daría dos números distintos. Consecuencias aceptadas y
+  verificadas: el hero da `100%` y patrimonio total con fijos da `118%`. **Casos no mecánicos:**
+  gemelos ARS del hero no se renderizan (nada de líneas vacías); el delta vs corrida previa
+  oculta el absoluto y deja su paréntesis, que va sobre otra base; los nominales de Tenencias se
+  ocultan (revelan tamaño de posición y no tienen % que signifique algo); la rama `pp` de
+  `fmtDelta` no se toca; el TC del día **no** se tapa. **Agregado sobre el spec:** las 3 filas de
+  `CompBar` y las de `OpcionCard`/`RiesgoTab`/decisiones ya traían un `pct()` con la **misma**
+  base, así que convertir el absoluto habría mostrado el mismo número dos veces — se aplica la
+  misma regla de §3 y el absoluto desaparece. **Toggle** del ojo en el header, con el estado del
+  `PrivacidadProvider` de `AppShell` (prender en Inicio y venir acá llega tapado), y
+  `BasePrivacidad` una sola vez en la cabecera de la vista, que cubre las 8 solapas. El checkbox
+  `sinMontos` del informe PDF queda **independiente**, documentado en el código. `tsc`: 41 → 41.
+  `vite build` OK. Frontend puro: deploy `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
