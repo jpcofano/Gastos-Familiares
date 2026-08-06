@@ -1057,6 +1057,13 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   puede distinguir un CEDEAR de Microsoft de uno de Vista, que sí es riesgo argentino — la exclusión
   del benchmark AR es decisión del consumidor, no del parser. `functions build` OK; `tsc`: 41 → 41.
   Toca `functions/src/index.ts`: **deploy `--only functions,hosting`**, `--only hosting` no alcanza.
+- F9.122 §3 — purga one-shot del cache negativo. `scripts/limpiarCafciMappingNulos.ts`, **script
+  suelto y no callable**: corre una vez, y un callable admin-only pediría UI, binding IAM y deploy
+  para eso. **Dry-run por defecto**, borra solo con `--apply`. Criterio conservador: se borra lo que
+  no tiene procedencia declarada — con campo `tipo` (viene del seed) o con `origen: 'manual'` (lo
+  cargó una persona) se conserva. Corrido contra producción el 2026-08-05: `{revisados: 10,
+  borrados: 10, conservados: 0}`, y la relectura da 0. Son exactamente los 10 que midió la auditoría
+  §0. El script queda en el repo: no es de un solo uso conceptual, es la herramienta para el caso.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
