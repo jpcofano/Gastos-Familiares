@@ -1196,6 +1196,27 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   manda, no lo que tenía prendido en ese momento. **Cancelar el share sheet (`AbortError`) NO cae a
   descarga**: bajarle un archivo a alguien que acaba de cancelar es peor que no hacer nada. Frontend
   puro, sin callables nuevos: deploy `--only hosting`. `tsc`: 41 → 41; `vite build` OK.
+- F9.128 §0/§1 — **`moneda_origen` NO indica la denominación del instrumento.** Ver
+  `docs/prompts/F9.128-bloquede-denominacion.md`. Es la moneda en la que la **fila** viene expresada
+  en el archivo de origen: el mismo `GD30` aparece con `USD` en una cuenta y `ARS` en otra, y con
+  `AL30`/`GD35`/`BPOC7` pasa igual. Queda escrito porque es la clase de dato que se vuelve a usar mal
+  si no está documentado — se descubrió por casualidad, auditando otra cosa (F9.127 §0). **Efecto
+  medido en la corrida 2026-07-17:** `bloqueDe` manda soberanos hard-dollar a `rentaFijaPesos`
+  (USD 1.795: GD38, GD30, GD35, BPOC7, BPOD7 en sus filas ARS) y CER en pesos a `soberanoAr`
+  (USD 10.612: TZXM7, DICP, TX26, LECAPSA) — ~12% del invertible con la **beta equivocada** en cada
+  escenario (`soberanoAr` 0,40 vs `rentaFijaPesos` 0,25). **La exposición argentina agregada no se
+  mueve**: los dos errores caen dentro de Argentina, así que el titular es correcto y lo que está mal
+  es el reparto interno. §1 agrega `DENOMINACION_SOBERANO` (tabla declarada, no regex enterrada) y
+  `denominacionDe()`; **todavía no la usa nadie** — `bloqueDe` se cambia en §2, frenado por el gate
+  de la ON corporativa. El fallback **cae en `pesos` a propósito**: un instrumento AR sin identificar
+  es más probablemente en pesos, y el error queda del lado conservador porque `rentaFijaPesos` tiene
+  la beta más castigada, así que un desconocido mal clasificado sobreestima el riesgo en vez de
+  esconderlo — un sistema de riesgo tiene que fallar hacia el lado incómodo. **Línea base de los 8
+  escenarios, para poder medir el delta del fix** (invertible USD 109.988, con manuales):
+  `global20 −23,83%` · `crash2020 −38,34%` · `localAr −31,83%` · `rally +23,83%` ·
+  `energia_ar −11,03%` · `cripto −10,88%` · `soberano_ar −24,41%` · `tormenta −35,29%`. **Los
+  números de la solapa Riesgo anteriores a F9.128 están sesgados** por el reparto de bloques, no por
+  el motor. `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

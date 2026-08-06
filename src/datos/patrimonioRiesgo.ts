@@ -32,6 +32,46 @@ export const BLOQUE_LABEL: Record<Bloque, string> = {
   cash:           'Cash y stablecoins',
 };
 
+// F9.128 §1 — `moneda_origen` describe cómo viene expresada la FILA en el archivo de origen, no en
+// qué moneda está denominado el INSTRUMENTO: el mismo GD30 aparece con USD en una cuenta y ARS en
+// otra. Clasificar por ese campo manda soberanos hard-dollar a rentaFijaPesos y CER en pesos a
+// soberanoAr — ~12% del invertible con la beta equivocada aplicada en cada escenario.
+// La única señal confiable es el ticker. Va como tabla explícita y no como regex de prefijos para
+// que se pueda leer, auditar y corregir sin desarmar una expresión regular.
+export type Denominacion = 'hard' | 'pesos';
+
+export const DENOMINACION_SOBERANO: Record<string, Denominacion> = {
+  // Hard-dollar: soberanos ley extranjera/local en USD y Bopreal.
+  GD30: 'hard', GD35: 'hard', GD38: 'hard',
+  BPOC7: 'hard', BPOD7: 'hard',
+  // Pesos: CER, Boncer, Discount en pesos y los FCI que los contienen.
+  TX26: 'pesos', TZXM7: 'pesos', TZSU2: 'pesos',
+  DICP: 'pesos', LECAPSA: 'pesos', BCAHA: 'pesos',
+  // Medidos en la corrida 2026-07-17 (F9.128 §0). Dos que NO están acá a propósito:
+  //   TLCPO — ON corporativa en USD. Su denominación es hard, pero el bloque `soberanoAr` no le
+  //           corresponde y esa decisión está abierta; ver el gate de §2.
+  //   RV    — FCI de renta variable, no es renta fija: no tiene denominación que declarar acá.
+  // Si un ticker de la corrida no está en la tabla, NO se inventa su denominación: cae en el
+  // fallback y se reporta como inferida.
+};
+
+// Fallback SOLO para instrumentos que todavía no están en la tabla. Es una heurística sobre
+// nomenclatura del mercado local, no una verdad: GD/AL/AE/BPO/BPY son ley extranjera o local en
+// dólares; TX/TZX/DIC/PAR/LECAP/BONCER ajustan por CER o son a tasa en pesos.
+//
+// El default cae en `pesos` deliberadamente: un instrumento AR sin identificar es más probablemente
+// en pesos, y el error queda del lado conservador porque `rentaFijaPesos` tiene la beta más
+// castigada — un desconocido mal clasificado SOBREESTIMA el riesgo en vez de esconderlo. Un sistema
+// de riesgo tiene que fallar hacia el lado incómodo. Toda inferencia se reporta en pantalla (§3).
+export function denominacionDe(ticker: string): { den: Denominacion; inferida: boolean } {
+  const t = ticker.toUpperCase();
+  const tabla = DENOMINACION_SOBERANO[t];
+  if (tabla) return { den: tabla, inferida: false };
+  if (/^(GD|AL|AE|BPO|BPY)\d/.test(t)) return { den: 'hard', inferida: true };
+  if (/^(TX|TZX|TZ|DIC|PAR|LECAP|BONCER|S\d)/.test(t)) return { den: 'pesos', inferida: true };
+  return { den: 'pesos', inferida: true };
+}
+
 export function bloqueDe(p: Posicion): Bloque {
   if (p.tipo === 'cash') return 'cash';
   // Una stablecoin no es cripto a efectos de riesgo de mercado: se comporta como cash.
