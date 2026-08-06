@@ -8,7 +8,10 @@ import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useMovimientosDelAnio } from '../hooks/useMovimientosDelAnio';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
-import { agregarMensual, agregarAnual, mesAnterior, type DashMensual, type DashAnual } from '../datos/agregados';
+import { agregarMensual, agregarAnual, mesAnterior, escalaEvolucionDiaria, type DashMensual, type DashAnual } from '../datos/agregados';
+import { generarInformeMensual, construirResumenFijos, type ResumenFijosMes } from '../datos/informeMensual';
+import { itemsEsperadosActivos } from '../datos/itemsEsperados';
+import { calcularChecklist } from '../datos/checklist';
 import { CHART_PALETTES, usePaletaIdx } from '../datos/graficosPrefs';
 import EditarMovimiento from './EditarMovimiento';
 import type { Movement } from '../types';
@@ -163,12 +166,17 @@ function TreemapChart({ cats, onClickTile }: { cats: CatSlice[]; onClickTile?: (
 
 // ── Mensual ───────────────────────────────────────────────────────────────────
 
-function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: DashMensual; cur: Moneda; movsMes: Movement[]; esAdmin: boolean; onEditar: (m: Movement) => void; paleta: string[] }) {
+function DashboardMensual({ d, mes, cur, movsMes, esAdmin, onEditar, paleta }: { d: DashMensual; mes: string; cur: Moneda; movsMes: Movement[]; esAdmin: boolean; onEditar: (m: Movement) => void; paleta: string[] }) {
   const tc = d.tc;
   // F9.119 — base del período: los ingresos, igual que Resumen. Ver el comentario de curBig.
   const { privado } = usePrivacidad();
   const priv: Priv = { privado, base: d.ingresosUsd };
-  const [compartirInfo, setCompartirInfo] = useState(false);
+  // F9.124 — estado del informe mensual. `sinMontos` es INDEPENDIENTE del toggle de privacidad de
+  // pantalla, igual que el del informe de patrimonio: el PDF se comparte por fuera de la app y
+  // quien lo genera decide qué manda, no lo que tenía prendido en ese momento.
+  const [generando, setGenerando] = useState(false);
+  const [sinMontos, setSinMontos] = useState(false);
+  const [errorInforme, setErrorInforme] = useState<string | null>(null);
   const [openCatMes, setOpenCatMes] = useState<string | null>(null);
   const [openOtrasCat, setOpenOtrasCat] = useState<string | null>(null);
   const [zoomCat, setZoomCat] = useState<string | null>(null);
@@ -191,25 +199,42 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
     ? { nombre: 'Otras', color: 'var(--gf-gray-300)', pct: catResto.reduce((s, c) => s + c.pct, 0), count: catResto.reduce((s, c) => s + c.count, 0), usd: catResto.reduce((s, c) => s + c.usd, 0), subs: [] as { nombre: string; usd: number }[] }
     : null;
   const catLista = catOtras ? [...catTop6, catOtras] : catTop6;
-  const maxDia = Math.max(...d.diaria, 1);
   const maxSubVal = Math.max(...d.subcategorias.map(s => s.valor), 1);
   const chartH = 120;
 
-  // F9.123 — escala recortada de la evolución diaria. Escalar contra el día pico hace que un solo
-  // outlier aplaste el resto del mes y empuje la línea de promedio contra el piso. El tope robusto
-  // sale del p90 de los días CON gasto (los ceros no son señal de nivel, sesgan el percentil hacia
-  // abajo) con un piso en 2× el promedio diario, que garantiza que la línea de referencia nunca
-  // quede por encima de la mitad del alto. El dato no se toca: la barra recortada muestra el valor
-  // real en el title, y el KPI "Día pico" ya lo expone aparte.
-  const diasConMonto = d.diaria.filter(v => v > 0).sort((a, b) => a - b);
-  const p90 = diasConMonto.length > 0
-    ? diasConMonto[Math.min(diasConMonto.length - 1, Math.floor(diasConMonto.length * 0.9))]
-    : 0;
-  const topeRobusto = Math.max(p90 * 1.15, d.promedioDiarioUsd * 2, 1);
-  // Umbral de activación: recortar por un 5% de exceso sería ruido visual sin ganancia de lectura.
-  const hayRecorte = maxDia > topeRobusto * 1.25;
-  const escalaDia = hayRecorte ? topeRobusto : maxDia;
-  const diasRecortados = hayRecorte ? d.diaria.filter(v => v > escalaDia).length : 0;
+  // F9.124 — los ítems esperados se leen ACÁ, al tocar el botón, y no al montar la vista: el
+  // Dashboard hoy no los necesita para nada más, y cargarlos siempre sería pagar una query en cada
+  // apertura para una sección que casi nunca se pide.
+  // Fail-soft: si los fijos no se pueden leer, el informe sale sin §5 en vez de no salir.
+  const generarInforme = async () => {
+    setGenerando(true);
+    setErrorInforme(null);
+    try {
+      let fijos: ResumenFijosMes | null = null;
+      try {
+        const res = await itemsEsperadosActivos();
+        if (res.ok) {
+          fijos = construirResumenFijos(calcularChecklist(res.data, movsMes, mes), tc);
+        } else {
+          console.error('[informe] no se pudieron leer los ítems esperados:', res.error);
+        }
+      } catch (e) {
+        console.error('[informe] gastos fijos omitidos:', e);
+      }
+      await generarInformeMensual({ d, mes, tc, cur, soloPorcentajes: sinMontos, fijos });
+    } catch (e) {
+      console.error('[informe] falló la generación:', e);
+      setErrorInforme(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGenerando(false);
+    }
+  };
+
+  // F9.123 — escala recortada de la evolución diaria. El dato no se toca: la barra recortada muestra
+  // el valor real en el title, y el KPI "Día pico" ya lo expone aparte.
+  // F9.124 — la lógica vive en agregados.ts, no acá: el gráfico del PDF mensual usa exactamente esta
+  // misma escala y dos copias podrían divergir sin que nadie lo note.
+  const { escalaDia, hayRecorte, diasRecortados } = escalaEvolucionDiaria(d.diaria, d.promedioDiarioUsd);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -546,19 +571,25 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
         </div>
       </Card>
 
-      {/* F9.14 — placeholder, mecanismo a definir */}
-      <button onClick={() => setCompartirInfo(true)} style={{
+      {/* F9.124 — cierra el placeholder de F9.14: PDF generado en el cliente + share sheet nativa. */}
+      <button onClick={generarInforme} disabled={generando} style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', boxSizing: 'border-box',
-        padding: '12px 16px', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border)', cursor: 'pointer',
+        padding: '12px 16px', borderRadius: 'var(--radius-card)', border: '1px solid var(--color-border)',
+        cursor: generando ? 'default' : 'pointer', opacity: generando ? 0.6 : 1,
         fontFamily: 'var(--font-base)', fontSize: 14, fontWeight: 700, color: 'var(--color-text)', background: 'var(--color-surface)',
       }}>
         <Icon name="share-2" size={16} color="var(--color-text-sec)" />
-        Compartir informe
+        {generando ? 'Generando…' : 'Compartir informe'}
       </button>
-      {compartirInfo && (
-        <Message kind="wait" title="Próximamente.">
-          Compartir el informe mensual está en definición (PDF, email o link). Por ahora es un placeholder visual.
-        </Message>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--color-text-sec)', cursor: 'pointer', padding: '0 4px' }}>
+        <input type="checkbox" checked={sinMontos} onChange={e => setSinMontos(e.target.checked)} />
+        <span>
+          Sin montos — cada valor sale como % del gasto del mes. Es una opción del archivo, aparte
+          del modo privacidad de la pantalla, y el nombre del PDF lo declara.
+        </span>
+      </label>
+      {errorInforme && (
+        <Message kind="err" title="No se pudo generar el informe.">{errorInforme}</Message>
       )}
       <div style={{ height: 4 }} />
     </div>
@@ -927,7 +958,7 @@ export default function Dashboard() {
       ) : sec === 'mensual' ? (
         dashMensual.movimientos === 0
           ? <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Sin movimientos en {periodoLabel}.</p>
-          : <DashboardMensual d={dashMensual} cur={cur} movsMes={movsMes} esAdmin={esAdmin} onEditar={setEditandoMovimiento} paleta={paleta} />
+          : <DashboardMensual d={dashMensual} mes={mes} cur={cur} movsMes={movsMes} esAdmin={esAdmin} onEditar={setEditandoMovimiento} paleta={paleta} />
       ) : (
         dashAnual.mesesConDatos === 0
           ? <p style={{ textAlign: 'center', color: 'var(--color-text-sec)', padding: '24px 0' }}>Sin movimientos en {anio}.</p>

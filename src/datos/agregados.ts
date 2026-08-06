@@ -22,7 +22,9 @@ export function colorHash(nombre: string): string {
 }
 const colorCategoria = colorHash;
 
-function usdEq(m: Movement, fallbackTc = 0): number {
+// F9.124 — exportada: el informe mensual necesita el equivalente en USD de los movimientos que
+// matchean cada gasto fijo, y reimplementarlo daría un PDF que no cuadra con la pantalla.
+export function usdEq(m: Movement, fallbackTc = 0): number {
   if (m.moneda === 'USD') return m.monto;
   const tc = m.tcUsdArs ?? fallbackTc;
   if (!tc) return 0;
@@ -78,6 +80,41 @@ export interface DashMensual {
   subcategorias: SubcategoriaSlice[];
   diaria: number[];
   porDescripcion: DescripcionSlice[];
+}
+
+// F9.123/F9.124 — GEMELO EVITADO. La escala de la evolución diaria nació en Dashboard.tsx y se
+// mudó acá al aparecer el segundo consumidor (el gráfico SVG del informe mensual). Es lógica de
+// presentación, sí, pero la alternativa era copiarla: dos implementaciones que se ven distintas en
+// pantalla y en el PDF del mismo mes es exactamente el bug que nadie reporta porque nadie compara.
+// Un solo dueño, dos consumidores. Ver `escalaEvolucionDiaria` en Dashboard.tsx e informeMensual.ts.
+//
+// El tope es una ELECCIÓN DE DISEÑO, no una constante técnica, y se puede discutir sin releer esto:
+// p90 de los días CON gasto × 1,15, piso en 2× el promedio diario, umbral de activación 1,25×.
+// Escalar contra el día pico hace que un solo outlier aplaste el resto del mes y empuje la línea de
+// promedio contra el piso; los ceros no son señal de nivel y sesgarían el percentil hacia abajo.
+export interface EscalaDiaria {
+  escalaDia: number;       // denominador para la altura de las barras
+  hayRecorte: boolean;     // false ⇒ escalaDia === maxDia y el render queda idéntico al original
+  diasRecortados: number;
+  maxDia: number;
+}
+
+export function escalaEvolucionDiaria(diaria: number[], promedioDiarioUsd: number): EscalaDiaria {
+  const maxDia = Math.max(...diaria, 1);
+  const diasConMonto = diaria.filter(v => v > 0).sort((a, b) => a - b);
+  const p90 = diasConMonto.length > 0
+    ? diasConMonto[Math.min(diasConMonto.length - 1, Math.floor(diasConMonto.length * 0.9))]
+    : 0;
+  const topeRobusto = Math.max(p90 * 1.15, promedioDiarioUsd * 2, 1);
+  // Recortar por un 5% de exceso sería ruido visual sin ganancia de lectura.
+  const hayRecorte = maxDia > topeRobusto * 1.25;
+  const escalaDia = hayRecorte ? topeRobusto : maxDia;
+  return {
+    escalaDia,
+    hayRecorte,
+    diasRecortados: hayRecorte ? diaria.filter(v => v > escalaDia).length : 0,
+    maxDia,
+  };
 }
 
 export interface AnualSubcategoria { nombre: string; usd: number; pct: number; }

@@ -1162,6 +1162,40 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   ARS además mentía la moneda. Ahora pasa por `curBig(v, cur, tc, priv)`, el mismo helper que el
   resto de la vista. `escalaDia` se comparte con `informeMensual.ts` en F9.124: al moverlo, va a
   `agregados.ts` y queda un solo dueño de la lógica. Frontend puro: deploy `--only hosting`.
+- F9.124 — **Informe mensual en PDF. Cierra el placeholder F9.14**, que desde entonces abría un
+  `<Message kind="wait">` diciendo "está en definición (PDF, email o link)". Ver
+  `docs/prompts/F9.124-informe-mensual-pdf.md`. Resuelto como **PDF generado en el cliente + share
+  sheet nativa**, con descarga como fallback. **Nada de email ni link**: el email lo pone el sistema
+  operativo desde el share sheet, y un link exigiría Storage público con expiración — superficie de
+  seguridad nueva para un informe que se regenera en dos segundos desde datos ya cargados. Motor
+  **pdfmake**, el mismo de `patrimonioInforme.ts`, con sus mismos estilos (`h1`/`h2`/`tableHeader`/
+  `note`) y su mismo import dinámico con `vfs_fonts`; los helpers se copiaron de ahí, no se
+  reinventaron. **Decisión: NO se archiva** en Storage ni en Firestore, al revés que el informe de
+  patrimonio. Aquel documenta una *corrida* —un estado que no se puede reconstruir después— y por eso
+  se guarda; este es una proyección de datos vivos que siguen en Firestore, y archivarlo generaría
+  copias que se desactualizan y contradicen la app. **Decisiones §A/§B del dueño:** §A **sí** —los
+  gastos fijos entran en v1, porque "qué falta pagar" es la pregunta que uno se lleva del mes y hoy
+  vive en otra solapa—; §B **no** —el informe anual se difiere a F9.126—. **`escalaDia` se mudó a
+  `agregados.ts`** (`escalaEvolucionDiaria`): al aparecer el segundo consumidor, la alternativa era
+  copiarla, y dos implementaciones que recortan distinto para el mismo mes en pantalla y en el PDF
+  son el bug que nadie reporta porque nadie compara. Un dueño, dos consumidores; la extracción se
+  verificó corriendo la función real bajo node y da los **mismos** seis resultados que F9.123.
+  `usdEq` también se exportó de `agregados.ts` por lo mismo. **Los ítems esperados se leen al tocar
+  el botón**, no al montar la vista: el Dashboard no los necesita para nada más y cargarlos siempre
+  sería pagar una query en cada apertura. **Fail-soft en dos niveles:** si los fijos no se pueden
+  leer, el informe sale sin §5; si una sección falla, sale con esa sección marcada y el resto
+  válido — perder el PDF entero por una sección rota sería peor que un renglón que dice qué se
+  rompió. Los nueve estados del checklist se colapsan a **tres** (`pagado` / `a confirmar` /
+  `pendiente`): el PDF responde "qué falta pagar", no "en qué estado interno está el match".
+  **Variante sin montos**: sombrea EL formateador —no cada llamada, para que ninguna sección se
+  escape por olvido—, con base declarada en la portada (gasto del mes) y sufijo `-sin-montos` en el
+  nombre del archivo. El **eje del gráfico SVG no lleva números** a propósito: un eje en USD
+  filtraría por la ventana lo que el resto del informe tapa; la referencia es la línea de promedio,
+  que es relativa. El checkbox es **independiente del toggle de privacidad de pantalla**, igual que
+  en el informe de patrimonio: el PDF se comparte por fuera de la app y quien lo genera decide qué
+  manda, no lo que tenía prendido en ese momento. **Cancelar el share sheet (`AbortError`) NO cae a
+  descarga**: bajarle un archivo a alguien que acaba de cancelar es peor que no hacer nada. Frontend
+  puro, sin callables nuevos: deploy `--only hosting`. `tsc`: 41 → 41; `vite build` OK.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
