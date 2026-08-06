@@ -1130,10 +1130,38 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   bajo node vía bundle de esbuild, no una reimplementación): base propia 49,2% del invertible,
   cobertura promedio de los fondos 84,2%, **0 fondos salteados**, **0 warnings del assert**. YPFD
   pasó de Δ −6,6% a **+0,5%** (dio vuelta, que era la prueba de que la base propia se filtró) y TRAN
-  de +9,7% a **+21,2%**. GGAL **no** se achicó como se esperaba (−13,5% → −14,5%): es correcto y
-  aritmético —propio sube 2 pp al pasar a la base chica, pero el lado fondo sube 3,1 pp porque
-  renormaliza un número grande—, y no indica que la base haya fallado. "En tu cartera, no en fondos"
-  quedó en **BIOX** solo, sin cripto ni cash ni soberanos. `tsc`: 41 → 41.
+  de +9,7% a **+21,2%**. **GGAL refutó la predicción y la predicción estaba mal, no el código:** se
+  esperaba que se achicara y creció (−13,5% → −14,5%). La regla que se creía general —"al pasar a la
+  base chica los deltas se achican"— **solo vale para papeles con peso propio alto**. En GGAL lo
+  propio es chico: escalarlo suma 2 pp, mientras que el lado fondo renormaliza un número grande y
+  suma 3,1 pp, así que la brecha se abre. Queda anotado como corrección de la heurística, no como
+  predicción cumplida. "En tu cartera, no en fondos" quedó en **BIOX** solo, sin cripto ni cash ni
+  soberanos. `tsc`: 41 → 41.
+- F9.123 — Evolución diaria: **escala recortada con marca de corte**. Ver
+  `docs/prompts/F9.123-escala-recortada-evolucion-diaria.md`. `Math.max(...d.diaria, 1)` escalaba
+  contra el día pico, así que un solo outlier aplastaba los otros 29 días contra el piso y empujaba
+  la línea de promedio a ~15% de altura: el gráfico dejaba de mostrar el patrón del mes y mostraba
+  el outlier. **No se recorta el dato, se recorta la escala** — la barra del outlier llega al tope y
+  se marca con una banda en zigzag; el valor real sigue en el `title` y en el KPI "Día pico". Nada
+  de escala logarítmica: son montos, y el ojo no lee log en plata. **El tope es una elección de
+  diseño, no una constante técnica**, y se puede discutir sin releer el código: p90 de los días
+  **con gasto** × 1,15 (los ceros no son señal de nivel y sesgarían el percentil hacia abajo), con
+  piso en 2× el promedio diario —que en el caso recortado deja la línea de referencia exactamente a
+  media altura— y umbral de activación 1,25× (recortar por un 5% de exceso sería ruido visual sin
+  ganancia de lectura). **No-regresión, probada por construcción y no por muestreo:** cuando
+  `hayRecorte === false`, `escalaDia === maxDia` por definición, así que `Math.min(v/escalaDia, 1)`
+  es la identidad (ningún `v` supera `maxDia`), `recortada` es false para toda barra, y el sufijo
+  del encabezado y la nota al pie están detrás del mismo flag. El render queda idéntico al anterior,
+  no parecido. Medido sobre seis casos: mes vacío (`p90 = 0` → `topeRobusto = 1`, no crashea), un
+  solo día con gasto (`p90` = ese día → no recorta), mes parejo (no recorta), outlier suave de 1,4×
+  (**no** recorta: el umbral no es de gatillo fácil), outlier fuerte (recorta, 1 día, la línea de
+  promedio sube de ~15% a 50% del alto) y dos outliers (recorta 2, plural correcto en la nota).
+  **Hueco de privacidad cerrado en el mismo commit** (lo marcaba la verificación del propio prompt):
+  el `title` de cada barra mostraba `USD ${v}` crudo sin pasar por `curBig`, así que con el modo
+  privacidad activo la card quedaba tapada pero el tooltip filtraba el monto — y con el toggle en
+  ARS además mentía la moneda. Ahora pasa por `curBig(v, cur, tc, priv)`, el mismo helper que el
+  resto de la vista. `escalaDia` se comparte con `informeMensual.ts` en F9.124: al moverlo, va a
+  `agregados.ts` y queda un solo dueño de la lógica. Frontend puro: deploy `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

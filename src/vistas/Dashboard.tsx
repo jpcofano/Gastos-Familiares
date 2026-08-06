@@ -195,6 +195,22 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
   const maxSubVal = Math.max(...d.subcategorias.map(s => s.valor), 1);
   const chartH = 120;
 
+  // F9.123 — escala recortada de la evolución diaria. Escalar contra el día pico hace que un solo
+  // outlier aplaste el resto del mes y empuje la línea de promedio contra el piso. El tope robusto
+  // sale del p90 de los días CON gasto (los ceros no son señal de nivel, sesgan el percentil hacia
+  // abajo) con un piso en 2× el promedio diario, que garantiza que la línea de referencia nunca
+  // quede por encima de la mitad del alto. El dato no se toca: la barra recortada muestra el valor
+  // real en el title, y el KPI "Día pico" ya lo expone aparte.
+  const diasConMonto = d.diaria.filter(v => v > 0).sort((a, b) => a - b);
+  const p90 = diasConMonto.length > 0
+    ? diasConMonto[Math.min(diasConMonto.length - 1, Math.floor(diasConMonto.length * 0.9))]
+    : 0;
+  const topeRobusto = Math.max(p90 * 1.15, d.promedioDiarioUsd * 2, 1);
+  // Umbral de activación: recortar por un 5% de exceso sería ruido visual sin ganancia de lectura.
+  const hayRecorte = maxDia > topeRobusto * 1.25;
+  const escalaDia = hayRecorte ? topeRobusto : maxDia;
+  const diasRecortados = hayRecorte ? d.diaria.filter(v => v > escalaDia).length : 0;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Balance del período */}
@@ -440,19 +456,54 @@ function DashboardMensual({ d, cur, movsMes, esAdmin, onEditar, paleta }: { d: D
       {/* Evolución diaria */}
       <Card padding="var(--space-4)">
         <div style={{ fontSize: 16, fontWeight: 800 }}>Evolución diaria</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>· pico {d.picoDia.fecha} · {d.picoDia.dow}</div>
+        <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginBottom: 14 }}>
+          · pico {d.picoDia.fecha} · {d.picoDia.dow}
+          {hayRecorte && <> · escala recortada</>}
+        </div>
         <div style={{ position: 'relative', height: chartH, display: 'flex', alignItems: 'flex-end', gap: 2, overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', left: 0, right: 0, bottom: `${(d.promedioDiarioUsd / maxDia) * chartH}px`, borderTop: '1.5px dashed var(--gf-out)', zIndex: 1 }}>
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: `${(d.promedioDiarioUsd / escalaDia) * chartH}px`, borderTop: '1.5px dashed var(--gf-out)', zIndex: 1 }}>
             <span style={{ position: 'absolute', top: -14, left: 0, fontSize: 9, color: 'var(--gf-out)', fontWeight: 600 }}>promedio diario</span>
           </div>
           {d.diaria.map((v, i) => {
             const peak = (i + 1) === d.picoDia.diaNum;
-            return <div key={i} style={{ flex: 1, height: `${Math.max((v / maxDia) * chartH, v > 0 ? 3 : 0)}px`, background: peak ? 'var(--gf-expense)' : 'var(--gf-chart-serie)', borderRadius: '2px 2px 0 0' }} title={`Día ${i + 1}: USD ${v}`} />;
+            const recortada = v > escalaDia;
+            const h = Math.max(Math.min(v / escalaDia, 1) * chartH, v > 0 ? 3 : 0);
+            return (
+              <div
+                key={i}
+                style={{
+                  flex: 1, height: `${h}px`, position: 'relative',
+                  background: peak ? 'var(--gf-expense)' : 'var(--gf-chart-serie)',
+                  borderRadius: recortada ? 0 : '2px 2px 0 0',
+                }}
+                // F9.123 — el title pasa por curBig: antes mostraba `USD ${v}` crudo, así que con el
+                // modo privacidad activo la card quedaba tapada pero el tooltip filtraba el monto —
+                // y con el toggle en ARS mentía la moneda. Es el mismo hueco que F9.119 cerró en el
+                // resto de la vista.
+                title={`Día ${i + 1}: ${curBig(v, cur, tc, priv)}${recortada ? ' (supera la escala)' : ''}`}
+              >
+                {/* F9.123 — banda de corte: la barra sigue hasta arriba, el zigzag dice que el valor
+                    real está fuera de la escala. Sin esto la barra mentiría por omisión. */}
+                {recortada && (
+                  <span style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, height: 5,
+                    background: 'repeating-linear-gradient(-45deg, var(--color-surface) 0 2px, transparent 2px 4px)',
+                  }} />
+                )}
+              </div>
+            );
           })}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--gf-gray-400)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
           <span>01</span><span>05</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span>
         </div>
+        {hayRecorte && (
+          <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
+            {diasRecortados === 1 ? '1 día supera' : `${diasRecortados} días superan`} el tope de la
+            escala y se muestra{diasRecortados === 1 ? '' : 'n'} recortado{diasRecortados === 1 ? '' : 's'}.
+            El monto real está en "Día pico".
+          </div>
+        )}
       </Card>
 
       {/* Stats */}
