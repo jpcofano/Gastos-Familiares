@@ -47,10 +47,14 @@ export const DENOMINACION_SOBERANO: Record<string, Denominacion> = {
   // Pesos: CER, Boncer, Discount en pesos y los FCI que los contienen.
   TX26: 'pesos', TZXM7: 'pesos', TZSU2: 'pesos',
   DICP: 'pesos', LECAPSA: 'pesos', BCAHA: 'pesos',
-  // Medidos en la corrida 2026-07-17 (F9.128 §0). Dos que NO están acá a propósito:
-  //   TLCPO — ON corporativa en USD. Su denominación es hard, pero el bloque `soberanoAr` no le
-  //           corresponde y esa decisión está abierta; ver el gate de §2.
-  //   RV    — FCI de renta variable, no es renta fija: no tiene denominación que declarar acá.
+  // ON corporativa en dólares. Va acá porque esta tabla declara DENOMINACIÓN, no soberanía: TLCPO
+  // está denominado en dólares y punto. Que el bloque resultante se llame `soberanoAr` es una
+  // imprecisión conocida y provisional — ver el comentario de la rama en `bloqueDe`.
+  // Sin esta entrada caía al fallback y terminaba en `rentaFijaPesos`, que es peor: un instrumento
+  // en dólares clasificado como pesos.
+  TLCPO: 'hard',
+  // Medidos en la corrida 2026-07-17 (F9.128 §0). RV NO está acá a propósito: es un FCI de renta
+  // variable, no renta fija, y no tiene denominación que declarar (lo resuelve F9.129).
   // Si un ticker de la corrida no está en la tabla, NO se inventa su denominación: cae en el
   // fallback y se reporta como inferida.
 };
@@ -59,10 +63,13 @@ export const DENOMINACION_SOBERANO: Record<string, Denominacion> = {
 // nomenclatura del mercado local, no una verdad: GD/AL/AE/BPO/BPY son ley extranjera o local en
 // dólares; TX/TZX/DIC/PAR/LECAP/BONCER ajustan por CER o son a tasa en pesos.
 //
-// El default cae en `pesos` deliberadamente: un instrumento AR sin identificar es más probablemente
-// en pesos, y el error queda del lado conservador porque `rentaFijaPesos` tiene la beta más
-// castigada — un desconocido mal clasificado SOBREESTIMA el riesgo en vez de esconderlo. Un sistema
-// de riesgo tiene que fallar hacia el lado incómodo. Toda inferencia se reporta en pantalla (§3).
+// El default cae en `pesos` porque un instrumento AR sin identificar es más probablemente en pesos.
+// OJO — el spec justificaba este default diciendo que era el conservador, y **eso es falso**:
+// `rentaFijaPesos` tiene beta 0,25 contra 0,40 de `soberanoAr`, y en `localAr` recibe −35% contra
+// −40%. O sea que caer en `pesos` SUBESTIMA el riesgo, no lo sobreestima. El default se deja por
+// probabilidad, no por prudencia, y queda anotado como decisión abierta: si se prefiere que falle
+// hacia el lado incómodo, hay que invertirlo a `hard`. Toda inferencia se reporta en pantalla (§3),
+// que es lo que impide que esto quede escondido en cualquiera de las dos variantes.
 export function denominacionDe(ticker: string): { den: Denominacion; inferida: boolean } {
   const t = ticker.toUpperCase();
   const tabla = DENOMINACION_SOBERANO[t];
@@ -79,9 +86,43 @@ export function bloqueDe(p: Posicion): Bloque {
   if (p.tipo === 'accion' || p.tipo === 'cedear') {
     return p.pais_riesgo === 'AR' ? 'accionesAr' : 'accionesGlobal';
   }
-  // bono / on / fci
+  // F9.128 §2 — bono / on con riesgo AR: la denominación sale del TICKER, no de `moneda_origen`.
+  // Ver el comentario de DENOMINACION_SOBERANO: el mismo GD30 viene con USD en una cuenta y ARS en
+  // otra, así que decidir por ese campo partía el mismo instrumento en dos bloques.
+  //
+  // Las ON corporativas en dólares (TLCPO) quedan en `soberanoAr` de forma PROVISIONAL. No son
+  // soberanas y el bloque miente sobre lo que son; el criterio acordado es que la distinción
+  // corporativo/soberano se resuelve en la capa de factores (F9.127), no acá, porque partir el
+  // bloque solo para una posición de USD 379 agregaría una beta que nadie midió.
+  if (p.pais_riesgo === 'AR' && (p.tipo === 'bono' || p.tipo === 'on')) {
+    return denominacionDe(p.ticker).den === 'hard' ? 'soberanoAr' : 'rentaFijaPesos';
+  }
+  // fci — sigue decidiendo por `moneda_origen` hasta F9.129, que los clasifica por subyacente.
   if (p.pais_riesgo === 'AR') return p.moneda_origen === 'USD' ? 'soberanoAr' : 'rentaFijaPesos';
   return 'rentaFijaPesos';
+}
+
+// F9.128 §3 — visibilidad de lo que se dio por sentado. No es un warning: es una línea que dice qué
+// se infirió, para que un instrumento nuevo se vea antes de contaminar un escenario durante seis
+// meses en silencio — que es exactamente lo que acaba de pasar con los CER en `soberanoAr`.
+// Se deduplica por ticker: GD30 aparece en tres filas y sería tres veces la misma inferencia.
+export type InferenciaBloque = { ticker: string; bloque: Bloque; motivo: string };
+
+export function inferenciasDeBloque(posiciones: Posicion[]): InferenciaBloque[] {
+  const vistos = new Map<string, InferenciaBloque>();
+  for (const p of posiciones) {
+    if (p.pais_riesgo !== 'AR') continue;
+    if (p.tipo === 'bono' || p.tipo === 'on') {
+      const { den, inferida } = denominacionDe(p.ticker);
+      if (!inferida || vistos.has(p.ticker)) continue;
+      vistos.set(p.ticker, {
+        ticker: p.ticker,
+        bloque: den === 'hard' ? 'soberanoAr' : 'rentaFijaPesos',
+        motivo: 'denominación inferida del prefijo del ticker',
+      });
+    }
+  }
+  return [...vistos.values()];
 }
 
 // ── Betas por bloque ──────────────────────────────────────────────────────────

@@ -58,7 +58,7 @@ import { calcMetrics, sectorDisplay, SECTOR_DISPLAY, manualToPosicion } from '..
 // movieron al módulo y conviven con los sistémicos por beta. Una sola fuente de números.
 import {
   ESCENARIOS, calcEscenarios, calcBrecha, calcMixObjetivo, violacionesBandas,
-  RIESGO_DEFAULTS, ESCENARIO_TITULAR, BLOQUE_LABEL,
+  RIESGO_DEFAULTS, ESCENARIO_TITULAR, BLOQUE_LABEL, inferenciasDeBloque, posicionesInvertibles,
   type ResultadoEscenario, type ViolacionBanda, type MixObjetivo, type TopesRiesgo, type Bloque,
 } from '../datos/patrimonioRiesgo';
 
@@ -652,6 +652,10 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
   const [escenarioSel, setEscenarioSel] = useState<string>(ESCENARIO_TITULAR);
   const [verMix, setVerMix] = useState(false);
 
+  // F9.128 §3 — posiciones cuyo bloque se dedujo en vez de estar declarado. Va en esta card, junto
+  // al desglose por bloque: es acá donde el bloque se convierte en un número.
+  const inferencias = inferenciasDeBloque(posicionesInvertibles(posiciones, manuales));
+
   const escenarios: ResultadoEscenario[] | null = intentar(() => calcEscenarios(posiciones, manuales), 'calcEscenarios');
   const violaciones: ViolacionBanda[] | null = intentar(() => violacionesBandas(posiciones, manuales, topes), 'violacionesBandas');
 
@@ -805,6 +809,18 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
           </div>
         ))}
       </div>
+
+      {/* F9.128 §3 — qué se dio por sentado al clasificar. No es un warning: es una línea que dice
+          qué se infirió, para que un instrumento nuevo se vea antes de contaminar un escenario
+          durante seis meses en silencio, que es exactamente lo que acaba de pasar. */}
+      {inferencias.length > 0 && (
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 10, lineHeight: 1.45 }}>
+          Clasificación inferida, no declarada:{' '}
+          {inferencias.map(i => `${i.ticker} → ${BLOQUE_LABEL[i.bloque]}`).join(' · ')}.
+          Se dedujo del nombre del instrumento; si alguna está mal, el bloque —y su beta— está mal
+          en todos los escenarios.
+        </div>
+      )}
 
       <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 10, lineHeight: 1.4 }}>
         Escenarios ilustrativos con shocks fijos y betas constantes documentadas; no son predicciones ni probabilidades.

@@ -1208,15 +1208,36 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   mueve**: los dos errores caen dentro de Argentina, así que el titular es correcto y lo que está mal
   es el reparto interno. §1 agrega `DENOMINACION_SOBERANO` (tabla declarada, no regex enterrada) y
   `denominacionDe()`; **todavía no la usa nadie** — `bloqueDe` se cambia en §2, frenado por el gate
-  de la ON corporativa. El fallback **cae en `pesos` a propósito**: un instrumento AR sin identificar
-  es más probablemente en pesos, y el error queda del lado conservador porque `rentaFijaPesos` tiene
-  la beta más castigada, así que un desconocido mal clasificado sobreestima el riesgo en vez de
-  esconderlo — un sistema de riesgo tiene que fallar hacia el lado incómodo. **Línea base de los 8
-  escenarios, para poder medir el delta del fix** (invertible USD 109.988, con manuales):
+  de la ON corporativa. El fallback cae en `pesos` **por probabilidad, no por prudencia**: el spec
+  lo justificaba diciendo que era el default conservador y **eso es falso** — `rentaFijaPesos` tiene
+  beta 0,25 contra 0,40 de `soberanoAr`, y en `localAr` recibe −35% contra −40%, así que caer en
+  `pesos` **subestima** el riesgo. Queda como decisión abierta: si se prefiere que falle hacia el
+  lado incómodo hay que invertirlo a `hard`. Lo que impide que quede escondido en cualquiera de las
+  dos variantes es §3. **Línea base de los 8 escenarios, para poder medir el delta del fix**
+  (invertible USD 109.988, con manuales):
   `global20 −23,83%` · `crash2020 −38,34%` · `localAr −31,83%` · `rally +23,83%` ·
   `energia_ar −11,03%` · `cripto −10,88%` · `soberano_ar −24,41%` · `tormenta −35,29%`. **Los
   números de la solapa Riesgo anteriores a F9.128 están sesgados** por el reparto de bloques, no por
   el motor. `tsc`: 41 → 41.
+- F9.128 §2/§3 — `bloqueDe` usa la tabla, y las inferencias se muestran. La rama de bono/on con
+  riesgo AR pasa a decidir por `denominacionDe(p.ticker)`. **Los FCI siguen decidiendo por
+  `moneda_origen` hasta F9.129**, a propósito: mezclar los dos fixes en un commit haría que el delta
+  de escenarios tenga dos causas y no se pueda atribuir. **Resultado medido:** `soberanoAr` pasa de
+  USD 18.359 a **8.118** y `rentaFijaPesos` de 1.795 a **12.036** — se movieron 10.241 dólares de
+  bloque y la suma se conserva. **La exposición argentina agregada queda en 67,5%, idéntica**, que es
+  el check de que el fix no rompió nada: los dos bloques son argentinos. **Delta de los 8
+  escenarios, ninguno supera los 2 pp:** `global20` −23,83 → **−23,55** · `crash2020` −38,34 →
+  **−37,87** · `localAr` −31,83 → **−31,37** · `rally` +23,83 → **+23,55**. Los otros cuatro
+  (`energia_ar`, `cripto`, `soberano_ar`, `tormenta`) **no se mueven, y es correcto**: shockean por
+  `tipo`/`sector`, no por bloque, así que son insensibles a una reclasificación de bloques. Solo los
+  cuatro sistémicos usan `porBeta`/`porBloque`. **TLCPO (ON corporativa, USD 379) queda en
+  `soberanoAr`**, con el criterio que trae F9.129 (`corporativo_usd: 'soberanoAr'`, "se resuelve por
+  factor"): el bloque miente sobre lo que es, pero partirlo para una sola posición agregaría una beta
+  que nadie midió. Está declarado en la tabla porque **la tabla declara denominación, no soberanía**
+  — sin esa entrada caía al fallback y terminaba en `rentaFijaPesos`, o sea un instrumento en dólares
+  clasificado como pesos, que es peor. §3 agrega en `RiesgoCard` la línea de clasificaciones
+  inferidas, deduplicada por ticker (GD30 aparece en tres filas). **Hoy la lista sale vacía**: los 12
+  tickers de renta fija de la corrida están declarados. `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
