@@ -1012,6 +1012,31 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `informesPortafolio` antes de F9.122 tienen la tabla de benchmark con los pesos de fondos
   inflados ×100, y no se regeneran retroactivamente** — se corrige el generador, no lo ya emitido.
   Toca `patrimonioCafci.ts`, `Patrimonio.tsx`, `patrimonioInforme.ts`; frontend puro. `tsc`: 41 → 41.
+- F9.122.1 §A — `normalizarEspecie` es un **par gemelo declarado**. Ver
+  `docs/prompts/F9.122.1-benchmark-base-comparable.md`. Había dos normalizadores de especie CAFCI,
+  idénticos por casualidad: `normalizarEspecie` en Functions (resuelve las especies) y
+  `normalizeEspecie` en `patrimonioCafci.ts` (**escribe las claves del seed** y las lee en
+  `calcBenchmark`). Endurecer uno solo rompe el mapeo **en silencio**: el seed escribiría claves con
+  una normalización y el servidor las buscaría con otra, y el síntoma sería "el fondo no tiene el
+  papel" en vez de un error. Ahora los dos llevan la misma implementación, el mismo nombre y el
+  mismo comentario de gemelo — verificado con `diff` + `md5sum`, no a ojo. **Copia canónica:
+  `functions/src/cafciHtml.ts`, no `index.ts`** como decía el spec: el spec también pide el test en
+  `cafciHtml.test.ts`, e importar `index.ts` arrastra la registración de callables y
+  `admin.initializeApp()`. `cafciHtml.ts` ya es el módulo puro sin SDK (mismo criterio que
+  `matchLogica.ts`), así que la función se mudó ahí y `index.ts` la importa. Reglas nuevas, cada una
+  contra una forma observada en producción: se saca la razón social (`S.A.`/`S.R.L.`), la puntuación
+  colapsa a espacio (`&`, `.`, `-`) y **se borra el sufijo de clase de UNA letra al final**
+  (`"YPF - D"` → `"ypf"`). El orden importa: el sufijo se saca *después* de colapsar la puntuación.
+  Dos letras no se tocan (`"Grupo Supervielle CB"`) ni los códigos alfanuméricos (`"Lecap S31G6"`).
+  **Barrido previo sobre datos reales** (`scripts/auditF9122c.ts`): 0 colisiones sobre los 70
+  patrones del seed, y las 33 especies de las 13 carteras resuelven bien salvo 8 CEDEARs de
+  subyacente no argentino, que es lo correcto. **Consecuencia operativa: cambiar cualquiera de los
+  dos gemelos obliga a correr "Importar mapping seed" desde la UI**, si no las claves viejas quedan
+  huérfanas y el fix no surte efecto. Post-reseed quedan 3 docs huérfanos con ticker correcto pero
+  clave inalcanzable (`"ferrum s.a."`, `"grupo finc. valores"`, `"vista oil & gas"`): son peso
+  muerto, no un riesgo — ninguna especie normalizada puede volver a caer en esas claves.
+  §A.2 (CEDEARs resuelven ticker) va con §2, porque depende del diccionario que carga §2.
+  Tests nuevos en `cafciHtml.test.ts`, incluida idempotencia. `tsc`: 41 → 41; `functions build` OK.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

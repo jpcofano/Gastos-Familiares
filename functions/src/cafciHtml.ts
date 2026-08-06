@@ -49,3 +49,22 @@ export function extraerFechaCartera(html: string): string | null {
   const [, dd, mm, yyyy] = m;
   return `${yyyy}-${mm}-${dd}`;
 }
+
+// F9.122.1 — GEMELO. La copia canónica es functions/src/cafciHtml.ts; src/datos/patrimonioCafci.ts la
+// espeja. Divergir rompe el mapeo en silencio: el seed escribe claves con una normalización y el
+// servidor las busca con otra, y el resultado es "el fondo no tiene el papel" en vez de un error.
+// Cada regla responde a una forma observada en CAFCI (auditoría F9.122 §0, 2026-08):
+//   "YPF - D"                  — sufijo de clase: la clase no cambia el emisor
+//   "Cedear Vista Oil Gas"     — '&' ausente respecto del patrón "Vista Oil & Gas"
+//   "Grupo Fciero Galicia - B" — puntuación irregular entre fuentes
+export function normalizarEspecie(s: string): string {
+  return s
+    .trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\b(s\.?a\.?u?\.?|s\.?r\.?l\.?)\b/g, ' ')  // razón social, no identifica al emisor
+    .replace(/[^a-z0-9]+/g, ' ')                        // & . - , ( ) → espacio
+    .trim()
+    .replace(/\s+[a-z]$/, '')                           // sufijo de clase de UNA letra al final
+    .replace(/\s+/g, ' ')
+    .trim();
+}

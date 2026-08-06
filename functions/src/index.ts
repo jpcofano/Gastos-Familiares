@@ -18,7 +18,7 @@ import {
   type PropuestaMatch,
 } from './matchLogica';
 import { normalizar, type NormRule } from './normalizador';
-import { extraerItemsCartera, extraerFechaCartera } from './cafciHtml';
+import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
 
 if (!getApps().length) initializeApp();
 
@@ -3376,9 +3376,9 @@ export const analizarConIA = onCall(
 );
 
 // ── F9.97 — Sincronización CAFCI (benchmark vs fondos) ───────────────────────
-function normalizarEspecie(s: string): string {
-  return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-}
+// F9.122.1 — `normalizarEspecie` se mudó a cafciHtml.ts (módulo puro, sin SDK) para que el test
+// pueda importarla: importar index.ts arrastra la registración de callables y admin.initializeApp().
+// Es la copia canónica del par gemelo con src/datos/patrimonioCafci.ts.
 
 // F9.97.1 — Estructura confirmada por AppsScript en producción:
 // carteras[] son las posiciones directamente; campo especie = nombreActivo, peso = share.
