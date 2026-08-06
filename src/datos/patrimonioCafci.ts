@@ -254,15 +254,19 @@ export function fechaDatosDeFondo(carteras: CafciCartera[], fondoId: string): st
 }
 
 // ── Helpers de análisis para BenchmarkTab ─────────────────────────────────────
+// F9.122 — TODOS los campos de peso son FRACCIÓN (0–1), nunca porcentaje. `CafciPosicion.pesoPct`
+// viene de CAFCI en 0–100 (lo confirma la validación totalPct ∈ [98,102]) y se divide acá al leer.
+// Antes convivían las dos unidades en la misma fila y la UI multiplicaba las dos por 100: un fondo
+// con 11,4% de PAMP se mostraba como 1140,0%. El sufijo `Frac` es el que impide que vuelva a pasar.
 export type FilaBenchmark = {
   ticker: string;
-  propioUsd: number | null;   // null si no está en cartera propia
-  propioPct: number | null;   // % sobre total propio
-  fondosAvgPct: number;       // promedio de los fondos
-  fondosMinPct: number;
-  fondosMaxPct: number;
-  fondosStdPct: number;
-  divergencia: number;        // |propioPct - fondosAvgPct|, para ordenar
+  propioUsd: number | null;    // null si no está en cartera propia
+  propioFrac: number | null;   // fracción sobre total propio
+  fondosAvgFrac: number;       // promedio entre TODOS los fondos del set (los que no la tienen pesan 0)
+  fondosMinFrac: number;
+  fondosMaxFrac: number;
+  fondosStdFrac: number;
+  divergencia: number;         // |propioFrac - fondosAvgFrac|, para ordenar
 };
 
 export function calcBenchmark(
@@ -271,7 +275,7 @@ export function calcBenchmark(
   mappings: Record<string, string | null>
 ): {
   filas: FilaBenchmark[];
-  soloenFondos: Array<{ ticker: string; avgPct: number }>;
+  soloenFondos: Array<{ ticker: string; avgFrac: number }>;
   soloEnPropio: string[];
 } {
   if (carteras.length === 0) return { filas: [], soloenFondos: [], soloEnPropio: [] };
@@ -295,7 +299,8 @@ export function calcBenchmark(
       tickersEnCartera.add(ticker);
       if (!fondosByTicker[ticker]) fondosByTicker[ticker] = Array(carteras.length).fill(0);
       const idx = carteras.indexOf(cartera);
-      fondosByTicker[ticker][idx] = (fondosByTicker[ticker][idx] ?? 0) + pos.pesoPct;
+      // F9.122 — pesoPct viene 0–100 desde CAFCI; acá adentro todo es fracción.
+      fondosByTicker[ticker][idx] = (fondosByTicker[ticker][idx] ?? 0) + pos.pesoPct / 100;
     }
   }
 
@@ -308,7 +313,7 @@ export function calcBenchmark(
   const filas: FilaBenchmark[] = [];
   for (const ticker of todosLosTickers) {
     const propioUsd = propioByTicker[ticker] ?? null;
-    const propioPct = propioUsd !== null ? propioUsd / (totalPropio || 1) : null;
+    const propioFrac = propioUsd !== null ? propioUsd / (totalPropio || 1) : null;
     const pcts = fondosByTicker[ticker] ?? [];
     const avg = pcts.length > 0 ? pcts.reduce((s, x) => s + x, 0) / pcts.length : 0;
     const min = pcts.length > 0 ? Math.min(...pcts) : 0;
@@ -319,25 +324,33 @@ export function calcBenchmark(
     filas.push({
       ticker,
       propioUsd,
-      propioPct,
-      fondosAvgPct: avg,
-      fondosMinPct: min,
-      fondosMaxPct: max,
-      fondosStdPct: std,
-      divergencia: Math.abs((propioPct ?? 0) - avg),
+      propioFrac,
+      fondosAvgFrac: avg,
+      fondosMinFrac: min,
+      fondosMaxFrac: max,
+      fondosStdFrac: std,
+      divergencia: Math.abs((propioFrac ?? 0) - avg),
     });
   }
 
   filas.sort((a, b) => b.divergencia - a.divergencia);
 
+  // F9.122 — guardarraíl de unidad: una fracción > 1 sería un fondo con más del 100% en un solo
+  // papel. Es imposible, así que si aparece es que volvió a colarse un peso en escala 0–100.
+  for (const f of filas) {
+    if (f.fondosAvgFrac > 1) {
+      console.warn(`[calcBenchmark] ${f.ticker}: fondosAvgFrac=${f.fondosAvgFrac} > 1 — peso en escala equivocada`);
+    }
+  }
+
   const soloenFondos = filas
-    .filter(f => f.propioPct === null && f.fondosAvgPct > 0)
-    .sort((a, b) => b.fondosAvgPct - a.fondosAvgPct)
+    .filter(f => f.propioFrac === null && f.fondosAvgFrac > 0)
+    .sort((a, b) => b.fondosAvgFrac - a.fondosAvgFrac)
     .slice(0, 10)
-    .map(f => ({ ticker: f.ticker, avgPct: f.fondosAvgPct }));
+    .map(f => ({ ticker: f.ticker, avgFrac: f.fondosAvgFrac }));
 
   const soloEnPropio = filas
-    .filter(f => f.fondosAvgPct === 0 && f.propioPct !== null)
+    .filter(f => f.fondosAvgFrac === 0 && f.propioFrac !== null)
     .map(f => f.ticker);
 
   return { filas, soloenFondos, soloEnPropio };

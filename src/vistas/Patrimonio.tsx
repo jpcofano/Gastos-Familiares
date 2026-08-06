@@ -2673,7 +2673,7 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
 
   const possPropias = posiciones.map(p => ({ ticker: p.ticker, valorUsd: p.valorUsd }));
   const { filas, soloenFondos, soloEnPropio } = calcBenchmark(possPropias, carteras, mappings);
-  const filasEnAmbos = filas.filter(f => f.propioPct !== null && f.fondosAvgPct > 0);
+  const filasEnAmbos = filas.filter(f => f.propioFrac !== null && f.fondosAvgFrac > 0);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2690,21 +2690,21 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 58px 68px 50px', gap: 4, fontSize: 10, color: 'var(--gf-gray-400)', fontWeight: 700, marginBottom: 6 }}>
               <div>Ticker</div>
               <div style={{ textAlign: 'right' }}>Propio</div>
-              <div style={{ textAlign: 'right' }}>Fondos avg</div>
+              <div style={{ textAlign: 'right' }}>Fondos avg¹</div>
               <div style={{ textAlign: 'right' }}>Δ</div>
             </div>
             {filasEnAmbos.map(f => {
-              const delta = (f.propioPct ?? 0) - f.fondosAvgPct;
+              const delta = (f.propioFrac ?? 0) - f.fondosAvgFrac;
               const col = Math.abs(delta) > 0.05 ? 'var(--gf-expense)' : Math.abs(delta) > 0.02 ? '#f59e0b' : 'var(--gf-gray-400)';
               return (
                 <div key={f.ticker} style={{ display: 'grid', gridTemplateColumns: '1fr 58px 68px 50px', gap: 4, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', fontSize: 12.5, alignItems: 'center' }}>
                   <div style={{ fontWeight: 700 }}>{f.ticker}</div>
-                  <div style={{ textAlign: 'right' }}>{(Math.round((f.propioPct ?? 0) * 1000) / 10).toFixed(1)}%</div>
+                  <div style={{ textAlign: 'right' }}>{(Math.round((f.propioFrac ?? 0) * 1000) / 10).toFixed(1)}%</div>
                   <div style={{ textAlign: 'right', color: 'var(--gf-gray-500)' }}>
-                    {(Math.round(f.fondosAvgPct * 1000) / 10).toFixed(1)}%
-                    {f.fondosMinPct !== f.fondosMaxPct && (
+                    {(Math.round(f.fondosAvgFrac * 1000) / 10).toFixed(1)}%
+                    {f.fondosMinFrac !== f.fondosMaxFrac && (
                       <div style={{ fontSize: 9, color: 'var(--gf-gray-300)' }}>
-                        {(Math.round(f.fondosMinPct * 1000) / 10).toFixed(1)}–{(Math.round(f.fondosMaxPct * 1000) / 10).toFixed(1)}%
+                        {(Math.round(f.fondosMinFrac * 1000) / 10).toFixed(1)}–{(Math.round(f.fondosMaxFrac * 1000) / 10).toFixed(1)}%
                       </div>
                     )}
                   </div>
@@ -2718,13 +2718,18 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
         )}
       </Card>
 
+      <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 8, lineHeight: 1.4 }}>
+        ¹ promedio entre los {carteras.length} fondos del set: un fondo que no tiene el papel
+        computa 0%. No es el promedio entre los que sí lo tienen.
+      </div>
+
       {soloenFondos.length > 0 && (
         <Card>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>En fondos, no en tu cartera</div>
           {soloenFondos.map(f => (
             <div key={f.ticker} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', fontSize: 12.5 }}>
               <span style={{ fontWeight: 600 }}>{f.ticker}</span>
-              <span style={{ color: 'var(--gf-gray-500)', fontSize: 11.5 }}>{(Math.round(f.avgPct * 1000) / 10).toFixed(1)}% avg</span>
+              <span style={{ color: 'var(--gf-gray-500)', fontSize: 11.5 }}>{(Math.round(f.avgFrac * 1000) / 10).toFixed(1)}% avg</span>
             </div>
           ))}
         </Card>

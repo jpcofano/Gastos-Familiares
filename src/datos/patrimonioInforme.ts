@@ -670,18 +670,18 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
     content.push({ text: `${cafciCarteras.length} fondo${cafciCarteras.length !== 1 ? 's' : ''} · corrida ${cafciCarteras[0]?.fechaDatos ?? '—'}`, style: 'note', margin: [0, 0, 0, 6] });
     const possPropias = [...posiciones, ...manuales.map(m => ({ ticker: m.ticker, valorUsd: m.valorUsd }))];
     const { filas, soloenFondos, soloEnPropio } = calcBenchmark(possPropias, cafciCarteras, cafciMappings);
-    const filasEnAmbos = filas.filter(f => f.propioPct !== null && f.fondosAvgPct > 0);
+    const filasEnAmbos = filas.filter(f => f.propioFrac !== null && f.fondosAvgFrac > 0);
     if (filasEnAmbos.length > 0) {
       const fmtPct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%';
       content.push(tableOf(
         ['Ticker', 'Propio %', 'Fondos avg %', 'Rango', 'Δ'],
         filasEnAmbos.map(f => {
-          const delta = (f.propioPct ?? 0) - f.fondosAvgPct;
+          const delta = (f.propioFrac ?? 0) - f.fondosAvgFrac;
           return [
             { text: f.ticker, fontSize: 9, bold: true },
-            { text: fmtPct(f.propioPct ?? 0), fontSize: 9, alignment: 'right' },
-            { text: fmtPct(f.fondosAvgPct), fontSize: 9, alignment: 'right' },
-            { text: f.fondosMinPct !== f.fondosMaxPct ? `${fmtPct(f.fondosMinPct)}–${fmtPct(f.fondosMaxPct)}` : '—', fontSize: 8, alignment: 'right', color: '#64748b' },
+            { text: fmtPct(f.propioFrac ?? 0), fontSize: 9, alignment: 'right' },
+            { text: fmtPct(f.fondosAvgFrac), fontSize: 9, alignment: 'right' },
+            { text: f.fondosMinFrac !== f.fondosMaxFrac ? `${fmtPct(f.fondosMinFrac)}–${fmtPct(f.fondosMaxFrac)}` : '—', fontSize: 8, alignment: 'right', color: '#64748b' },
             { text: (delta > 0 ? '+' : '') + fmtPct(delta), fontSize: 9, alignment: 'right', bold: true, color: Math.abs(delta) > 0.05 ? '#DC2626' : Math.abs(delta) > 0.02 ? '#D97706' : '#64748b' },
           ];
         })
@@ -689,7 +689,7 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
     }
     if (soloenFondos.length > 0) {
       content.push(h2('En fondos, no en tu cartera'));
-      content.push({ text: soloenFondos.map(f => `${f.ticker} (${(Math.round(f.avgPct * 1000) / 10).toFixed(1)}%)`).join('  ·  '), fontSize: 8.5, margin: [0, 2, 0, 4] });
+      content.push({ text: soloenFondos.map(f => `${f.ticker} (${(Math.round(f.avgFrac * 1000) / 10).toFixed(1)}%)`).join('  ·  '), fontSize: 8.5, margin: [0, 2, 0, 4] });
     }
     if (soloEnPropio.length > 0) {
       content.push(h2('En tu cartera, no en fondos'));

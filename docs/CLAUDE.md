@@ -995,6 +995,23 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `BasePrivacidad` una sola vez en la cabecera de la vista, que cubre las 8 solapas. El checkbox
   `sinMontos` del informe PDF queda **independiente**, documentado en el código. `tsc`: 41 → 41.
   `vite build` OK. Frontend puro: deploy `--only hosting`.
+- F9.122 §1 — CAFCI: unidad única en el benchmark. Ver `docs/prompts/F9.122-cafci-unidades-y-mapeo.md`.
+  **Auditoría §0 medida contra producción** (`scripts/auditF9122.ts`, solo lectura): PAMP pesa
+  `11.6` en Galileo Acciones con `totalPct = 100.1` → `CafciPosicion.pesoPct` está persistido en
+  **escala 0–100**, mientras que `propioPct` se calculaba como fracción. Las dos unidades convivían
+  en la misma `FilaBenchmark` y la UI multiplicaba ambas por 100: la columna "Fondos avg" venía
+  mostrando **1140%** donde correspondía 11,4%. **Decisión: no se migra Firestore, se convierte al
+  leer** — `pesoPct / 100` en `calcBenchmark`, y los campos se **renombran a `...Frac`**
+  (`propioFrac`, `fondosAvgFrac`, `fondosMinFrac`, `fondosMaxFrac`, `fondosStdFrac`, `avgFrac`).
+  El renombre es el fix real: un campo `...Pct` que guarda una fracción es la trampa que produjo el
+  bug, y el nombre es lo único que impide que vuelva. La aritmética de render (`x * 1000 / 10`) no
+  cambia: ahora es correcta para las dos columnas. `console.warn` en `calcBenchmark` si algún
+  `fondosAvgFrac > 1` (imposible: sería un fondo con el 100% en un solo papel). Nota `¹` al pie de
+  la tabla declarando el denominador: el promedio es sobre **todos** los fondos del set, un fondo
+  que no tiene el papel computa 0. **Los informes PDF de patrimonio archivados en
+  `informesPortafolio` antes de F9.122 tienen la tabla de benchmark con los pesos de fondos
+  inflados ×100, y no se regeneran retroactivamente** — se corrige el generador, no lo ya emitido.
+  Toca `patrimonioCafci.ts`, `Patrimonio.tsx`, `patrimonioInforme.ts`; frontend puro. `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
