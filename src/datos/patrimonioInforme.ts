@@ -6,6 +6,7 @@ import { cargarDecisiones, revisionPendiente, type DecisionPatrimonio } from './
 import { cargarUltimaAgenda, type AgendaMacro } from './patrimonioIA';
 import { cargarFlujos, calcRetorno, type FlujoPatrimonio } from './patrimonioFlujos';
 import { cargarUltimasCarteras, cargarMappings, calcBenchmark } from './patrimonioCafci';
+import { posicionesInvertibles } from './patrimonioRiesgo';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import type { Posicion, ActivoFijo, PosicionManual, PatMetrics } from '../types/patrimonio';
@@ -668,8 +669,11 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
   if (cafciCarteras.length > 0) {
     content.push(pageBreak(), h1('13. Benchmark vs fondos CAFCI'));
     content.push({ text: `${cafciCarteras.length} fondo${cafciCarteras.length !== 1 ? 's' : ''} · corrida ${cafciCarteras[0]?.fechaDatos ?? '—'}`, style: 'note', margin: [0, 0, 0, 6] });
-    const possPropias = [...posiciones, ...manuales.map(m => ({ ticker: m.ticker, valorUsd: m.valorUsd }))];
-    const { filas, soloenFondos, soloEnPropio } = calcBenchmark(possPropias, cafciCarteras, cafciMappings);
+    // F9.122.1 §B — posiciones completas, no {ticker, valorUsd}: la base propia se filtra con
+    // bloqueDe(), que necesita `tipo` y `pais_riesgo`. `posicionesInvertibles` es la conversión
+    // canónica de las manuales a Posicion — no se rehace acá.
+    const possPropias = posicionesInvertibles(posiciones, manuales);
+    const { filas, soloenFondos, soloEnPropio, base } = calcBenchmark(possPropias, cafciCarteras, cafciMappings);
     const filasEnAmbos = filas.filter(f => f.propioFrac !== null && f.fondosAvgFrac > 0);
     if (filasEnAmbos.length > 0) {
       const fmtPct = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%';
@@ -682,7 +686,9 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
             { text: fmtPct(f.propioFrac ?? 0), fontSize: 9, alignment: 'right' },
             { text: fmtPct(f.fondosAvgFrac), fontSize: 9, alignment: 'right' },
             { text: f.fondosMinFrac !== f.fondosMaxFrac ? `${fmtPct(f.fondosMinFrac)}–${fmtPct(f.fondosMaxFrac)}` : '—', fontSize: 8, alignment: 'right', color: '#64748b' },
-            { text: (delta > 0 ? '+' : '') + fmtPct(delta), fontSize: 9, alignment: 'right', bold: true, color: Math.abs(delta) > 0.05 ? '#DC2626' : Math.abs(delta) > 0.02 ? '#D97706' : '#64748b' },
+            // F9.122.1 §B — mismos umbrales que la pantalla (0,08 / 0,04): sobre la base comparable
+            // los deltas son ~2× más grandes y los viejos pintaban todo en rojo.
+            { text: (delta > 0 ? '+' : '') + fmtPct(delta), fontSize: 9, alignment: 'right', bold: true, color: Math.abs(delta) > 0.08 ? '#DC2626' : Math.abs(delta) > 0.04 ? '#D97706' : '#64748b' },
           ];
         })
       ));
@@ -695,7 +701,20 @@ export async function generarYArchivarInforme(params: InformeParams): Promise<In
       content.push(h2('En tu cartera, no en fondos'));
       content.push({ text: soloEnPropio.join('  ·  '), fontSize: 8.5, margin: [0, 2, 0, 4] });
     }
-    content.push(note(`Fondos: ${cafciCarteras.map(c => c.nombre).join(', ')}. La divergencia muestra sub/sobrexposición relativa a esos fondos. No es asesoramiento.`));
+    // F9.122.1 §B — el note() declara la BASE, no solo lista los fondos: un informe archivado con
+    // porcentajes sin denominador se lee mal para siempre, y nadie va a poder reconstruirlo.
+    const fmtB = (v: number) => (Math.round(v * 1000) / 10).toFixed(1) + '%';
+    content.push(note(
+      `Base: renta variable argentina — ${fmtB(base.propioPctDeCartera)} del invertible propio, ` +
+      `${fmtB(base.fondoCoberturaProm)} promedio de la cartera de cada fondo. Se excluyen liquidez, ` +
+      `renta fija, "Resto de Activos" y CEDEARs sin riesgo argentino (${fmtB(base.excluidoFondoProm)} ` +
+      `promedio del fondo).` +
+      (base.fondosSalteados > 0
+        ? ` ${base.fondosSalteados} fondo${base.fondosSalteados !== 1 ? 's' : ''} quedó afuera por base comparable menor al 40%.`
+        : '') +
+      ` Fondos: ${cafciCarteras.map(c => c.nombre).join(', ')}. La divergencia muestra ` +
+      `sub/sobrexposición relativa a esos fondos. No es asesoramiento.`
+    ));
   }
 
   // 14. Metodología y límites

@@ -4,6 +4,8 @@ import {
 } from 'firebase/firestore';
 import { db, functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
+import { bloqueDe } from './patrimonioRiesgo';
+import type { Posicion } from '../types/patrimonio';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 export type CafciFondoConfig = {
@@ -271,38 +273,98 @@ export type FilaBenchmark = {
   divergencia: number;         // |propioFrac - fondosAvgFrac|, para ordenar
 };
 
+// F9.122.1 §B — la base sobre la que se calculan TODOS los porcentajes de este módulo. Se expone
+// porque un % sin denominador declarado es una cifra que induce a error, no una medición.
+export type BaseComparable = {
+  propioUsd: number;          // renta variable AR propia
+  propioPctDeCartera: number; // qué fracción del invertible representa
+  fondoCoberturaProm: number; // fracción promedio de los fondos que entró a la base
+  excluidoFondoProm: number;  // 1 − cobertura: liquidez + resto + renta fija + CEDEAR no-AR
+  // Agregados sobre el spec: sin esto, "se saltearon fondos" es una decisión invisible.
+  fondosEnBase: number;
+  fondosSalteados: number;
+};
+
+// Un fondo cuya porción comparable no llega a este piso no se renormaliza: dividir por una base
+// flaca amplifica el ruido en vez de medir. Está en escala 0–100, como pesoPct.
+const BASE_FONDO_MINIMA = 40;
+
 export function calcBenchmark(
-  posicionesPropias: Array<{ ticker: string; valorUsd: number }>,
+  posicionesPropias: Posicion[],
   carteras: CafciCartera[],
   mappings: Record<string, string | null>
 ): {
   filas: FilaBenchmark[];
   soloenFondos: Array<{ ticker: string; avgFrac: number }>;
   soloEnPropio: string[];
+  base: BaseComparable;
 } {
-  if (carteras.length === 0) return { filas: [], soloenFondos: [], soloEnPropio: [] };
+  const baseVacia: BaseComparable = {
+    propioUsd: 0, propioPctDeCartera: 0, fondoCoberturaProm: 0, excluidoFondoProm: 0,
+    fondosEnBase: 0, fondosSalteados: 0,
+  };
+  if (carteras.length === 0) return { filas: [], soloenFondos: [], soloEnPropio: [], base: baseVacia };
 
-  const totalPropio = posicionesPropias.reduce((s, p) => s + p.valorUsd, 0);
+  // F9.122.1 §B — BASE PROPIA: renta variable argentina, no el invertible entero. Comparar el peso
+  // de un papel sobre una cartera que incluye cripto, cash y soberanos contra el peso que ese papel
+  // tiene dentro de un fondo de acciones son dos universos distintos, y el número que sale de
+  // mezclarlos no significa nada: subestima sistemáticamente lo propio y hace leer "estás en línea"
+  // donde en realidad hay más concentración. Se reusa `bloqueDe` de patrimonioRiesgo.ts —la función
+  // canónica de clasificación— en vez de inventar un filtro nuevo que pueda divergir de ella.
+  const propias = posicionesPropias.filter(p => bloqueDe(p) === 'accionesAr');
+  const totalPropio = propias.reduce((s, p) => s + p.valorUsd, 0);
+  const totalInvertible = posicionesPropias.reduce((s, p) => s + p.valorUsd, 0);
 
   // Peso propio por ticker
   const propioByTicker: Record<string, number> = {};
-  for (const p of posicionesPropias) {
+  for (const p of propias) {
     propioByTicker[p.ticker] = (propioByTicker[p.ticker] ?? 0) + p.valorUsd;
   }
+  const tickersArPropios = new Set(propias.map(p => p.ticker));
 
-  // Pesos de fondos por ticker (usando mapping)
-  const fondosByTicker: Record<string, number[]> = {};
+  const tickerDe = (pos: CafciPosicion): string | null =>
+    pos.ticker ?? mappings[normalizarEspecie(pos.especieRaw)] ?? null;
+
+  // BASE FONDO: se sacan liquidez, "Resto de Activos" y renta fija, y los CEDEARs cuyo subyacente
+  // no está en tu renta variable AR. La regla del CEDEAR es asimétrica y conviene decirlo: solo
+  // puede *encontrar* solapamiento (VIST, que Galileo tiene al 13,5%), nunca mostrarte un CEDEAR de
+  // riesgo argentino que el fondo tenga y vos no. La alternativa —un registro propio de riesgo-país
+  // por CEDEAR— es un dato que la app no tiene.
+  const enBase: Array<{ comparables: CafciPosicion[]; baseFondo: number }> = [];
+  let fondosSalteados = 0;
   for (const cartera of carteras) {
-    const tickersEnCartera = new Set<string>();
-    for (const pos of cartera.posiciones) {
-      if (pos.incompleto) continue;
-      const ticker = pos.ticker ?? mappings[normalizarEspecie(pos.especieRaw)];
-      if (!ticker) continue;
-      tickersEnCartera.add(ticker);
-      if (!fondosByTicker[ticker]) fondosByTicker[ticker] = Array(carteras.length).fill(0);
-      const idx = carteras.indexOf(cartera);
-      // F9.122 — pesoPct viene 0–100 desde CAFCI; acá adentro todo es fracción.
-      fondosByTicker[ticker][idx] = (fondosByTicker[ticker][idx] ?? 0) + pos.pesoPct / 100;
+    const comparables = cartera.posiciones.filter(pos => {
+      if (pos.incompleto) return false;
+      const t = tickerDe(pos);
+      if (!t) return false;
+      if (pos.categoria === 'LIQUIDEZ' || pos.categoria === 'RESTO' || pos.categoria === 'RENTA_FIJA') return false;
+      if (pos.categoria === 'CEDEAR' && !tickersArPropios.has(t)) return false;
+      return true;
+    });
+    const baseFondo = comparables.reduce((s, p) => s + p.pesoPct, 0);
+    if (baseFondo < BASE_FONDO_MINIMA) { fondosSalteados++; continue; }
+    enBase.push({ comparables, baseFondo });
+  }
+
+  // Pesos de fondos por ticker, renormalizados sobre la base comparable de cada fondo.
+  const fondosByTicker: Record<string, number[]> = {};
+  for (let idx = 0; idx < enBase.length; idx++) {
+    const { comparables, baseFondo } = enBase[idx];
+    for (const pos of comparables) {
+      const ticker = tickerDe(pos)!;
+      if (!fondosByTicker[ticker]) fondosByTicker[ticker] = Array(enBase.length).fill(0);
+      // F9.122.1 §B — acá NO va el /100 que introdujo F9.122 §1: `pesoPct` y `baseFondo` están en
+      // la misma escala 0–100, así que el cociente ya sale en fracción. Un /100 de más daría 0,01.
+      fondosByTicker[ticker][idx] = (fondosByTicker[ticker][idx] ?? 0) + pos.pesoPct / baseFondo;
+    }
+  }
+
+  // Assert de la renormalización: los pesos de cada fondo tienen que sumar 1,0. Si no suman, o el
+  // filtro de comparables no coincide con el denominador, o volvió a colarse una conversión.
+  for (let idx = 0; idx < enBase.length; idx++) {
+    const suma = Object.values(fondosByTicker).reduce((s, arr) => s + (arr[idx] ?? 0), 0);
+    if (Math.abs(suma - 1) > 0.001) {
+      console.warn(`[calcBenchmark] fondo #${idx}: pesos renormalizados suman ${suma.toFixed(6)}, esperado 1,0 ± 0,001`);
     }
   }
 
@@ -355,7 +417,19 @@ export function calcBenchmark(
     .filter(f => f.fondosAvgFrac === 0 && f.propioFrac !== null)
     .map(f => f.ticker);
 
-  return { filas, soloenFondos, soloEnPropio };
+  const coberturaProm = enBase.length > 0
+    ? enBase.reduce((s, c) => s + c.baseFondo / 100, 0) / enBase.length
+    : 0;
+  const base: BaseComparable = {
+    propioUsd: totalPropio,
+    propioPctDeCartera: totalInvertible > 0 ? totalPropio / totalInvertible : 0,
+    fondoCoberturaProm: coberturaProm,
+    excluidoFondoProm: enBase.length > 0 ? 1 - coberturaProm : 0,
+    fondosEnBase: enBase.length,
+    fondosSalteados,
+  };
+
+  return { filas, soloenFondos, soloEnPropio, base };
 }
 
 // F9.122.1 — GEMELO. La copia canónica es functions/src/cafciHtml.ts; src/datos/patrimonioCafci.ts la

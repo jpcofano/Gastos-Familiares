@@ -1037,6 +1037,14 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   muerto, no un riesgo — ninguna especie normalizada puede volver a caer en esas claves.
   §A.2 (CEDEARs resuelven ticker) va con §2, porque depende del diccionario que carga §2.
   Tests nuevos en `cafciHtml.test.ts`, incluida idempotencia. `tsc`: 41 → 41; `functions build` OK.
+  **Qué red tiene cada copia del gemelo, porque no es la misma** (F9.125): la del **servidor**
+  (`functions/src/cafciHtml.ts`) la cubre `cafciHtml.test.ts`, que corre por línea de comandos con
+  `npx tsx` y falla con exit 1 — es la que se puede automatizar. La del **cliente**
+  (`patrimonioCafci.ts`) la cubre `testsGemeloNormalizarEspecie()`, que corre **solo si alguien abre
+  el panel "Verificar tests unitarios del motor" en Patrimonio**: no hay runner de tests en el
+  frontend, y importar ese módulo bajo `tsx` arrastra el SDK de firebase. O sea: si divergen, el
+  lado servidor grita solo y el lado cliente espera a que alguien mire. Al tocar `normalizarEspecie`,
+  correr el test del servidor **y** abrir el panel una vez.
 - F9.122 §2 (+ F9.122.1 §A.2) — resolución especie→ticker **por patrón, no por clave exacta**.
   `importarMappingSeed` escribe docs cuya clave es un patrón (`"ypf"`, `"grupo galicia"`), y
   `parsearFichaCafci` los buscaba con el nombre COMPLETO de la especie (`"ypf - d"`): el seed casi
@@ -1087,9 +1095,45 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `testsGemeloNormalizarEspecie()` corre la **misma tabla** en el panel de tests de Patrimonio,
   siguiendo la convención de `correrTests()` de `patrimonioOptimizacion.ts` (el cliente no tiene
   runner: importar `patrimonioCafci.ts` bajo `tsx` arrastra el SDK de firebase). Si tocás una tabla,
-  tocá la otra. **Ruido conocido:** el CLI de Firebase reformatea `functions/package.json` en cada
-  deploy y le sube el pin de `firebase-functions` (`^7` → `^7.3.2`). Nadie lo pide y con caret
-  resuelve igual: se revierte con `git checkout -- functions/package.json functions/package-lock.json`.
+  tocá la otra. **Ruido conocido, con su n:** en **un** deploy que incluyó functions, el CLI de
+  Firebase reformateó `functions/package.json` y subió el pin de `firebase-functions` de `^7` a
+  `^7.3.2`; un deploy posterior `--only hosting` **no** lo tocó. Con eso alcanza para sospechar que
+  pasa en deploys de functions y no en los de hosting, pero son dos observaciones, no una regla: si
+  reaparece, se revierte con `git checkout -- functions/package.json functions/package-lock.json`,
+  porque nadie pidió el bump y con caret resolvía igual.
+- F9.122.1 §B — **base comparable: renta variable argentina de los dos lados**. Ver
+  `docs/prompts/F9.122.1-benchmark-base-comparable.md`. El benchmark comparaba el peso de un papel
+  sobre el **invertible entero** (que incluye cripto, cash, soberanos y las acciones del empleador)
+  contra su peso dentro de un fondo de acciones al que además se le descartaba ~21% de la cartera.
+  Dos universos distintos: el número no significaba nada y se leía al revés — "estás en línea"
+  donde había bastante más concentración. **F9.122 §1 no arregla esto, lo empeora**: al volver los
+  números plausibles, los vuelve peligrosos. **Cinco decisiones, revertibles sin leer el código:**
+  (1) base propia = `bloqueDe(p) === 'accionesAr'`, reusando la función canónica de
+  `patrimonioRiesgo.ts` en vez de un filtro nuevo que pueda divergir de ella; (2) base fondo =
+  posiciones sin LIQUIDEZ / RESTO / RENTA_FIJA, renormalizadas a 1 por fondo; (3) los CEDEARs del
+  fondo entran **solo si su ticker está en tu renta variable AR** — es asimétrico y hay que decirlo:
+  la regla solo puede *encontrar* solapamiento (VIST, que Galileo tiene al 13,5%), nunca mostrarte un
+  CEDEAR de riesgo argentino que el fondo tenga y vos no, porque el dato de riesgo-país por CEDEAR
+  no existe en la app; (4) **reemplaza** la vista sobre cartera total, no se agrega al lado: dos
+  denominadores en la misma pantalla son dos respuestas a la misma pregunta; (5) umbrales de color
+  de 0,05/0,02 a **0,08/0,04**, porque sobre una base ~2× más chica los deltas son ~2× más grandes y
+  los viejos pintaban todo de rojo. **Piso de base flaca:** un fondo cuya porción comparable no
+  llega a 40 no se renormaliza y se cuenta aparte —dividir por una base flaca amplifica el ruido en
+  vez de medir—, y **la cantidad salteada se muestra en pantalla**, no se silencia. **El `/100` de
+  §1 desaparece acá**: `pesoPct` y `baseFondo` están en la misma escala, así que el cociente ya sale
+  en fracción; hay un assert que avisa si los pesos renormalizados de un fondo no suman 1,0 ± 0,001,
+  que es lo que detectaría un `/100` de más (daría 0,01). `BaseComparable` se **expone**: un % sin
+  denominador declarado induce a error, así que la base va declarada arriba de la tabla y en el
+  `note()` del informe PDF, no en una nota al pie. Con el modo privacidad activo el monto absoluto de
+  la base se omite —`$.usd()` daría el mismo % que ya se muestra al lado—, misma regla que F9.121 §3.
+  **Verificado contra producción** (corrida 2026-07-17, 13 fondos, la `calcBenchmark` real corrida
+  bajo node vía bundle de esbuild, no una reimplementación): base propia 49,2% del invertible,
+  cobertura promedio de los fondos 84,2%, **0 fondos salteados**, **0 warnings del assert**. YPFD
+  pasó de Δ −6,6% a **+0,5%** (dio vuelta, que era la prueba de que la base propia se filtró) y TRAN
+  de +9,7% a **+21,2%**. GGAL **no** se achicó como se esperaba (−13,5% → −14,5%): es correcto y
+  aritmético —propio sube 2 pp al pasar a la base chica, pero el lado fondo sube 3,1 pp porque
+  renormaliza un número grande—, y no indica que la base haya fallado. "En tu cartera, no en fondos"
+  quedó en **BIOX** solo, sin cripto ni cash ni soberanos. `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

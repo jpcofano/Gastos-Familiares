@@ -2659,6 +2659,7 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
   carteras: CafciCartera[];
   mappings: Record<string, string | null>;
 }) {
+  const $ = useDinero();
   if (carteras.length === 0) {
     return (
       <Card>
@@ -2672,15 +2673,32 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
     );
   }
 
-  const possPropias = posiciones.map(p => ({ ticker: p.ticker, valorUsd: p.valorUsd }));
-  const { filas, soloenFondos, soloEnPropio } = calcBenchmark(possPropias, carteras, mappings);
+  // F9.122.1 §B — se pasan las posiciones completas, no {ticker, valorUsd}: calcBenchmark necesita
+  // `tipo` y `pais_riesgo` para filtrar la base con bloqueDe().
+  const { filas, soloenFondos, soloEnPropio, base } = calcBenchmark(posiciones, carteras, mappings);
   const filasEnAmbos = filas.filter(f => f.propioFrac !== null && f.fondosAvgFrac > 0);
+  const fmtFrac = (x: number) => (Math.round(x * 1000) / 10).toFixed(1) + '%';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Card>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
-          Divergencia vs fondos — {carteras.length} fondo{carteras.length !== 1 ? 's' : ''}
+          Divergencia vs fondos — renta variable AR · {base.fondosEnBase} fondo{base.fondosEnBase !== 1 ? 's' : ''}
+        </div>
+        {/* F9.122.1 §B — la base va declarada arriba de la tabla y no en una nota al pie: un % cuyo
+            denominador hay que ir a buscar es un % que se lee mal. El monto absoluto se omite con
+            el modo privacidad activo, porque ahí $.usd() daría el mismo % que ya se muestra al
+            lado — misma regla que F9.121 §3. */}
+        <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginBottom: 10, lineHeight: 1.45 }}>
+          Base: renta variable argentina. Tu cartera {fmtFrac(base.propioPctDeCartera)} del invertible
+          {!$.privado && <> ({fmtUsd(base.propioUsd)})</>}; los fondos, {fmtFrac(base.fondoCoberturaProm)} promedio
+          de su cartera. Se excluyen liquidez, renta fija, "Resto de Activos" y CEDEARs sin riesgo
+          argentino ({fmtFrac(base.excluidoFondoProm)} promedio del fondo).
+          {base.fondosSalteados > 0 && (
+            <> <strong>{base.fondosSalteados} fondo{base.fondosSalteados !== 1 ? 's' : ''}</strong> quedó
+            {base.fondosSalteados !== 1 ? 'ron' : ''} afuera: su porción comparable no llega al 40% y
+            renormalizar sobre una base tan flaca amplifica el ruido en vez de medir.</>
+          )}
         </div>
         {filasEnAmbos.length === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--gf-gray-400)', lineHeight: 1.5 }}>
@@ -2696,7 +2714,10 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
             </div>
             {filasEnAmbos.map(f => {
               const delta = (f.propioFrac ?? 0) - f.fondosAvgFrac;
-              const col = Math.abs(delta) > 0.05 ? 'var(--gf-expense)' : Math.abs(delta) > 0.02 ? '#f59e0b' : 'var(--gf-gray-400)';
+              // F9.122.1 §B — umbrales recalibrados de 0,05/0,02 a 0,08/0,04: sobre una base ~2×
+              // más chica los deltas son ~2× más grandes, y los umbrales viejos pintarían de rojo
+              // toda la tabla, que es lo mismo que no tener semáforo.
+              const col = Math.abs(delta) > 0.08 ? 'var(--gf-expense)' : Math.abs(delta) > 0.04 ? '#f59e0b' : 'var(--gf-gray-400)';
               return (
                 <div key={f.ticker} style={{ display: 'grid', gridTemplateColumns: '1fr 58px 68px 50px', gap: 4, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', fontSize: 12.5, alignItems: 'center' }}>
                   <div style={{ fontWeight: 700 }}>{f.ticker}</div>
@@ -2720,8 +2741,8 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
       </Card>
 
       <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 8, lineHeight: 1.4 }}>
-        ¹ promedio entre los {carteras.length} fondos del set: un fondo que no tiene el papel
-        computa 0%. No es el promedio entre los que sí lo tienen.
+        ¹ promedio entre los {base.fondosEnBase} fondos que entraron a la base: un fondo que no
+        tiene el papel computa 0%. No es el promedio entre los que sí lo tienen.
       </div>
 
       {soloenFondos.length > 0 && (
