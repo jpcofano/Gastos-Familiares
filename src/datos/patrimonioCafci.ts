@@ -20,7 +20,9 @@ export type CafciPosicion = {
   especieRaw: string;
   ticker: string | null;
   pesoPct: number;
-  categoria?: 'LIQUIDEZ' | 'CEDEAR' | 'RESTO';
+  // F9.122 — RENTA_FIJA se suma acá: una ON de un emisor de acciones no es la acción, y contarla
+  // en el benchmark de renta variable falsea el peso del papel.
+  categoria?: 'LIQUIDEZ' | 'CEDEAR' | 'RESTO' | 'RENTA_FIJA';
   incompleto?: boolean;
 };
 

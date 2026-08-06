@@ -1037,6 +1037,26 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   muerto, no un riesgo — ninguna especie normalizada puede volver a caer en esas claves.
   §A.2 (CEDEARs resuelven ticker) va con §2, porque depende del diccionario que carga §2.
   Tests nuevos en `cafciHtml.test.ts`, incluida idempotencia. `tsc`: 41 → 41; `functions build` OK.
+- F9.122 §2 (+ F9.122.1 §A.2) — resolución especie→ticker **por patrón, no por clave exacta**.
+  `importarMappingSeed` escribe docs cuya clave es un patrón (`"ypf"`, `"grupo galicia"`), y
+  `parsearFichaCafci` los buscaba con el nombre COMPLETO de la especie (`"ypf - d"`): el seed casi
+  nunca pegaba, y cada fallo escribía `{ticker: null}` — un **cache negativo permanente** que además
+  silenciaba el pendiente en las corridas siguientes, así que el síntoma nunca llegaba a la UI.
+  Ahora la resolución es en dos etapas: **exacta primero** (respeta lo aprendido y lo cargado a
+  mano), **patrón después**, con los patrones ordenados por longitud descendente para que
+  `"grupo galicia"` gane sobre `"galicia"`. **Una sola lectura de `cafciMapping` por corrida**, no
+  una por posición: antes era una `get()` por especie. Es un read de colección entera sin `limit()`
+  —la excepción consciente a la regla de queries acotadas—: es un diccionario de ~79 docs que se lee
+  una vez por sincronización, y acotarlo con un `limit` arbitrario truncaría mapeos en silencio, que
+  es peor. **Solo se persiste un mapeo resuelto**: nunca más se escribe `ticker: null`. Rama nueva
+  **RENTA_FIJA** (`ON`, `bono`, `letra`, `lecap`, `boncer`, `título`) antes del mapeo: una ON de un
+  emisor de acciones no es la acción, y contarla como tal falsea el peso del papel; `CafciPosicion`
+  suma la categoría. **§A.2 va acá y no en su propio commit**: el branch CEDEAR necesita el
+  diccionario `mapExacto`/`patrones` que carga §2, así que aplicarlo antes no compilaría. Los
+  CEDEARs pasan a **resolver ticker igual** (siguen marcados `CEDEAR`): sin ticker el cliente no
+  puede distinguir un CEDEAR de Microsoft de uno de Vista, que sí es riesgo argentino — la exclusión
+  del benchmark AR es decisión del consumidor, no del parser. `functions build` OK; `tsc`: 41 → 41.
+  Toca `functions/src/index.ts`: **deploy `--only functions,hosting`**, `--only hosting` no alcanza.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

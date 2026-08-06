@@ -3466,6 +3466,21 @@ async function parsearFichaCafci(
   let totalPct = 0;
   let pesoResto = 0;
 
+  // F9.122 — el seed de mappings guarda PATRONES ("ypf", "grupo galicia"), no nombres completos.
+  // La resolución era por clave exacta contra el nombre entero de la especie, así que el seed casi
+  // nunca pegaba. Se resuelve en dos etapas: exacta primero (respeta lo aprendido y lo cargado a
+  // mano), patrón después. Una sola lectura de la colección por corrida — nunca por posición.
+  const mappingSnap = await db.collection('cafciMapping').get();
+  const mapExacto = new Map<string, { ticker: string | null; categoria?: string }>();
+  for (const d of mappingSnap.docs) {
+    mapExacto.set(d.id, d.data() as { ticker: string | null; categoria?: string });
+  }
+  // Patrones con ticker resuelto, del más largo al más corto: "grupo galicia" gana sobre "galicia",
+  // y "ypf energia electrica" (ON) nunca se come el match de "ypf".
+  const patrones = [...mapExacto.entries()]
+    .filter(([, v]) => !!v.ticker)
+    .sort((a, b) => b[0].length - a[0].length);
+
   for (const item of items) {
     const { especieRaw, pesoPct, incompleto } = parsePosicionCafci(item);
     const norm = normalizarEspecie(especieRaw);
@@ -3484,24 +3499,44 @@ async function parsearFichaCafci(
       ticker = null;
       categoria = 'LIQUIDEZ';
     }
-    // Detectar CEDEARs — excluir de benchmark AR, no son pendientes
+    // Detectar CEDEARs — la exclusión del benchmark AR la decide el consumidor, no el parser
     else if (/^cedear/i.test(especieRaw.trim())) {
-      ticker = null;
       categoria = 'CEDEAR';
+      // F9.122.1 — el ticker se resuelve igual. Excluir CEDEARs del benchmark AR es una decisión
+      // del consumidor (ver §B), no del parser: sin ticker, el cliente no puede distinguir un
+      // CEDEAR de Apple de uno de Vista, que sí es riesgo argentino.
+      const normCedear = normalizarEspecie(especieRaw.replace(/^cedear\s*/i, ''));
+      ticker = mapExacto.get(normCedear)?.ticker
+        ?? patrones.find(([pat]) => normCedear.includes(pat))?.[1].ticker
+        ?? null;
+    }
+    // F9.122 — renta fija sobre un emisor de acciones NO es la acción. "ON YPF 2029" no mapea a
+    // YPFD: es deuda, y meterla en el benchmark de renta variable falsea el peso del papel.
+    else if (/^(on\b|o\.?n\.?\s|obligaci[oó]n|bono|letra|lecap|boncer|titulo|t[ií]tulo)/i.test(especieRaw.trim())) {
+      ticker = null;
+      categoria = 'RENTA_FIJA';
     }
     else {
-      const mappingSnap = await db.collection('cafciMapping').doc(norm).get();
-      if (mappingSnap.exists) {
-        const mdata = mappingSnap.data() as { ticker: string | null; categoria?: string };
-        ticker = mdata.ticker;
-        if (mdata.categoria) categoria = mdata.categoria;
-      } else {
-        const auto = autoTickerMapping(especieRaw);
-        ticker = auto;
-        await db.collection('cafciMapping').doc(norm).set({ ticker: auto });
-        if (!auto && !incompleto) {
-          pendientesMapeo.push(especieRaw);
+      const exacto = mapExacto.get(norm);
+      if (exacto) {
+        ticker = exacto.ticker;
+        if (exacto.categoria) categoria = exacto.categoria;
+      }
+      if (!ticker) {
+        const hit = patrones.find(([pat]) => norm.includes(pat));
+        if (hit) {
+          ticker = hit[1].ticker;
+          if (hit[1].categoria) categoria = hit[1].categoria;
         }
+      }
+      if (!ticker) ticker = autoTickerMapping(especieRaw);
+      // F9.122 — SOLO se persiste un mapeo resuelto. Ver §3: escribir `{ ticker: null }` creaba un
+      // cache negativo permanente que además silenciaba el pendiente en las corridas siguientes.
+      if (ticker && !exacto) {
+        await db.collection('cafciMapping').doc(norm).set({ ticker, origen: 'auto' }, { merge: true });
+      }
+      if (!ticker && !incompleto) {
+        pendientesMapeo.push(especieRaw);
       }
     }
 
