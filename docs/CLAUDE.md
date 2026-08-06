@@ -1238,6 +1238,30 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   clasificado como pesos, que es peor. §3 agrega en `RiesgoCard` la línea de clasificaciones
   inferidas, deduplicada por ticker (GD30 aparece en tres filas). **Hoy la lista sale vacía**: los 12
   tickers de renta fija de la corrida están declarados. `tsc`: 41 → 41.
+- F9.129 — **un FCI se clasifica por lo que tiene adentro, no por el envase**. Ver
+  `docs/prompts/F9.129-fci-por-subyacente.md`. `bloqueDe` mandaba todo `tipo === 'fci'` por la rama
+  de renta fija decidiendo por `moneda_origen`: **RV, un fondo de acciones argentinas, entraba a los
+  escenarios con beta 0,25 en vez de 1,30** — un fondo de acciones pesando como un plazo fijo.
+  A diferencia de F9.128, acá **`sector` sí sirve**: está poblado y con la granularidad correcta en
+  los tres FCI, así que el mapa `BLOQUE_FCI` se apoya en él y no en el ticker. **Medido:** LECAPSA y
+  BCAHA → `rentaFijaPesos`, RV → `accionesAr`; `accionesAr` sube exactamente los USD 1.264 de RV y la
+  exposición argentina agregada **sigue en 67,5%**. El default para un `sector` no mapeado es
+  `accionesAr` —el bloque de mayor beta— y **acá el fundamento sí cierra**, al revés del fallback de
+  F9.128: un desconocido sobreestima el riesgo en vez de esconderlo. **Corrección al spec:** decía
+  que los FCI globales "ya se resuelven antes en `bloqueDe`", y es falso —caen al `return` final—,
+  así que la rama va acotada a `pais_riesgo === 'AR'`; sin eso se comería el primer FCI global que
+  aparezca y lo mandaría a `accionesAr`. **Delta de escenarios contra la línea base post-F9.128:**
+  `crash2020` −37,87 → **−38,17** (el que más se mueve) · `global20` −23,55 → **−23,73** · `localAr`
+  −31,37 → **−31,44**. El spec predecía que `localAr` y `soberano_ar` serían los que más se movieran
+  y **los dos fallaron**: `soberano_ar` no se mueve nada porque shockea por `tipo` (todo `fci` recibe
+  −30% sea cual sea su bloque), y `localAr` es el que **menos** se mueve de los sistémicos porque los
+  dos efectos se cancelan casi enteros — RV empeora al pasar de −35% a −50%, pero LECAPSA y BCAHA
+  mejoran al pasar de −40% a −35%, y son USD 2.212 contra 1.264. **Efecto colateral verificado sobre
+  el benchmark** (F9.122.1 §B): RV entra a la base comparable, que pasa de USD 54.081 a **55.345**,
+  así que todos los pesos propios se diluyen — TRAN 22,9 → **22,4%**, YPFD 20,9 → **20,4%**, PAMP
+  20,9 → **20,5%**. Los 13 fondos siguen sumando 1,0 ± 0,001 y 0 salteados. RV aparece en "en tu
+  cartera, no en fondos" junto a BIOX, que es correcto: ningún fondo del set tiene un FCI adentro.
+  `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

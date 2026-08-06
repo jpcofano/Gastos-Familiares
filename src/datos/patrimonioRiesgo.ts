@@ -70,6 +70,21 @@ export const DENOMINACION_SOBERANO: Record<string, Denominacion> = {
 // probabilidad, no por prudencia, y queda anotado como decisión abierta: si se prefiere que falle
 // hacia el lado incómodo, hay que invertirlo a `hard`. Toda inferencia se reporta en pantalla (§3),
 // que es lo que impide que esto quede escondido en cualquiera de las dos variantes.
+// F9.129 — Un FCI es un envase: lo que define su riesgo es lo que tiene adentro, no el envase.
+// `bloqueDe` los mandaba a todos por la rama de renta fija decidiendo por `moneda_origen`, así que
+// un fondo de acciones argentinas (RV, USD 1.264) entraba a los escenarios con beta 0,25 en vez de
+// 1,30 — un fondo de acciones pesando como un plazo fijo.
+// A diferencia de F9.128, acá `sector` SÍ tiene la granularidad correcta y está poblado en los tres
+// FCI de la corrida: el mapa se apoya en él y no en el ticker.
+export const BLOQUE_FCI: Record<string, Bloque> = {
+  renta_variable_ar:  'accionesAr',
+  lecaps_pesos:       'rentaFijaPesos',
+  cer_pesos:          'rentaFijaPesos',
+  money_market_pesos: 'rentaFijaPesos',
+  soberano_usd:       'soberanoAr',
+  corporativo_usd:    'soberanoAr',   // mismo criterio que TLCPO en F9.128: se resuelve por factor
+};
+
 export function denominacionDe(ticker: string): { den: Denominacion; inferida: boolean } {
   const t = ticker.toUpperCase();
   const tabla = DENOMINACION_SOBERANO[t];
@@ -97,7 +112,21 @@ export function bloqueDe(p: Posicion): Bloque {
   if (p.pais_riesgo === 'AR' && (p.tipo === 'bono' || p.tipo === 'on')) {
     return denominacionDe(p.ticker).den === 'hard' ? 'soberanoAr' : 'rentaFijaPesos';
   }
-  // fci — sigue decidiendo por `moneda_origen` hasta F9.129, que los clasifica por subyacente.
+  // F9.129 §1 — FCI: por subyacente, no por envase. Va ANTES de la rama de renta fija, que es la
+  // que los venía clasificando por `moneda_origen`.
+  // La condición de país es DELIBERADA y corrige el spec: éste daba por sentado que los FCI
+  // globales "ya se resuelven antes en bloqueDe", y no es así — caen al `return 'rentaFijaPesos'`
+  // del final. Sin acotar por AR, esta rama se los comería y los mandaría a `accionesAr` por el
+  // default. Hoy no hay ninguno en la corrida, pero el primero que aparezca entraría mal.
+  if (p.tipo === 'fci' && p.pais_riesgo === 'AR') {
+    const b = BLOQUE_FCI[p.sector ?? ''];
+    if (b) return b;
+    // Sin sector reconocido no se adivina. Cae en el bloque de mayor beta a propósito: un
+    // desconocido mal clasificado tiene que SOBREESTIMAR el riesgo, nunca esconderlo. Acá el
+    // fundamento sí cierra —`accionesAr` es la beta más alta (1,30)—, al revés del fallback de
+    // F9.128, donde el default cae en el bloque más benigno. Se reporta en la lista de §3.
+    return 'accionesAr';
+  }
   if (p.pais_riesgo === 'AR') return p.moneda_origen === 'USD' ? 'soberanoAr' : 'rentaFijaPesos';
   return 'rentaFijaPesos';
 }
@@ -119,6 +148,16 @@ export function inferenciasDeBloque(posiciones: Posicion[]): InferenciaBloque[] 
         ticker: p.ticker,
         bloque: den === 'hard' ? 'soberanoAr' : 'rentaFijaPesos',
         motivo: 'denominación inferida del prefijo del ticker',
+      });
+    }
+    // F9.129 — un FCI cuyo `sector` no está en BLOQUE_FCI cae al default y tiene que aparecer en
+    // ESTA lista, no en una paralela: es la misma pregunta —"¿qué se dio por sentado acá?"— y dos
+    // listas separadas harían que se lea una y se ignore la otra.
+    if (p.tipo === 'fci' && !BLOQUE_FCI[p.sector ?? ''] && !vistos.has(p.ticker)) {
+      vistos.set(p.ticker, {
+        ticker: p.ticker,
+        bloque: 'accionesAr',
+        motivo: `FCI con sector "${p.sector ?? '(vacío)'}" no mapeado — default de mayor beta`,
       });
     }
   }
