@@ -376,3 +376,59 @@ export function normalizarEspecie(s: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+// ── F9.125 — cobertura del espejo cliente del gemelo ──────────────────────────
+// La tabla es la MISMA que la de functions/src/cafciHtml.test.ts, a propósito. El gemelo solo
+// sirve si las dos copias se comportan igual, y hasta acá los tests cubrían únicamente la del
+// servidor: si alguien editaba esta copia, nada fallaba. Ahora falla el panel de tests de
+// Patrimonio. Si tocás una tabla, tocá la otra — es el punto entero del par.
+const CASOS_GEMELO: Array<[string, string]> = [
+  ['YPF - D', 'ypf'],
+  ['Grupo Fciero Galicia - B', 'grupo fciero galicia'],
+  ['Ternium - A', 'ternium'],
+  ['Transp Gas del Norte C', 'transp gas del norte'],
+  ['Vista Oil & Gas', 'vista oil gas'],
+  ['Pampa Energía S.A.', 'pampa energia'],
+  ['Grupo Supervielle CB', 'grupo supervielle cb'],
+  ['Lecap S31G6', 'lecap s31g6'],
+  ['Aluar', 'aluar'],
+  ['  BYMA  ', 'byma'],
+];
+
+export function testsGemeloNormalizarEspecie(): Array<{ nombre: string; ok: boolean; detalle: string }> {
+  const fallas = CASOS_GEMELO
+    .map(([entrada, esperado]) => ({ entrada, esperado, obtenido: normalizarEspecie(entrada) }))
+    .filter(r => r.obtenido !== r.esperado);
+
+  // El prefijo "Cedear " lo saca el parser antes de normalizar (F9.122.1 §A.2); se replica acá
+  // porque es el caso que hace que VIST resuelva en vez de quedar como CEDEAR anónimo.
+  const cedear = normalizarEspecie('Cedear Vista Oil Gas'.replace(/^cedear\s*/i, ''));
+
+  // Idempotencia: el seed escribe la clave ya normalizada y la relectura la vuelve a normalizar.
+  // Si no fuera idempotente, la segunda pasada buscaría una clave que nadie escribió.
+  const noIdempotentes = CASOS_GEMELO
+    .map(([entrada]) => normalizarEspecie(entrada))
+    .filter(k => normalizarEspecie(k) !== k);
+
+  return [
+    {
+      nombre: 'Gemelo normalizarEspecie — tabla de casos (espejo cliente)',
+      ok: fallas.length === 0,
+      detalle: fallas.length === 0
+        ? `${CASOS_GEMELO.length}/${CASOS_GEMELO.length} casos ✓`
+        : fallas.map(f => `"${f.entrada}" → "${f.obtenido}" (esperado "${f.esperado}")`).join(' · '),
+    },
+    {
+      nombre: 'Gemelo normalizarEspecie — CEDEAR sin prefijo → subyacente',
+      ok: cedear === 'vista oil gas',
+      detalle: cedear === 'vista oil gas' ? '"Cedear Vista Oil Gas" → "vista oil gas" ✓' : `obtenido "${cedear}"`,
+    },
+    {
+      nombre: 'Gemelo normalizarEspecie — idempotencia',
+      ok: noIdempotentes.length === 0,
+      detalle: noIdempotentes.length === 0
+        ? 'normalizar dos veces da lo mismo ✓'
+        : `no idempotente sobre: ${noIdempotentes.join(', ')}`,
+    },
+  ];
+}

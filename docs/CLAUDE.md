@@ -1064,6 +1064,32 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   cargó una persona) se conserva. Corrido contra producción el 2026-08-05: `{revisados: 10,
   borrados: 10, conservados: 0}`, y la relectura da 0. Son exactamente los 10 que midió la auditoría
   §0. El script queda en el repo: no es de un solo uso conceptual, es la herramienta para el caso.
+- F9.125 — Higiene de deploy. **Cierra el cabo suelto de F9.113**: la hipótesis registrada allá
+  ("bundle cacheado") era esto, y era falsa en su parte de cache. Diagnóstico medido, no inferido:
+  después de desplegar F9.122 §1, producción seguía mostrando 1140,8% en PAMP. `curl` del bundle
+  desplegado contra el build local de HEAD dio `fondosAvgPct ×12 / fondosAvgFrac ×0` en producción
+  y `×0 / ×15` en local, con `X-Cache: MISS` — o sea el **origen** servía código viejo. **El
+  service worker no tenía nada que ver: no cachea nada** (`public/sw.js` lo dice en su primera
+  línea; su único `fetch` handler intercepta `POST /share-target`), y ya traía `skipWaiting` +
+  `clients.claim`. Un `skipWaiting` a ciegas no habría arreglado nada. **Causa real: `firebase.json`
+  no tenía `predeploy`**, así que `firebase deploy` subía lo que hubiera en `dist/` — en ese caso,
+  un build de nueve horas antes. Ahora hosting corre `npm run build` y functions
+  `npm --prefix "$RESOURCE_DIR" run build` como predeploy: **es imposible desplegar un `dist/`
+  viejo**, y el paso manual que el runbook pedía recordar deja de depender de la memoria.
+  **Headers de cache**, que era el problema secundario y real: `index.html` venía con el default de
+  Firebase, `max-age=3600`, así que aun con un deploy correcto un usuario que abrió la app en la
+  última hora seguía viendo el bundle anterior **hasta 60 minutos**. Ahora `no-cache` en `**` y
+  `public, max-age=31536000, immutable` en `/assets/**` — seguro porque van hasheados. El orden de
+  las reglas importa y la específica va segunda; si Firebase resolviera el solapamiento al revés, el
+  costo sería menos cacheo de assets, nunca un bundle viejo: la incertidumbre está puesta del lado
+  barato a propósito. **El SW no se tocó.** **Test del espejo cliente del gemelo**: los 23 tests de
+  F9.122.1 cubrían solo la copia del servidor, así que editar la del cliente no rompía nada.
+  `testsGemeloNormalizarEspecie()` corre la **misma tabla** en el panel de tests de Patrimonio,
+  siguiendo la convención de `correrTests()` de `patrimonioOptimizacion.ts` (el cliente no tiene
+  runner: importar `patrimonioCafci.ts` bajo `tsx` arrastra el SDK de firebase). Si tocás una tabla,
+  tocá la otra. **Ruido conocido:** el CLI de Firebase reformatea `functions/package.json` en cada
+  deploy y le sube el pin de `firebase-functions` (`^7` → `^7.3.2`). Nadie lo pide y con caret
+  resuelve igual: se revierte con `git checkout -- functions/package.json functions/package-lock.json`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

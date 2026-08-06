@@ -46,6 +46,7 @@ import {
   sincronizarCafci as sincronizarCafciCallable, calcBenchmark,
   importarFondosSugeridos, importarMappingSeed,
   importarCafciManual as importarCafciManualCallable, fechaDatosDeFondo,
+  testsGemeloNormalizarEspecie,
   type ConfigCafci, type CafciCartera, type CafciFondoConfig, type ResultadoSincronizarCafci,
   type ResultadoImportarCafciManual,
 } from '../datos/patrimonioCafci';
@@ -3311,7 +3312,9 @@ function OptimizacionTab({
 
           {/* Tests unitarios */}
           <div>
-            <button onClick={() => { setShowTests(!showTests); if (!testResults) setTestResults(correrTests()); }}
+            {/* F9.125 — los tests del gemelo normalizarEspecie corren acá, en el mismo panel: la
+                copia cliente no la cubría nada, y el par gemelo solo sirve si las dos se testean. */}
+            <button onClick={() => { setShowTests(!showTests); if (!testResults) setTestResults([...correrTests(), ...testsGemeloNormalizarEspecie()]); }}
               style={{ ...btn, background: 'var(--gf-gray-100)', color: 'var(--color-text-sec)', width: '100%' }}>
               {showTests ? 'Ocultar tests matemáticos' : 'Verificar tests unitarios del motor'}
             </button>
