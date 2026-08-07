@@ -1208,12 +1208,15 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   mueve**: los dos errores caen dentro de Argentina, así que el titular es correcto y lo que está mal
   es el reparto interno. §1 agrega `DENOMINACION_SOBERANO` (tabla declarada, no regex enterrada) y
   `denominacionDe()`; **todavía no la usa nadie** — `bloqueDe` se cambia en §2, frenado por el gate
-  de la ON corporativa. El fallback cae en `pesos` **por probabilidad, no por prudencia**: el spec
-  lo justificaba diciendo que era el default conservador y **eso es falso** — `rentaFijaPesos` tiene
-  beta 0,25 contra 0,40 de `soberanoAr`, y en `localAr` recibe −35% contra −40%, así que caer en
-  `pesos` **subestima** el riesgo. Queda como decisión abierta: si se prefiere que falle hacia el
-  lado incómodo hay que invertirlo a `hard`. Lo que impide que quede escondido en cualquiera de las
-  dos variantes es §3. **Línea base de los 8 escenarios, para poder medir el delta del fix**
+  de la ON corporativa. **El fallback cae en `hard`, corrigiendo al spec**, que pedía `pesos`
+  justificándolo como el lado conservador: era falso — `rentaFijaPesos` tiene beta 0,25 contra 0,40
+  de `soberanoAr`, y en `localAr` recibe −35% contra −40%, así que caer en `pesos` **subestima** el
+  riesgo. Gana el principio que el propio spec declara (fallar hacia el lado incómodo) sobre el
+  argumento de probabilidad, y así queda coherente con el default de `BLOQUE_FCI`, que ya cae en el
+  bloque de mayor beta: dos defaults con filosofías opuestas en el mismo archivo se leen mal seis
+  meses después. **Cambiar el default no movió ningún número**: los 12 tickers de renta fija de la
+  corrida están declarados en la tabla, así que el fallback no se ejecuta para ninguno.
+  **Línea base de los 8 escenarios, para poder medir el delta del fix**
   (invertible USD 109.988, con manuales):
   `global20 −23,83%` · `crash2020 −38,34%` · `localAr −31,83%` · `rally +23,83%` ·
   `energia_ar −11,03%` · `cripto −10,88%` · `soberano_ar −24,41%` · `tormenta −35,29%`. **Los

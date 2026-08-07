@@ -63,13 +63,14 @@ export const DENOMINACION_SOBERANO: Record<string, Denominacion> = {
 // nomenclatura del mercado local, no una verdad: GD/AL/AE/BPO/BPY son ley extranjera o local en
 // dólares; TX/TZX/DIC/PAR/LECAP/BONCER ajustan por CER o son a tasa en pesos.
 //
-// El default cae en `pesos` porque un instrumento AR sin identificar es más probablemente en pesos.
-// OJO — el spec justificaba este default diciendo que era el conservador, y **eso es falso**:
-// `rentaFijaPesos` tiene beta 0,25 contra 0,40 de `soberanoAr`, y en `localAr` recibe −35% contra
-// −40%. O sea que caer en `pesos` SUBESTIMA el riesgo, no lo sobreestima. El default se deja por
-// probabilidad, no por prudencia, y queda anotado como decisión abierta: si se prefiere que falle
-// hacia el lado incómodo, hay que invertirlo a `hard`. Toda inferencia se reporta en pantalla (§3),
-// que es lo que impide que esto quede escondido en cualquiera de las dos variantes.
+// El default cae en `hard`, y esto CORRIGE al spec de F9.128, que pedía `pesos` justificándolo como
+// el lado conservador. Era falso: `rentaFijaPesos` tiene beta 0,25 contra 0,40 de `soberanoAr`, y en
+// `localAr` recibe −35% contra −40%, así que caer en `pesos` SUBESTIMA el riesgo. El principio que
+// el propio spec declara —un sistema de riesgo tiene que fallar hacia el lado incómodo— le gana al
+// argumento de probabilidad ("un AR sin identificar es más probablemente en pesos"), y además deja
+// este default coherente con el de `BLOQUE_FCI`, que ya cae en el bloque de mayor beta. Dos defaults
+// con filosofías opuestas en el mismo archivo es lo que se lee mal seis meses después.
+// Toda inferencia se reporta igual en pantalla (§3): el default es la red, no el mecanismo.
 // F9.129 — Un FCI es un envase: lo que define su riesgo es lo que tiene adentro, no el envase.
 // `bloqueDe` los mandaba a todos por la rama de renta fija decidiendo por `moneda_origen`, así que
 // un fondo de acciones argentinas (RV, USD 1.264) entraba a los escenarios con beta 0,25 en vez de
@@ -91,7 +92,7 @@ export function denominacionDe(ticker: string): { den: Denominacion; inferida: b
   if (tabla) return { den: tabla, inferida: false };
   if (/^(GD|AL|AE|BPO|BPY)\d/.test(t)) return { den: 'hard', inferida: true };
   if (/^(TX|TZX|TZ|DIC|PAR|LECAP|BONCER|S\d)/.test(t)) return { den: 'pesos', inferida: true };
-  return { den: 'pesos', inferida: true };
+  return { den: 'hard', inferida: true };
 }
 
 export function bloqueDe(p: Posicion): Bloque {
