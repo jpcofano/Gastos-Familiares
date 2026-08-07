@@ -1398,6 +1398,30 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   umbral controla el tamaño, no la redundancia. Qué eje mostrar primero —o si conviene un solo eje a
   la vez— es una decisión de producto que quedó sin tomar. Toca `firestore.rules`: **deploy
   `--only hosting,firestore:rules`**. `tsc`: 41 → 41.
+- F9.132.1 — Corrección de F9.132: **dos cards, y la de "a pagar" vuelve arriba**. Ver
+  `docs/prompts/F9.132.1-card-hoy-correccion.md`. **Los cambios 2 y 3 de F9.132 quedan REVERTIDOS**
+  —está anotado acá para que no se vuelvan a aplicar leyendo el prompt viejo—: la card va **arriba**
+  y los montos van en **pesos y dólares reales**, no en USD equivalente.
+  **El bug de fondo, medido:** la card decía "Nada que pagar hoy" el mismo día en que la fila HOY de
+  la tabla mostraba cuatro bancos y $ 11.085.000. No era un problema de UI ni de datos faltantes,
+  era **una diferencia de filtro**: de los 8 movimientos del 7/8/2026, **7 tienen `itemEsperadoId` y
+  esos ítems tienen `diaVencimiento: null`**. `hoyEsperados` los excluye porque pide
+  `diaVencimiento === hoy.getDate()` (null ≠ 7) o estado `vencido` (que exige
+  `diaVencimiento < hoy`, imposible con null); y `realesHoy` los excluye porque están en
+  `matchedIds`. **Caían entre las dos rejillas y desaparecían.** El octavo (AYSA, sin
+  `itemEsperadoId`) lo agarra igual el checklist por texto. Es un bug **pre-existente** de la lógica
+  de F9.102, no introducido por F9.132 — pero F9.132 §0 preguntaba justamente si `hoyItems` incluía
+  los esperados del día y se respondió leyendo el código en vez de mirando los datos.
+  **La corrección es estructural:** la Card 2 comparte fuente con `porDia` (`cajaMov` filtrado al
+  día), así que **no puede volver a divergir por construcción**. Nada de dos caminos paralelos.
+  **Dos cards por decisión explícita, no por descuido:** "a pagar hoy" y "gastado hoy" son dos plata
+  distintas y dos totales distintos que no se suman, y el título de cada una lo dice sin abrirlas.
+  **Montos reales:** `Eq` es una CONVERSIÓN —para un gasto en pesos calcula un `usd` que nadie
+  transfirió— así que se agregó `MontoReal` (`sumarReal`/`totalReal`/`agruparReal`), que acumula por
+  `Movement.moneda`. Un banco que solo movió pesos ya no muestra `U$S 0`. El dato de moneda original
+  existe y es confiable, así que la separación no inventa nada. Con privacidad activa sale un único
+  % contra la base de la pantalla: porcentualizar dos monedas por separado daría dos números que no
+  se comparan entre sí. `tsc`: 41 → 41; `vite build` OK. Frontend puro: deploy `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
