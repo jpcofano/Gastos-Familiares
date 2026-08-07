@@ -315,6 +315,10 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // significa nada. El equivalente en la otra moneda se omite: en % sería el mismo número.
   const fmtBig = (e: Eq) => privado ? fmtPct(e.ars, c.ingArsEq) : (cur === 'ARS' ? fmtArs(e.ars) : fmtUsdEq(e.usd));
   const fmtSmall = (e: Eq) => privado ? '' : (cur === 'ARS' ? fmtUsdEq(e.usd) : fmtArs(e.ars));
+  // F9.132 — chip de banco del día en USD equivalente, ignorando el toggle ARS/USD a propósito
+  // (ver el comentario en el render). Respeta privacidad con la misma base que `fmtBig`: si el
+  // modo tapa el titular, no puede destaparlo un chip.
+  const fmtChipUsd = (e: Eq) => privado ? fmtPct(e.ars, c.ingArsEq) : fmtUsdEq(e.usd);
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
   const [hoyExpandido, setHoyExpandido] = useState(true);
   // Cifras vivas que no vienen de un movimiento (esperados no pagados): TC de hoy, siempre.
@@ -394,7 +398,30 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       hoyPorBanco.set(e.mov.banco, sumaEq(hoyPorBanco.get(e.mov.banco) ?? EQ0, eqDe(e.mov, tcDeMov)));
     }
   }
-  const hoyBancos = [...hoyPorBanco.entries()].sort((a, b) => b[1].ars - a[1].ars);
+  // F9.132 cambio 2 — el orden pasa a ser por USD, que es lo que se muestra. Antes ordenaba por
+  // `.ars`: con TC único da el mismo orden, pero ordenar por una columna que no se ve es la clase
+  // de incoherencia que después nadie entiende. El cálculo de `hoyPorBanco` NO se toca: sigue
+  // acumulando `Eq` y el dato en pesos queda disponible.
+  const hoyBancos = [...hoyPorBanco.entries()].sort((a, b) => b[1].usd - a[1].usd);
+
+  // F9.132 cambio 1 — el total del día, con los DOS números declarados por separado.
+  // El total viejo cambiaba de significado según el estado: mostraba `hoyPendienteEq` (solo lo que
+  // falta) cuando quedaba algo, y `hoyTotalEq` (todo lo pagado) cuando estaba todo cubierto. Dos
+  // magnitudes distintas en el mismo lugar, sin decir cuál era cuál — que es exactamente lo que un
+  // titular no puede hacer. Ahora se muestran ambas, siempre etiquetadas.
+  const hoyGastadoEq = hoyItems.reduce((s, e) => {
+    if (e.kind === 'esperado') return e.ci.matches.reduce((a, m) => sumaEq(a, eqDe(m, tcDeMov)), s);
+    return hoyEntryCubierto(e) ? sumaEq(s, eqDe(e.mov, tcDeMov)) : s;
+  }, EQ0);
+
+  // F9.132 cambio 4 — quién gastó qué. Movimientos REALES del día (los que ya salieron), incluidos
+  // los que matchearon un esperado: la pregunta es "quién gastó", no "qué ítem se concilió".
+  // Resumen es una ruta solo-admin (AppShell) y las reglas de Firestore ya acotan la lectura de un
+  // dependiente a sus propios movimientos, así que mostrar toda la familia acá no abre nada nuevo.
+  const hoyPorPersona = hoyItems
+    .flatMap(e => (e.kind === 'esperado' ? e.ci.matches : hoyEntryCubierto(e) ? [e.mov] : []))
+    .map(m => ({ mov: m, eq: eqDe(m, tcDeMov) }))
+    .sort((a, b) => b.eq.usd - a.eq.usd);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -459,101 +486,6 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           </Card>
         );
       })()}
-
-      {/* F9.99.8.1 — Card Hoy pasa a usar la MISMA fila que "Gastos por día" (DiaRowShell):
-          chips de banco, total grande/chico, expandible. El contenido expandido agrega
-          estado por ítem (check/reloj/alerta/vencido) y lápiz de edición cuando hay un único
-          movimiento real detrás del ítem (esperado con 1 match, o el suelto mismo). */}
-      <DiaRowShell
-        dayBig={String(hoy.getDate())}
-        daySub="HOY"
-        banks={hoyBancos}
-        totalNode={hoyItems.length === 0 ? null : todoPagadoHoy ? (
-          <>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--gf-income)', fontWeight: 700, fontSize: 13 }}>
-              <Icon name="check" size={13} color="var(--gf-income)" /> Al día
-            </span>
-            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtBig(hoyTotalEq)}</div>
-          </>
-        ) : (
-          <>
-            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>{fmtBig(hoyPendienteEq)}</div>
-            <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>{fmtSmall(hoyPendienteEq)}</div>
-          </>
-        )}
-        highlight
-        expanded={hoyExpandido}
-        onToggle={() => setHoyExpandido(v => !v)}
-        config={config}
-        fmtChip={fmtBig}
-      >
-        {hoyExpandido && (hoyItems.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--color-text-sec)', marginTop: 10 }}>
-            {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
-          </div>
-        ) : (
-          <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {hoyItems.map((e, i) => {
-              const esVencido    = e.kind === 'esperado' && e.ci.estado === 'vencido';
-              const pagado       = hoyEntryCubierto(e);
-              const porConfirmar = e.kind === 'esperado' && !pagado && (e.ci.estado === 'por_confirmar' || e.ci.estado === 'parcial');
-              const etiqueta = e.kind === 'esperado'
-                ? ([e.ci.item.categoria, e.ci.item.subcategoria].filter(Boolean).join(' › ') || e.ci.item.notas || '(sin categoría)')
-                : (e.mov.descripcion || '(sin descripción)');
-              const bancoPago = e.kind === 'esperado' ? e.ci.matches[0]?.banco : (pagado ? e.mov.banco : null);
-              const bancoInfo = bancoPago ? bancoDeNombre(bancoPago, config?.bancos) : undefined;
-              const key = e.kind === 'esperado' ? e.ci.item.id : e.mov.id;
-              const monto = e.kind === 'esperado'
-                ? (e.ci.item.montoEsperado != null ? fmtMoney(e.ci.item.montoEsperado, { from: e.ci.item.moneda, to: e.ci.item.moneda }) : '—')
-                : fmtMoney(e.mov.monto, { from: e.mov.moneda, to: e.mov.moneda });
-              // Lápiz de edición (paridad con la fila de Por día): un suelto o un 'real' son
-              // siempre un único movimiento (editable); un esperado con 0 o >1 matches no lo es.
-              const editTarget = e.kind !== 'esperado' ? e.mov : (e.ci.matches.length === 1 ? e.ci.matches[0] : null);
-              const editable = esAdmin && editTarget != null;
-              return (
-                <button
-                  key={key}
-                  onClick={editable ? () => onEditarMovimiento?.(editTarget) : undefined}
-                  disabled={!editable}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', width: '100%',
-                    borderBottom: i < hoyItems.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
-                    background: 'none', border: 'none', cursor: editable ? 'pointer' : 'default',
-                    textAlign: 'left', fontFamily: 'var(--font-base)',
-                  }}
-                >
-                  {pagado && bancoInfo ? (
-                    <BankLogo id={bancoInfo.id} nombre={bancoInfo.nombre} color={bancoInfo.color} dominio={bancoInfo.dominio} size={28} radius={7} />
-                  ) : (
-                    <span style={{ width: 28, height: 28, borderRadius: 7, background: pagado ? 'var(--gf-emerald)' : 'var(--gf-gray-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Icon
-                        name={pagado ? 'check' : porConfirmar ? 'alert-circle' : 'clock'}
-                        size={14}
-                        color={pagado ? '#fff' : porConfirmar ? 'var(--gf-out)' : esVencido ? 'var(--gf-expense)' : 'var(--gf-gray-400)'}
-                      />
-                    </span>
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiqueta}</div>
-                    <div style={{ fontSize: 11, color: esVencido && !pagado ? 'var(--gf-expense)' : 'var(--color-text-sec)', fontWeight: esVencido && !pagado ? 700 : 400 }}>
-                      {pagado
-                        ? `${e.kind === 'real' ? 'Pagado' : 'Conciliado'}${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}`
-                        : porConfirmar ? 'Cargado · a confirmar'
-                        : e.kind === 'esperado' && esVencido ? `Venció día ${e.ci.item.diaVencimiento}`
-                        : e.kind === 'suelto' ? 'Sin plantilla · a pagar'
-                        : 'A pagar'}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, color: pagado ? 'var(--gf-income)' : 'var(--color-text)' }}>
-                    {monto}
-                  </div>
-                  {editable && <Icon name="pencil" size={12} color="var(--gf-gray-300)" />}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </DiaRowShell>
 
       {personas.length > 0 && (
         <div>
@@ -662,6 +594,160 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           </div>
         )}
       </div>
+      {/* F9.132 cambio 3 — la card Hoy va al FINAL de la pagina. Estaba arriba, que es donde
+          uno espera lo del dia; se mueve para que el resumen del mes se lea primero. Es el
+          cambio mas discutible de los cuatro y revertirlo es mover este bloque JSX de vuelta
+          arriba, entre el banner de pendientes y "Gastos por dia". `hoyExpandido` conserva su
+          default (true). */}
+      {/* F9.99.8.1 — Card Hoy pasa a usar la MISMA fila que "Gastos por día" (DiaRowShell):
+          chips de banco, total grande/chico, expandible. El contenido expandido agrega
+          estado por ítem (check/reloj/alerta/vencido) y lápiz de edición cuando hay un único
+          movimiento real detrás del ítem (esperado con 1 match, o el suelto mismo).
+          F9.132 cambio 1 — `totalNode` muestra gastado y a pagar SIEMPRE etiquetados y separados.
+          Antes alternaba: `hoyPendienteEq` cuando faltaba algo, `hoyTotalEq` cuando estaba todo
+          cubierto. Dos magnitudes distintas en el mismo lugar sin decir cuál era cuál.
+          F9.132 cambio 2 — `fmtChip` pasa a `fmtChipUsd`: los chips de banco del día van en USD
+          equivalente y no en el par ARS/USD. Con inflación el número en pesos de hoy no es
+          comparable con el de la semana pasada, y ponerlos juntos invita a comparar lo que no se
+          puede. La fila de "Gastos por día" sigue con `fmtBig`: el cambio es solo del día en curso. */}
+      <DiaRowShell
+        dayBig={String(hoy.getDate())}
+        daySub="HOY"
+        banks={hoyBancos}
+        totalNode={hoyItems.length === 0 ? null : (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+              {fmtBig(hoyGastadoEq)}
+              <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)', marginLeft: 4 }}>gastado</span>
+            </div>
+            {todoPagadoHoy ? (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--gf-income)', fontWeight: 700, fontSize: 11 }}>
+                <Icon name="check" size={11} color="var(--gf-income)" /> Al día
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>
+                {fmtBig(hoyPendienteEq)}
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)', marginLeft: 4 }}>a pagar</span>
+              </div>
+            )}
+          </>
+        )}
+        highlight
+        expanded={hoyExpandido}
+        onToggle={() => setHoyExpandido(v => !v)}
+        config={config}
+        fmtChip={fmtChipUsd}
+      >
+        {hoyExpandido && (hoyItems.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--color-text-sec)', marginTop: 10 }}>
+            {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
+          </div>
+        ) : (
+          <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {hoyItems.map((e, i) => {
+              const esVencido    = e.kind === 'esperado' && e.ci.estado === 'vencido';
+              const pagado       = hoyEntryCubierto(e);
+              const porConfirmar = e.kind === 'esperado' && !pagado && (e.ci.estado === 'por_confirmar' || e.ci.estado === 'parcial');
+              const etiqueta = e.kind === 'esperado'
+                ? ([e.ci.item.categoria, e.ci.item.subcategoria].filter(Boolean).join(' › ') || e.ci.item.notas || '(sin categoría)')
+                : (e.mov.descripcion || '(sin descripción)');
+              const bancoPago = e.kind === 'esperado' ? e.ci.matches[0]?.banco : (pagado ? e.mov.banco : null);
+              const bancoInfo = bancoPago ? bancoDeNombre(bancoPago, config?.bancos) : undefined;
+              const key = e.kind === 'esperado' ? e.ci.item.id : e.mov.id;
+              // F9.132 — con el modo privacidad activo esta fila mostraba el monto crudo vía
+              // fmtMoney, así que la card quedaba tapada arriba y destapada acá. Es el mismo hueco
+              // que F9.123 (title de las barras) y F9.124 §5 (eje del SVG), tercera aparición: todo
+              // lo que imprime plata tiene que pasar por un formateador que conozca el modo.
+              const montoEq = e.kind === 'esperado'
+                ? (e.ci.matches.length > 0
+                    ? e.ci.matches.reduce((a, m) => sumaEq(a, eqDe(m, tcDeMov)), EQ0)
+                    : (e.ci.item.montoEsperado != null ? eqVivo(e.ci.item.montoEsperado, e.ci.item.moneda) : null))
+                : eqDe(e.mov, tcDeMov);
+              const monto = privado
+                ? (montoEq ? fmtPct(montoEq.ars, c.ingArsEq) : '—')
+                : e.kind === 'esperado'
+                  ? (e.ci.item.montoEsperado != null ? fmtMoney(e.ci.item.montoEsperado, { from: e.ci.item.moneda, to: e.ci.item.moneda }) : '—')
+                  : fmtMoney(e.mov.monto, { from: e.mov.moneda, to: e.mov.moneda });
+              // Lápiz de edición (paridad con la fila de Por día): un suelto o un 'real' son
+              // siempre un único movimiento (editable); un esperado con 0 o >1 matches no lo es.
+              const editTarget = e.kind !== 'esperado' ? e.mov : (e.ci.matches.length === 1 ? e.ci.matches[0] : null);
+              const editable = esAdmin && editTarget != null;
+              return (
+                <button
+                  key={key}
+                  onClick={editable ? () => onEditarMovimiento?.(editTarget) : undefined}
+                  disabled={!editable}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', width: '100%',
+                    borderBottom: i < hoyItems.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
+                    background: 'none', border: 'none', cursor: editable ? 'pointer' : 'default',
+                    textAlign: 'left', fontFamily: 'var(--font-base)',
+                  }}
+                >
+                  {pagado && bancoInfo ? (
+                    <BankLogo id={bancoInfo.id} nombre={bancoInfo.nombre} color={bancoInfo.color} dominio={bancoInfo.dominio} size={28} radius={7} />
+                  ) : (
+                    <span style={{ width: 28, height: 28, borderRadius: 7, background: pagado ? 'var(--gf-emerald)' : 'var(--gf-gray-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Icon
+                        name={pagado ? 'check' : porConfirmar ? 'alert-circle' : 'clock'}
+                        size={14}
+                        color={pagado ? '#fff' : porConfirmar ? 'var(--gf-out)' : esVencido ? 'var(--gf-expense)' : 'var(--gf-gray-400)'}
+                      />
+                    </span>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiqueta}</div>
+                    <div style={{ fontSize: 11, color: esVencido && !pagado ? 'var(--gf-expense)' : 'var(--color-text-sec)', fontWeight: esVencido && !pagado ? 700 : 400 }}>
+                      {pagado
+                        ? `${e.kind === 'real' ? 'Pagado' : 'Conciliado'}${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}`
+                        : porConfirmar ? 'Cargado · a confirmar'
+                        : e.kind === 'esperado' && esVencido ? `Venció día ${e.ci.item.diaVencimiento}`
+                        : e.kind === 'suelto' ? 'Sin plantilla · a pagar'
+                        : 'A pagar'}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, color: pagado ? 'var(--gf-income)' : 'var(--color-text)' }}>
+                    {monto}
+                  </div>
+                  {editable && <Icon name="pencil" size={12} color="var(--gf-gray-300)" />}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+        {/* F9.132 cambio 4 — quién gastó qué. Va como sección aparte y no mezclada con la lista de
+            arriba: aquella responde "qué falta pagar" por ítem esperado, ésta responde "quién
+            gastó" por persona. Meterlas en una sola lista plana volvería a hacer que el bloque
+            signifique dos cosas, que es lo que este prompt vino a arreglar en el total.
+            Fila propia y no la compartida de F9.99.8.1: ésa se organiza por ítem/banco/estado, y
+            forzarla a un uso por persona la deformaría — se rompen las dos. */}
+        {hoyExpandido && hoyPorPersona.length > 0 && (
+          <div style={{ marginTop: 12, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 4 }}>
+              Quién gastó hoy
+            </div>
+            {hoyPorPersona.map(({ mov, eq }) => (
+              <div key={mov.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '4px 0', fontSize: 12.5 }}>
+                <span style={{ fontWeight: 600, flexShrink: 0 }}>
+                  {/* Un gasto sin dueño es información, no un error a ocultar: la fila se muestra
+                      igual. Hoy es entre el 4% y el 30% de los movimientos según el mes. */}
+                  {mov.persona ? nombrePersona(mov.persona, config) : 'Sin asignar'}
+                </span>
+                <span style={{ flex: 1, minWidth: 0, color: 'var(--color-text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {mov.descripcion || '(sin descripción)'}
+                </span>
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, flexShrink: 0 }}>{fmtChipUsd(eq)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {hoyExpandido && hoyPorPersona.length === 0 && hoyItems.length > 0 && (
+          <div style={{ marginTop: 12, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 8, fontSize: 12, color: 'var(--color-text-sec)' }}>
+            Todavía no salió plata hoy.
+          </div>
+        )}
+      </DiaRowShell>
+
       <div style={{ height: 4 }} />
     </div>
   );

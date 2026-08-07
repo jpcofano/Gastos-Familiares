@@ -1308,6 +1308,33 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `Σ ExposicionFactor.usd` = invertible con diff **−0,0000**, los 12 escenarios sin `NaN`, RV como
   único `sin_clasificar` y visible, PAMP marcado. Toca `firestore.rules` (colección nueva):
   **deploy `--only hosting,firestore:rules`**. `tsc`: 41 → 41.
+- F9.132 — Card "Hoy" en Resumen: total declarado, bancos en USD, quién gastó qué, y al final de la
+  página. Ver `docs/prompts/F9.132-card-hoy-resumen.md`. **El arreglo importante no era ninguno de
+  los cuatro cambios pedidos, era el total:** `totalNode` mostraba `hoyPendienteEq` (solo lo que
+  falta) cuando quedaba algo por pagar y `hoyTotalEq` (todo lo pagado) cuando estaba todo cubierto —
+  **dos magnitudes distintas en el mismo lugar, alternando según el estado y sin decir cuál era
+  cuál**. Ahora se muestran las dos, siempre etiquetadas: "gastado" arriba y "a pagar" abajo (o el
+  check "Al día"). Las filas de la lista **sí** distinguían gastado de pendiente por ícono y
+  subtítulo desde F9.99.8.1; el problema estaba solo en el titular. **Bancos en USD únicamente** —
+  va a parecer una regresión a quien mire el diff, y es una decisión de comparabilidad: con
+  inflación el número en pesos de hoy no es comparable con el de la semana pasada, y mostrarlos
+  juntos invita a comparar lo que no se puede. El USD equivalente es la única serie con sentido a lo
+  largo del mes. **El cálculo de `hoyPorBanco` no se tocó** (sigue acumulando `Eq`, el dato en pesos
+  queda), cambia el render y el orden pasa a ser por USD, que es lo que se ve. La fila de "Gastos
+  por día" sigue con `fmtBig`: el cambio es solo del día en curso. **Quién gastó hoy** va como
+  sección aparte dentro de la card, con fila propia y no la compartida de F9.99.8.1 —aquella se
+  organiza por ítem/banco/estado y forzarla a un uso por persona rompería las dos—. Los movimientos
+  sin `persona` se muestran como "Sin asignar" y no se esconden: **es entre el 4% y el 30% de los
+  movimientos según el mes** (medido: 6/20 en agosto, 45/267 en julio, 9/246 en junio), o sea un
+  caso corriente, no un borde. **Gate de permisos resuelto sin frenar:** `/resumen` es una ruta
+  **solo-admin** en `AppShell`, y las reglas de Firestore ya acotan la lectura de un dependiente a
+  sus propios movimientos, así que mostrar toda la familia acá no abre nada nuevo. **Tercera
+  aparición del mismo hueco de privacidad**, cerrada en el mismo commit: el monto de cada fila salía
+  por `fmtMoney` crudo, así que con el modo activo la card quedaba tapada arriba y destapada abajo —
+  igual que el `title` de las barras en F9.123 y el eje del SVG en F9.124 §5. **La card se movió al
+  final de la página**; es el cambio más discutible y revertirlo es mover un bloque JSX de vuelta
+  entre el banner de pendientes y "Gastos por día". `hoyExpandido` conserva su default. `tsc`:
+  41 → 41; `vite build` OK. Frontend puro: deploy `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
