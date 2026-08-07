@@ -167,6 +167,10 @@ service cloud.firestore {
     match /factoresTicker/{ticker} {
       allow read, write: if esDueno();
     }
+    // F9.130 — tipo de custodia declarado por cuenta/plataforma. Mismo alcance.
+    match /custodiaCuenta/{cuenta} {
+      allow read, write: if esDueno();
+    }
     match /seriesPrecios/{simbolo} {
       allow read, write: if esDueno();
     }

@@ -50,7 +50,7 @@ import {
   type ConfigCafci, type CafciCartera, type CafciFondoConfig, type ResultadoSincronizarCafci,
   type ResultadoImportarCafciManual,
 } from '../datos/patrimonioCafci';
-import { cargarFactoresTicker, importarFactoresSeed } from '../datos/patrimonioFactores';
+import { cargarFactoresTicker, importarFactoresSeed, cargarCustodiaCuenta } from '../datos/patrimonioFactores';
 import PatrimonioIngesta from './PatrimonioIngesta';
 // F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
 // reusable; la lógica no cambió.
@@ -61,6 +61,7 @@ import {
   ESCENARIOS, calcEscenarios, calcBrecha, calcMixObjetivo, violacionesBandas,
   RIESGO_DEFAULTS, ESCENARIO_TITULAR, BLOQUE_LABEL, inferenciasDeBloque, posicionesInvertibles,
   exposicionArgentina, FACTOR_LABEL, FACTOR_AMBIGUO, FACTOR_ENERGIA, type Factor,
+  exposicionContraparte, escenariosContraparteDe, CUSTODIA_LABEL, type Custodia,
   type ResultadoEscenario, type ViolacionBanda, type MixObjetivo, type TopesRiesgo, type Bloque,
 } from '../datos/patrimonioRiesgo';
 
@@ -658,12 +659,25 @@ function RiesgoCard({ posiciones, manuales, topes, configurado, factores }: {
   // F9.128 §3 — posiciones cuyo bloque se dedujo en vez de estar declarado. Va en esta card, junto
   // al desglose por bloque: es acá donde el bloque se convierte en un número.
   const inferencias = inferenciasDeBloque(posicionesInvertibles(posiciones, manuales));
+  const [custodias, setCustodias] = useState<Record<string, Custodia>>({});
+  useEffect(() => {
+    cargarCustodiaCuenta().then(setCustodias).catch(e => console.error('[custodia] no se pudo leer:', e));
+  }, []);
 
   // F9.127 §3 — exposición argentina por factor. El override de `factoresTicker` se pasa entero,
   // leído una sola vez arriba: nunca un get() por posición.
   const expo = intentar(
     () => exposicionArgentina(posicionesInvertibles(posiciones, manuales), factores),
     'exposicionArgentina',
+  );
+
+  // F9.130 §2/§3 — exposición por contraparte y sus escenarios. Se calculan aparte de los de
+  // precio a propósito: ver el comentario de `escenariosContraparteDe`.
+  const todasInv = posicionesInvertibles(posiciones, manuales);
+  const contra = intentar(() => exposicionContraparte(todasInv, custodias), 'exposicionContraparte');
+  const escContra: ResultadoEscenario[] | null = intentar(
+    () => calcEscenarios(posiciones, manuales, escenariosContraparteDe(posiciones, manuales, custodias)),
+    'escenariosContraparte',
   );
 
   const escenarios: ResultadoEscenario[] | null = intentar(() => calcEscenarios(posiciones, manuales), 'calcEscenarios');
@@ -729,6 +743,44 @@ function RiesgoCard({ posiciones, manuales, topes, configurado, factores }: {
               Sin clasificar: {expo.sinClasificar.tickers.join(', ')} · {pct(expo.sinClasificar.usd / (expo.usd || 1))} de
               la exposición argentina. Cuenta en el total pero no se le asignó factor: preferimos
               verlo acá antes que contarlo en el factor equivocado.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* F9.130 §2 — exposición por contraparte, debajo de la de factores. Responde una pregunta
+          que ninguna otra vista hacía: no "cuánto puede caer" sino "quién te lo tiene que devolver". */}
+      {contra && (
+        <div style={{ marginTop: 10, padding: '11px 12px', borderRadius: 12, background: 'var(--gf-gray-100)' }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+            Crédito contra terceros {pct(contra.creditoPct)}
+            {!$.privado && contra.creditoUsd > 0 && (
+              <span style={{ fontWeight: 400, color: 'var(--color-text-sec)' }}> · {$.usd(contra.creditoUsd)}</span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-sec)', marginTop: 3, lineHeight: 1.45 }}>
+            {contra.mayor
+              ? <>Mayor exposición a una sola contraparte: <strong>{contra.mayor.contraparte}</strong> con {pct(contra.mayor.pctInvertible)}. Dos plataformas al 11% no es lo mismo que una al 22%.</>
+              : <>Ninguna posición está declarada como crédito. Los escenarios de contraparte dan 0 por eso, no porque no haya riesgo.</>}
+          </div>
+          {contra.porContraparte.map(c => (
+            <div key={c.contraparte} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '3px 0', fontSize: 11.5 }}>
+              <span style={{ flex: 1, color: 'var(--color-text-sec)' }}>
+                {c.contraparte}
+                <span style={{
+                  marginLeft: 6, fontSize: 9.5, fontWeight: 700,
+                  color: c.esCredito ? 'var(--gf-expense)' : c.custodia === 'sin_declarar' ? 'var(--gf-out)' : 'var(--gf-gray-400)',
+                }}>{CUSTODIA_LABEL[c.custodia]}</span>
+                <span style={{ color: 'var(--gf-gray-400)', fontSize: 10, marginLeft: 5 }}>{c.tickers.slice(0, 6).join(' ')}</span>
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{pct(c.pctInvertible)}</span>
+            </div>
+          ))}
+          {contra.sinDeclarar.usd > 0 && (
+            <div style={{ fontSize: 10.5, color: 'var(--gf-out)', marginTop: 6, lineHeight: 1.4 }}>
+              Sin declarar: {contra.sinDeclarar.contrapartes.join(', ')}. Nada se da por sentado —
+              suponer "propia" sobre algo que en realidad es un crédito escondería justo el riesgo
+              que esta card existe para mostrar. Declarala en Config para que entre a los escenarios.
             </div>
           )}
         </div>
@@ -874,6 +926,27 @@ function RiesgoCard({ posiciones, manuales, topes, configurado, factores }: {
           {inferencias.map(i => `${i.ticker} → ${BLOQUE_LABEL[i.bloque]}`).join(' · ')}.
           Se dedujo del nombre del instrumento; si alguna está mal, el bloque —y su beta— está mal
           en todos los escenarios.
+        </div>
+      )}
+
+      {/* F9.130 §3 — SECCIÓN APARTE, no mezclada con los escenarios de precio. Un colapso de
+          plataforma y una corrección global son eventos independientes y de probabilidad muy
+          distinta; ordenarlos en la misma lista por pérdida invita a leerlos como comparables. */}
+      {escContra && escContra.length > 0 && (
+        <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid var(--gf-gray-200)' }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 2 }}>Riesgo de contraparte</div>
+          <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginBottom: 6, lineHeight: 1.4 }}>
+            No son escenarios de mercado y no se comparan con los de arriba: acá el activo no baja de
+            precio, no vuelve.
+          </div>
+          {escContra.map(e => (
+            <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '3px 0', fontSize: 11.5 }}>
+              <span style={{ flex: 1, color: 'var(--color-text-sec)' }}>{e.nombre}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: e.perdidaUsd < 0 ? 'var(--gf-expense)' : 'var(--gf-gray-400)' }}>
+                {pct(e.perdidaPct)}
+              </span>
+            </div>
+          ))}
         </div>
       )}
 

@@ -307,6 +307,125 @@ export function factorDe(p: Posicion, overrides: Record<string, Factor> = {}): R
   return { factor: 'sin_clasificar', ambiguo };
 }
 
+// ── Custodia y contraparte (F9.130) ───────────────────────────────────────────
+// TERCER eje, ortogonal a los otros dos. Las tres preguntas: `Bloque` dice **dónde está la plata**,
+// `Factor` dice **qué la mueve**, `Custodia` dice **quién te la tiene que devolver**. Un mismo
+// activo cambia de riesgo según esto: 1 ETH en una billetera propia y 1 ETH prestado en una
+// plataforma tienen idéntico riesgo de precio y riesgo de contraparte incomparable.
+//
+// Por qué hace falta: los 12 escenarios de F9.127 modelan movimientos de PRECIO. El escenario
+// `cripto` aplica −50% a ETH/BTC/AAVE/UNI — el activo sigue siendo tuyo y vale menos. Si esos
+// tokens están en una plataforma de lending, el colapso de la plataforma no es −50%: es −100% de lo
+// que esté ahí, haga lo que haga el precio. No es un shock más grande, es otro tipo de evento.
+export type Custodia =
+  | 'propia'          // llaves o efectivo propios: sin contraparte
+  | 'segregada'       // broker/caja de valores: el título está a tu nombre
+  | 'credito'         // lending, staking con terceros, saldo en exchange: sos acreedor
+  | 'emisor'          // stablecoin: crédito contra quien lo emite
+  | 'sin_declarar';
+
+export const CUSTODIA_LABEL: Record<Custodia, string> = {
+  propia:       'Propia',
+  segregada:    'Segregada',
+  credito:      'Crédito contra la plataforma',
+  emisor:       'Crédito contra el emisor',
+  sin_declarar: 'Sin declarar',
+};
+
+export const esCreditoCustodia = (c: Custodia): boolean => c === 'credito' || c === 'emisor';
+
+/**
+ * F9.130 §1 — custodia de una posición. El override manual (colección `custodiaCuenta/{cuenta}`)
+ * gana siempre, y **nada cae a un default plausible**.
+ *
+ * Acá esa regla importa más que en ningún otro lado de la serie: dar por sentado `propia` sobre una
+ * posición que en realidad es un crédito esconde exactamente el riesgo que este eje existe para
+ * mostrar. Si no se sabe, se dice que no se sabe — y la card lo muestra.
+ *
+ * La ÚNICA excepción es el stablecoin, y no es una inferencia sino una definición: un USDT es un
+ * pasivo de quien lo emite, esté donde esté. Eso no depende de cómo tenga el usuario su cuenta.
+ */
+export function custodiaDe(p: Posicion, overrides: Record<string, Custodia> = {}): Custodia {
+  const ov = overrides[p.cuenta ?? ''];
+  if (ov) return ov;
+  if (p.tipo === 'cripto' && STABLECOINS.has(p.ticker)) return 'emisor';
+  return 'sin_declarar';
+}
+
+// F9.130 §2 — el denominador va declarado, como en F9.122.1 §B.
+export type ExposicionContraparte = {
+  contraparte: string;        // valor de `cuenta`: la plataforma / broker
+  custodia: Custodia;
+  usd: number;
+  pctInvertible: number;
+  tickers: string[];
+  esCredito: boolean;         // la CUENTA está declarada como crédito
+  usdCredito: number;         // USD dentro de la cuenta clasificados como crédito por posición
+};
+
+export function exposicionContraparte(
+  posiciones: Posicion[],
+  overrides: Record<string, Custodia> = {},
+): {
+  porContraparte: ExposicionContraparte[];
+  creditoUsd: number;          // 'credito' + 'emisor'
+  creditoPct: number;
+  mayor: ExposicionContraparte | null;   // la mayor exposición a UNA sola contraparte de crédito
+  sinDeclarar: { usd: number; contrapartes: string[] };
+} {
+  const total = posiciones.reduce((s, p) => s + p.valorUsd, 0);
+
+  // Agrupa por cuenta y suma por ticker dentro de cada una, mismo criterio que F9.127: sumar filas
+  // repetiría el ticker cuando hay dos posiciones del mismo papel en la misma cuenta.
+  const grupos = new Map<string, { usd: number; usdCredito: number; tickers: Map<string, number> }>();
+  for (const p of posiciones) {
+    const cuenta = p.cuenta || '(sin cuenta)';
+    const g = grupos.get(cuenta) ?? { usd: 0, usdCredito: 0, tickers: new Map<string, number>() };
+    g.usd += p.valorUsd;
+    // El crédito se cuenta POR POSICIÓN, no por cuenta. Promover la cuenta entera a "crédito"
+    // porque tiene un stablecoin adentro sería inferir que todo lo que hay ahí es un préstamo a
+    // partir de un token: exactamente el default plausible que este eje prohíbe. Una cuenta es
+    // crédito cuando alguien lo declaró, no cuando su composición lo sugiere.
+    if (esCreditoCustodia(custodiaDe(p, overrides))) g.usdCredito += p.valorUsd;
+    g.tickers.set(p.ticker, (g.tickers.get(p.ticker) ?? 0) + p.valorUsd);
+    grupos.set(cuenta, g);
+  }
+
+  const porContraparte: ExposicionContraparte[] = [...grupos.entries()]
+    .map(([contraparte, g]) => {
+      const custodia = overrides[contraparte] ?? 'sin_declarar';
+      return {
+        contraparte,
+        custodia,
+        usd: g.usd,
+        pctInvertible: total > 0 ? g.usd / total : 0,
+        tickers: [...g.tickers.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t),
+        esCredito: esCreditoCustodia(custodia),
+        usdCredito: g.usdCredito,
+      };
+    })
+    .sort((a, b) => b.usd - a.usd);
+
+  const credito = porContraparte.filter(c => c.esCredito);
+  // Suma de lo efectivamente clasificado como crédito, no del valor entero de las cuentas de
+  // crédito: un stablecoin dentro de un broker segregado también es un crédito contra su emisor.
+  const creditoUsd = porContraparte.reduce((s, c) => s + (c.esCredito ? c.usd : c.usdCredito), 0);
+  const sinDecl = porContraparte.filter(c => c.custodia === 'sin_declarar');
+
+  return {
+    porContraparte,
+    creditoUsd,
+    creditoPct: total > 0 ? creditoUsd / total : 0,
+    // Dos plataformas al 11% cada una es un riesgo distinto a una al 22%: el máximo individual es
+    // el número que importa, no la suma.
+    mayor: credito[0] ?? null,
+    sinDeclarar: {
+      usd: sinDecl.reduce((s, c) => s + c.usd, 0),
+      contrapartes: sinDecl.map(c => c.contraparte),
+    },
+  };
+}
+
 // ── Betas por bloque ──────────────────────────────────────────────────────────
 // Constantes documentadas, no estimadas de series (eso está fuera de alcance de F9.116).
 // Referencia de la beta AR: marzo 2020, el Merval cayó ~34% en USD contra ~34% del S&P pico a
@@ -520,6 +639,50 @@ export const ESCENARIOS: Escenario[] = [
   ...ESCENARIOS_IDIOSINCRATICOS,
   ...ESCENARIOS_POR_FACTOR,
 ];
+
+/**
+ * F9.130 §3 — escenarios de CONTRAPARTE. Deliberadamente **fuera** de `ESCENARIOS`.
+ *
+ * Un colapso de plataforma y una corrección global son eventos independientes y de probabilidad muy
+ * distinta. Presentarlos en la misma lista ordenada por pérdida invita a leerlos como comparables,
+ * y no lo son: la lista de precio responde "cuánto puede caer esto", ésta responde "qué pasa si no
+ * me lo devuelven". La UI los muestra en sección aparte, con su propio encabezado.
+ *
+ * Dependen de la cartera (cuál es la mayor exposición de crédito), así que se construyen con los
+ * datos, igual que `nombre_unico` de F9.127 §4.
+ */
+export function escenariosContraparteDe(
+  posiciones: Posicion[],
+  manuales: PosicionManual[] = [],
+  overrides: Record<string, Custodia> = {},
+): Escenario[] {
+  const todas = posicionesInvertibles(posiciones, manuales);
+  const { mayor } = exposicionContraparte(todas, overrides);
+
+  return [
+    {
+      id: 'colapso_contraparte',
+      nombre: mayor ? `Colapso de contraparte (${mayor.contraparte})` : 'Colapso de contraparte',
+      descripcion: mayor
+        ? `Pérdida del 100% de lo que está en ${mayor.contraparte}. No es un shock de precio: el `
+          + `activo no vuelve, haga lo que haga el mercado.`
+        : 'No hay ninguna posición declarada como crédito contra una contraparte, así que este '
+          + 'escenario da 0. No significa que no haya riesgo: significa que la custodia todavía no '
+          + 'se declaró — ver la card de contraparte.',
+      familia: 'idiosincratico',
+      shock: (p: Posicion) => (mayor && (p.cuenta || '(sin cuenta)') === mayor.contraparte ? -1 : 0),
+    },
+    {
+      id: 'corrida_stablecoin',
+      nombre: 'Corrida de stablecoin',
+      descripcion: 'Stablecoins −40%. SUPUESTO, no dato: históricamente los depeg se recuperaron '
+        + 'parcialmente (USDT 2022, USDC 2023), así que un −100% acá sería alarmismo y un −5% '
+        + 'complacencia. El número es discutible y por eso está declarado.',
+      familia: 'idiosincratico',
+      shock: (p: Posicion) => (custodiaDe(p, overrides) === 'emisor' ? -0.40 : 0),
+    },
+  ];
+}
 
 // El titular de la brecha se mide contra este escenario: es el más comparable con "cuánta
 // caída bancás", porque no depende de que se dé un evento argentino puntual.

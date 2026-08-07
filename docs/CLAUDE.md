@@ -1335,6 +1335,37 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   final de la página**; es el cambio más discutible y revertirlo es mover un bloque JSX de vuelta
   entre el banner de pendientes y "Gastos por día". `hoyExpandido` conserva su default. `tsc`:
   41 → 41; `vite build` OK. Frontend puro: deploy `--only hosting`.
+- F9.130 — **contraparte y custodia: el tercer eje**. Ver `docs/prompts/F9.130-contraparte-y-custodia.md`.
+  Las tres preguntas, ortogonales entre sí: **`Bloque` dice dónde está la plata, `Factor` dice qué la
+  mueve, `Custodia` dice quién te la tiene que devolver.** Un mismo activo cambia de riesgo según
+  esto — 1 ETH en billetera propia y 1 ETH prestado en una plataforma tienen idéntico riesgo de
+  precio y riesgo de contraparte incomparable. Los 12 escenarios de F9.127 modelan **precio**: el de
+  `cripto` aplica −50% y el activo sigue siendo tuyo; si está en una plataforma que colapsa no es
+  −50%, es −100% de lo que esté ahí, haga lo que haga el mercado. **§0 midió que el dato existe**:
+  `cuenta` está poblado en 50/50 posiciones y distingue plataformas (PPI, Balanz ×2, Bitfinex, Nexo,
+  Globant ESPP, Plan empleado ACN), así que el gate del prompt no se disparó y §1 se pudo calcular.
+  **Lo que NO existe** es ningún campo `custodia`/`plataforma`/`broker`. El dato dice *dónde*, no
+  *de qué tipo*. **Nada se da por sentado:** todo arranca en `sin_declarar` y se declara por cuenta
+  en `custodiaCuenta`, que **no persiste negativos** (declarar `sin_declarar` borra el override).
+  Suponer `propia` sobre algo que en realidad es un crédito escondería justo el riesgo que el eje
+  existe para mostrar. **Única excepción, y es definición y no inferencia:** un stablecoin es
+  `emisor` esté donde esté, porque es un pasivo de quien lo emite. **Corrección sobre la primera
+  implementación:** el crédito se cuenta **por posición, no por cuenta**. La versión inicial promovía
+  la cuenta entera a "crédito" cuando tenía un stablecoin adentro, así que sin declarar nada Bitfinex
+  ya figuraba con el 15,3% como crédito — inferido de un USDT que además vale 0. Era el default
+  plausible prohibido, con otra cara. Ahora, sin declaraciones, **el crédito da 0,0% y el escenario
+  lo dice** en vez de mostrar un cero sin explicación. **Medido** (`Σ ExposicionContraparte.usd` =
+  invertible, diff −0,0000): cripto queda **desglosado por dónde está** —Bitfinex 15,3% + Nexo 6,4%,
+  no un bloque único de 21,8%—, que era el punto del prompt. Simulando Bitfinex y Nexo como crédito:
+  21,8% de crédito, mayor contraparte **Bitfinex 15,3%** y `colapso_contraparte` −15,33%. **Dos
+  plataformas al 11% no es lo mismo que una al 22%**, por eso la card muestra el máximo individual y
+  no solo la suma. **Los escenarios de contraparte van en sección aparte**, fuera de `ESCENARIOS`:
+  un colapso de plataforma y una corrección global son eventos independientes y de probabilidad muy
+  distinta, y ordenarlos en la misma lista por pérdida invita a leerlos como comparables. El **−40%
+  de `corrida_stablecoin` es un SUPUESTO, no un dato**: los depeg históricos (USDT 2022, USDC 2023)
+  se recuperaron parcialmente, así que −100% sería alarmismo y −5% complacencia; está declarado en la
+  `descripcion` para que se pueda discutir. Toca `firestore.rules`: **deploy
+  `--only hosting,firestore:rules`**. `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

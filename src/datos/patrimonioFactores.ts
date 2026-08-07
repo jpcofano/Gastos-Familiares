@@ -9,7 +9,7 @@
 
 import { collection, doc, getDocs, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { FACTOR_ENERGIA, type Factor } from './patrimonioRiesgo';
+import { FACTOR_ENERGIA, type Factor, type Custodia } from './patrimonioRiesgo';
 
 export type FactorTickerDoc = {
   factor: Factor;
@@ -63,4 +63,31 @@ export async function importarFactoresSeed(): Promise<{ escritos: number; conser
   }
   if (escritos > 0) await batch.commit();
   return { escritos, conservados };
+}
+
+// ── F9.130 §2 — override de custodia por cuenta ───────────────────────────────
+// Misma forma que `factoresTicker`: una lectura por render, y **no se persisten negativos** —
+// declarar algo como `sin_declarar` borra el override en vez de escribir uno. Un `sin_declarar`
+// guardado sería cache negativo (F9.122 §3) y además ocultaría que la custodia sigue sin declarar,
+// que es justo lo que la card tiene que gritar.
+export async function cargarCustodiaCuenta(): Promise<Record<string, Custodia>> {
+  const snap = await getDocs(collection(db, 'custodiaCuenta'));
+  const out: Record<string, Custodia> = {};
+  for (const d of snap.docs) {
+    const data = d.data() as { custodia?: Custodia };
+    if (data.custodia && data.custodia !== 'sin_declarar') out[d.id] = data.custodia;
+  }
+  return out;
+}
+
+export async function guardarCustodiaCuenta(cuenta: string, custodia: Custodia, nota?: string): Promise<void> {
+  if (custodia === 'sin_declarar') {
+    await deleteDoc(doc(db, 'custodiaCuenta', cuenta));
+    return;
+  }
+  await setDoc(
+    doc(db, 'custodiaCuenta', cuenta),
+    { custodia, origen: 'manual', ...(nota ? { nota } : {}) },
+    { merge: true },
+  );
 }
