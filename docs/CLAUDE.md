@@ -1366,6 +1366,38 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   se recuperaron parcialmente, así que −100% sería alarmismo y −5% complacencia; está declarado en la
   `descripcion` para que se pueda discutir. Toca `firestore.rules`: **deploy
   `--only hosting,firestore:rules`**. `tsc`: 41 → 41.
+- F9.131 — **declarada, derivada, emergente**. Ver `docs/prompts/F9.131-declarada-derivada-emergente.md`.
+  Convierte la medición en sistema: F9.127 y F9.130 miden, esto define qué se hace con lo medido.
+  **No hay topes duros, y es el punto:** una banda dura marcaría TRAN en rojo en cada valuación, el
+  dueño sabría que está bien, y en tres meses ignoraría todas las alertas por igual — **un tablero
+  que grita siempre no informa**. La distinción que sirve no es "cuánto es demasiado" sino **qué
+  elegiste y qué se acumuló**. `declarada` no se cuestiona mientras esté abajo del techo *que puso el
+  dueño*; `derivada` es consecuencia aritmética de una declarada y se informa sin alertar;
+  `emergente` es la que nadie eligió y **la única que levanta la mano**, junto con `excedida`, que es
+  el dueño contra su propia decisión pasada y no contra un promedio ajeno. **`nota` obligatoria con
+  mínimo de 20 caracteres, validada en tres lugares** —formulario, `guardarDeclaracion` y
+  `firestore.rules`— porque es regla del dominio y no del formulario: una declaración sin motivo
+  escrito es indistinguible de una exposición emergente que alguien silenció apretando un botón, y
+  todo el módulo se apoya en esa diferencia. **Nada se autodeclara**: el techo viene precargado con
+  el % actual, el motivo lo tipea el dueño y hay confirmación explícita. **Dos elecciones de diseño,
+  no verdades:** materialidad **5%** del invertible (por debajo no se reporta nada; treinta líneas
+  del 0,3% son ruido, y el ruido es lo que entrena a ignorar la pantalla) y **70%** de USD
+  proveniente de posiciones ya declaradas para considerar una exposición derivada (más bajo y todo se
+  vuelve derivada perdiendo la señal; más alto y declarar TRAN+TGSU2+CEPU seguiría reportando energía
+  regulada como emergente, que es el falso positivo que enseña a ignorar). **Los techos se anclan a
+  la historia propia y explícitamente NO a los 13 fondos CAFCI**: anclarse al promedio de la
+  industria es adoptar las restricciones de mandato y liquidez de otro sin haberlas elegido.
+  **Medido: hay 2 corridas y hacen falta 3**, así que hoy `proponerTechos` no propone nada y lo dice
+  — declarar a mano sigue disponible. **Verificado contra producción con cero declaraciones:** los
+  dos casos testigo aparecen como emergentes —cripto 21,8% y energía (Oil & gas 27,0% + regulada
+  16,2% = 43,2%)—; declarar TRAN al 25% lo pasa a `declarada` sin alerta; declarar TRAN+TGSU2+CEPU+
+  ECOG pasa `energia_ar_regulada` a `derivada`; cero exposiciones bajo el 5% en la lista; nota vacía
+  y de 19 caracteres rechazadas, 20 aceptada. **Hallazgo abierto:** con el umbral en 5% salen **25
+  emergentes**, porque los cuatro ejes describen la misma plata desde ángulos distintos (cripto
+  aparece como factor, como bloque, como ETH/BTC en ticker y como Bitfinex/Nexo en contraparte). El
+  umbral controla el tamaño, no la redundancia. Qué eje mostrar primero —o si conviene un solo eje a
+  la vez— es una decisión de producto que quedó sin tomar. Toca `firestore.rules`: **deploy
+  `--only hosting,firestore:rules`**. `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

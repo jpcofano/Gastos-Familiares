@@ -51,6 +51,11 @@ import {
   type ResultadoImportarCafciManual,
 } from '../datos/patrimonioCafci';
 import { cargarFactoresTicker, importarFactoresSeed, cargarCustodiaCuenta } from '../datos/patrimonioFactores';
+import {
+  cargarDeclaraciones, guardarDeclaracion, clasificarExposiciones,
+  NOTA_MINIMA, UMBRAL_MATERIALIDAD, UMBRAL_DERIVADA,
+  type Declaracion, type Exposicion,
+} from '../datos/patrimonioDeclaraciones';
 import PatrimonioIngesta from './PatrimonioIngesta';
 // F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
 // reusable; la lógica no cambió.
@@ -1133,6 +1138,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
       })()}
 
       {/* 4b. Riesgo y escenarios (F9.116) */}
+      <DeclaracionesCard posiciones={posiciones} manuales={manuales} factores={factores} />
       <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} factores={factores} />
 
       {/* 5. Informe PDF */}
@@ -2801,6 +2807,202 @@ function CafciFondosCard({ configCafci, carteras, sincronizando, onSincronizar, 
           Importar factores ({Object.keys(FACTOR_ENERGIA).length})
         </button>
       </div>
+    </Card>
+  );
+}
+
+// ── F9.131 — Declaradas, derivadas, emergentes ────────────────────────────────
+// Card en Riesgo, ARRIBA de escenarios, ordenada por accionabilidad y no por tamaño: lo primero que
+// hay que mirar es lo que nunca pasó por una decisión, no lo que más pesa.
+function DeclaracionesCard({ posiciones, manuales, factores }: {
+  posiciones: Posicion[];
+  manuales: PosicionManual[];
+  factores: Record<string, Factor>;
+}) {
+  const $ = useDinero();
+  const [decls, setDecls] = useState<Declaracion[]>([]);
+  // La custodia se lee acá y no llega por props: esta card es el único consumidor fuera de
+  // RiesgoCard, y pasarla por dos niveles de componente solo para esto sería peor.
+  const [custodias, setCustodias] = useState<Record<string, Custodia>>({});
+  const [editando, setEditando] = useState<Exposicion | null>(null);
+  const [techoInput, setTechoInput] = useState('');
+  const [notaInput, setNotaInput] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [verDerivadas, setVerDerivadas] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const recargar = () => cargarDeclaraciones().then(setDecls).catch(e => console.error('[declaraciones]', e));
+  useEffect(() => {
+    recargar();
+    cargarCustodiaCuenta().then(setCustodias).catch(e => console.error('[custodia]', e));
+  }, []);
+
+  const todas = posicionesInvertibles(posiciones, manuales);
+  const expos = intentar(() => clasificarExposiciones(todas, decls, {
+    factores, custodias,
+    labelFactor: (f: Factor) => FACTOR_LABEL[f],
+    labelBloque: (b: Bloque) => BLOQUE_LABEL[b],
+  }), 'clasificarExposiciones') ?? [];
+
+  const emergentes = expos.filter(e => e.estado === 'emergente');
+  const excedidas  = expos.filter(e => e.estado === 'excedida');
+  const declaradas = expos.filter(e => e.estado === 'declarada');
+  const derivadas  = expos.filter(e => e.estado === 'derivada');
+
+  const abrirForm = (e: Exposicion) => {
+    setEditando(e);
+    // El techo viene precargado con el % ACTUAL: es el punto de partida natural, y el dueño lo edita.
+    setTechoInput((e.pct * 100).toFixed(1).replace('.', ','));
+    setNotaInput(e.declaracion?.nota ?? '');
+    setError(null);
+  };
+
+  const guardar = async () => {
+    if (!editando) return;
+    const techoPct = parseFloat(techoInput.replace(',', '.')) / 100;
+    setGuardando(true);
+    setError(null);
+    try {
+      await guardarDeclaracion({
+        eje: editando.eje, clave: editando.clave, techoPct, base: 'invertible',
+        fecha: new Date().toISOString().slice(0, 10), nota: notaInput.trim(),
+      });
+      await recargar();
+      setEditando(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const notaCorta = notaInput.trim().length < NOTA_MINIMA;
+
+  const btnSec: React.CSSProperties = {
+    padding: '7px 11px', borderRadius: 9, border: '1px solid var(--gf-gray-200)',
+    cursor: 'pointer', background: 'transparent', color: 'var(--color-text-sec)',
+    fontSize: 11.5, fontWeight: 600, fontFamily: 'var(--font-base)',
+  };
+
+  if (expos.length === 0) return null;
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Exposiciones: declaradas y emergentes</div>
+      <div style={{ fontSize: 11, color: 'var(--color-text-sec)', marginTop: 2, lineHeight: 1.45 }}>
+        No hay topes duros. La app no dice qué hacer: dice dónde hay exposición que nunca pasó por una
+        decisión. Solo se listan las que superan el {pct(UMBRAL_MATERIALIDAD)} del invertible.
+      </div>
+
+      {/* 1. Emergentes — las únicas que levantan la mano, junto con las excedidas. */}
+      {emergentes.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          {emergentes.map(e => (
+            <div key={`${e.eje}-${e.clave}`} style={{ padding: '9px 11px', borderRadius: 10, background: 'var(--st-por-confirmar-bg, var(--gf-gray-100))', marginBottom: 6 }}>
+              <div style={{ fontSize: 12.5, lineHeight: 1.45 }}>
+                <strong>{e.etiqueta}</strong> es el {pct(e.pct)} del invertible y nunca lo declaraste.
+                ¿Lo declarás o lo bajás?
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 3 }}>
+                {e.eje} · {e.tickers.slice(0, 8).join(' ')}
+              </div>
+              <button onClick={() => abrirForm(e)} style={{ ...btnSec, marginTop: 6, width: 'auto', padding: '5px 12px' }}>
+                Declarar
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 2. Excedidas — el dueño contra su propia decisión pasada, no contra un promedio ajeno. */}
+      {excedidas.map(e => (
+        <div key={`${e.eje}-${e.clave}`} style={{ padding: '9px 11px', borderRadius: 10, background: 'var(--st-vencido-bg, var(--gf-gray-100))', marginTop: 6 }}>
+          <div style={{ fontSize: 12.5, lineHeight: 1.45 }}>
+            <strong>{e.etiqueta}</strong> está en {pct(e.pct)} y declaraste un techo de {pct(e.declaracion!.techoPct)} el {e.declaracion!.fecha}.
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-sec)', marginTop: 3 }}>
+            {/* Aritmética, no recomendación: no lleva "deberías vender". */}
+            Volver al techo son {$.usd(e.excesoUsd)}.
+          </div>
+          <button onClick={() => abrirForm(e)} style={{ ...btnSec, marginTop: 6, width: 'auto', padding: '5px 12px' }}>
+            Revisar declaración
+          </button>
+        </div>
+      ))}
+
+      {/* 3. Declaradas — sin colores de alarma. Con la nota visible: es lo que permite saber en seis
+             meses si la convicción sigue en pie. */}
+      {declaradas.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          {declaradas.map(e => (
+            <div key={`${e.eje}-${e.clave}`} style={{ padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', fontSize: 11.5 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <span style={{ flex: 1, color: 'var(--color-text-sec)' }}>{e.etiqueta}</span>
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{pct(e.pct)}</span>
+                <span style={{ color: 'var(--gf-gray-400)' }}>de {pct(e.declaracion!.techoPct)}</span>
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', lineHeight: 1.4 }}>
+                {e.declaracion!.fecha} · {e.declaracion!.nota}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 4. Derivadas — consecuencia aritmética de una declarada. Colapsadas por defecto. */}
+      {derivadas.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => setVerDerivadas(v => !v)} style={{ ...btnSec, width: 'auto', padding: '4px 10px', fontSize: 11 }}>
+            {verDerivadas ? 'Ocultar' : `Ver ${derivadas.length} derivada${derivadas.length !== 1 ? 's' : ''}`}
+          </button>
+          {verDerivadas && derivadas.map(e => (
+            <div key={`${e.eje}-${e.clave}`} style={{ display: 'flex', gap: 8, padding: '3px 0', fontSize: 11.5, color: 'var(--color-text-sec)' }}>
+              <span style={{ flex: 1 }}>{e.etiqueta}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{pct(e.pct)}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 4, lineHeight: 1.4 }}>
+            Consecuencia de lo que ya declaraste: más del {pct(UMBRAL_DERIVADA)} de su valor viene de
+            posiciones con declaración propia. Se informa, no se alerta.
+          </div>
+        </div>
+      )}
+
+      {/* Formulario. Nada se autodeclara: el techo viene precargado pero el motivo lo tipea el dueño. */}
+      {editando && (
+        <div style={{ marginTop: 10, padding: '10px 11px', borderRadius: 10, border: '1px solid var(--color-border)' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Declarar {editando.etiqueta}</div>
+          <label style={{ display: 'block', fontSize: 11, color: 'var(--color-text-sec)', marginBottom: 2 }}>
+            Techo (% del invertible)
+          </label>
+          <input
+            value={techoInput}
+            onChange={ev => setTechoInput(ev.target.value)}
+            inputMode="decimal"
+            style={{ width: 90, padding: '6px 8px', borderRadius: 8, border: '1px solid var(--color-border)', fontFamily: 'var(--font-base)', fontSize: 13 }}
+          />
+          <label style={{ display: 'block', fontSize: 11, color: 'var(--color-text-sec)', margin: '8px 0 2px' }}>
+            Por qué (mínimo {NOTA_MINIMA} caracteres)
+          </label>
+          <textarea
+            value={notaInput}
+            onChange={ev => setNotaInput(ev.target.value)}
+            rows={3}
+            placeholder="Sin esto, la declaración no se distingue de silenciar la alerta."
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: 8, border: `1px solid ${notaCorta ? 'var(--gf-out)' : 'var(--color-border)'}`, fontFamily: 'var(--font-base)', fontSize: 12.5, resize: 'vertical' }}
+          />
+          <div style={{ fontSize: 10.5, color: notaCorta ? 'var(--gf-out)' : 'var(--gf-gray-400)', marginTop: 2 }}>
+            {notaInput.trim().length}/{NOTA_MINIMA}
+          </div>
+          {error && <div style={{ fontSize: 11, color: 'var(--gf-expense)', marginTop: 4, lineHeight: 1.4 }}>{error}</div>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button onClick={guardar} disabled={notaCorta || guardando} style={{ ...btnSec, width: 'auto', padding: '6px 14px', opacity: notaCorta || guardando ? 0.5 : 1 }}>
+              {guardando ? 'Guardando…' : 'Confirmar declaración'}
+            </button>
+            <button onClick={() => setEditando(null)} style={{ ...btnSec, width: 'auto', padding: '6px 14px' }}>Cancelar</button>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

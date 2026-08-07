@@ -171,6 +171,21 @@ service cloud.firestore {
     match /custodiaCuenta/{cuenta} {
       allow read, write: if esDueno();
     }
+    // F9.131 — declaraciones de exposición. La `nota` obligatoria se valida también acá: es una
+    // regla del dominio, no del formulario, y sin ella una declaración no se distingue de haber
+    // silenciado la alerta con un botón.
+    match /declaraciones/{id} {
+      allow read: if esDueno();
+      allow write: if esDueno()
+        && request.resource.data.nota is string
+        && request.resource.data.nota.size() >= 20
+        && request.resource.data.techoPct is number
+        && request.resource.data.techoPct > 0
+        && request.resource.data.techoPct <= 1
+        && request.resource.data.eje in ['ticker', 'factor', 'bloque', 'contraparte']
+        && request.resource.data.base in ['invertible', 'bloque'];
+      allow delete: if esDueno();
+    }
     match /seriesPrecios/{simbolo} {
       allow read, write: if esDueno();
     }
