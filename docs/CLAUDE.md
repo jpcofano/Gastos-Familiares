@@ -1265,6 +1265,49 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   20,9 → **20,5%**. Los 13 fondos siguen sumando 1,0 ± 0,001 y 0 salteados. RV aparece en "en tu
   cartera, no en fondos" junto a BIOX, que es correcto: ningún fondo del set tiene un FCI adentro.
   `tsc`: 41 → 41.
+- F9.127 — **capa de factores de riesgo**. Ver `docs/prompts/F9.127-capa-de-factores.md`.
+  **`Factor` y `Bloque` son ortogonales y hacen falta los dos:** `Bloque` responde *dónde está la
+  plata* y es la unidad de los shocks y las betas; `Factor` responde *qué la hace subir o bajar*. Un
+  bono soberano y una acción argentina son bloques distintos y el **mismo factor país**, y por eso
+  la cartera puede verse diversificada por bloque y ser una sola apuesta. **Medido:** el HHI por
+  ticker sobre renta variable AR da **0,168 (6,0 nombres)** y se lee como diversificado; por factor
+  da **0,260 (3,8 factores)**. La misma plata, dos lecturas, y la segunda es la verdad.
+  **Decisiones de clasificación, del dueño tras la auditoría §0:** `sector` gana donde alcanza
+  (bancos, materiales, agro, telecom, tech) y **el mapa de tickers cubre solo energía**, porque
+  `sector: 'energia'` mete en la misma bolsa reguladas y upstream, que es justo la distinción que
+  este módulo existe para hacer. **Condición dura:** un ticker con `sector: 'energia'` que no esté en
+  `FACTOR_ENERGIA` va a `sin_clasificar` **y aparece en pantalla**, nunca a un default plausible —
+  adivinar ahí sería el bug de F9.122 §3 en otra forma. La denominación de la renta fija sale de la
+  tabla declarada de F9.128, no de `moneda_origen`. **Ambigüedad declarada, no escondida:** PAMP es
+  genuinamente los dos factores (generación regulada y upstream de gas); se le asigna `oil_gas` por
+  peso del negocio y se **marca en pantalla** con `≈` y la nota en el `title`. Asignarle uno solo es
+  una decisión, no un dato, y la app tiene que decir "esto es una simplificación" en vez de fingir
+  precisión. **`factoresTicker` NO persiste clasificaciones negativas**: marcar algo como
+  `sin_clasificar` **borra** el override en vez de escribir uno, y la lectura ignora cualquiera que
+  se haya colado — un `sin_clasificar` guardado sería cache negativo, fosilizaría el miss y además
+  lo silenciaría, que es exactamente lo que costó la purga de F9.122 §3. Una sola lectura del
+  diccionario por montaje de la vista, nunca un `get()` por posición; la semilla es idempotente y
+  **nunca pisa `origen: 'manual'`**. **La agregación es por TICKER, no por fila** — PAMP y TRAN
+  tienen dos posiciones cada uno y GD30 tres; sumar filas daría el mismo total pero listaría el
+  ticker repetido y rompería el HHI. **Corrección al spec en el cross-check:** medir el total
+  argentino por pertenencia a la lista de factores AR daba **66,3%** contra el **67,5%** de la vista
+  por bloques — la diferencia era exactamente RV (USD 1.264), argentino por bloque pero sin factor.
+  El total se mide **por bloque**, así que lo que no se puede atribuir sigue contando como
+  exposición argentina y se muestra aparte; dos denominadores en la misma pantalla es lo que
+  F9.122.1 §B decidió no volver a hacer. Cross-check ahora exacto: 67,5% contra 67,5%, diff 0,0000.
+  **§4 — cuatro escenarios nuevos, los ocho viejos intactos** (`energia_ar` se conserva por
+  comparabilidad histórica, con su `descripcion` diciendo que quedó superado): `tarifas` −8,36%,
+  `crudo_baja` −8,90%, `normalizacion_ar` **+12,22%** y `nombre_unico` −4,73%. Los dos primeros son
+  el punto entero de la capa: el viejo `energia_ar` daba −11,03% mezclando reguladas y upstream, y
+  ahora se ve que un congelamiento tarifario y un crudo a la baja pegan parecido en total pero a
+  papeles distintos. `normalizacion_ar` es el **único upside argentino**: hasta acá el único
+  escenario positivo era el rally global, y mostrar solo el downside de donde está la mitad de la
+  cartera es información sesgada. **`nombre_unico` se calcula, no se hardcodea** — hoy resuelve a
+  ETH; por eso `calcEscenarios` pasa por `escenariosDe(posiciones, manuales)` y no por la constante
+  `ESCENARIOS` pelada, que daría shock 0 siempre. **Verificado contra producción:**
+  `Σ ExposicionFactor.usd` = invertible con diff **−0,0000**, los 12 escenarios sin `NaN`, RV como
+  único `sin_clasificar` y visible, PAMP marcado. Toca `firestore.rules` (colección nueva):
+  **deploy `--only hosting,firestore:rules`**. `tsc`: 41 → 41.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

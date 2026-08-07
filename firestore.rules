@@ -162,6 +162,11 @@ service cloud.firestore {
     match /cafciMapping/{id} {
       allow read, write: if esDueno();
     }
+    // F9.127 — override de factor de riesgo por ticker. Mismo alcance que cafciMapping: es
+    // configuración de análisis del dueño, no dato familiar compartido.
+    match /factoresTicker/{ticker} {
+      allow read, write: if esDueno();
+    }
     match /seriesPrecios/{simbolo} {
       allow read, write: if esDueno();
     }

@@ -165,6 +165,148 @@ export function inferenciasDeBloque(posiciones: Posicion[]): InferenciaBloque[] 
   return [...vistos.values()];
 }
 
+// ── Factores de riesgo (F9.127) ───────────────────────────────────────────────
+// Factor de riesgo: qué mueve el precio, no qué instrumento es. `Bloque` responde "dónde está la
+// plata"; `Factor` responde "qué la hace subir o bajar". Son ORTOGONALES: un bono soberano y una
+// acción argentina son bloques distintos y el MISMO factor país, y por eso la cartera puede verse
+// diversificada por bloque y ser una sola apuesta.
+//
+// El caso que motivó todo: `accionesAr` es un solo bloque, así que ninguna métrica sobre esa grilla
+// puede ver que el 87,7% de la renta variable AR es energía. Y peor: el escenario `energia_ar`
+// castiga a TRAN, TGSU2, CEPU, ECOG, YPFD, PAMP y VIST con el mismo −30%, cuando son dos factores
+// distintos — las reguladas dependen de una decisión tarifaria, las de upstream del precio del
+// crudo. Un congelamiento tarifario destroza a TRAN y apenas toca a VIST.
+export type Factor =
+  | 'energia_ar_regulada'    // transporte, distribución, generación: manda la tarifa
+  | 'oil_gas'                // upstream: manda el precio del crudo y el gas
+  | 'banco_ar'
+  | 'industria_ar'
+  | 'infraestructura_mercado'// BYMA y afines: manda el volumen operado
+  | 'soberano_ar_hard'       // GD/BPO: manda el riesgo país
+  | 'soberano_ar_pesos'      // LECAP/CER/TX: manda la tasa y la inflación
+  | 'cripto'
+  | 'global_dm'
+  | 'cash'
+  | 'sin_clasificar';
+
+export const FACTOR_LABEL: Record<Factor, string> = {
+  energia_ar_regulada:     'Energía AR regulada',
+  oil_gas:                 'Oil & gas',
+  banco_ar:                'Bancos AR',
+  industria_ar:            'Industria AR',
+  infraestructura_mercado: 'Infraestructura de mercado',
+  soberano_ar_hard:        'Soberano AR hard-dollar',
+  soberano_ar_pesos:       'Soberano AR pesos / CER',
+  cripto:                  'Cripto',
+  global_dm:               'Global desarrollado',
+  cash:                    'Cash y stablecoins',
+  sin_clasificar:          'Sin clasificar',
+};
+
+// F9.127 — `sector` gana donde alcanza. Decisión del dueño tras la auditoría §0: el vocabulario de
+// `sector` es limpio para bancos/materiales/agro, y sostener esos tres en un mapa de tickers sería
+// mantenimiento manual sin ganancia.
+const FACTOR_POR_SECTOR: Record<string, Factor> = {
+  bancos:      'banco_ar',
+  materiales:  'industria_ar',
+  // `agro` no tiene factor propio: BIOX entra al balde de industria. Es un balde declarado, no un
+  // default silencioso — si algún día pesa, se le abre factor.
+  agro:        'industria_ar',
+  telecom:     'industria_ar',
+  tech:        'industria_ar',
+};
+
+// F9.127 — y NO alcanza para energía: `sector: 'energia'` cubre por igual reguladas y upstream, que
+// es justo la distinción que este módulo existe para hacer. Para esos tickers el mapa NO es un
+// override, es la fuente primaria.
+// Condición dura decidida por el dueño: un ticker con `sector: 'energia'` que NO esté acá va a
+// `sin_clasificar` y aparece en pantalla. Nunca a un default plausible — una posición mal
+// clasificada en silencio es peor que una sin clasificar a la vista, y adivinar acá sería el bug de
+// F9.122 §3 en otra forma.
+export const FACTOR_ENERGIA: Record<string, Factor> = {
+  YPFD:  'oil_gas',
+  VIST:  'oil_gas',
+  PAMP:  'oil_gas',                // ambiguo, ver FACTOR_AMBIGUO
+  TRAN:  'energia_ar_regulada',
+  TGSU2: 'energia_ar_regulada',
+  CEPU:  'energia_ar_regulada',
+  ECOG:  'energia_ar_regulada',
+};
+
+// F9.127 — tickers cuya exposición real se reparte entre dos factores. En v1 se les asigna el
+// dominante y se los MARCA: la app tiene que decir "esto es una simplificación", no fingir
+// precisión. Repartir el valorUsd entre factores es otro prompt si hace falta.
+export const FACTOR_AMBIGUO: Record<string, { asignado: Factor; tambien: Factor; nota: string }> = {
+  PAMP: {
+    asignado: 'oil_gas',
+    tambien: 'energia_ar_regulada',
+    nota: 'Upstream de gas y generación eléctrica. Se asigna oil_gas por peso del negocio.',
+  },
+};
+
+// Subyacente de FCI AR → factor. Mismo criterio que BLOQUE_FCI: el envase no define el riesgo.
+const FACTOR_FCI: Record<string, Factor> = {
+  lecaps_pesos:       'soberano_ar_pesos',
+  cer_pesos:          'soberano_ar_pesos',
+  money_market_pesos: 'soberano_ar_pesos',
+  soberano_usd:       'soberano_ar_hard',
+  corporativo_usd:    'soberano_ar_hard',
+  // `renta_variable_ar` NO está acá a propósito: un fondo de acciones argentinas es varios factores
+  // a la vez, no uno. Cae en `sin_clasificar` y se ve en pantalla, que es la respuesta honesta.
+};
+
+export type ResultadoFactor = { factor: Factor; ambiguo: boolean };
+
+/**
+ * F9.127 — resuelve el factor de una posición. El ORDEN importa:
+ *   1. override manual por ticker (colección `factoresTicker`) — gana siempre
+ *   2. cripto / cash por tipo
+ *   3. no-AR → global_dm
+ *   4. renta fija AR → por denominación declarada (la tabla de F9.128, no `moneda_origen`)
+ *   5. renta variable AR → `sector`, y energía por el mapa de tickers
+ *   6. nada resolvió → sin_clasificar
+ */
+export function factorDe(p: Posicion, overrides: Record<string, Factor> = {}): ResultadoFactor {
+  const amb = FACTOR_AMBIGUO[p.ticker];
+  const ambiguo = !!amb;
+
+  // 1. El override manual le gana a toda heurística: es el único lugar donde se resuelven los casos
+  //    que la app no puede deducir.
+  const ov = overrides[p.ticker];
+  if (ov) return { factor: ov, ambiguo };
+
+  // 2.
+  if (p.tipo === 'cash') return { factor: 'cash', ambiguo };
+  if (p.tipo === 'cripto') return { factor: STABLECOINS.has(p.ticker) ? 'cash' : 'cripto', ambiguo };
+
+  // 3.
+  if (p.pais_riesgo !== 'AR') return { factor: 'global_dm', ambiguo };
+
+  // 4. Renta fija AR. El criterio de moneda sale de la tabla declarada de F9.128 y NO de
+  //    `moneda_origen`, que describe la fila y no el instrumento.
+  if (p.tipo === 'bono' || p.tipo === 'on') {
+    const { den } = denominacionDe(p.ticker);
+    return { factor: den === 'hard' ? 'soberano_ar_hard' : 'soberano_ar_pesos', ambiguo };
+  }
+  if (p.tipo === 'fci') {
+    const f = FACTOR_FCI[p.sector ?? ''];
+    return { factor: f ?? 'sin_clasificar', ambiguo };
+  }
+
+  // 5. Renta variable AR.
+  if (p.tipo === 'accion' || p.tipo === 'cedear') {
+    if (p.sector === 'energia') {
+      // Sin entrada en el mapa NO se adivina, aunque el sector sea inequívoco.
+      return { factor: FACTOR_ENERGIA[p.ticker] ?? 'sin_clasificar', ambiguo };
+    }
+    const f = FACTOR_POR_SECTOR[p.sector ?? ''];
+    return { factor: f ?? 'sin_clasificar', ambiguo };
+  }
+
+  // 6.
+  return { factor: 'sin_clasificar', ambiguo };
+}
+
 // ── Betas por bloque ──────────────────────────────────────────────────────────
 // Constantes documentadas, no estimadas de series (eso está fuera de alcance de F9.116).
 // Referencia de la beta AR: marzo 2020, el Merval cayó ~34% en USD contra ~34% del S&P pico a
@@ -198,6 +340,12 @@ function porBloque(mapa: Partial<Record<Bloque, number>>): ShockFn {
 // Movimiento del mercado global × beta del bloque.
 function porBeta(shockMercado: number): ShockFn {
   return p => shockMercado * BETA_DEFAULT[bloqueDe(p)];
+}
+
+// F9.127 §4 — análogo de porBloque, pero sobre la grilla de factores. Es lo que permite castigar a
+// TRAN sin castigar a VIST, que con la grilla de bloques era imposible.
+function porFactor(mapa: Partial<Record<Factor, number>>): ShockFn {
+  return p => mapa[factorDe(p).factor] ?? 0;
 }
 
 // Sistémicos (F9.116). Un shock negativo es caída.
@@ -257,7 +405,9 @@ export const ESCENARIOS_IDIOSINCRATICOS: Escenario[] = [
   {
     id: 'energia_ar',
     nombre: 'Corrección energía AR',
-    descripcion: 'Acciones de energía argentina −30%.',
+    descripcion: 'Acciones de energía argentina −30%. Superado por "Congelamiento tarifario" y '
+      + '"Crudo a la baja" (F9.127), que separan reguladas de upstream; se conserva por '
+      + 'comparabilidad histórica.',
     familia: 'idiosincratico',
     shock: p => (p.sector === 'energia' && p.pais_riesgo === 'AR' && p.tipo === 'accion' ? -0.30 : 0),
   },
@@ -299,7 +449,77 @@ export const ESCENARIOS_IDIOSINCRATICOS: Escenario[] = [
   },
 ];
 
-export const ESCENARIOS: Escenario[] = [...ESCENARIOS_SISTEMICOS, ...ESCENARIOS_IDIOSINCRATICOS];
+// F9.127 §4 — escenarios sobre la grilla de factores. Los cuatro anteriores NO se tocaron: shockean
+// por `tipo`/`sector` y se conservan por comparabilidad histórica.
+export const ESCENARIOS_POR_FACTOR: Escenario[] = [
+  {
+    id: 'tarifas',
+    nombre: 'Congelamiento tarifario',
+    descripcion: 'Reguladas −35%, upstream −10%. La decisión tarifaria golpea a TRAN, TGSU2, CEPU '
+      + 'y ECOG; a las de upstream las toca de refilón, por arrastre de plaza.',
+    familia: 'idiosincratico',
+    shock: porFactor({ energia_ar_regulada: -0.35, oil_gas: -0.10 }),
+  },
+  {
+    id: 'crudo_baja',
+    nombre: 'Crudo a la baja',
+    descripcion: 'Upstream −30%, reguladas −5%. El espejo del anterior: un crudo a 45 destroza a '
+      + 'YPFD y VIST y casi no mueve a las reguladas, que cobran tarifa y no precio.',
+    familia: 'idiosincratico',
+    shock: porFactor({ oil_gas: -0.30, energia_ar_regulada: -0.05 }),
+  },
+  {
+    id: 'normalizacion_ar',
+    nombre: 'Normalización argentina',
+    descripcion: 'Escenario POSITIVO: soberano hard +25%, bancos +40%, reguladas +30%, upstream '
+      + '+15%. Hasta acá el único upside era el rally global; mostrar solo el downside de lo '
+      + 'argentino, que es donde está la mitad de la cartera, es información sesgada.',
+    familia: 'idiosincratico',
+    shock: porFactor({
+      soberano_ar_hard:    0.25,
+      banco_ar:            0.40,
+      energia_ar_regulada: 0.30,
+      oil_gas:             0.15,
+    }),
+  },
+  {
+    id: 'nombre_unico',
+    nombre: 'Nombre único −40%',
+    descripcion: 'La mayor posición individual cae 40%. El ticker se calcula sobre la cartera del '
+      + 'momento, no está fijo: hardcodearlo haría que el escenario mienta apenas cambie la cartera.',
+    familia: 'idiosincratico',
+    // El shock no puede ver el resto de la cartera, así que el mayor nombre se resuelve por
+    // closure sobre las posiciones que se le pasen a calcEscenarios (ver `escenariosDe`).
+    shock: () => 0,
+  },
+];
+
+/**
+ * F9.127 §4 — el escenario de nombre único depende de la cartera, así que no puede ser una
+ * constante. `escenariosDe` devuelve el registro completo con ese escenario ya resuelto contra las
+ * posiciones reales. Todo lo demás pasa igual.
+ */
+export function escenariosDe(posiciones: Posicion[], manuales: PosicionManual[] = []): Escenario[] {
+  const todas = posicionesInvertibles(posiciones, manuales);
+  const porTicker = new Map<string, number>();
+  for (const p of todas) porTicker.set(p.ticker, (porTicker.get(p.ticker) ?? 0) + p.valorUsd);
+  const mayor = [...porTicker.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+  return ESCENARIOS.map(e => {
+    if (e.id !== 'nombre_unico') return e;
+    return {
+      ...e,
+      nombre: mayor ? `Nombre único −40% (${mayor})` : e.nombre,
+      shock: (p: Posicion) => (mayor && p.ticker === mayor ? -0.40 : 0),
+    };
+  });
+}
+
+export const ESCENARIOS: Escenario[] = [
+  ...ESCENARIOS_SISTEMICOS,
+  ...ESCENARIOS_IDIOSINCRATICOS,
+  ...ESCENARIOS_POR_FACTOR,
+];
 
 // El titular de la brecha se mide contra este escenario: es el más comparable con "cuánta
 // caída bancás", porque no depende de que se dé un evento argentino puntual.
@@ -331,10 +551,123 @@ export function posicionesInvertibles(posiciones: Posicion[], manuales: Posicion
   return [...posiciones, ...manuales.map(manualToPosicion)];
 }
 
+// ── Concentración por factor (F9.127 §3) ──────────────────────────────────────
+// La lección de F9.122.1 §B: un porcentaje sin denominador declarado induce a error. Acá se exponen
+// los dos, siempre juntos, porque responden preguntas distintas.
+export type ExposicionFactor = {
+  factor: Factor;
+  usd: number;
+  pctInvertible: number;   // sobre el patrimonio invertible total
+  pctBloque: number;       // sobre su propio bloque
+  tickers: string[];
+  ambiguos: string[];      // subconjunto marcado en FACTOR_AMBIGUO
+};
+
+// F9.127 — Exposición argentina agregada, atravesando bloques. Renta fija AR y renta variable AR no
+// son dos apuestas: si Argentina repricea, se mueven juntas. La vista por bloque las presenta como
+// diversificación y eso es una ilusión de encuadre.
+//
+// El HHI se calcula POR FACTOR y no por ticker a propósito: sobre los tickers de RV AR da ~0,17 y se
+// lee como "diversificado", cuando el mismo dinero está apostado a dos o tres cosas.
+const FACTORES_AR: Factor[] = [
+  'energia_ar_regulada', 'oil_gas', 'banco_ar', 'industria_ar',
+  'infraestructura_mercado', 'soberano_ar_hard', 'soberano_ar_pesos',
+];
+
+export function exposicionArgentina(
+  posiciones: Posicion[],
+  overrides: Record<string, Factor> = {},
+): {
+  usd: number;
+  pctInvertible: number;
+  porFactor: ExposicionFactor[];
+  hhiFactor: number;
+  nombresEfectivos: number;
+  sinClasificar: { usd: number; tickers: string[] };
+} {
+  const total = posiciones.reduce((s, p) => s + p.valorUsd, 0);
+
+  // Agregación POR TICKER, no por fila: PAMP y TRAN tienen dos posiciones cada uno y GD30 tres.
+  // Sumar filas daría el mismo total pero listaría el ticker repetido y rompería el HHI.
+  const porFactorMap = new Map<Factor, { usd: number; tickers: Map<string, number> }>();
+  const usdPorBloque = new Map<Bloque, number>();
+
+  for (const p of posiciones) {
+    const { factor } = factorDe(p, overrides);
+    const cur = porFactorMap.get(factor) ?? { usd: 0, tickers: new Map<string, number>() };
+    cur.usd += p.valorUsd;
+    cur.tickers.set(p.ticker, (cur.tickers.get(p.ticker) ?? 0) + p.valorUsd);
+    porFactorMap.set(factor, cur);
+    const b = bloqueDe(p);
+    usdPorBloque.set(b, (usdPorBloque.get(b) ?? 0) + p.valorUsd);
+  }
+
+  // El bloque de referencia de un factor es aquel donde vive la mayor parte de su plata.
+  const bloqueDeFactor = new Map<Factor, Bloque>();
+  for (const p of posiciones) {
+    const { factor } = factorDe(p, overrides);
+    if (!bloqueDeFactor.has(factor)) bloqueDeFactor.set(factor, bloqueDe(p));
+  }
+
+  const porFactor: ExposicionFactor[] = [...porFactorMap.entries()]
+    .map(([factor, v]) => {
+      const bloque = bloqueDeFactor.get(factor);
+      const usdBloque = bloque ? (usdPorBloque.get(bloque) ?? 0) : 0;
+      const tickers = [...v.tickers.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+      return {
+        factor,
+        usd: v.usd,
+        pctInvertible: total > 0 ? v.usd / total : 0,
+        pctBloque: usdBloque > 0 ? v.usd / usdBloque : 0,
+        tickers,
+        ambiguos: tickers.filter(t => !!FACTOR_AMBIGUO[t]),
+      };
+    })
+    .sort((a, b) => b.usd - a.usd);
+
+  // El total argentino se mide por BLOQUE, no por pertenencia a FACTORES_AR. Si se midiera por
+  // factor, una posición argentina sin clasificar quedaría fuera del titular y la card diría 66,3%
+  // donde la vista por bloques dice 67,5% — dos respuestas a la misma pregunta en la misma
+  // pantalla, que es justo lo que F9.122.1 §B decidió no volver a hacer. Lo que no se puede
+  // atribuir a un factor sigue siendo exposición argentina; se cuenta, y se muestra aparte.
+  const BLOQUES_AR: Bloque[] = ['accionesAr', 'soberanoAr', 'rentaFijaPesos'];
+  const usdAr = posiciones
+    .filter(p => BLOQUES_AR.includes(bloqueDe(p)))
+    .reduce((s, p) => s + p.valorUsd, 0);
+
+  // HHI sobre la apuesta argentina, normalizado dentro de Argentina: la pregunta es "cuán
+  // concentrada está", no "cuánta Argentina hay" — eso lo dice pctInvertible. El bucket sin
+  // clasificar entra al cálculo: es una exposición distinta de las demás, no un hueco.
+  const usdArSinClas = posiciones
+    .filter(p => BLOQUES_AR.includes(bloqueDe(p)) && factorDe(p, overrides).factor === 'sin_clasificar')
+    .reduce((s, p) => s + p.valorUsd, 0);
+  const cubos = [
+    ...porFactor.filter(f => FACTORES_AR.includes(f.factor)).map(f => f.usd),
+    ...(usdArSinClas > 0 ? [usdArSinClas] : []),
+  ];
+  const hhiFactor = usdAr > 0 ? cubos.reduce((s, v) => s + (v / usdAr) ** 2, 0) : 0;
+
+  const sc = porFactorMap.get('sin_clasificar');
+  return {
+    usd: usdAr,
+    pctInvertible: total > 0 ? usdAr / total : 0,
+    porFactor,
+    hhiFactor,
+    nombresEfectivos: hhiFactor > 0 ? 1 / hhiFactor : 0,
+    sinClasificar: {
+      usd: sc?.usd ?? 0,
+      tickers: sc ? [...sc.tickers.keys()] : [],
+    },
+  };
+}
+
 export function calcEscenarios(
   posiciones: Posicion[],
   manuales: PosicionManual[] = [],
-  escenarios: Escenario[] = ESCENARIOS,
+  // F9.127 §4 — el default pasa por `escenariosDe` y no por `ESCENARIOS` a secas: el escenario de
+  // nombre único se resuelve contra la cartera que se está midiendo. Con la constante pelada su
+  // shock sería 0 siempre, o sea un escenario que dice "no pasa nada" — peor que no tenerlo.
+  escenarios: Escenario[] = escenariosDe(posiciones, manuales),
 ): ResultadoEscenario[] {
   const todas = posicionesInvertibles(posiciones, manuales);
   const total = todas.reduce((s, p) => s + p.valorUsd, 0);

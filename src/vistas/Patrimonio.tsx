@@ -50,6 +50,7 @@ import {
   type ConfigCafci, type CafciCartera, type CafciFondoConfig, type ResultadoSincronizarCafci,
   type ResultadoImportarCafciManual,
 } from '../datos/patrimonioCafci';
+import { cargarFactoresTicker, importarFactoresSeed } from '../datos/patrimonioFactores';
 import PatrimonioIngesta from './PatrimonioIngesta';
 // F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
 // reusable; la lógica no cambió.
@@ -59,6 +60,7 @@ import { calcMetrics, sectorDisplay, SECTOR_DISPLAY, manualToPosicion } from '..
 import {
   ESCENARIOS, calcEscenarios, calcBrecha, calcMixObjetivo, violacionesBandas,
   RIESGO_DEFAULTS, ESCENARIO_TITULAR, BLOQUE_LABEL, inferenciasDeBloque, posicionesInvertibles,
+  exposicionArgentina, FACTOR_LABEL, FACTOR_AMBIGUO, FACTOR_ENERGIA, type Factor,
   type ResultadoEscenario, type ViolacionBanda, type MixObjetivo, type TopesRiesgo, type Bloque,
 } from '../datos/patrimonioRiesgo';
 
@@ -642,11 +644,12 @@ function intentar<T>(fn: () => T, ctx: string): T | null {
   try { return fn(); } catch (e) { console.error(`[RiesgoCard] ${ctx} falló:`, e); return null; }
 }
 
-function RiesgoCard({ posiciones, manuales, topes, configurado }: {
+function RiesgoCard({ posiciones, manuales, topes, configurado, factores }: {
   posiciones: Posicion[];
   manuales: PosicionManual[];
   topes: TopesRiesgo;
   configurado: boolean;
+  factores: Record<string, Factor>;
 }) {
   const $ = useDinero();
   const [escenarioSel, setEscenarioSel] = useState<string>(ESCENARIO_TITULAR);
@@ -655,6 +658,13 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
   // F9.128 §3 — posiciones cuyo bloque se dedujo en vez de estar declarado. Va en esta card, junto
   // al desglose por bloque: es acá donde el bloque se convierte en un número.
   const inferencias = inferenciasDeBloque(posicionesInvertibles(posiciones, manuales));
+
+  // F9.127 §3 — exposición argentina por factor. El override de `factoresTicker` se pasa entero,
+  // leído una sola vez arriba: nunca un get() por posición.
+  const expo = intentar(
+    () => exposicionArgentina(posicionesInvertibles(posiciones, manuales), factores),
+    'exposicionArgentina',
+  );
 
   const escenarios: ResultadoEscenario[] | null = intentar(() => calcEscenarios(posiciones, manuales), 'calcEscenarios');
   const violaciones: ViolacionBanda[] | null = intentar(() => violacionesBandas(posiciones, manuales, topes), 'violacionesBandas');
@@ -678,6 +688,51 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
   return (
     <Card>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Riesgo y escenarios</div>
+
+      {/* F9.127 §3 — exposición argentina por factor, ARRIBA de los escenarios. Es la métrica que
+          ninguna vista mostraba: renta fija AR y renta variable AR no son dos apuestas, y la grilla
+          de bloques las presentaba como diversificación. */}
+      {expo && (
+        <div style={{ marginTop: 10, padding: '11px 12px', borderRadius: 12, background: 'var(--gf-gray-100)' }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+            Exposición argentina {pct(expo.pctInvertible)}
+            {!$.privado && <span style={{ fontWeight: 400, color: 'var(--color-text-sec)' }}> · {$.usd(expo.usd)}</span>}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-sec)', marginTop: 3, lineHeight: 1.45 }}>
+            Atraviesa bloques: acciones, soberanos y pesos se mueven juntos si Argentina repricea.
+            Concentración por factor HHI {expo.hhiFactor.toFixed(2)} · {expo.nombresEfectivos.toFixed(1)} factores
+            efectivos.
+          </div>
+          {expo.porFactor.filter(f => f.usd > 0 && f.factor !== 'sin_clasificar').map(f => (
+            <div key={f.factor} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '3px 0', fontSize: 11.5 }}>
+              <span style={{ flex: 1, color: 'var(--color-text-sec)' }}>
+                {FACTOR_LABEL[f.factor]}
+                {f.ambiguos.length > 0 && (
+                  <span
+                    title={f.ambiguos.map(t => `${t}: ${FACTOR_AMBIGUO[t]?.nota ?? ''}`).join(' · ')}
+                    style={{ marginLeft: 5, color: 'var(--gf-out)', fontWeight: 700, cursor: 'help' }}
+                  >≈</span>
+                )}
+                <span style={{ color: 'var(--gf-gray-400)', fontSize: 10, marginLeft: 5 }}>{f.tickers.join(' ')}</span>
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{pct(f.pctInvertible)}</span>
+            </div>
+          ))}
+          {expo.porFactor.some(f => f.ambiguos.length > 0) && (
+            <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 4, lineHeight: 1.4 }}>
+              ≈ el ticker pesa en más de un factor y se le asignó el dominante. Es una simplificación
+              declarada, no una medición — pasá el cursor para ver el detalle.
+            </div>
+          )}
+          {expo.sinClasificar.usd > 0 && (
+            <div style={{ fontSize: 10.5, color: 'var(--gf-out)', marginTop: 6, lineHeight: 1.4 }}>
+              Sin clasificar: {expo.sinClasificar.tickers.join(', ')} · {pct(expo.sinClasificar.usd / (expo.usd || 1))} de
+              la exposición argentina. Cuenta en el total pero no se le asignó factor: preferimos
+              verlo acá antes que contarlo en el factor equivocado.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 1. Titular de brecha */}
       {titular && brecha ? (
@@ -830,13 +885,14 @@ function RiesgoCard({ posiciones, manuales, topes, configurado }: {
 }
 
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado }: {
+function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
   posiciones: Posicion[];
   manuales: PosicionManual[];
   topesRiesgo: TopesRiesgo;
   riesgoConfigurado: boolean;
+  factores: Record<string, Factor>;
   historial: SnapshotResumen[];
   flujos: FlujoPatrimonio[];
   informes: InformeAnterior[];
@@ -1004,7 +1060,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
       })()}
 
       {/* 4b. Riesgo y escenarios (F9.116) */}
-      <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} />
+      <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} factores={factores} />
 
       {/* 5. Informe PDF */}
       <Card>
@@ -2546,7 +2602,7 @@ function PegarJsonModal({ fondo, onImportar, onClose }: {
 }
 
 // ── Card de fondos CAFCI ──────────────────────────────────────────────────────
-function CafciFondosCard({ configCafci, carteras, sincronizando, onSincronizar, onGuardar, onImportarFondos, onImportarMapping, onImportarManual }: {
+function CafciFondosCard({ configCafci, carteras, sincronizando, onSincronizar, onGuardar, onImportarFondos, onImportarMapping, onImportarFactores, onImportarManual }: {
   configCafci: ConfigCafci;
   carteras: CafciCartera[];
   sincronizando: boolean;
@@ -2554,6 +2610,7 @@ function CafciFondosCard({ configCafci, carteras, sincronizando, onSincronizar, 
   onGuardar: (c: ConfigCafci) => void;
   onImportarFondos: () => void;
   onImportarMapping: () => void;
+  onImportarFactores: () => void;
   onImportarManual: (fondoId: string, claseId: string, json: string) => Promise<ResultadoImportarCafciManual>;
 }) {
   const [pegarJsonFondo, setPegarJsonFondo] = useState<CafciFondoConfig | null>(null);
@@ -2663,6 +2720,12 @@ function CafciFondosCard({ configCafci, carteras, sincronizando, onSincronizar, 
         </button>
         <button onClick={onImportarMapping} style={btnSec}>
           Importar mapping (70)
+        </button>
+      </div>
+      {/* F9.127 §2 — semilla del override de factores. Idempotente y nunca pisa un origen manual. */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button onClick={onImportarFactores} style={btnSec}>
+          Importar factores ({Object.keys(FACTOR_ENERGIA).length})
         </button>
       </div>
     </Card>
@@ -2980,7 +3043,7 @@ function PoliticaRiesgoCard({ topes, configurado, onGuardar }: {
   );
 }
 
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarCafciManual }: {
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarFactores, onImportarCafciManual }: {
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
   topesRiesgo: TopesRiesgo;
@@ -3003,6 +3066,7 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
   onGuardarConfigCafci: (c: ConfigCafci) => void;
   onImportarFondosCafci: () => void;
   onImportarMappingCafci: () => void;
+  onImportarFactores: () => void;
   onImportarCafciManual: (fondoId: string, claseId: string, json: string) => Promise<ResultadoImportarCafciManual>;
 }) {
   return (
@@ -3010,7 +3074,7 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
       <AportesRetirosCard flujos={flujos} onAdd={onAddFlujo} onEdit={onEditFlujo} />
-      <CafciFondosCard configCafci={configCafci} carteras={cafciCarteras} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} onImportarManual={onImportarCafciManual} />
+      <CafciFondosCard configCafci={configCafci} carteras={cafciCarteras} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} onImportarFactores={onImportarFactores} onImportarManual={onImportarCafciManual} />
       <TipoCambioCard />
       <PoliticaRiesgoCard topes={topesRiesgo} configurado={riesgoConfigurado} onGuardar={onGuardarRiesgo} />
       <Card>
@@ -3577,6 +3641,7 @@ export default function Patrimonio() {
   const [configCafci,        setConfigCafci]        = useState<ConfigCafci>({ fondos: [] });
   const [cafciCarteras,      setCafciCarteras]      = useState<CafciCartera[]>([]);
   const [cafciMappings,      setCafciMappings]      = useState<Record<string, string | null>>({});
+  const [factores,           setFactores]           = useState<Record<string, Factor>>({});
   const [sincronizandoCafci, setSincronizandoCafci] = useState(false);
 
   // F9.98 — Optimización
@@ -3621,6 +3686,8 @@ export default function Patrimonio() {
     cargarConfigCafci().then(setConfigCafci);
     cargarUltimasCarteras().then(setCafciCarteras);
     cargarMappings().then(setCafciMappings);
+    // F9.127 §2 — una sola lectura del diccionario de overrides por montaje de la vista.
+    cargarFactoresTicker().then(setFactores).catch(e => console.error('[factores] no se pudieron leer:', e));
     cargarUltimaOptimizacion().then(setOptimizacion);
   }, []);
 
@@ -3732,6 +3799,18 @@ export default function Patrimonio() {
       alert(`Mapping importado: ${n} patrones escritos en cafciMapping.`);
     } catch (e) {
       console.error('[importarMapping]', e);
+    }
+  }
+
+  // F9.127 §2 — semilla del override de factores. Reporta cuántos conservó por ser manuales, que es
+  // la garantía de que la semilla no pisa lo cargado a mano.
+  async function handleImportarFactores() {
+    try {
+      const { escritos, conservados } = await importarFactoresSeed();
+      setFactores(await cargarFactoresTicker());
+      alert(`Factores importados: ${escritos} escritos${conservados > 0 ? `, ${conservados} conservados por ser manuales` : ''}.`);
+    } catch (e) {
+      console.error('[importarFactores]', e);
     }
   }
 
@@ -4180,6 +4259,7 @@ export default function Patrimonio() {
               manuales={posicionesManuales}
               topesRiesgo={topesRiesgo}
               riesgoConfigurado={riesgoConfigurado}
+              factores={factores}
             />
           )}
           {tab === 'tenencias' && (
@@ -4354,6 +4434,7 @@ export default function Patrimonio() {
               onGuardarConfigCafci={handleGuardarConfigCafci}
               onImportarFondosCafci={handleImportarFondosCafci}
               onImportarMappingCafci={handleImportarMappingCafci}
+              onImportarFactores={handleImportarFactores}
               onImportarCafciManual={handleImportarCafciManual}
             />
           )}
