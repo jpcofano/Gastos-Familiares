@@ -773,13 +773,22 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                             </div>
                           </div>
                           <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            {/* F9.135 §1 — CUARTA aparición del mismo hueco en este archivo
+                                (F9.123 `title` de las barras, F9.124 §5 eje del SVG, F9.132 fila
+                                de la card Hoy, y acá). Con privacidad activa desplegar cualquier
+                                día mostraba los montos reales: el modo tapaba los totales y
+                                destapaba el detalle, que es peor que no tenerlo. */}
                             <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-out)' }}>
-                              {fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                              {privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
                             </div>
                             {/* F9.114 — el equivalente en pesos se muestra también cuando el
                                 movimiento en USD no trae snapshot propio (antes esa fila valía
-                                0 y desaparecía de los totales): se marca "TC estimado". */}
-                            {m.moneda === 'USD' && (
+                                0 y desaparecía de los totales): se marca "TC estimado".
+                                F9.135 §1 — con privacidad la sub-línea se omite ENTERA, igual que
+                                `fmtSmall` devuelve '' arriba: en % las dos monedas dan el mismo
+                                número y repetirlo no agrega nada. "TC estimado" se va con ella —
+                                es un aviso sobre un monto que ya no se está mostrando. */}
+                            {m.moneda === 'USD' && !privado && (
                               <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', fontVariantNumeric: 'tabular-nums' }}>
                                 {fmtArs(arsEq(m, tcDeMov))}
                                 {sinTcPropio(m) && <span style={{ marginLeft: 5, color: 'var(--gf-out)' }}>TC estimado</span>}

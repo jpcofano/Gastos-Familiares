@@ -230,8 +230,8 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   por estado); `pendiente` y `alDia/total` de `GastosFijosSeccion` siguen sobre `agenda` completa,
   sin afectarse por el reorden de `principales`. Semántica del match/checklist intacta. Frontend
   puro, sin cambios de Rules/Functions. `tsc --noEmit`: mismo baseline que antes de este cambio
-  (48 errores pre-existentes ajenos a este archivo — el número subió de 41 a 48 en commits
-  anteriores no relacionados; 0 errores nuevos introducidos acá). Deploy: `--only hosting`.
+  (41 errores pre-existentes ajenos a este archivo, 0 errores nuevos introducidos acá).
+  Deploy: `--only hosting`.
 - F9.99.9 — Comprobantes: picker de conciliación manual con agenda unificada. Ver
   `docs/prompts/F9.99.9-picker-agenda-unificada.md`. **1. Fuente de candidatos:** el picker
   consume la agenda del **mes actual** (`construirAgenda`/`calcularChecklist` sobre
@@ -327,7 +327,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   ya iteraba ticker por ticker); `handleSincronizarCafci` vive en la solapa Config, no
   Research (igual invocable, está en scope del componente); `PatrimonioIngesta` sin pantalla
   de éxito (resuelto con el toast del punto 4). Frontend + Functions. `tsc --noEmit`
-  (cliente y `functions/`): 0 errores nuevos (48 pre-existentes ajenos, mismo baseline).
+  (cliente y `functions/`): 0 errores nuevos (41 pre-existentes ajenos, mismo baseline).
   `vite build`: OK. Deploy: `cd functions && npm run build` → `firebase deploy --only
   functions,hosting`.
 - F9.102 — Card HOY completa, banner de fijos con números, feedback CAFCI y fix de alineado en
@@ -366,7 +366,7 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   no arrastra a las otras, `claveSemanaISO` en borde de año (2025-12-29 → 2026-W01). **5. Dedupe
   de chips:** `OptimizacionTab` arma `Map<symYahoo, valorUsdAgregado>` desde `aptas` antes de
   mapear los chips (key ya única por símbolo) — sin cambio visual además del dedupe. Frontend +
-  Functions. `tsc --noEmit` (cliente y `functions/`): 0 errores nuevos (48 pre-existentes ajenos
+  Functions. `tsc --noEmit` (cliente y `functions/`): 0 errores nuevos (41 pre-existentes ajenos
   en cliente, mismo baseline; 0 en functions). `vite build` y `functions` build: OK. Deploy:
   `cd functions && npm run build` → `firebase deploy --only functions,hosting`.
 - F9.102.1 — Hotfix: persistencia de la matriz de correlaciones + primer intento de región
@@ -420,8 +420,8 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   + botón "Pegar JSON" → `PegarJsonModal` (URL de la ficha copiable/clickeable, textarea, botón
   Importar, error inline). Mensaje de 403 corregido a `Usá "Pegar JSON" en Config` (antes
   prometía un "pegado manual" que no existía). Frontend + Functions. `tsc --noEmit` (cliente y
-  `functions/`): 41 errores pre-existentes en cliente (baseline fijado en esta sesión — venía
-  sin registrar, había migrado de 48 a 41 entre sesiones previas), 0 nuevos; 0 en functions.
+  `functions/`): 41 errores pre-existentes en cliente (baseline fijado en esta sesión), 0 nuevos;
+  0 en functions.
   `vite build` y `functions` build: OK. Pendiente de cierre manual (no soy yo quien deploya):
   correr `firebase functions:delete sincronizarCafci --region southamerica-east1` (si aplica) →
   `cd functions && npm run build` → `firebase deploy --only functions,hosting` → probar
@@ -1483,8 +1483,34 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   solo como fallback para el pendiente sin match. Se decide aparte.
   Se borró `hoyItems` y su tipo `HoyEntry`/`hoyEntryCubierto` (F9.99.8/F9.102): la unión de
   esperados+sueltos+reales dejaba caer movimientos entre sus dos rejillas. Auditorías de solo lectura
-  en `scripts/auditF91322*.ts`. `tsc`: 48 → 48 (la base subió de 41 a 48 con F9.133); `vite build`
-  OK. Frontend puro: `--only hosting`.
+  en `scripts/auditF91322*.ts`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Frontend puro:
+  `--only hosting`.
+- F9.135 — dos arreglos chicos: hueco de privacidad en "Gastos por día" + baseline de `tsc` mal
+  escrito hace tres semanas.
+  **§1 — CUARTA aparición del mismo hueco en `Resumen.tsx`** (F9.123 `title` de las barras, F9.124
+  §5 eje del SVG, F9.132 fila de la card Hoy, y ahora las filas expandidas de "Gastos por día"). Con
+  privacidad activa, desplegar cualquier día mostraba `fmtMoney(m.monto)` y `fmtArs(arsEq(...))`
+  crudos: **el modo tapaba los totales y destapaba el detalle**, que es peor que no tenerlo. Van por
+  `privado ? fmtPct(...) : ...`, el patrón que ya usaban las dos cards. La sub-línea de USD se omite
+  **entera** con privacidad —en % las dos monedas dan el mismo número— y con ella el aviso "TC
+  estimado", que califica un monto que ya no se muestra.
+  **Barrido completo de `Resumen.tsx` hecho, no solo las dos líneas del reporte: 2 huecos, 0
+  adicionales.** Los otros candidatos ya estaban cubiertos y conviene no volver a auditarlos:
+  `MontoInlineEdit` y el `<Money>` de los movimientos del ítem viven detrás del ternario de
+  `privado` (F9.120), y los `MoneyInput` son campos que la persona tipea, no dato expuesto.
+  **§2 — el baseline de `tsc` en cliente es 41, no 48, y siempre lo fue.** El 48 entró en `1dd65a4`
+  (21/7) y se copió por cuatro entradas. **La causa era `wc -l` en vez de contar errores:** varios
+  TS2430/TS2345 son multilínea, así que el archivo tiene 48 líneas y 41 errores. Medir con
+  `tsc --noEmit | grep -c "error TS"`, nunca con `wc -l`. La atribución a F9.133 que traía la
+  entrada de F9.132.2 era falsa: F9.133 (`f011c2a`) da el mismo número que `d268c6f` y `db23a1a`.
+  Verificado con `npm ci` desde el lockfile commiteado: **41 en cliente, 0 en `functions/`**.
+  **§3 — F9.61 se implementó sin prompt, y el archivo que llevaba ese nombre documentaba otra cosa.**
+  El F9.61 real (`estadoItem`, `pagoAutomatico` por fecha en `checklist.ts`) llegó en **`3153c7d`**,
+  el commit F9.60-F9.62. `docs/prompts/F9.61-fecha-vencimiento-pagado-por-fecha.md` era el borrador
+  previo a la renumeración, cuyo contenido pasó a ser F9.63 —el propio F9.63 lo dice en su
+  encabezado—. Se borró: era subconjunto estricto de F9.63 (mismas 202 líneas renumeradas, más 7 de
+  encabezado). **No se escribió un prompt retroactivo.**
+  Frontend + docs. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
