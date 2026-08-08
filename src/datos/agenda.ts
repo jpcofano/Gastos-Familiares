@@ -31,13 +31,18 @@ export function agendaCubierto(e: AgendaEntry): boolean {
 }
 
 // F9.102 1b — pendiente de UNA entrada, en su moneda nativa (sin conversión ARS-eq):
-// vencidos/pendientes sin match aportan montoEsperado; por_confirmar/parcial aportan el
-// monto REAL de sus matches (no montoEsperado, que puede venir null); sueltos aportan su
-// monto real. Extraído de pendienteAgenda para que PorDiaSeccion (Card HOY) lo reuse.
+// lo que tiene movimiento cargado sin cubrir aporta el monto REAL de sus matches (no
+// montoEsperado, que puede venir null); lo que no tiene match aporta montoEsperado; los
+// sueltos aportan su monto real. Extraído de pendienteAgenda para que PorDiaSeccion lo reuse.
+// F9.136 §1 — la condición era `estado === 'por_confirmar' || estado === 'parcial'`, o sea la
+// lista de los estados que en ese momento implicaban match. Desde F9.132.2 `'vencido'` también
+// puede tenerlo, y caía a `montoEsperado ?? 0`: el ítem vencido con un pago real cargado aportaba
+// CERO al banner "Revisar pendientes del mes". Se pregunta por match + cobertura, que es la
+// condición real y no depende de qué estados existan.
 export function pendienteDeEntrada(e: AgendaEntry): number {
   if (e.kind === 'suelto') return Math.abs(e.mov.monto);
   const c = e.ci;
-  const noConfirmado = c.estado === 'por_confirmar' || c.estado === 'parcial';
+  const noConfirmado = c.matches.length > 0 && !cubierto(c.estado);
   const montoReal = c.matches.reduce((a, m) => a + Math.abs(m.monto), 0);
   return noConfirmado ? montoReal : (c.item.montoEsperado ?? 0);
 }

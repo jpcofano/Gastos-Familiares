@@ -1511,6 +1511,48 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   encabezado—. Se borró: era subconjunto estricto de F9.63 (mismas 202 líneas renumeradas, más 7 de
   encabezado). **No se escribió un prompt retroactivo.**
   Frontend + docs. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
+- F9.136 — regresión del botón de pago (introducida por F9.132.2 §4) + tres arreglos de la card
+  Hoy. Ver `docs/prompts/F9.136-regresion-boton-pago-card-hoy.md`.
+  **La lección, que vale más que el fix: cuando una máquina de estados gana un valor nuevo, lo que
+  se rompe no son los CONSUMIDORES del estado sino las IGUALDADES contra él.** F9.132.2 auditó
+  consumidores —todos leían el estado, ninguno lo recalculaba, "el cambio los alcanza a todos por
+  igual"— y eso era cierto e insuficiente. El patrón roto siempre es el mismo: **el estado usado
+  como proxy de otra pregunta.** Cinco lugares preguntaban por el estado cuando querían saber si
+  **había match**, porque hasta F9.132.2 `'vencido'` implicaba `matches.length === 0`:
+  · `Resumen.tsx:964` "Confirmar pago" (`=== 'por_confirmar'`) + `:983` "Registrar pago"
+    (`matches.length === 0`) → **un vencido con match no entraba en ninguna: SIN NINGUNA ACCIÓN.**
+    El bloqueante. Ahora la rama de confirmar cubre `'vencido'` con match.
+  · `Resumen.tsx:905` `tieneMatch = estado === 'pagado' || 'parcial' || 'por_confirmar'` → el ítem
+    caía a `montoEsperado ?? 0` y mostraba **$ 0 teniendo un movimiento cargado** (Casa › Luz,
+    $ 136.533). Pasa a `matches.length > 0`, que es lo que el nombre dice.
+  · `agenda.ts:40` `pendienteDeEntrada` → un vencido con pago real cargado aportaba **cero** al
+    banner "Revisar pendientes del mes". Pasa a `matches.length > 0 && !cubierto(estado)`.
+  · `Comprobantes.tsx:694` → `Venció día {item.diaVencimiento}` con el campo en `null` renderizaba
+    literalmente **"Venció día null"**. Usa `fechaEfectivaItem`, la misma con la que se decidió.
+  · `Resumen.tsx:1009` "vence día X" y el banner **"Nada vencido"** (que se apoyaba en `porRevisar`,
+    y por diseño de F9.110 ése solo cuenta lo SIN CARGAR) → afirmaba que no había vencidos con uno
+    vencido. Ahora cuenta los `'vencido'` de la agenda.
+  **No afectados, verificados:** `functions/src/index.ts:1424` es la máquina de `entrantes`, otra
+  cosa; `ui_kits/*.jsx` no los importa la app; `TINT`/`STATES`/`ORDEN_ESTADO` son `Record` sobre
+  `EstadoChecklist` y TS los exige exhaustivos — **el tipo los protege, las igualdades sueltas no**.
+  **Matriz estado × match verificada entera** (`scripts/auditF9136b.ts`), no solo el estado roto:
+  ningún accionable queda sin acción en ninguna combinación alcanzable. `'parcial'` con match no
+  ofrece botón, pero eso es **pre-existente** (no está en `ACCIONABLE`) y no se tocó.
+  **§2/§3/§4 — la card dejó de contradecirse a sí misma:** los chips agrupan hoy **+ vencidos**
+  (con $ 0 de hoy la fila colapsada no mostraba banco y abajo había $ 316.492 en tres); el empty
+  state mira las dos secciones (decía "Nada que pagar hoy." arriba de cuatro filas rojas — el mismo
+  bug que F9.132 vino a cerrar); y el TOTAL del encabezado muestra las dos monedas siempre vía
+  `fmtTotalReal`, porque "$ 0" pelado se lee como "no hay nada". En filas y chips sigue mandando
+  `fmtReal`: ahí la moneda en cero sí sobra (regla de F9.132.1).
+  **§5 — AUDITADO, NO ARREGLADO.** El "resumen de tarjeta en 0" **no es un movimiento**: los 6 del
+  mes tienen montos reales, cero en 0/null. Es un **ítem esperado** (`GAL-VISA`, USD) sin
+  `montoEsperado` y sin match, que la card renderiza **$ 0** por el `?? 0` de `:906`. `"no sé
+  cuánto" no es lo mismo que "cero"` — `informeMensual.ts:64` ya hace esa distinción, la card no.
+  Aparte: `GAL-MASTER-BLK` tiene un movimiento **manual de U$S 1** que parece carga de prueba.
+  **Contradicción entre pantallas, reportada y no arreglada:** TELECOM (`$ 106.037`) es el único
+  movimiento de 21 con `pagado: false` y `confirmadoPago: true`, así que la Card 1 (ancla en
+  `pagado`, decisión de F9.132.2) lo muestra vencido mientras Gastos Fijos lo da por pagado.
+  Frontend puro. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

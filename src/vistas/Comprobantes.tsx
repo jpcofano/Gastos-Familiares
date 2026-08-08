@@ -9,7 +9,7 @@ import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
-import { calcularChecklist, mesActualStr } from '../datos/checklist';
+import { calcularChecklist, mesActualStr, fechaEfectivaItem } from '../datos/checklist';
 import { construirAgenda, sueltosFuturosDelMes, pendientesOrdenados, type AgendaEntry, type GrupoAgenda } from '../datos/agenda';
 import { desvincularDestinoItem } from '../datos/destinos';
 import { actualizarItemEsperado } from '../datos/itemsEsperados';
@@ -691,7 +691,19 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
                         <span style={{ flex: 1 }}>
                           {labelAgenda(e)}
                           {e.kind === 'suelto' && <Badge tone="neutral">Sin plantilla</Badge>}
-                          {vencidoE && <span style={{ color: 'var(--gf-expense)', marginLeft: 6, fontWeight: 700 }}>Venció día {e.ci.item.diaVencimiento}</span>}
+                          {/* F9.136 §1 — decía `Venció día {item.diaVencimiento}`, que asumía que
+                              todo vencido tenía ese campo. Desde F9.132.2 el vencimiento sale de
+                              `vencimientos[0].fecha` del movimiento y `diaVencimiento` está en 1 de
+                              22 ítems, así que esto renderizaba literalmente "Venció día null".
+                              Se usa la misma fecha efectiva con la que se decidió el estado. */}
+                          {vencidoE && (
+                            <span style={{ color: 'var(--gf-expense)', marginLeft: 6, fontWeight: 700 }}>
+                              {(() => {
+                                const fe = fechaEfectivaItem(e.ci.item, e.ci.matches, grupo.mes);
+                                return fe ? `Venció ${fe.slice(8, 10)}/${fe.slice(5, 7)}` : 'Vencido';
+                              })()}
+                            </span>
+                          )}
                           {monto != null && <span style={{ color: 'var(--gf-gray-400)', marginLeft: 6 }}>{fmtMonto(monto, moneda)}</span>}
                         </span>
                       </label>

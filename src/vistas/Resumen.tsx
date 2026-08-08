@@ -419,6 +419,13 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
     if (r.usd !== 0) partes.push(fmtUsdEq(r.usd));
     return partes.length > 0 ? partes.join(' · ') : fmtArs(0);
   };
+  // F9.136 §4 — el TOTAL del encabezado muestra las dos monedas SIEMPRE, incluso en cero: es el
+  // número que resume la card y "$ 0" pelado se lee como "no hay nada", cuando puede haber dólares
+  // (o al revés). En las filas y los chips sigue mandando `fmtReal`: ahí la moneda en cero sí sobra
+  // —un banco que solo movió pesos no tiene por qué mostrar `U$S 0`— y son la regla de F9.132.1.
+  const fmtTotalReal = (r: MontoReal): string => privado
+    ? fmtReal(r)
+    : `${fmtArs(r.ars)} · ${fmtUsdEq(r.usd)}`;
   const fmtChipReal = (r: MontoReal) => fmtReal(r);
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
   const [hoyExpandido, setHoyExpandido] = useState(true);
@@ -466,12 +473,6 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
     .filter(m => m.pagado !== true)
     .sort((a, b) => arsEq(b, tcDeMov) - arsEq(a, tcDeMov));
   const aPagarTotal: MontoReal = totalReal(aPagarHoy);
-  // F9.132.2 cambio 3 — se revierte `banks={[]}`: ahora hay movimiento detrás de cada fila, y el
-  // banco del movimiento es de dónde sale la plata. (`item.banco` queda como fallback para el
-  // pendiente sin match, que no vive en esta card.)
-  const aPagarPorBanco = [...agruparReal(aPagarHoy, m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos)).entries()]
-    .sort((a, b) => b[1].ars - a[1].ars);
-
   // Vencidos: impagos de días ANTERIORES. Sección propia y subtotal propio — no se suman al
   // total del encabezado, que es el de hoy. Son dos plata distintas, dos números.
   // Acá sí manda la fecha efectiva: un gasto cargado el 4 que vence el 10 no está vencido.
@@ -481,6 +482,18 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
     .filter(m => m.tipo === 'Gasto' && m.pagado !== true && fechaEfectivaMov(m).getTime() < inicioHoy.getTime())
     .sort((a, b) => fechaEfectivaMov(a).getTime() - fechaEfectivaMov(b).getTime());
   const aPagarVencidosTotal: MontoReal = totalReal(aPagarVencidos);
+
+  // F9.132.2 cambio 3 — se revierte `banks={[]}`: hay movimiento detrás de cada fila, y el banco
+  // del movimiento es de dónde sale la plata.
+  // F9.136 §2 — los chips agrupaban SOLO `aPagarHoy`, así que con nada de hoy la fila colapsada
+  // no mostraba ningún banco mientras abajo había $ 316.492 en tres. La card se contradecía a sí
+  // misma. Cubren hoy + vencidos: los bancos son de la plata que la card dice que hay que pagar,
+  // y esa incluye los vencidos. El chip no distingue cuál es cuál —el desglose está adentro— y
+  // un chip de menos es peor que un chip sin matiz.
+  const aPagarPorBanco = [...agruparReal(
+    [...aPagarHoy, ...aPagarVencidos],
+    m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos),
+  ).entries()].sort((a, b) => b[1].ars - a[1].ars);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -517,6 +530,10 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
         const cubiertos = agenda.filter(agendaCubierto).length;
         const total = agenda.length;
         const todoConfirmado = porRevisar === 0 && cubiertos === total;
+        // F9.136 §1 — "Nada vencido" se apoyaba en `porRevisar`, que por diseño (F9.110) cuenta
+        // solo lo SIN CARGAR. Desde F9.132.2 un ítem puede estar vencido CON movimiento cargado,
+        // así que no movía el contador y el banner afirmaba "Nada vencido" con uno vencido.
+        const vencidos = agenda.filter(e => e.kind === 'esperado' && e.ci.estado === 'vencido').length;
         return (
           <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
             {porRevisar > 0 ? (
@@ -535,7 +552,8 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                 `Todo confirmado · ${cubiertos}/${total}`
               ) : (
                 <>
-                  Nada vencido · {cubiertos}/{total} confirmados
+                  {vencidos > 0 ? `${vencidos} vencido${vencidos > 1 ? 's' : ''} · ` : 'Nada vencido · '}
+                  {cubiertos}/{total} confirmados
                   {pendienteAgenda(agenda) > 0 && (
                     <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {(privado ? fmtPct(pendienteAgenda(agenda), c.ingArsEq) : fmtArs(pendienteAgenda(agenda)))} a confirmar</span>
                   )}
@@ -590,7 +608,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
         totalNode={
           <>
             <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: aPagarHoy.length > 0 ? 'var(--gf-expense)' : 'var(--color-text)' }}>
-              {fmtReal(aPagarTotal)}
+              {fmtTotalReal(aPagarTotal)}
             </div>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)' }}>a pagar</div>
             {/* El subtotal de vencidos va AL LADO del de hoy y etiquetado, nunca sumado: son
@@ -610,9 +628,18 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       >
         {hoyExpandido && (
           <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {/* F9.136 §3 — el empty state miraba solo `aPagarHoy`, así que decía "Nada que pagar
+                hoy." con cuatro filas rojas y $ 316.492 justo debajo. Es el MISMO bug que F9.132
+                vino a cerrar, reaparecido: un texto que afirma que no hay plata mientras la card
+                muestra plata. Con vencidos presentes el texto acota que lo que no hay es de HOY;
+                sin nada en ninguna de las dos secciones se mantiene el mensaje de siempre. */}
             {aPagarHoy.length === 0 ? (
               <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>
-                {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
+                {!esMesActual
+                  ? 'Ver mes actual para pagos de hoy.'
+                  : aPagarVencidos.length > 0
+                  ? 'Nada que pagar hoy — pero hay vencido:'
+                  : 'Nada que pagar hoy.'}
               </div>
             ) : aPagarHoy.map((m, i) => (
               <FilaAPagar
@@ -670,7 +697,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
         banks={gastadoPorBanco}
         totalNode={
           <>
-            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtReal(gastadoHoyTotal)}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtTotalReal(gastadoHoyTotal)}</div>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)' }}>gastado hoy</div>
           </>
         }
@@ -902,7 +929,12 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
 
   const accionable = ACCIONABLE.includes(estado);
   const montoReal = matches.reduce((s, m) => s + Math.abs(m.monto), 0);
-  const tieneMatch = estado === 'pagado' || estado === 'parcial' || estado === 'por_confirmar';
+  // F9.136 §1 — esto preguntaba por el ESTADO (`'pagado' || 'parcial' || 'por_confirmar'`) para
+  // saber si HAY MATCH. Era una lista de los estados que en ese momento implicaban match, no la
+  // pregunta real, así que F9.132.2 la rompió al hacer que `'vencido'` también pudiera tenerlo:
+  // el ítem caía a `item.montoEsperado ?? 0` y mostraba **$ 0** teniendo un movimiento cargado.
+  // Se pregunta por lo que el nombre dice. Para los tres estados de antes es equivalente.
+  const tieneMatch = matches.length > 0;
   const monto = tieneMatch ? montoReal : (item.montoEsperado ?? 0);
   const etiqueta = [item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || '(sin categoría)';
 
@@ -961,7 +993,13 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
             {estado === 'parcial' && <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>Falta completar</div>}
           </div>
         </div>
-        {estado === 'por_confirmar' && (
+        {/* F9.136 §1 — EL BLOQUEANTE. Esta rama era `estado === 'por_confirmar'` y la de
+            "Registrar pago" es `matches.length === 0`, así que un ítem `'vencido'` CON match
+            —posible desde F9.132.2— no entraba en ninguna y quedaba SIN NINGUNA ACCIÓN.
+            `'vencido'` cambia el color y la urgencia, no la acción: sigue siendo el mismo
+            movimiento esperando confirmación. La condición se ancla en `matches.length > 0`,
+            que es de lo que depende poder confirmar. */}
+        {(estado === 'por_confirmar' || estado === 'vencido') && matches.length > 0 && (
           <div style={{ marginTop: 9 }}>
             <Button variant="green" size="sm" style={{ width: '100%' }} onClick={() => onConfirmar(item, matches)}>
               <Icon name="check" size={15} /> Confirmar pago
@@ -1006,7 +1044,10 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
             </div>
           </div>
         )}
-        {accionable && estado !== 'por_confirmar' && item.diaVencimiento && (
+        {/* F9.136 §1 — era `estado !== 'por_confirmar'`, otra vez el estado usado como proxy de
+            "no hay match": un vencido con movimiento cargado anunciaba "vence día X" al lado del
+            botón de confirmarlo. Se ancla en `matches.length === 0`, igual que "Registrar pago". */}
+        {accionable && matches.length === 0 && item.diaVencimiento && (
           <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 6 }}>vence día {item.diaVencimiento}</div>
         )}
       </div>
