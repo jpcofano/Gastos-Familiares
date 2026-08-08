@@ -1605,6 +1605,11 @@ export const descartarEntrada = onCall(
       for (const m of movs.docs) {
         if (m.data().origenComprobanteId === id) { batch.delete(m.ref); borrados++; }
         else {
+          // F9.138 §1 — baja `confirmadoPago` y NO toca `pagado`, y es CORRECTO: descartar el
+          // comprobante quita la evidencia de la verificación, no revierte que la plata haya
+          // salido. El movimiento es preexistente (por eso no se borra) y queda en
+          // `pagado: true` + `confirmadoPago: false`, que es un estado válido. Nunca escribe
+          // `confirmadoPago: true`, así que no puede producir el par imposible del §2.
           batch.update(m.ref, {
             hashPdf: null, refStoragePdf: null, confirmadoPago: false,
             itemEsperadoId: FieldValue.delete(),

@@ -1553,6 +1553,46 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   movimiento de 21 con `pagado: false` y `confirmadoPago: true`, así que la Card 1 (ancla en
   `pagado`, decisión de F9.132.2) lo muestra vencido mientras Gastos Fijos lo da por pagado.
   Frontend puro. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
+- F9.138 — la incoherencia `pagado`/`confirmadoPago` era **del escritor**, no del dato ni de las
+  vistas. Ver `docs/prompts/F9.138-incoherencia-del-escritor.md`. Reemplaza el §4 de F9.137.
+  **§2 — la semántica de los dos campos quedó escrita** (sección "State machine de esperados" ↑).
+  Que no existiera en ningún lado es la razón por la que dos escritores hacían cosas distintas:
+  cada uno la infirió. Regla: **`confirmadoPago: true` con `pagado: false` es imposible.**
+  **§1 — auditoría de writers, con veredicto uno por uno:**
+  · `movimientos.ts:222` `confirmarPagoEsperado` → **DESCUIDO**, el que escribía la incoherencia.
+  · `movimientos.ts:245` `desmarcarPago` → **DESCUIDO simétrico**: "Deshacer" no deshacía.
+  · `comprobantes.ts:151` `confirmarRama1`, rama no-obligación → **DESCUIDO** con `quedaConfirmado:
+    true`. Es el segundo writer, y explica el único caso `ImportTarjeta` de junio.
+  · `comprobantes.ts:149` `confirmarRama1`, rama obligación → **CORRECTO**: una factura adjuntada
+    no dice nada sobre si el movimiento se pagó, así que no toca ninguno de los dos.
+  · `functions/src/index.ts:1607` `descartarEntrada` → **CORRECTO**: baja `confirmadoPago` y deja
+    `pagado`. Quita la evidencia, no revierte el hecho. Nunca sube `confirmadoPago`.
+  · `registrarPagoEsperado`, `marcarPagadoSuelto`/`desmarcarPagadoSuelto`,
+    `confirmarSueltoDesdeComprobante`, `resumenesTarjeta`, `AltaMovimiento`, `functions:1803` →
+    **ya escribían los dos.** Los tres correctos quedan documentados **con el motivo en el código**,
+    para que no se "arreglen" después por parecerse al bug.
+  **§3 — trade-off asumido en `desmarcarPago`:** `pagado: true` + `confirmadoPago: false` es un
+  estado VÁLIDO (lo deja un extracto importado), así que revertir los dos puede marcar como
+  no-pagado un débito que el banco sí hizo. Se elige igual la simetría: un "Deshacer" que no
+  revierte lo que "Confirmar" escribió es peor, porque revertir de más **se ve en pantalla** y se
+  vuelve a confirmar.
+  **§4 — la limpieza midió más y más viejo de lo esperado: 9 movimientos, no 3-4, y desde
+  `2026-07-16`, no de esta semana.** 8 por `confirmarPagoEsperado` (`origen: Manual`, todos con
+  `itemEsperadoId`) + 1 de junio `ImportTarjeta` sin `pagadoEn` (el de `confirmarRama1`). O sea que
+  **el bug es anterior a F9.132.2** — que lo destapó, no lo creó, exactamente como decía el §5.
+  `scripts/limpiarPagadoIncoherente.ts`, dry-run por defecto. Corrido contra producción:
+  `{encontrados: 9, actualizados: 9}`, relectura en **0**. El fix es `pagado: true`, NO
+  `confirmadoPago: false`: alguien apretó "Confirmar pago" sobre un movimiento real, así que la
+  verificación es el dato bueno y `pagado` es el que quedó atrás.
+  **§5 — el ancla de la Card 1 NO se tocó**, sigue en `pagado`. Verificado después de limpiar: la
+  Card 1 pasa de 4 vencidos a **0** y el checklist de `vencido 1 / por_confirmar 9` a
+  `vencido 0 / por_confirmar 2 / pagado 14`. Las dos vistas coinciden **sin que ninguna ceda su
+  criterio**, que era el punto.
+  De paso se corrigieron dos descripciones desactualizadas de esta misma sección: `vencido` (decía
+  "sin match, diaVencimiento < hoy", muerto desde F9.132.2) y "Confirmar pago" (decía que opera solo
+  sobre `por_confirmar`, ampliado en F9.136).
+  Frontend + Functions (un comentario). `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK.
+  Deploy: `--only hosting` junto con F9.136 y F9.137.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
@@ -2201,7 +2241,11 @@ Derivada en vivo, NO materializada. Nueve estados (F5.5):
 - `parcial`: mes en curso/futuro con confirmados pero monto confirmado < 99% esperado.
 - `automatico`: mes en curso, sin match, `pagoAutomatico=true` y `diaVencimiento` aún no llegó (o sin diaVencimiento). Cubierto sin conciliar.
 - `pendiente`: mes en curso, sin match, diaVencimiento no alcanzado (o sin diaVencimiento).
-- `vencido`: mes en curso, sin match, diaVencimiento < hoy.
+- `vencido`: mes en curso y **fecha efectiva** anterior a hoy sin cobertura (`pagado || confirmadoPago`).
+  Desde F9.132.2 **puede tener match**: fecha efectiva = `vencimientos[0].fecha` del movimiento
+  matcheado, si no `diaVencimiento` del ítem, si no ninguna → el ítem NO puede vencer y cae a
+  `pendiente`. Antes era `sin match, diaVencimiento < hoy`, y como `diaVencimiento` está poblado en
+  1 de 22 ítems activos la rama estaba muerta.
 - `programado`: mes futuro, sin match (incluye `pagoAutomatico` de mes futuro desde F9.61).
 - `no_registrado`: mes cerrado, sin match.
 - `no_aplica`: periodicidad no incluye este mes (placeholder; requiere mes-ancla cuando se active).
@@ -2209,13 +2253,45 @@ Derivada en vivo, NO materializada. Nueve estados (F5.5):
 Cubierto = `pagado` || `automatico`. `por_confirmar` y `parcial` NO cuentan como cubiertos.
 
 Confirmación (F5.5): el checklist NO crea movimientos. "Confirmar pago" opera solo sobre un movimiento
-ya matcheado (estado `por_confirmar`): escribe `confirmadoPago=true` + `itemEsperadoId` vía
-`writeBatch` (admin). "Deshacer" lo revierte (solo mes en curso). Meses cerrados con match = pagado
-automáticamente sin acción (asunción: sin migración retroactiva).
+ya matcheado — estado `por_confirmar` **o `vencido` con match** (F9.136 §1: `vencido` cambia el color
+y la urgencia, no la acción disponible) —: escribe `pagado` + `confirmadoPago` + `itemEsperadoId` vía
+`writeBatch` (admin). "Deshacer" revierte **los dos campos** (solo mes en curso). Meses cerrados con
+match = pagado automáticamente sin acción (asunción: sin migración retroactiva).
 
 `confirmadoPago: boolean` existe en `Movement` (default false al leer; los docs migrados no tienen el
 campo → se normaliza a false). El alta global puede presetear `itemEsperadoId` al crear un movimiento
 vinculado a un esperado puntual; ese movimiento entra por Rama 0 y se puede confirmar.
+
+### `pagado` vs `confirmadoPago` — semántica (F9.138 §2)
+
+Que esto no estuviera escrito en ningún lado es **la razón por la que dos escritores hacían cosas
+distintas**. Es normativo, no descriptivo:
+
+| campo | significa |
+|---|---|
+| `pagado` | **la plata salió** |
+| `confirmadoPago` | **alguien verificó que salió** |
+
+De ahí la única regla que importa:
+
+> **`confirmadoPago: true` con `pagado: false` es IMPOSIBLE.** No se puede verificar algo que no pasó.
+> Todo writer que escriba `confirmadoPago: true` tiene que escribir `pagado: true` en la misma
+> operación.
+
+Los otros tres pares sí son válidos y hay que saber leerlos:
+
+- `pagado: false` + `confirmadoPago: false` — todavía no salió. Es lo que la Card 1 llama "a pagar".
+- `pagado: true` + `confirmadoPago: false` — salió pero nadie lo verificó. Es lo que deja un extracto
+  importado, y lo que queda al descartar un comprobante. **Estado normal, no un error.**
+- `pagado: true` + `confirmadoPago: true` — salió y está verificado.
+
+**Bajar la verificación sin tocar `pagado` es legítimo** (`confirmadoPago: false` sola): quita la
+evidencia, no revierte el hecho. Lo hace `descartarEntrada` en `functions/src/index.ts:1607`, a
+propósito y documentado ahí. **Subirla sin tocar `pagado` nunca lo es.**
+
+Corolario para las vistas: la Card 1 de Resumen se ancla en `pagado` y el checklist de Gastos Fijos en
+`confirmadoPago`, y **está bien que sea así** — cada una pregunta lo suyo. Si las dos se contradicen
+sobre el mismo movimiento, el bug está en el writer, no en las vistas (F9.138 §5).
 
 Pendiente: periodicidades no-mensuales necesitan mes-ancla cuando se activen. Hoy `aplicaEnMes`
 devuelve `true` para todas como placeholder.

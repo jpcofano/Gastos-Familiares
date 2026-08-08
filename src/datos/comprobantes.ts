@@ -146,9 +146,15 @@ export async function confirmarRama1(
       refStoragePdf:  comp.refStoragePdf,
       // F9.75 — si es obligación, NO tocar confirmadoPago del movimiento existente (preservar el
       // estado del pago real). Solo pagos/tickets confirman por fecha.
+      // F9.138 §1 — ese salteo es CORRECTO y se deja: una factura adjuntada a un movimiento no
+      // dice nada sobre si ese movimiento se pagó, así que no toca ninguno de los dos campos.
+      // Lo que sí era descuido es la otra rama: escribía `confirmadoPago` sin `pagado`, y con
+      // `quedaConfirmado: true` dejaba el par imposible (ver docs/CLAUDE.md, F9.138 §2). Ahora
+      // los dos se mueven juntos. Con `quedaConfirmado: false` solo baja la verificación:
+      // `pagado: true` + `confirmadoPago: false` es un estado válido y no se pisa.
       ...(esObligacionDoc(comp.datosExtraidos?.tipoDocumento)
         ? {}
-        : { confirmadoPago: quedaConfirmado, ...(quedaConfirmado ? { pagadoEn: serverTimestamp() } : {}) }),
+        : { confirmadoPago: quedaConfirmado, ...(quedaConfirmado ? { pagado: true, pagadoEn: serverTimestamp() } : {}) }),
       ...(itemEsperadoId ? { itemEsperadoId } : {}),
       // F6.8 — propagar destino y vencimientos para que aprenderDestino() aprenda
       // seedImport: false — gradúa el mov de "seed pristino" a "tocado por usuario"

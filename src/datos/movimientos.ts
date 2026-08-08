@@ -219,6 +219,12 @@ export async function registrarPagoChecklist(
   });
 }
 
+// F9.138 §3 — este writer escribía `confirmadoPago: true` y NO tocaba `pagado`, así que dejaba
+// el movimiento en `confirmadoPago: true` + `pagado: false`: un par imposible bajo la semántica
+// de los campos (ver docs/CLAUDE.md, F9.138 §2 — no se puede verificar lo que no pasó).
+// La incoherencia no la produjo el dato ni las vistas: la escribía el botón. Con la Card 1
+// anclada en `pagado` (F9.132.2) y Gastos Fijos en `confirmadoPago`, el mismo movimiento salía
+// "a pagar" en una pantalla y "pagado" en la otra. Medidos 9 casos, desde 2026-07-16.
 export async function confirmarPagoEsperado(
   item: ExpectedItem,
   matches: Movement[],
@@ -227,6 +233,9 @@ export async function confirmarPagoEsperado(
     const batch = writeBatch(db);
     for (const m of matches) {
       batch.update(doc(db, 'movimientos', m.id), {
+        // Confirmar un pago implica que la plata salió. Si no salió, no hay nada que confirmar:
+        // ese caso es "Registrar pago", que crea el movimiento con los dos campos en true.
+        pagado: true,
         confirmadoPago: true,
         itemEsperadoId: item.id,
         // F9.99.7 — fecha real de confirmación (permite detectar pago adelantado/tardío
@@ -242,11 +251,20 @@ export async function confirmarPagoEsperado(
   }
 }
 
+// F9.138 §3 — defecto simétrico del anterior: ponía `confirmadoPago: false` y dejaba `pagado`
+// como estaba, así que "Deshacer" no deshacía — el movimiento no volvía a los vencidos de la
+// Card 1 y la acción se veía como si no hubiera pasado nada.
+// TRADE-OFF ASUMIDO: `pagado: true` + `confirmadoPago: false` es un estado VÁLIDO (la plata
+// salió, falta verificarla) y es el que deja un extracto importado. Al revertir los dos, deshacer
+// sobre un movimiento que vino del banco lo marca como no-pagado pese a que el débito existió.
+// Se elige igual la simetría: un "Deshacer" que no revierte lo que "Confirmar" escribió es peor
+// que uno que revierte de más, porque el de más se ve en pantalla y se vuelve a confirmar.
 export async function desmarcarPago(matches: Movement[]): Promise<Resultado<void>> {
   try {
     const batch = writeBatch(db);
     for (const m of matches) {
       batch.update(doc(db, 'movimientos', m.id), {
+        pagado: false,
         confirmadoPago: false,
         pagadoEn: null,
         actualizadoEn: serverTimestamp(),
