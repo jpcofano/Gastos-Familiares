@@ -1455,6 +1455,36 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   Federico). **No se corrigieron** — se reportan y se decide aparte.
   Los dependientes siguen sin ver los agregados (`persona: null` no matchea su query ni su regla), y
   eso está bien y no se cambió. `tsc`: 41 → 41; `vite build` OK. Frontend puro: `--only hosting`.
+- F9.132.2 — Card 1 sobre `pagado`, Card 2 sin doble conteo, y `vencido` que funciona. Ver
+  `docs/prompts/F9.132.2-cards-hoy-pagado.md`.
+  **El criterio de "a pagar" es `pagado === false`, no `diaVencimiento`.** Y **no incluye** los
+  `pagado: true` con `confirmadoPago: false` (los 6 resúmenes de tarjeta del 7/8): esa plata ya
+  salió y lo que falta es confirmarla, que es otro problema. Meterlos en la Card 1 haría que el
+  total significara dos cosas otra vez, que es el bug que F9.132.1 vino a cerrar. Decisión explícita.
+  **`diaVencimiento` es FALLBACK, no fuente principal.** Está poblado en **1 de 22 ítems activos**
+  (Monotributo, día 20); la app carga la fecha real en `vencimientos[0].fecha` del movimiento. Toda
+  lógica nueva que se apoye en `diaVencimiento` nace muerta — ya pasó dos veces (la card vacía salvo
+  el día 20, y `estadoItem` que no podía devolver `'vencido'` para nadie). No borrarlo del esquema:
+  es el fallback del ítem sin movimiento y Monotributo lo usa.
+  **Las dos cards son excluyentes por construcción:** misma fuente (`cajaMov` filtrado al día, la de
+  `porDia`), mismo filtro de día, y `pagado` como único discriminante. Si alguna vez comparten un
+  movimiento, es un bug de filtro. Medido sobre 7/8/2026: Card 1 `$ 187.480` (2 movs) + Card 2
+  `$ 7.074.337 + U$S 2.515` (6 movs) = fila HOY, 8 movs, 0 solapamientos.
+  **§4 — `estadoItem` usa fecha efectiva** (`fechaEfectivaItem`): `vencimientos[0].fecha` del match
+  si existe, si no `diaVencimiento` del ítem, si no **null → el ítem no puede vencer** y cae a
+  `pendiente`. Sin fecha no hay vencimiento; **17 de 22 ítems activos no tienen ninguna de las dos**
+  y eso es correcto, no un caso a forzar. Cubierto = `pagado || confirmadoPago`, así que un
+  `por_confirmar` con el débito ya impactado no se pinta de rojo. Conteo medido antes → después:
+  `por_confirmar` 10 → 9, `pendiente` 6 → 6, `pagado` 6 → 6, `vencido` **0 → 1** (Casa › Luz, venció
+  7/8 con movimiento cargado sin confirmar). Uno, no quince.
+  **Deuda de datos reportada, no arreglada:** **5 ítems activos de 22** tienen `banco` distinto del
+  banco del movimiento que los matchea (Colegio Fede, Casa › Luz, 2× Pago Tarjeta, Actividades
+  extracurriculares). La regla de lectura es **gana `m.banco` cuando hay movimiento**; `item.banco`
+  solo como fallback para el pendiente sin match. Se decide aparte.
+  Se borró `hoyItems` y su tipo `HoyEntry`/`hoyEntryCubierto` (F9.99.8/F9.102): la unión de
+  esperados+sueltos+reales dejaba caer movimientos entre sus dos rejillas. Auditorías de solo lectura
+  en `scripts/auditF91322*.ts`. `tsc`: 48 → 48 (la base subió de 41 a 48 con F9.133); `vite build`
+  OK. Frontend puro: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

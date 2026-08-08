@@ -75,9 +75,40 @@ export function aplicaEnMes(_item: ExpectedItem, _mes: string): boolean {
 // Ver docs/prompts/F9.99.7-semantica-pagos-y-match-futuros.md.
 export const MES_CORTE_SEMANTICA_PAGOS = '2026-07';
 
+// F9.132.2 §4 — la fecha con la que un ítem puede vencer. Prioridad medida, no supuesta:
+// `diaVencimiento` está poblado en 1 de 22 ítems activos, así que apoyar el vencimiento
+// solo en él dejaba la rama muerta (`estadoItem` no podía devolver 'vencido' para nadie
+// salvo Monotributo). La app carga la fecha real en `vencimientos[0].fecha` del movimiento
+// matcheado — ésa manda; `diaVencimiento` queda como fallback del ítem sin movimiento.
+// Devuelve YYYY-MM-DD, o null cuando no hay ninguna de las dos: sin fecha no hay vencimiento.
+export function fechaEfectivaItem(item: ExpectedItem, matches: Movement[], mes: string): string | null {
+  const venc = matches[0]?.vencimientos;
+  if (Array.isArray(venc) && venc.length > 0 && venc[0]?.fecha) return String(venc[0].fecha).slice(0, 10);
+  if (item.diaVencimiento) return `${mes}-${String(item.diaVencimiento).padStart(2, '0')}`;
+  return null;
+}
+
+// Cubierto a los efectos del vencimiento: la plata ya salió (`pagado`) o ya se confirmó que
+// salió (`confirmadoPago`). Un por_confirmar con el débito ya impactado NO está vencido:
+// lo que falta es la confirmación, que es otro problema.
+function tieneCobertura(matches: Movement[]): boolean {
+  return matches.some(m => m.pagado === true || m.confirmadoPago === true);
+}
+
+function estaVencido(item: ExpectedItem, matches: Movement[], mes: string, hoyIso: string): boolean {
+  const fe = fechaEfectivaItem(item, matches, mes);
+  return fe != null && fe < hoyIso && !tieneCobertura(matches);
+}
+
+function isoDeHoy(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr: string, mes: string): EstadoChecklist {
   if (!aplicaEnMes(item, mes)) return 'no_aplica';
   const corte = mes >= MES_CORTE_SEMANTICA_PAGOS;
+  const hoyIso = isoDeHoy();
 
   if (matches.length > 0) {
     // F9.99.7 Parte 5 — fin del arrastre: solo meses < corte siguen asumiendo "pagado" por
@@ -89,6 +120,10 @@ export function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr
       if (item.montoEsperado != null && montoConf < item.montoEsperado * 0.99) return 'parcial';
       return 'pagado';
     }
+    // F9.132.2 §4 — un ítem con movimiento cargado pero sin cobertura (ni pagado ni confirmado)
+    // cuya fecha efectiva ya pasó está vencido, no meramente "a confirmar". Antes esta rama
+    // devolvía siempre 'por_confirmar' y el vencimiento no se miraba nunca.
+    if (corte && mes === mesActualStr && estaVencido(item, matches, mes, hoyIso)) return 'vencido';
     return 'por_confirmar';
   }
 
@@ -103,7 +138,10 @@ export function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr
   // Cae a la misma máquina que cualquier ítem: programado / no_registrado / vencido / pendiente.
   if (mes > mesActualStr) return 'programado';
   if (mes < mesActualStr) return 'no_registrado';
-  if (item.diaVencimiento && item.diaVencimiento < new Date().getDate()) return 'vencido';
+  // F9.132.2 §4 — antes: `item.diaVencimiento < new Date().getDate()`. Sin movimiento no hay
+  // `vencimientos[]`, así que acá la fecha efectiva es siempre el `diaVencimiento` del ítem —
+  // el cambio real es comparar fechas completas en vez de números de día sueltos.
+  if (estaVencido(item, matches, mes, hoyIso)) return 'vencido';
   return 'pendiente';
 }
 

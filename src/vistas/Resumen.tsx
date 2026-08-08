@@ -15,21 +15,16 @@ import { cargarTCRango } from '../datos/patrimonioOptimizacion';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
 import { calcularChecklist, cubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
-import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, pendienteAgenda, pendienteDeEntrada, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
+import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, pendienteAgenda, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
 import EditarMovimiento from './EditarMovimiento';
 import type { Movement, ExpectedItem, FamiliaConfig, MedioPago } from '../types';
 import './Resumen.css';
 
 type Moneda = 'ARS' | 'USD';
 
-// F9.102 1a — Card HOY suma una tercera fuente (movimientos reales de caja del día no
-// matcheados) además de esperados/sueltos. 'real' es local a esta card: NO entra a
-// pendienteAgenda ni al checklist de fijos (ver src/datos/agenda.ts, AgendaEntry).
-type HoyEntry = AgendaEntry | { kind: 'real'; mov: Movement };
-
-function hoyEntryCubierto(e: HoyEntry): boolean {
-  return e.kind === 'real' ? (e.mov.pagado === true || e.mov.confirmadoPago === true) : agendaCubierto(e);
-}
+// F9.132.2 — acá vivían `HoyEntry` y `hoyEntryCubierto`, el tipo unión que mezclaba entradas de
+// agenda con movimientos reales para alimentar la Card HOY. Las dos cards se construyen ahora
+// sobre `Movement` directo: no hace falta un tipo que unifique tres formas distintas de "lo de hoy".
 
 // Lookup banco por nombre (aplicando medioCanonico) para obtener id/color/dominio
 function bancoDeNombre(nombre: string, bancos?: MedioPago[]): MedioPago | undefined {
@@ -133,6 +128,20 @@ function agruparReal(movs: Movement[], clave: (m: Movement) => string): Map<stri
 }
 
 function sinTcPropio(m: Movement): boolean { return m.moneda === 'USD' && !m.tcUsdArs; }
+
+// F9.132.2 cambio 1 — fecha con la que un movimiento se considera exigible: la primera de
+// `vencimientos[].fecha` cuando el comprobante la trajo, si no la fecha del movimiento.
+// Medido sobre los impagos del 7/8/2026: AYSA no tiene `vencimientos` (cae a `m.fecha`) y
+// Empresa Distribuidora sí, con `2026-08-07` — el mismo día. Las dos ramas están vivas.
+// Se normaliza a inicio de día para poder comparar contra `inicioHoy` sin arrastrar la hora.
+function fechaEfectivaMov(m: Movement): Date {
+  const venc = m.vencimientos;
+  if (Array.isArray(venc) && venc.length > 0 && venc[0]?.fecha) {
+    const d = new Date(`${String(venc[0].fecha).slice(0, 10)}T00:00:00`);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return inicioDia(m.fecha);
+}
 
 function nombrePersona(memberId: string | null, config: FamiliaConfig | null): string {
   if (!memberId) return '—';
@@ -306,6 +315,59 @@ function DiaRowShell({ dayBig, daySub, banks, totalNode, highlight, expanded, on
   );
 }
 
+// F9.132.2 — fila de la Card 1. Es un MOVIMIENTO impago, no una entrada de agenda: todas las
+// filas de la card comparten estado (`pagado: false`), así que el semáforo por ítem que traía
+// de F9.99.8.1 no distinguía nada. Lo único que varía es si ya venció.
+// El `monto` llega ya formateado por el caller: es el único que sabe si el modo privacidad
+// está activo, y todo lo que imprime plata tiene que pasar por un formateador que lo conozca
+// (F9.123, F9.124 §5, F9.132, F9.132.1 — quinta vez en la serie).
+function FilaAPagar({ m, config, conBorde, esAdmin, onEditar, monto, pie, vencido }: {
+  m: Movement;
+  config: FamiliaConfig | null;
+  conBorde: boolean;
+  esAdmin: boolean;
+  onEditar?: (mov: Movement) => void;
+  monto: string;
+  pie: string;
+  vencido?: boolean;
+}) {
+  // Gana el banco del MOVIMIENTO: es de dónde sale la plata. `item.banco` sólo sirve de
+  // fallback para un pendiente sin match, que no vive en esta card.
+  const info = m.banco ? bancoDeNombre(m.banco, config?.bancos) : undefined;
+  return (
+    <button
+      onClick={esAdmin ? () => onEditar?.(m) : undefined}
+      disabled={!esAdmin}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', width: '100%',
+        borderBottom: conBorde ? '1px solid var(--gf-gray-100)' : 'none',
+        background: 'none', border: 'none', cursor: esAdmin ? 'pointer' : 'default',
+        textAlign: 'left', fontFamily: 'var(--font-base)',
+      }}
+    >
+      {info ? (
+        <BankLogo id={info.id} nombre={info.nombre} color={info.color} dominio={info.dominio} size={28} radius={7} />
+      ) : (
+        <span style={{ width: 28, height: 28, borderRadius: 7, background: 'var(--gf-gray-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon name="clock" size={14} color={vencido ? 'var(--gf-expense)' : 'var(--gf-gray-400)'} />
+        </span>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {m.descripcion || '(sin descripción)'}
+        </div>
+        <div style={{ fontSize: 11, color: vencido ? 'var(--gf-expense)' : 'var(--color-text-sec)', fontWeight: vencido ? 700 : 400 }}>
+          {pie}{m.banco ? ` · ${medioCanonico(m.banco, config?.bancos)}` : ''}
+        </div>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{monto}</div>
+      {esAdmin && <Icon name="pencil" size={12} color="var(--gf-gray-300)" />}
+    </button>
+  );
+}
+
+const fmtDiaCorto = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
+
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
 function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, mapaTc, tcEfectivo, avisoTc, onIrAGastos }: {
@@ -361,85 +423,14 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
   const [hoyExpandido, setHoyExpandido] = useState(true);
   const [gastadoExpandido, setGastadoExpandido] = useState(true);
-  // Cifras vivas que no vienen de un movimiento (esperados no pagados): TC de hoy, siempre.
-  const eqVivo = (monto: number, moneda: Moneda): Eq => moneda === 'ARS'
-    ? { ars: monto, usd: tcEfectivo ? monto / tcEfectivo : 0 }
-    : { ars: monto * tcEfectivo, usd: monto };
-
-  // Card HOY (solo para el mes actual). F9.99.8 — unión de:
-  //  (a) esperados con diaVencimiento === hoy (comportamiento pre-existente),
-  //  (b) esperados en estado 'vencido' (por definición de estadoItem, sin match → no cubiertos),
-  //  (c) futuros sueltos (gastos manuales sin plantilla) con fecha === hoy.
-  // Vencidos primero, sin duplicar si un ítem cae en (a) y (b) a la vez (no puede pasar: 'vencido'
-  // exige diaVencimiento < hoy.getDate()).
-  const hoyEsperados: CheckItem[] = [];
-  if (esMesActual) {
-    const vistos = new Set<string>();
-    for (const ci of checklist) if (ci.estado === 'vencido') { hoyEsperados.push(ci); vistos.add(ci.item.id); }
-    for (const ci of checklist) if (ci.item.diaVencimiento === hoy.getDate() && !vistos.has(ci.item.id)) hoyEsperados.push(ci);
-  }
   const inicioHoy = inicioDia(hoy);
-  const sueltosHoy = esMesActual
-    ? sueltosFuturos.filter(m => inicioDia(m.fecha).getTime() === inicioHoy.getTime())
-    : [];
-  // F9.102 1a — tercera fuente: movimientos reales de caja del día que NO son ya matches
-  // de algún esperado (mismo dedupe que sueltosFuturosDelMes) ni ya listados como sueltos
-  // (esos son los no-pagados de hoy, capturados arriba). En la práctica esto son los gastos
-  // de hoy YA pagados que ningún ítem esperado atrapó — ej. un suelto cargado y pagado el
-  // mismo día. Van al final: ya están resueltos.
-  const matchedIds = new Set(checklist.flatMap(ci => ci.matches.map(m => m.id)));
-  const sueltosHoyIds = new Set(sueltosHoy.map(m => m.id));
-  const realesHoy = esMesActual
-    ? movs.filter(m =>
-        m.tipo === 'Gasto' &&
-        inicioDia(m.fecha).getTime() === inicioHoy.getTime() &&
-        !matchedIds.has(m.id) &&
-        !sueltosHoyIds.has(m.id)
-      )
-    : [];
-  const hoyItems: HoyEntry[] = [
-    ...hoyEsperados.map(ci => ({ kind: 'esperado', ci } as AgendaEntry)),
-    ...sueltosHoy.map(mov => ({ kind: 'suelto', mov } as AgendaEntry)),
-    ...realesHoy.map(mov => ({ kind: 'real', mov } as HoyEntry)),
-  ];
 
-  // Total de hoy pendiente (ARS eq) para el header de Card HOY, sobre el conjunto ampliado.
-  // F9.76 — pendiente/pagado por estado real, no por presencia de match. Un por_confirmar sigue
-  // siendo deuda hasta que el pago real lo confirme.
-  // F9.102 1b — la rama 'esperado' usa pendienteDeEntrada (monto REAL de los matches cuando
-  // por_confirmar/parcial) en vez de leer item.montoEsperado directamente — antes un
-  // por_confirmar con montoEsperado null quedaba en $0 pese a tener un match real cargado.
-  // F9.114 — el pendiente de un esperado es plata que TODAVÍA no salió → TC de hoy (eqVivo).
-  const hoyPendienteEq = hoyItems
-    .filter(e => !hoyEntryCubierto(e))
-    .reduce((s, e) => {
-      if (e.kind !== 'esperado') return sumaEq(s, eqDe(e.mov, tcDeMov));
-      return sumaEq(s, eqVivo(pendienteDeEntrada(e), e.ci.item.moneda));
-    }, EQ0);
-  const todoPagadoHoy = hoyItems.length > 0 && hoyItems.every(hoyEntryCubierto);
-  // F9.102 1b — total pagado del día (todos los ítems, incluidos los reales) para mostrar
-  // junto al check "Al día" cuando todoPagadoHoy.
-  const hoyTotalEq = hoyItems.reduce((s, e) => {
-    if (e.kind === 'esperado') return e.ci.matches.reduce((a, m) => sumaEq(a, eqDe(m, tcDeMov)), s);
-    return sumaEq(s, eqDe(e.mov, tcDeMov));
-  }, EQ0);
-
-  // F9.92.1 — desglose por banco de lo ya conciliado hoy (los pendientes sin match no tienen banco).
-  // F9.102 1b — suma también los 'real' (comparten forma con 'suelto': ambos tienen .mov).
-  const hoyPorBanco = new Map<string, Eq>();
-  for (const e of hoyItems) {
-    if (e.kind === 'esperado') {
-      const banco = e.ci.matches[0]?.banco;
-      if (!banco) continue;
-      const monto = e.ci.matches.reduce((s, m) => sumaEq(s, eqDe(m, tcDeMov)), EQ0);
-      hoyPorBanco.set(banco, sumaEq(hoyPorBanco.get(banco) ?? EQ0, monto));
-    } else {
-      if (!hoyEntryCubierto(e) || !e.mov.banco) continue;
-      hoyPorBanco.set(e.mov.banco, sumaEq(hoyPorBanco.get(e.mov.banco) ?? EQ0, eqDe(e.mov, tcDeMov)));
-    }
-  }
-  // F9.132.1 — revierte el orden por USD del cambio 2: vuelve a `.ars`, que es la moneda dominante.
-  const hoyBancos = [...hoyPorBanco.entries()].sort((a, b) => b[1].ars - a[1].ars);
+  // F9.132.2 cambio 1 — acá vivía la construcción de `hoyItems` (F9.99.8): la unión de esperados
+  // con `diaVencimiento === hoy`, esperados en estado 'vencido', sueltos del día y reales del día,
+  // con sus totales `hoyPendienteEq` / `hoyTotalEq` / `hoyBancos`. Se borra entera, no se deja
+  // "por las dudas": la rejilla de `diaVencimiento` dejaba la card vacía todos los días salvo el
+  // 20, y desde F9.132.1 (`banks={[]}`) la mitad de esos cálculos ya no llegaba a la pantalla.
+  // Las dos cards se construyen ahora directamente sobre `cajaMov`, abajo.
 
   // ── F9.132.1 — CARD 2: lo que YA se gastó hoy ───────────────────────────────
   // MISMA fuente que la fila HOY de "Gastos por día": `cajaMov` filtrado al día. No es preferencia
@@ -449,21 +440,47 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // que es el caso de los 7 resúmenes de tarjeta del 7/8/2026. Resultado medido: "Nada que pagar
   // hoy" con cuatro bancos y $ 11.085.000 en la fila de al lado. Compartiendo fuente con `porDia`
   // eso no puede volver a pasar por construcción.
+  // F9.132.2 cambio 2 — filtro `pagado === true`. Sin él, en cuanto la Card 1 dejó de mirar
+  // `diaVencimiento` los dos impagos del día (AYSA y Empresa Distribuidora) aparecían en las
+  // DOS cards y sumaban en los dos totales. Las cards son excluyentes por construcción: misma
+  // fuente, mismo filtro de día, y `pagado` como único discriminante.
   const gastadoHoy = cajaMov
-    .filter(m => m.tipo === 'Gasto' && inicioDia(m.fecha).getTime() === inicioHoy.getTime())
+    .filter(m => m.tipo === 'Gasto' && inicioDia(m.fecha).getTime() === inicioHoy.getTime() && m.pagado === true)
     .sort((a, b) => arsEq(b, tcDeMov) - arsEq(a, tcDeMov));
   const gastadoHoyTotal = totalReal(gastadoHoy);
   const gastadoPorBanco = [...agruparReal(gastadoHoy, m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos)).entries()]
     .sort((a, b) => b[1].ars - a[1].ars);
 
-  // ── F9.132.1 — CARD 1: lo que TODAVÍA hay que pagar hoy ─────────────────────
-  // Los pagados no van acá: van a la Card 2 y no suman a este total. Son dos plata distintas.
-  const aPagarHoy = hoyItems.filter(e => !hoyEntryCubierto(e));
-  const aPagarTotal: MontoReal = aPagarHoy.reduce((s, e) => (
-    e.kind === 'esperado'
-      ? sumarReal(s, e.ci.item.moneda, pendienteDeEntrada(e))
-      : sumarReal(s, e.mov.moneda, e.mov.monto)
-  ), REAL0);
+  // ── F9.132.2 — CARD 1: lo que TODAVÍA hay que pagar hoy ─────────────────────
+  // F9.132.2 cambio 1 — se corta la dependencia de `hoyItems`, que arrastraba el filtro por
+  // `diaVencimiento`: ese campo está poblado en 1 de 22 ítems activos, así que la card estaba
+  // vacía todos los días salvo el 20. Ahora comparte fuente con `porDia` y con la Card 2
+  // —`cajaMov` filtrado al día— y el único filtro que la separa de la Card 2 es `pagado`.
+  //   Criterio de "a pagar": `pagado === false`. Los `pagado: true` sin confirmar NO entran:
+  // esa plata ya salió y lo que falta es confirmarla, que es otro problema; meterlos acá haría
+  // que el total volviera a significar dos cosas.
+  //   La partición se hace por `m.fecha` (no por fecha efectiva) para que Card 1 + Card 2 dé
+  // exacto el total de la fila HOY: cualquier otro criterio abre un hueco entre las dos.
+  const delDia = cajaMov.filter(m => m.tipo === 'Gasto' && inicioDia(m.fecha).getTime() === inicioHoy.getTime());
+  const aPagarHoy = delDia
+    .filter(m => m.pagado !== true)
+    .sort((a, b) => arsEq(b, tcDeMov) - arsEq(a, tcDeMov));
+  const aPagarTotal: MontoReal = totalReal(aPagarHoy);
+  // F9.132.2 cambio 3 — se revierte `banks={[]}`: ahora hay movimiento detrás de cada fila, y el
+  // banco del movimiento es de dónde sale la plata. (`item.banco` queda como fallback para el
+  // pendiente sin match, que no vive en esta card.)
+  const aPagarPorBanco = [...agruparReal(aPagarHoy, m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos)).entries()]
+    .sort((a, b) => b[1].ars - a[1].ars);
+
+  // Vencidos: impagos de días ANTERIORES. Sección propia y subtotal propio — no se suman al
+  // total del encabezado, que es el de hoy. Son dos plata distintas, dos números.
+  // Acá sí manda la fecha efectiva: un gasto cargado el 4 que vence el 10 no está vencido.
+  // Solo en el mes actual: bajo el rótulo HOY, "vencido" tiene que medirse contra hoy. Mirando
+  // julio en septiembre, todo julio está vencido y la sección no diría nada.
+  const aPagarVencidos = !esMesActual ? [] : cajaMov
+    .filter(m => m.tipo === 'Gasto' && m.pagado !== true && fechaEfectivaMov(m).getTime() < inicioHoy.getTime())
+    .sort((a, b) => fechaEfectivaMov(a).getTime() - fechaEfectivaMov(b).getTime());
+  const aPagarVencidosTotal: MontoReal = totalReal(aPagarVencidos);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -556,27 +573,33 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       {/* F9.132.1 cambio A — la card vuelve ARRIBA, a la posicion previa a F9.132. Se probo
           abajo y no sirve: lo del dia es lo primero que se busca al abrir la app. No volver a
           moverla sin pedido explicito. `hoyExpandido` conserva su default. */}
-      {/* F9.99.8.1 — Card Hoy pasa a usar la MISMA fila que "Gastos por día" (DiaRowShell):
-          chips de banco, total grande/chico, expandible. El contenido expandido agrega
-          estado por ítem (check/reloj/alerta/vencido) y lápiz de edición cuando hay un único
-          movimiento real detrás del ítem (esperado con 1 match, o el suelto mismo).
+      {/* F9.99.8.1 — Card Hoy usa la MISMA fila que "Gastos por día" (DiaRowShell): chips de
+          banco, total grande/chico, expandible.
           F9.132.1 — CARD 1: solo lo que TODAVÍA hay que pagar. El total ya no alterna de
           significado (era `hoyPendienteEq` o `hoyTotalEq` según el estado, sin decir cuál): acá
           siempre es "a pagar", y lo gastado tiene su propia card abajo con su propio total.
-          `banks={[]}` a propósito — los chips de banco son de lo YA pagado y ahora viven en la
-          Card 2; un pendiente sin match no tiene banco todavía.
+          F9.132.2 — las filas ahora son MOVIMIENTOS impagos, no entradas de agenda: el estado
+          (check/reloj/alerta) sobraba porque todas las filas comparten el mismo, `pagado: false`.
+          Y `banks` vuelve a estar poblado: hay movimiento detrás de cada fila, así que hay banco.
           F9.132.1 cambio C — `fmtChip` usa montos REALES (pesos y dólares por moneda de origen),
           revirtiendo el USD equivalente del cambio 2 de F9.132. */}
       <DiaRowShell
         dayBig={String(hoy.getDate())}
         daySub="HOY"
-        banks={[]}
+        banks={aPagarPorBanco}
         totalNode={
           <>
             <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: aPagarHoy.length > 0 ? 'var(--gf-expense)' : 'var(--color-text)' }}>
               {fmtReal(aPagarTotal)}
             </div>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)' }}>a pagar</div>
+            {/* El subtotal de vencidos va AL LADO del de hoy y etiquetado, nunca sumado: son
+                dos plata distintas y el encabezado es el de hoy. */}
+            {aPagarVencidos.length > 0 && (
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+                +{fmtReal(aPagarVencidosTotal)} vencido
+              </div>
+            )}
           </>
         }
         highlight
@@ -585,83 +608,55 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
         config={config}
         fmtChip={fmtChipReal}
       >
-        {hoyExpandido && (aPagarHoy.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--color-text-sec)', marginTop: 10 }}>
-            {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
-          </div>
-        ) : (
+        {hoyExpandido && (
           <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {aPagarHoy.map((e, i) => {
-              const esVencido    = e.kind === 'esperado' && e.ci.estado === 'vencido';
-              const pagado       = hoyEntryCubierto(e);
-              const porConfirmar = e.kind === 'esperado' && !pagado && (e.ci.estado === 'por_confirmar' || e.ci.estado === 'parcial');
-              const etiqueta = e.kind === 'esperado'
-                ? ([e.ci.item.categoria, e.ci.item.subcategoria].filter(Boolean).join(' › ') || e.ci.item.notas || '(sin categoría)')
-                : (e.mov.descripcion || '(sin descripción)');
-              const bancoPago = e.kind === 'esperado' ? e.ci.matches[0]?.banco : (pagado ? e.mov.banco : null);
-              const bancoInfo = bancoPago ? bancoDeNombre(bancoPago, config?.bancos) : undefined;
-              const key = e.kind === 'esperado' ? e.ci.item.id : e.mov.id;
-              // F9.132 — con el modo privacidad activo esta fila mostraba el monto crudo vía
-              // fmtMoney, así que la card quedaba tapada arriba y destapada acá. Es el mismo hueco
-              // que F9.123 (title de las barras) y F9.124 §5 (eje del SVG), tercera aparición: todo
-              // lo que imprime plata tiene que pasar por un formateador que conozca el modo.
-              const montoEq = e.kind === 'esperado'
-                ? (e.ci.matches.length > 0
-                    ? e.ci.matches.reduce((a, m) => sumaEq(a, eqDe(m, tcDeMov)), EQ0)
-                    : (e.ci.item.montoEsperado != null ? eqVivo(e.ci.item.montoEsperado, e.ci.item.moneda) : null))
-                : eqDe(e.mov, tcDeMov);
-              const monto = privado
-                ? (montoEq ? fmtPct(montoEq.ars, c.ingArsEq) : '—')
-                : e.kind === 'esperado'
-                  ? (e.ci.item.montoEsperado != null ? fmtMoney(e.ci.item.montoEsperado, { from: e.ci.item.moneda, to: e.ci.item.moneda }) : '—')
-                  : fmtMoney(e.mov.monto, { from: e.mov.moneda, to: e.mov.moneda });
-              // Lápiz de edición (paridad con la fila de Por día): un suelto o un 'real' son
-              // siempre un único movimiento (editable); un esperado con 0 o >1 matches no lo es.
-              const editTarget = e.kind !== 'esperado' ? e.mov : (e.ci.matches.length === 1 ? e.ci.matches[0] : null);
-              const editable = esAdmin && editTarget != null;
-              return (
-                <button
-                  key={key}
-                  onClick={editable ? () => onEditarMovimiento?.(editTarget) : undefined}
-                  disabled={!editable}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', width: '100%',
-                    borderBottom: i < aPagarHoy.length - 1 ? '1px solid var(--gf-gray-100)' : 'none',
-                    background: 'none', border: 'none', cursor: editable ? 'pointer' : 'default',
-                    textAlign: 'left', fontFamily: 'var(--font-base)',
-                  }}
-                >
-                  {pagado && bancoInfo ? (
-                    <BankLogo id={bancoInfo.id} nombre={bancoInfo.nombre} color={bancoInfo.color} dominio={bancoInfo.dominio} size={28} radius={7} />
-                  ) : (
-                    <span style={{ width: 28, height: 28, borderRadius: 7, background: pagado ? 'var(--gf-emerald)' : 'var(--gf-gray-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Icon
-                        name={pagado ? 'check' : porConfirmar ? 'alert-circle' : 'clock'}
-                        size={14}
-                        color={pagado ? '#fff' : porConfirmar ? 'var(--gf-out)' : esVencido ? 'var(--gf-expense)' : 'var(--gf-gray-400)'}
-                      />
-                    </span>
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{etiqueta}</div>
-                    <div style={{ fontSize: 11, color: esVencido && !pagado ? 'var(--gf-expense)' : 'var(--color-text-sec)', fontWeight: esVencido && !pagado ? 700 : 400 }}>
-                      {pagado
-                        ? `${e.kind === 'real' ? 'Pagado' : 'Conciliado'}${bancoPago ? ` · ${medioCanonico(bancoPago, config?.bancos)}` : ''}`
-                        : porConfirmar ? 'Cargado · a confirmar'
-                        : e.kind === 'esperado' && esVencido ? `Venció día ${e.ci.item.diaVencimiento}`
-                        : e.kind === 'suelto' ? 'Sin plantilla · a pagar'
-                        : 'A pagar'}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, color: pagado ? 'var(--gf-income)' : 'var(--color-text)' }}>
-                    {monto}
-                  </div>
-                  {editable && <Icon name="pencil" size={12} color="var(--gf-gray-300)" />}
-                </button>
-              );
-            })}
+            {aPagarHoy.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>
+                {esMesActual ? 'Nada que pagar hoy.' : 'Ver mes actual para pagos de hoy.'}
+              </div>
+            ) : aPagarHoy.map((m, i) => (
+              <FilaAPagar
+                key={m.id}
+                m={m}
+                config={config}
+                conBorde={i < aPagarHoy.length - 1}
+                esAdmin={esAdmin}
+                onEditar={onEditarMovimiento}
+                monto={privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                pie="A pagar"
+              />
+            ))}
+
+            {/* Sección propia para los vencidos: su propio encabezado y su propio subtotal.
+                Mezclarlos con los de hoy haría que el total del encabezado significara dos
+                cosas otra vez, que es exactamente el bug que F9.132.1 vino a cerrar. */}
+            {aPagarVencidos.length > 0 && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginTop: 12, paddingTop: 8, borderTop: '1px solid var(--gf-gray-150)' }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--gf-expense)' }}>
+                    Vencido · {aPagarVencidos.length}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>
+                    {fmtReal(aPagarVencidosTotal)}
+                  </span>
+                </div>
+                {aPagarVencidos.map((m, i) => (
+                  <FilaAPagar
+                    key={m.id}
+                    m={m}
+                    config={config}
+                    conBorde={i < aPagarVencidos.length - 1}
+                    esAdmin={esAdmin}
+                    onEditar={onEditarMovimiento}
+                    monto={privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                    pie={`Venció ${fmtDiaCorto(fechaEfectivaMov(m))}`}
+                    vencido
+                  />
+                ))}
+              </>
+            )}
           </div>
-        ))}
+        )}
       </DiaRowShell>
 
       {/* F9.132.1 — CARD 2, propia y debajo de la Card 1. Son dos plata distintas y dos totales
