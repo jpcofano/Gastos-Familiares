@@ -139,6 +139,17 @@ function nombrePersona(memberId: string | null, config: FamiliaConfig | null): s
   return config?.miembros[memberId]?.nombre ?? memberId;
 }
 
+// F9.133 §1 — `excluirDash: true` marca un AGREGADO ESTRUCTURAL: el pago de tarjeta consolidado y
+// las percepciones consolidadas que el importador genera para cuadrar el resumen. No tienen
+// `persona` porque no les corresponde tener una — no es que falte cargarla.
+// Mostrarlos como "Sin asignar" convierte una decisión de modelo en un hueco de carga inexistente,
+// y de paso esconde el hueco verdadero adentro del ruido: sobre 2026-06/07/08 eran 22 de los 60
+// movimientos sin persona. Helper único acá, no un `if` en cada consumidor.
+function etiquetaPersona(m: Movement, config: FamiliaConfig | null): string {
+  if (m.excluirDash) return 'Agregado';
+  return m.persona ? nombrePersona(m.persona, config) : 'Sin asignar';
+}
+
 // ── KPIs de caja (incluirResumenMes=true) ────────────────────────────────────
 
 interface Kpis {
@@ -690,10 +701,11 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                   cursor: esAdmin ? 'pointer' : 'default', textAlign: 'left', fontFamily: 'var(--font-base)', fontSize: 12.5,
                 }}
               >
-                <span style={{ fontWeight: 600, flexShrink: 0 }}>
-                  {/* Un gasto sin dueño es información, no un error a ocultar: la fila se muestra
-                      igual. Medido: entre el 4% y el 30% de los movimientos según el mes. */}
-                  {m.persona ? nombrePersona(m.persona, config) : 'Sin asignar'}
+                <span style={{ fontWeight: 600, flexShrink: 0, color: m.excluirDash ? 'var(--gf-gray-400)' : undefined }}>
+                  {/* F9.133 §1 — "Agregado" para los estructurales, "Sin asignar" solo para el hueco
+                      real. Un gasto sin dueño es información y la fila se muestra igual; lo que no
+                      puede pasar es que un agregado del importador se lea como carga faltante. */}
+                  {etiquetaPersona(m, config)}
                 </span>
                 <span style={{ flex: 1, minWidth: 0, color: 'var(--color-text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {m.descripcion || '(sin descripción)'}

@@ -368,6 +368,9 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     monto:               d.montoTotal != null ? String(d.montoTotal) : undefined,
     hashPdf:             comp.hashPdf,
     refStoragePdf:       comp.refStoragePdf,
+    // F9.133 §3 — último eslabón de la precedencia `item.persona → preload.persona → memberId`.
+    // Acá NO hay ítem esperado en juego (rama 3, alta suelta), así que quien opera es la mejor
+    // aproximación disponible; las ramas con ítem la sobrescriben más abajo.
     persona:             memberId,
     categoria:           pm.categoriaPrellena    ?? sugerenciaValida?.categoria    ?? undefined,
     subcategoria:        pm.subcategoriaPrellena ?? sugerenciaValida?.subcategoria ?? undefined,
@@ -418,6 +421,8 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
         tipo:           itemForzado?.tipo         ?? preloadBase.tipo,
         categoria:      itemForzado?.categoria    ?? preloadBase.categoria,
         subcategoria:   itemForzado?.subcategoria ?? preloadBase.subcategoria,
+        // F9.133 §3 — ver el comentario de `preloadBase.persona`.
+        persona:        itemForzado?.persona      ?? preloadBase.persona,
       }
     : pm.rama === 2
     ? {
@@ -427,6 +432,12 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
         categoria:      esperado?.categoria    ?? undefined,
         subcategoria:   esperado?.subcategoria ?? undefined,
         itemEsperadoId: itemEsperadoEfectivo,
+        // F9.133 §3 — la persona del ÍTEM le gana a la de quien opera. Sin esto, un admin que carga
+        // el comprobante del gasto de otro lo deja atribuido a sí mismo: el campo queda poblado, no
+        // aparece como hueco, y ATRIBUYE MAL EN SILENCIO — peor que dejarlo vacío. Medido en
+        // producción: 2 movimientos de "Micro Rugby" quedaron en Juan cuando el ítem dice Federico.
+        // `item.persona` está poblada en 8 de 24 ítems y hasta acá no se leía nunca.
+        persona:        esperado?.persona      ?? preloadBase.persona,
       }
     : preloadBase;
 

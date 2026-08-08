@@ -48,7 +48,12 @@ export function docAMovimiento(id: string, data: DocumentData): Movement {
     cuenta:                 data.cuenta                           ?? null,
     tarjetaCodigo:          data.tarjetaCodigo                    ?? null,
     tarjeta:                data.tarjeta                          ?? null,
-    persona:                data.persona                          ?? null,
+    // F9.133 §2 — `|| null` y no `?? null`: la cadena vacía NO es un memberId, y `??` la deja
+    // pasar. Un solo movimiento en producción tenía `persona: ""` y generaba una fila con clave
+    // vacía en `porPersonaIngreso` (`m.persona ?? '—'` tampoco la captura). Se normaliza acá, en el
+    // borde del dominio, y no con un parche en cada consumidor: si el contrato dice
+    // `string | null`, la cadena vacía no debería existir del otro lado.
+    persona:                data.persona                          || null,
     creadoPor:              data.creadoPor,
     pagado:                 data.pagado                           ?? false,
     excluirDash:            data.excluirDash                      ?? false,

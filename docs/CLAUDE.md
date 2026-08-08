@@ -1422,6 +1422,39 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   existe y es confiable, así que la separación no inventa nada. Con privacidad activa sale un único
   % contra la base de la pantalla: porcentualizar dos monedas por separado daría dos números que no
   se comparan entre sí. `tsc`: 41 → 41; `vite build` OK. Frontend puro: deploy `--only hosting`.
+- F9.133 — `persona`: agregados, cadena vacía y **propagación al conciliar**. Ver
+  `docs/prompts/F9.133-persona-agregados-y-propagacion.md`. Salió de una auditoría que **refutó la
+  hipótesis que la abrió**: los movimientos sin `persona` (4%–30% según el mes) no eran gastos
+  compartidos sin dueño, así que **no se agregó ninguna categoría "Familia"**.
+  **§1 — `excluirDash: true` significa AGREGADO ESTRUCTURAL**, no carga faltante: son el pago de
+  tarjeta consolidado y las percepciones consolidadas que el importador genera para cuadrar el
+  resumen, y no tienen `persona` porque no les corresponde tener una. Las vistas de personas los
+  muestran como **"Agregado"** vía `etiquetaPersona()`, un helper único —no un `if` por consumidor—.
+  `resumenesTarjeta.ts` **no se tocó**: el dato estaba bien, la lectura estaba mal.
+  **Lo que §1 NO resuelve, y está medido:** sobre 2026-06/07/08 el "sin persona" baja de **60 a 38**,
+  no a menos de 10. Los 38 son **36 percepciones e intereses de tarjeta** con `excluirDash: false`
+  —porque **sí cuentan como consumo** en el dashboard, así que el flag no las alcanza—, más el
+  colegio de junio y un "Auto › Agua". Clasificarlas es una decisión de modelo que quedó pendiente.
+  **Corrección a la auditoría previa:** esas percepciones **no son de importe cero**; tienen importes
+  reales en ARS (hasta 49.695) y aparecían en 0 porque **no tienen `tcUsdArs`**.
+  **§2 — `persona: ""` se normaliza en el borde del dominio.** `docAMovimiento` pasa de `?? null` a
+  `|| null`: la cadena vacía no es un memberId y `??` la dejaba pasar, generando una fila con clave
+  vacía en `porPersonaIngreso`. Se corrige en la lectura y no con un parche por consumidor. Script
+  one-shot `scripts/limpiarPersonaVacia.ts` (dry-run por defecto) corrido contra producción:
+  `{encontrados: 1, actualizados: 1}`, relectura en 0.
+  **§3 — la persona del ítem le gana a la de quien opera.** `Comprobantes.tsx` precargaba
+  `persona: memberId`, y `AltaMovimiento` además pisaba ese valor con el **primer miembro activo del
+  mapa** (o sea el orden de inserción de la config). Si un admin cargaba el comprobante del gasto de
+  otro, quedaba atribuido a sí mismo: **el campo queda poblado, no aparece como hueco, y atribuye mal
+  en silencio** — peor que dejarlo vacío. Precedencia ahora: **`item.persona → preload.persona →
+  memberId`**, y el fallback al primer miembro solo actúa si el valor actual no es un miembro activo.
+  `item.persona` está poblada en **8 de 24** ítems y hasta acá **no se leía nunca**. El campo queda
+  visible y editable, con una línea que avisa cuando la atribución vino del ítem y no del que opera:
+  una atribución automática que no se ve es la misma clase de problema que este cambio arregla.
+  **Movimientos históricos mal atribuidos: 2** (dos "Micro Rugby" en Juan cuando el ítem dice
+  Federico). **No se corrigieron** — se reportan y se decide aparte.
+  Los dependientes siguen sin ver los agregados (`persona: null` no matchea su query ni su regla), y
+  eso está bien y no se cambió. `tsc`: 41 → 41; `vite build` OK. Frontend puro: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

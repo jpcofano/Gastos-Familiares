@@ -134,9 +134,17 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
         setEtiquetas(e);
         if (fam) {
           setConfig(fam);
+          // F9.133 §3 — la precedencia es `item.persona → preload.persona → memberId`, y este
+          // efecto rompía el tercer eslabón: pisaba `memberId` con el PRIMER miembro activo del
+          // mapa, o sea el orden de inserción de la config. Ahora el fallback solo actúa cuando el
+          // valor actual no es un miembro activo (memberId ausente o dado de baja); si el admin es
+          // un miembro válido, queda él, que es lo que dice la precedencia.
           if (esAdmin && !preload?.persona) {
-            const primero = Object.keys(fam.miembros).find(k => fam.miembros[k].activo);
-            if (primero) setPersona(primero);
+            const actualValido = persona && fam.miembros[persona]?.activo;
+            if (!actualValido) {
+              const primero = Object.keys(fam.miembros).find(k => fam.miembros[k].activo);
+              if (primero) setPersona(primero);
+            }
           }
         }
         setCargandoCatalogos(false);
@@ -399,6 +407,14 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
               <select id="alta-persona" value={persona} onChange={e => setPersona(e.target.value)} style={selectStyle}>
                 {miembrosActivos.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
               </select>
+              {/* F9.133 §3 — cuando el gasto queda atribuido a otro, se dice. Una atribución
+                  automática que el usuario no ve es la misma clase de problema que la que este
+                  cambio arregla: el campo poblado no despierta sospecha y nadie la revisa. */}
+              {preload?.persona && preload.persona !== memberId && (
+                <div style={{ fontSize: 11, color: 'var(--color-text-sec)', marginTop: 4, lineHeight: 1.4 }}>
+                  Viene del gasto esperado, no de vos. Cambialo acá si no corresponde.
+                </div>
+              )}
             </FieldRow>
           ) : (
             <FieldRow label="Persona" value={miembro.nombre} readOnly />
