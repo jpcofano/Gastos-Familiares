@@ -1593,6 +1593,42 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   sobre `por_confirmar`, ampliado en F9.136).
   Frontend + Functions (un comentario). `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK.
   Deploy: `--only hosting` junto con F9.136 y F9.137.
+- F9.137 — sexto y séptimo caso del patrón de F9.136, y el `?? 0` de la card. Ver
+  `docs/prompts/F9.137-sexto-y-septimo-caso.md`.
+  **§3 — barrido sobre `src/` y `functions/` enteros: 2 rotos, 0 adicionales.** Los dos que
+  faltaban estaban fuera de `src/vistas`, que es donde F9.136 miró. Criterio confirmado en las 26
+  igualdades restantes: **preguntar por el estado está bien cuando lo que se quiere saber ES el
+  estado** (urgencia, orden, color) y mal cuando se lo usa de proxy de "hay match". Las listas
+  (`ACCIONABLE`, `ACCIONABLE_NOTIF`) ya incluían `'vencido'`; `functions:1424` es la máquina de
+  `entrantes`; los `ui_kits/*.jsx` no los importa la app.
+  **§1 — `informeMensual.ts:57`, la peor consecuencia de la serie.** No era una etiqueta: `:74-77`
+  cuenta ese bucket y le suma el monto **esperado**, así que un ítem con plata ya cargada entraba
+  al informe como pendiente y pedía de nuevo lo que ya estaba. Pasa a `ci.matches.length > 0`.
+  `'programado'` se queda por estado, a propósito: es mes futuro, no tiene movimiento todavía y
+  aun así no es algo que falte pagar hoy.
+  **`totalPendienteUsd` NO necesita `realUsd`, y la medición cambió la pregunta:** con el fix,
+  todo ítem con match cae en 'a confirmar', así que el bucket 'pendiente' contiene **solo ítems sin
+  match** — y ésos no tienen `realUsd` por construcción. La decisión que el prompt pedía tomar
+  queda sin objeto en vez de resuelta a ojo. Medido: **0 ítems 'pendiente' con match**.
+  **Los números del delta hoy son 0 y 0, y el motivo importa:** F9.138 limpió los `confirmadoPago`
+  incoherentes, así que ya no queda ningún `'vencido'` con match que dispare el caso. Que no haya
+  datos que lo disparen no es que el bug no exista — vuelve con que entre una factura impaga de
+  fecha pasada por extracto. Por eso el fix se verificó con un **caso construido a mano**
+  (`scripts/auditF9137.ts` §D, in-memory, no toca Firestore): un ítem `'vencido'` con 1 match pasa
+  de `pendiente` sumando `U$S 65,44` (el esperado) a `a confirmar`, teniendo `U$S 89,35` reales
+  cargados. **Declarar "0 cambios" y dar el arreglo por probado hubiera sido no probar nada.**
+  **§2 — `Notificaciones.tsx:76`:** un vencido con match dejaba de avisar "Pago detectado — falta
+  confirmar", que es justo el dato que evita cargarlo dos veces. `'parcial'` sigue por estado
+  porque dice algo más específico que "hay un pago".
+  **§4 — el `?? 0`: son 5 ítems de 22** (dos Pago Tarjeta, ABL, Colegio Sofi, Gas). `monto` pasa a
+  `number | null` y sin monto conocido se imprime `—` vía la constante `SIN_MONTO`, en los **tres**
+  renders (el `<Money>`, el `%` de privacidad —que tampoco puede inventar un 0%— y el
+  `MontoInlineEdit`, que tenía su propio `?? 0`). La fila se muestra igual: el ítem existe y es
+  accionable, lo que no se sabe es cuánto. El criterio ya estaba escrito en `informeMensual.ts:64`
+  desde antes; lo que faltaba era aplicarlo acá. El `?? 0` que **queda** en `totalPendienteUsd` es
+  correcto y está comentado: es un total, no un número que se muestra.
+  Frontend puro. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`
+  junto con F9.136 y F9.138.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

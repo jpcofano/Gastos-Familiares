@@ -52,9 +52,16 @@ export function construirResumenFijos(checkItems: CheckItem[], tc: number): Resu
   const filas: FilaFijo[] = [];
   for (const ci of checkItems) {
     if (ci.estado === 'no_aplica') continue;
+    // F9.137 §1 — sexto caso del patrón de F9.136: la lista `'por_confirmar' || 'parcial'` era
+    // otra vez el estado usado como proxy de "hay match". Desde F9.132.2 un ítem con movimiento
+    // cargado puede ser `'vencido'`, caía al else y entraba al informe como **pendiente**, que
+    // acá no es una etiqueta: `:74-77` cuenta ese bucket y le suma el monto ESPERADO, teniendo
+    // el real calculado dos líneas abajo. El informe pedía plata que ya estaba cargada.
+    // `'programado'` se queda por estado y no por match: es mes futuro, no tiene movimiento
+    // todavía y aun así no es algo que falte pagar hoy.
     const estado: EstadoFijo = cubierto(ci.estado)
       ? 'pagado'
-      : (ci.estado === 'por_confirmar' || ci.estado === 'parcial' || ci.estado === 'programado')
+      : (ci.matches.length > 0 || ci.estado === 'programado')
         ? 'a confirmar'
         : 'pendiente';
     const realUsd = ci.matches.length > 0
@@ -71,6 +78,12 @@ export function construirResumenFijos(checkItems: CheckItem[], tc: number): Resu
     const orden = { pendiente: 0, 'a confirmar': 1, pagado: 2 } as const;
     return orden[a.estado] - orden[b.estado] || a.nombre.localeCompare(b.nombre, 'es');
   });
+  // F9.137 §1 — se evaluó usar `realUsd` cuando existe y NO hace falta: con el fix de arriba,
+  // todo ítem con match cae en 'a confirmar', así que el bucket 'pendiente' contiene únicamente
+  // ítems SIN match — y ésos no tienen `realUsd` por construcción (`:60` lo deja en null).
+  // El `?? 0` que queda es el de un pendiente sin `montoEsperado`: ahí sí es correcto sumar cero,
+  // porque es un total y no un número que se muestra. Lo que no se puede es IMPRIMIR ese cero
+  // como si fuera el monto del ítem — ver `esperadoUsd` arriba y F9.137 §4 en la card.
   const pend = filas.filter(f => f.estado === 'pendiente');
   return {
     filas,

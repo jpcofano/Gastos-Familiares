@@ -55,7 +55,7 @@ function estadoPorDias(dias: number): EstadoRec {
 function recordatoriosEsperados(items: ExpectedItem[], movs: Movement[], hoy: Date, navigate: NavigateFunction): Recordatorio[] {
   const checklist = calcularChecklist(items, movs, mesActualStr());
   const out: Recordatorio[] = [];
-  for (const { item, estado } of checklist) {
+  for (const { item, estado, matches } of checklist) {
     if (item.tipo !== 'Gasto') continue;
     if (!ACCIONABLE_NOTIF.includes(estado)) continue;
     let fecha: Date | null = null;
@@ -73,7 +73,13 @@ function recordatoriosEsperados(items: ExpectedItem[], movs: Movement[], hoy: Da
       id: `esp-${item.id}`,
       tipo: 'esperado' as const,
       titulo: [item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || '(sin categoría)',
-      sub: estado === 'por_confirmar' ? 'Pago detectado — falta confirmar' : estado === 'parcial' ? 'Pago parcial detectado' : undefined,
+      // F9.137 §2 — séptimo caso del patrón de F9.136: `estado === 'por_confirmar'` como proxy de
+      // "hay match". Un vencido con el movimiento ya cargado dejaba de avisar que estaba cargado,
+      // que es justo el dato que evita cargarlo de nuevo. Se pregunta por el match; `'parcial'`
+      // sigue por estado porque dice algo más específico que "hay un pago".
+      sub: matches.length === 0 ? undefined
+        : estado === 'parcial' ? 'Pago parcial detectado'
+        : 'Pago detectado — falta confirmar',
       fecha, estado: estadoRec,
       montos: item.montoEsperado != null ? [{ monto: item.montoEsperado, moneda: item.moneda }] : [],
       onTap: () => navigate('/resumen', { state: { sec: 'fijos' } }),

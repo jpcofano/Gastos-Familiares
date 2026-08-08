@@ -368,6 +368,10 @@ function FilaAPagar({ m, config, conBorde, esAdmin, onEditar, monto, pie, vencid
 
 const fmtDiaCorto = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
 
+// F9.137 §4 — lo que se imprime cuando NO hay monto conocido. Una constante y no un '—' suelto
+// por consumidor: son tres lugares y tienen que decir lo mismo. "No sé cuánto" no es "cero".
+const SIN_MONTO = '—';
+
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
 function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, mapaTc, tcEfectivo, avisoTc, onIrAGastos }: {
@@ -889,7 +893,12 @@ function MontoInlineEdit({ item }: { item: ExpectedItem }) {
       title="Editar monto esperado"
       style={{ cursor: 'text', borderBottom: '1px dashed var(--gf-gray-300)' }}
     >
-      <Money value={item.montoEsperado ?? 0} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
+      {/* F9.137 §4 — mismo criterio: sin monto esperado va la raya, no un "$ 0" que se lee como
+          "este gasto vale cero". El span sigue siendo clickeable, así que la raya invita a
+          cargarlo en vez de afirmar un importe que nadie declaró. */}
+      {item.montoEsperado == null
+        ? <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--gf-gray-400)' }}>{SIN_MONTO}</span>
+        : <Money value={item.montoEsperado} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />}
     </span>
   );
 }
@@ -935,7 +944,12 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
   // el ítem caía a `item.montoEsperado ?? 0` y mostraba **$ 0** teniendo un movimiento cargado.
   // Se pregunta por lo que el nombre dice. Para los tres estados de antes es equivalente.
   const tieneMatch = matches.length > 0;
-  const monto = tieneMatch ? montoReal : (item.montoEsperado ?? 0);
+  // F9.137 §4 — `?? 0` imprimía "no sé cuánto" como "$ 0", que son cosas distintas: son 5 ítems
+  // de 22 (dos Pago Tarjeta, ABL, Colegio Sofi, Gas). El criterio ya estaba escrito y aplicado en
+  // `informeMensual.ts:64` —"Sin monto esperado la fila igual va"—; acá faltaba. `null` significa
+  // sin monto conocido y NO se imprime número. La fila se muestra igual: el ítem existe y es
+  // accionable, lo que no se sabe es cuánto.
+  const monto: number | null = tieneMatch ? montoReal : item.montoEsperado;
   const etiqueta = [item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || '(sin categoría)';
 
   // F9.99.7 Parte 3 — pago adelantado: el mes real del pago (pagadoEn) difiere del mes del ítem.
@@ -984,10 +998,14 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
             {/* F9.120 — con privacidad no se muestra el monto ni el campo editable: un input
                 con el número real adentro haría inútil el modo. */}
+            {/* F9.137 §4 — `monto: null` es "no sé cuánto" y se rinde como raya, no como cero.
+                Vale para las tres ramas: el % con privacidad tampoco puede inventar un 0%. */}
             {privado
-              ? <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtPct(monto, basePriv)}</span>
+              ? <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{monto == null ? SIN_MONTO : fmtPct(monto, basePriv)}</span>
               : !tieneMatch && !item.tarjetaCodigo
               ? <MontoInlineEdit item={item} />
+              : monto == null
+              ? <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--gf-gray-400)' }}>{SIN_MONTO}</span>
               : <Money value={monto} currency={item.moneda} colored={false} decimals={0} style={{ fontSize: 15 }} />
             }
             {estado === 'parcial' && <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>Falta completar</div>}
