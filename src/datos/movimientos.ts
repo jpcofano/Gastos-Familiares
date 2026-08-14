@@ -219,6 +219,35 @@ export async function registrarPagoChecklist(
   });
 }
 
+// F9.140 §2 — `confirmadoPago: true` con `pagado: false` es imposible: no se puede verificar
+// una salida de plata que no ocurrió. F9.138 arregló dos writers y el par reapareció el
+// 2026-08-12 por un tercero. Esto lo corta en el punto de escritura, no en la limpieza.
+//
+// CORRIGE, no tira error: un throw acá deja al usuario sin poder confirmar un pago, que es peor
+// que el par incoherente. Y loguea quién lo disparó — sin eso, la corrección silenciosa esconde
+// al writer culpable, que es exactamente cómo este defecto sobrevivió a F9.138.
+//
+// Todo writer de pago del cliente pasa sus campos por acá. Es un guard, no una validación: nunca
+// rompe una escritura del usuario.
+type CamposPago = { pagado?: boolean; confirmadoPago?: boolean; [k: string]: unknown };
+
+export function marcarPago<T extends CamposPago>(campos: T, writer: string, movimientoId: string): T {
+  // La condición es `pagado !== true`, NO `pagado === false`, y la diferencia es todo el punto:
+  // el writer que causó los dos casos escribía `{confirmadoPago: true, pagadoEn: …}` sin mencionar
+  // `pagado` para nada. Un guard que solo mirara el `false` explícito no habría visto ese update
+  // —el campo llegaba ausente— y habría dado por cerrado un agujero que seguía abierto.
+  // Forzar `pagado: true` ante un `confirmadoPago: true` es exactamente lo que dice la invariante,
+  // así que el caso "ausente" no es una excepción a manejar: es el caso principal.
+  if (campos.confirmadoPago === true && campos.pagado !== true) {
+    console.error(
+      `[F9.140] invariante violada: confirmadoPago:true con pagado:${campos.pagado === false ? 'false' : 'ausente'}`,
+      `— corregido a pagado:true.`, `writer=${writer}`, `movimientoId=${movimientoId}`,
+    );
+    return { ...campos, pagado: true };
+  }
+  return campos;
+}
+
 // F9.138 §3 — este writer escribía `confirmadoPago: true` y NO tocaba `pagado`, así que dejaba
 // el movimiento en `confirmadoPago: true` + `pagado: false`: un par imposible bajo la semántica
 // de los campos (ver docs/CLAUDE.md, F9.138 §2 — no se puede verificar lo que no pasó).
@@ -232,7 +261,7 @@ export async function confirmarPagoEsperado(
   try {
     const batch = writeBatch(db);
     for (const m of matches) {
-      batch.update(doc(db, 'movimientos', m.id), {
+      batch.update(doc(db, 'movimientos', m.id), marcarPago({
         // Confirmar un pago implica que la plata salió. Si no salió, no hay nada que confirmar:
         // ese caso es "Registrar pago", que crea el movimiento con los dos campos en true.
         pagado: true,
@@ -242,7 +271,7 @@ export async function confirmarPagoEsperado(
         // cuando difiere del mes del ítem).
         pagadoEn: serverTimestamp(),
         actualizadoEn: serverTimestamp(),
-      });
+      }, 'confirmarPagoEsperado', m.id));
     }
     await batch.commit();
     return { ok: true, data: undefined };
@@ -263,12 +292,12 @@ export async function desmarcarPago(matches: Movement[]): Promise<Resultado<void
   try {
     const batch = writeBatch(db);
     for (const m of matches) {
-      batch.update(doc(db, 'movimientos', m.id), {
+      batch.update(doc(db, 'movimientos', m.id), marcarPago({
         pagado: false,
         confirmadoPago: false,
         pagadoEn: null,
         actualizadoEn: serverTimestamp(),
-      });
+      }, 'desmarcarPago', m.id));
     }
     await batch.commit();
     return { ok: true, data: undefined };
@@ -284,12 +313,12 @@ export async function desmarcarPago(matches: Movement[]): Promise<Resultado<void
 export async function marcarPagadoSuelto(mov: Movement): Promise<Resultado<void>> {
   try {
     const batch = writeBatch(db);
-    batch.update(doc(db, 'movimientos', mov.id), {
+    batch.update(doc(db, 'movimientos', mov.id), marcarPago({
       pagado: true,
       confirmadoPago: true,
       pagadoEn: serverTimestamp(),
       actualizadoEn: serverTimestamp(),
-    });
+    }, 'marcarPagadoSuelto', mov.id));
     await batch.commit();
     return { ok: true, data: undefined };
   } catch (e) {
@@ -300,12 +329,12 @@ export async function marcarPagadoSuelto(mov: Movement): Promise<Resultado<void>
 export async function desmarcarPagadoSuelto(mov: Movement): Promise<Resultado<void>> {
   try {
     const batch = writeBatch(db);
-    batch.update(doc(db, 'movimientos', mov.id), {
+    batch.update(doc(db, 'movimientos', mov.id), marcarPago({
       pagado: false,
       confirmadoPago: false,
       pagadoEn: null,
       actualizadoEn: serverTimestamp(),
-    });
+    }, 'desmarcarPagadoSuelto', mov.id));
     await batch.commit();
     return { ok: true, data: undefined };
   } catch (e) {

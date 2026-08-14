@@ -88,11 +88,22 @@ export function fechaEfectivaItem(item: ExpectedItem, matches: Movement[], mes: 
   return null;
 }
 
-// Cubierto a los efectos del vencimiento: la plata ya salió (`pagado`) o ya se confirmó que
-// salió (`confirmadoPago`). Un por_confirmar con el débito ya impactado NO está vencido:
-// lo que falta es la confirmación, que es otro problema.
+// F9.140 §1 — un movimiento está cubierto si la plata salió (`pagado`) o si alguien verificó
+// que salió (`confirmadoPago`). Exportado porque Resumen.tsx lo necesita: tener DOS definiciones
+// de "cubierto" en dos pantallas fue exactamente el defecto — la Card 1 filtraba por
+// `pagado !== true` y esto por `pagado || confirmadoPago`, así que un movimiento con el par roto
+// salía vencido en rojo en una pantalla y pagado en la otra (ITPA SA, 11/8/2026).
+// `Pick` y no `Movement` entero: el predicado depende de dos campos y nada más, así que también
+// sirve para un objeto parcial (un payload a punto de escribirse, por ejemplo).
+export function movimientoCubierto(m: Pick<Movement, 'pagado' | 'confirmadoPago'>): boolean {
+  return m.pagado === true || m.confirmadoPago === true;
+}
+
+// Cubierto a los efectos del vencimiento: alcanza con que UNO de los matches lo esté.
+// Un por_confirmar con el débito ya impactado NO está vencido: lo que falta es la confirmación,
+// que es otro problema.
 function tieneCobertura(matches: Movement[]): boolean {
-  return matches.some(m => m.pagado === true || m.confirmadoPago === true);
+  return matches.some(movimientoCubierto);
 }
 
 function estaVencido(item: ExpectedItem, matches: Movement[], mes: string, hoyIso: string): boolean {

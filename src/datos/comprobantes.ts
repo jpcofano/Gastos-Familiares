@@ -6,6 +6,7 @@ import { ref, uploadBytes } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../firebase';
 import { sha256Archivo } from './hashArchivo';
+import { marcarPago } from './movimientos';
 import type { Comprobante, PropuestaMatch } from '../types';
 
 type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
@@ -141,7 +142,11 @@ export async function confirmarRama1(
     const quedaConfirmado = !esObligacionDoc(comp.datosExtraidos?.tipoDocumento) &&
       confirmadoPagoPorFecha(comp.datosExtraidos?.vencimientos?.[0]?.fecha ?? comp.datosExtraidos?.fecha);
     const batch = writeBatch(db);
-    batch.update(doc(db, 'movimientos', movimientoId), {
+    // F9.140 §2 — este writer es el que produjo los dos casos del par imposible (ITPA SA 12/8,
+    // Cons.Prop. 14/8): su versión pre-F9.138 escribía `confirmadoPago` sin `pagado`. Ya está
+    // corregido abajo, pero pasa igual por el guard — la corrección es disciplina y el guard es
+    // invariante, y este writer es la prueba de que la disciplina sola no alcanzó.
+    batch.update(doc(db, 'movimientos', movimientoId), marcarPago({
       hashPdf:        comp.hashPdf,
       refStoragePdf:  comp.refStoragePdf,
       // F9.75 — si es obligación, NO tocar confirmadoPago del movimiento existente (preservar el
@@ -168,7 +173,7 @@ export async function confirmarRama1(
       ...(comp.datosExtraidos?.destinoNombre ? { destinoNombre: comp.datosExtraidos.destinoNombre } : {}),
       ...(comp.datosExtraidos?.vencimientos?.length ? { vencimientos: comp.datosExtraidos.vencimientos } : {}),
       actualizadoEn: serverTimestamp(),
-    });
+    }, 'confirmarRama1', movimientoId));
     batch.update(doc(db, 'comprobantes', comp.id), {
       estado:       'vinculado',
       actualizadoEn: serverTimestamp(),
@@ -244,14 +249,14 @@ export async function confirmarSueltoDesdeComprobante(
 ): Promise<Resultado<void>> {
   try {
     const batch = writeBatch(db);
-    batch.update(doc(db, 'movimientos', movimientoId), {
+    batch.update(doc(db, 'movimientos', movimientoId), marcarPago({
       pagado:        true,
       confirmadoPago: true,
       pagadoEn:      serverTimestamp(),
       hashPdf:       comp.hashPdf,
       refStoragePdf: comp.refStoragePdf,
       actualizadoEn: serverTimestamp(),
-    });
+    }, 'confirmarSueltoDesdeComprobante', movimientoId));
     batch.update(doc(db, 'comprobantes', comp.id), {
       estado: 'vinculado',
       'propuestaMatch.origenSuelto': true,

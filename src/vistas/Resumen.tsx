@@ -14,7 +14,7 @@ import { usePrivacidad, fmtPct, BasePrivacidad } from '../contexto/PrivacidadCon
 import { cargarTCRango } from '../datos/patrimonioOptimizacion';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
-import { calcularChecklist, cubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
+import { calcularChecklist, cubierto, movimientoCubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
 import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, pendienteAgenda, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
 import EditarMovimiento from './EditarMovimiento';
 import type { Movement, ExpectedItem, FamiliaConfig, MedioPago } from '../types';
@@ -467,14 +467,21 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // `diaVencimiento`: ese campo está poblado en 1 de 22 ítems activos, así que la card estaba
   // vacía todos los días salvo el 20. Ahora comparte fuente con `porDia` y con la Card 2
   // —`cajaMov` filtrado al día— y el único filtro que la separa de la Card 2 es `pagado`.
-  //   Criterio de "a pagar": `pagado === false`. Los `pagado: true` sin confirmar NO entran:
-  // esa plata ya salió y lo que falta es confirmarla, que es otro problema; meterlos acá haría
-  // que el total volviera a significar dos cosas.
+  //   Criterio de "a pagar": NO estar cubierto, en las dos direcciones. F9.140 §1 — antes era
+  // `pagado !== true` a secas, que es media definición:
+  //   · `pagado: true` sin confirmar NO entra (seguía siendo cierto y se mantiene): esa plata ya
+  //     salió y lo que falta es confirmarla, que es otro problema; meterlo acá haría que el total
+  //     volviera a significar dos cosas.
+  //   · `confirmadoPago: true` con `pagado: false` TAMPOCO entra, y eso es lo que se agrega. Ese
+  //     par no debería existir (ver invariante en docs/CLAUDE.md), pero cuando existió —ITPA SA,
+  //     11/8/2026— esta card lo pintaba vencido en rojo mientras Gastos Fijos lo daba por pagado.
+  // `movimientoCubierto` es la MISMA función que usa el checklist: dos definiciones de "cubierto"
+  // en dos pantallas fue el defecto, no un detalle de estilo.
   //   La partición se hace por `m.fecha` (no por fecha efectiva) para que Card 1 + Card 2 dé
   // exacto el total de la fila HOY: cualquier otro criterio abre un hueco entre las dos.
   const delDia = cajaMov.filter(m => m.tipo === 'Gasto' && inicioDia(m.fecha).getTime() === inicioHoy.getTime());
   const aPagarHoy = delDia
-    .filter(m => m.pagado !== true)
+    .filter(m => !movimientoCubierto(m))
     .sort((a, b) => arsEq(b, tcDeMov) - arsEq(a, tcDeMov));
   const aPagarTotal: MontoReal = totalReal(aPagarHoy);
   // Vencidos: impagos de días ANTERIORES. Sección propia y subtotal propio — no se suman al
@@ -482,8 +489,11 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // Acá sí manda la fecha efectiva: un gasto cargado el 4 que vence el 10 no está vencido.
   // Solo en el mes actual: bajo el rótulo HOY, "vencido" tiene que medirse contra hoy. Mirando
   // julio en septiembre, todo julio está vencido y la sección no diría nada.
+  // F9.140 §1 — mismo predicado que `aPagarHoy`: ésta era la línea que pintaba de rojo la factura
+  // de ITPA SA ya confirmada, porque `fechaEfectivaMov` la daba vencida y `pagado !== true` no
+  // veía el `confirmadoPago`.
   const aPagarVencidos = !esMesActual ? [] : cajaMov
-    .filter(m => m.tipo === 'Gasto' && m.pagado !== true && fechaEfectivaMov(m).getTime() < inicioHoy.getTime())
+    .filter(m => m.tipo === 'Gasto' && !movimientoCubierto(m) && fechaEfectivaMov(m).getTime() < inicioHoy.getTime())
     .sort((a, b) => fechaEfectivaMov(a).getTime() - fechaEfectivaMov(b).getTime());
   const aPagarVencidosTotal: MontoReal = totalReal(aPagarVencidos);
 

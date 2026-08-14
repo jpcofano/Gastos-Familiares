@@ -1629,6 +1629,40 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   correcto y está comentado: es un total, no un número que se muestra.
   Frontend puro. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`
   junto con F9.136 y F9.138.
+- F9.140 — una sola definición de "pago cubierto" + la invariante aplicada en la escritura. Ver
+  `docs/prompts/F9.140-cobertura-de-pago.md`. Detalle de las reglas ↑ en "Medios de pago" no, en
+  **`pagado` vs `confirmadoPago`** (invariante del modelo + definición única de "cubierto").
+  **HALLAZGO QUE CAMBIA EL DIAGNÓSTICO: no hubo deploy.** El gate del §0 pedía comparar
+  `actualizadoEn` contra la hora del deploy del 14/8. Medido: `firebase hosting:channel:list` da
+  `live · Last Release Time 2026-06-29`, y el bundle servido (`assets/index-BF39hwdA.js`) **no
+  contiene ninguno de los marcadores de F9.132.1 en adelante** (`"gastado hoy"`, `"Nada que pagar
+  hoy"`, `"Medio por defecto"`: 0 ocurrencias). **Producción corre código de junio** — F9.132.2,
+  135, 136, 137, 138 y 139 están en `main` y no en el aire. Los dos casos del par imposible no son
+  ni "fósil" ni "writer desconocido", que eran las dos ramas del gate: son el writer pre-F9.138
+  **todavía corriendo en producción**, ya arreglado en `main` y sin deployar. Se implementó §2
+  igual porque el motivo del gate —"el guard taparía el síntoma sin que nadie sepa quién lo
+  produce"— no aplica: el writer está identificado por su firma exacta (`pagadoEn` escrito sin
+  `pagado`, sobre un movimiento preexistente).
+  **La "transición" de las 17:36 → 17:37 del 14/8 no era un cambio de bundle.** Los 5 movimientos
+  posteriores salieron coherentes porque tienen `creadoEn === actualizadoEn` y `pagadoEn` vacío:
+  son **altas nuevas** por la callable de `functions` (que siempre escribió los dos campos), no
+  confirmaciones por `confirmarRama1`. Distinto code path, no comparables.
+  **§1 — `movimientoCubierto()` exportada de `checklist.ts`**, usada por las dos pantallas.
+  `tieneCobertura` pasa a `matches.some(movimientoCubierto)`: se extrajo el predicado, no se
+  duplicó. Reemplaza `pagado !== true` en `aPagarHoy` y `aPagarVencidos`.
+  **Barrido sobre TODO el repo** (`pagado !== true` / `pagado === false`): **2 cambiados, 6
+  dejados**, 0 en `functions/`. Los 6 son de scripts: 4 son auditorías que replican a propósito la
+  lógica de la card *de su momento* (`auditF91322*`, `auditF9136c`) y 2 son los **detectores del
+  par imposible** (`limpiarPagadoIncoherente.ts:36`, `auditF9140.ts:62`) — ahí `pagado !== true`
+  es la pregunta literal y usar `movimientoCubierto` los volvería ciegos justo a lo que buscan.
+  **§2 — el guard atrapa el caso que el spec no contemplaba.** La condición es `pagado !== true`,
+  no `pagado === false`: el writer culpable escribía `{confirmadoPago: true, pagadoEn: …}` **sin
+  mencionar `pagado`**, así que un guard sobre el `false` explícito no habría visto ese update.
+  Probado con el caso real reproducido a mano (`scripts/verificarF9140.ts`, in-memory, contra la
+  función real bundleada — no una copia).
+  Verificado en prod: `PHWX7clkikjA17bz4sst` con `pagado=true confirmadoPago=true`;
+  `limpiarPagadoIncoherente.ts` en dry-run → **0 incoherentes sobre 100 confirmados**.
+  Frontend puro. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
@@ -2325,9 +2359,45 @@ Los otros tres pares sí son válidos y hay que saber leerlos:
 evidencia, no revierte el hecho. Lo hace `descartarEntrada` en `functions/src/index.ts:1607`, a
 propósito y documentado ahí. **Subirla sin tocar `pagado` nunca lo es.**
 
-Corolario para las vistas: la Card 1 de Resumen se ancla en `pagado` y el checklist de Gastos Fijos en
-`confirmadoPago`, y **está bien que sea así** — cada una pregunta lo suyo. Si las dos se contradicen
-sobre el mismo movimiento, el bug está en el writer, no en las vistas (F9.138 §5).
+### Invariante del modelo (F9.140 §2)
+
+> **`confirmadoPago: true` ⇒ `pagado: true`.** No es una convención entre writers: es una regla del
+> modelo, y se aplica en el punto de escritura.
+
+`marcarPago()` en `src/datos/movimientos.ts` la impone sobre TODO writer de pago del cliente. Si
+alguien intenta escribir el par imposible, **corrige** (fuerza `pagado: true`) y loguea el
+`movimientoId` y el writer — no tira error: dejar al usuario sin poder confirmar un pago es peor
+que el par incoherente, y una corrección silenciosa esconde al writer culpable, que es exactamente
+cómo este defecto sobrevivió a F9.138.
+
+**La condición es `pagado !== true`, no `pagado === false`, y la diferencia es todo el punto.** El
+writer que produjo los dos casos escribía `{confirmadoPago: true, pagadoEn: …}` **sin mencionar
+`pagado`**: un guard que solo mirara el `false` explícito no habría visto ese update y habría dado
+por cerrado un agujero abierto. Forzar `pagado: true` ante un `confirmadoPago: true` es literalmente
+lo que dice la invariante, así que el campo ausente no es una excepción — es el caso principal.
+
+**Limitación conocida:** el guard es solo del cliente y el log muere con la sesión del browser. No
+se replicó en reglas de Firestore a propósito (necesitaría leer el doc previo, sale caro, y sería
+una tercera copia de la semántica en otro lenguaje) ni en `functions` (los writers de ahí ya
+escriben los dos campos juntos). **El próximo writer roto se descubre con un audit, no en el
+momento** — `scripts/limpiarPagadoIncoherente.ts` en dry-run es ese audit.
+
+### "Cubierto" tiene UNA definición (F9.140 §1)
+
+`movimientoCubierto(m)` en `src/datos/checklist.ts`: `pagado === true || confirmadoPago === true`.
+Exportada y usada por las dos pantallas. **Tener dos definiciones de "cubierto" fue el defecto**: la
+Card 1 de Resumen filtraba por `pagado !== true` y el checklist por `pagado || confirmadoPago`, así
+que un movimiento con el par roto salía **vencido en rojo en una pantalla y pagado en la otra**
+(ITPA SA, 11/8). El párrafo que estaba acá decía que estaba bien que cada vista preguntara lo suyo;
+no lo estaba, y F9.136 §5 llegó a auditar ese cruce sobre TELECOM sin arreglarlo.
+
+Mientras el par va coherente los dos predicados coinciden — por eso el defecto sobrevivió tanto.
+Arreglar el dato sin arreglar el predicado deja la bomba armada, y por eso van juntos.
+
+Sigue valiendo el criterio de F9.137 §3: **preguntar por el campo está bien cuando lo que se quiere
+saber ES el campo.** `pagadosHoy` (Card 2) usa `pagado === true` a propósito —"¿qué plata salió
+hoy?"— y los detectores del par imposible (`limpiarPagadoIncoherente.ts`) usan `pagado !== true`
+literal: si usaran `movimientoCubierto` no podrían ver nunca la incoherencia que buscan.
 
 Pendiente: periodicidades no-mensuales necesitan mes-ancla cuando se activen. Hoy `aplicaEnMes`
 devuelve `true` para todas como placeholder.
