@@ -1226,6 +1226,10 @@ async function procesarResumenTarjeta(
       tarjetaCodigo:       tarjetaCodigoResuelto,
       nroResumen:          resumen.nroResumen         ?? null,
       titular:             resumen.titular             ?? null,
+      // F9.139 — este `banco` queda CRUDO a propósito, tal como el modelo lo leyó de la carátula:
+      // es la evidencia de qué decía el papel. NO canonicalizar acá. El defecto que F9.139 cerró
+      // era propagarlo sin resolver a `movimientos.banco`, y eso se arregla del lado del cliente
+      // (`bancoCanonicoDeResumen` en src/datos/resumenesTarjeta.ts), donde está la config.
       banco:               resumen.banco               || banco,
       tarjeta:             resumen.tarjeta             || tarjeta,
       periodo,

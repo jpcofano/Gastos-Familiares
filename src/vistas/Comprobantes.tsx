@@ -7,6 +7,8 @@ import { useComprobantes } from '../hooks/useComprobantes';
 import { useResumenesTarjeta } from '../hooks/useResumenesTarjeta';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
+import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
+import { medioPorDefecto } from '../datos/medios';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import { calcularChecklist, mesActualStr, fechaEfectivaItem } from '../datos/checklist';
@@ -20,7 +22,7 @@ import AltaMovimiento from './AltaMovimiento';
 import { SeccionTarjetas } from './ResumenesTarjeta';
 import { calcularSplitCuotas } from './TarjetaFace';
 import ShareLanding, { type FacturaLanding, type ResumenLanding, type BadgeFactura } from './ShareLanding';
-import type { Comprobante, Entrante, ExpectedItem, DatosExtraidos, PropuestaMatch, CardStatement } from '../types';
+import type { Comprobante, Entrante, ExpectedItem, DatosExtraidos, PropuestaMatch, CardStatement, FamiliaConfig } from '../types';
 import './Comprobantes.css';
 
 // F9.34 — re-skin mobile (kit CargaMobile.jsx) sobre la lógica real restaurada
@@ -145,6 +147,10 @@ interface PropuestaProps {
   memberId: string;
   miembro: import('../types').FamiliaMiembro;
   esAdmin: boolean;
+  // F9.139 §4 — la config baja por props desde la vista, NO con un useFamiliaConfig() acá:
+  // hay una card por comprobante en el historial y serían N lecturas del mismo doc.
+  // `null` mientras no resolvió; el preload lo trata como fail-soft.
+  config: FamiliaConfig | null;
   // F9.51 — el landing de share-target salta directo a "Revisar y cargar"
   // cuando la propuesta es rama 2/3, sin que el usuario tenga que tocarlo.
   autoAbrir?: boolean;
@@ -187,7 +193,7 @@ function parsePickerSel(sel: string): { kind: 'esperado' | 'suelto' | null; mes:
   return { kind: null, mes: '', id: '' };
 }
 
-function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAbrir }: PropuestaProps) {
+function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config, autoAbrir }: PropuestaProps) {
   const pm = comp.propuestaMatch;
   const d  = comp.datosExtraidos;
   const { clasificar, cargando: cargandoDict } = useDiccionario();
@@ -375,7 +381,12 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
     categoria:           pm.categoriaPrellena    ?? sugerenciaValida?.categoria    ?? undefined,
     subcategoria:        pm.subcategoriaPrellena ?? sugerenciaValida?.subcategoria ?? undefined,
     etiqueta:            pm.etiquetaPrellena     ?? sugerenciaValida?.etiqueta     ?? undefined,
-    banco:               'Efectivo' as const,
+    // F9.139 §4 — era `'Efectivo' as const`, hardcodeado: TODO movimiento nacido de un comprobante
+    // arrancaba en Efectivo, un medio que ni siquiera existe ya. Ahora sale del flag `porDefecto`
+    // de la config, editable desde Perfil › Medios de pago.
+    // Fail-soft: si `config` todavía no resolvió va `undefined` —el campo queda sin escribir y lo
+    // elige el usuario—. NO cae a un literal 'BBVA': eso sería el mismo hardcode con otro nombre.
+    banco:               config ? medioPorDefecto(config.bancos)?.nombre : undefined,
     // F9.75 — obligaciones (factura*, recibo_servicio) NO se pagan por vencimiento; el pago llega
     // después. Solo pagos/tickets confirman por fecha. (El server recalcula; esto mantiene el
     // preload coherente con lo que se va a guardar.)
@@ -793,7 +804,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, autoAb
 // ── Tarjeta de comprobante ────────────────────────────────────────────────────
 
 function ComprobanteCard({
-  comp, items, agenda, memberId, miembro, esAdmin, autoAbrir,
+  comp, items, agenda, memberId, miembro, esAdmin, config, autoAbrir,
 }: {
   comp:     Comprobante;
   items:    ExpectedItem[];
@@ -801,6 +812,7 @@ function ComprobanteCard({
   memberId: string;
   miembro:  import('../types').FamiliaMiembro;
   esAdmin:  boolean;
+  config:   FamiliaConfig | null;
   autoAbrir?: boolean;
 }) {
   const [descartando,   setDescartando]   = useState(false);
@@ -843,7 +855,7 @@ function ComprobanteCard({
         <p style={{ fontSize: 12, color: 'var(--gf-err-text)', marginTop: 6 }}>{comp.errorExtraccion}</p>
       )}
       {comp.estado === 'extraido' && comp.propuestaMatch && (
-        <PropuestaCard comp={comp} items={items} agenda={agenda} memberId={memberId} miembro={miembro} esAdmin={esAdmin} autoAbrir={autoAbrir} />
+        <PropuestaCard comp={comp} items={items} agenda={agenda} memberId={memberId} miembro={miembro} esAdmin={esAdmin} config={config} autoAbrir={autoAbrir} />
       )}
       {comp.estado === 'extraido' && !comp.propuestaMatch && (
         <p style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 6 }}>Calculando match…</p>
@@ -1047,6 +1059,10 @@ export default function Comprobantes() {
   const { comprobantes, cargando: cargandoLista, error: errorLista } = useComprobantes(memberId, esAdmin);
   const { resumenes } = useResumenesTarjeta();
   const { items } = useItemsEsperados();
+  // F9.139 §4 — UNA lectura de config/familia para toda la vista, que baja por props hasta
+  // PropuestaCard. El historial renderiza una card por comprobante: un useFamiliaConfig() por
+  // card serían N lecturas del mismo doc quasi-estático.
+  const { config } = useFamiliaConfig();
   const [mostrarAltaManual,    setMostrarAltaManual]    = useState(false);
   const [expandirHistorial,    setExpandirHistorial]    = useState(false);
 
@@ -1250,6 +1266,7 @@ export default function Comprobantes() {
                       memberId={memberId}
                       miembro={miembro}
                       esAdmin={esAdmin}
+                      config={config}
                       autoAbrir={autoAbrirCompId === comp.id}
                     />
                   ))}

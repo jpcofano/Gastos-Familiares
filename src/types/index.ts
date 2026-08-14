@@ -256,6 +256,12 @@ export interface MedioPago {
   dominio?: string;        // para el logo vía Brandfetch (BankLogo, F9.20)
   aliasDe?: string;        // id de otro medio: este se agrupa/etiqueta como ese (F9.23)
   oculto?: boolean;        // no aparece como fila propia en Medios de pago
+  // F9.139 — el medio que se asume cuando no se pudo detectar ninguno. Exactamente uno debería
+  // tenerlo en true; la unicidad se valida en el cliente (ver docs/CLAUDE.md → Medios de pago).
+  // `tipo` conserva 'Efectivo' aunque el medio Efectivo ya no exista: es el TIPO de medio, no el
+  // medio, y sacarlo obligaría a tocar TIPOS en el callable (functions/src/index.ts:1892) —
+  // con eso el deploy deja de ser solo hosting, a cambio de nada.
+  porDefecto?: boolean;
 }
 
 // F9.38 — categoria gana id estable (antes string[] plano): renombrar ya no

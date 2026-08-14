@@ -5,6 +5,7 @@ import { crearMovimiento, existeNumeroComprobante, mesesAdyacentes, etiquetaMes 
 import { tcParaFecha } from '../datos/tcDiario';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
+import { mediosVisibles } from '../datos/medios';
 import { FullModal, ModalBar, Hero, Drawer, SectionLabel, CtaBar } from '../design-system/shell';
 import { FieldRow, RadioChip, Button, Money, MoneyInput } from '../design-system/components';
 import { parseMonto } from '../design-system/utils/monto';
@@ -188,7 +189,12 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
 
   const subcatsFiltradas = subcats.filter(s => s.categoriaPadre === categoria);
   const categoriasDisp   = config ? config.categorias.filter(c => c.activo).map(c => c.nombre).sort() : [];
-  const bancosDisp       = config ? config.bancos.map(b => b.nombre) : [];
+  // F9.139 §5 — usaba `config.bancos` sin filtrar mientras EditarMovimiento.tsx:98 usa
+  // `mediosVisibles`, así que un medio `oculto` se ofrecía al dar de alta y desaparecía al editar.
+  // Con Efectivo ya borrado esto no cambia nada visible hoy; se arregla igual, porque el defecto
+  // es que dos selectores del MISMO campo consulten listas distintas, y eso vuelve con el próximo
+  // medio que se marque oculto.
+  const bancosDisp       = config ? mediosVisibles(config.bancos).map(b => b.nombre) : [];
   const miembrosActivos  = config
     ? Object.entries(config.miembros)
         .filter(([, m]) => m.activo)

@@ -2358,6 +2358,56 @@ Toda escritura vía callable admin-only (Admin SDK), salvo donde se indique clie
 - Unidades funcionales (uf, alias, etiqueta)        → config/familia.unidades (callable)
 - Destinos aprendidos (ver/corregir/borrar)         → /destinos (callable; sin regla de cliente)
 
+### Medios de pago — reglas canónicas (F9.139)
+
+**Efectivo ya no existe como medio.** Era un alias cosmético de Mercado Pago (`aliasDe: 'mp'`,
+`oculto: true`) y se retiró de `MEDIOS_FALLBACK`, de `config/familia.bancos` en prod y de
+`BANCOS_VALIDOS` del validador del seed. Los 150 movimientos históricos con `banco: 'Efectivo'`
+se migraron a `'Mercado Pago'` (`scripts/migrarEfectivoAMp.ts`). **El orden importa y no es
+negociable:** `medioCanonico('Efectivo')` resolvía a "Mercado Pago" *leyendo la entrada Efectivo
+de la config*, así que borrar el medio antes de migrar el dato deja los históricos mostrándose
+como fila propia "Efectivo" — el alias muere junto con el medio. Migrar primero, borrar después.
+
+**VENTANA ABIERTA entre el paso 2 y el deploy — pasó de verdad, no es hipotético.** Mientras el
+build viejo siga en hosting, el hardcode `banco: 'Efectivo'` de `Comprobantes.tsx` sigue vivo y
+cada comprobante nuevo escribe un medio que ya no existe en la config, así que se muestra como
+fila propia "Efectivo" — peor que antes de F9.139, porque ahora ni siquiera tiene el alias que lo
+rescataba. Durante esta implementación apareció **1 movimiento así** (2026-08, origen Manual) en
+los minutos entre migrar y verificar; se remigró. **Al terminar el deploy, correr una vez más
+`scripts/migrarEfectivoAMp.ts --target=production --apply --i-am-sure`** para barrer lo que haya
+caído en la ventana. El script avisa solo cuando detecta esta situación (Efectivo ausente de la
+config pero presente en los datos).
+
+**`porDefecto: boolean` es la fuente del banco asumido**, no una constante en el código. Cuando
+no hay medio detectable se usa `medioPorDefecto(config.bancos)` (`src/datos/medios.ts`), que cae
+al primer medio no oculto si nadie está marcado. Se edita desde Perfil › Medios de pago con un
+radio (es exclusivo). **Hueco conocido (Opción A del spec):** la unicidad se valida **solo en el
+cliente** — `actualizarMediosPago` (`functions/src/index.ts:1877`) hace full-replace y no la
+comprueba, así que otra vía de escritura podría dejar cero o dos defaults. `medioPorDefecto`
+tolera las dos cosas (toma el primero) pero la config quedaría ambigua. Cerrarlo = validar en el
+callable y deployar `functions:actualizarMediosPago`.
+
+**Los nombres de banco que vienen de un PDF se canonicalizan contra la config, nunca se usan
+crudos.** Un resumen de tarjeta trae `banco` como texto libre leído de la carátula por el modelo.
+Precedencia al escribir movimientos (`resumenesTarjeta.ts`, `bancoCanonicoDeResumen`):
+
+1. `config.tarjetas.find(t => t.codigo === resumen.tarjetaCodigo)?.banco` — autoritativa.
+2. Match exacto contra `config.bancos[].nombre`.
+3. `ALIAS_NOMBRE_MEDIO` — **tabla explícita**, no matcheo difuso: el fuzzy convierte un banco
+   desconocido en uno conocido sin que nadie se entere. Hoy tiene una sola entrada,
+   `'bbva argentina' → 'BBVA'`, que es el único alias que apareció midiendo los 1829 movimientos.
+4. `medioPorDefecto()`. Este paso **loguea el string crudo** que no pudo resolver: es la señal de
+   que falta un alias.
+
+`functions/src/index.ts:1229` **sigue escribiendo `resumen.banco` crudo** en el doc
+`resumenesTarjeta`, a propósito: ése es el dato leído del papel y preservarlo es la evidencia de
+qué decía. El defecto era propagarlo a `movimientos` sin canonicalizar, no leerlo.
+
+**Deuda medida y NO resuelta:** 299 movimientos históricos tienen `banco: "BBVA Argentina"` (y 4
+además en `subcategoria`). El fix es hacia adelante: esos 299 siguen apareciendo como fila propia
+separada de BBVA, que es el síntoma que abrió F9.139. Se cierra migrándolos o agregando "BBVA
+Argentina" a la config como medio oculto con `aliasDe: 'bbva'`. Decisión del dueño, no tomada acá.
+
 ### Futuro (no en el primer corte)
 - Diccionario (ver/corregir/borrar lo aprendido)    → /diccionario (cliente admin, bajo costo)
 - Reglas de normalización                           → /reglasNormalizacion — TRAMPA: viven en

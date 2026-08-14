@@ -7,6 +7,7 @@ import { db, storage } from '../firebase';
 import { sha256Archivo } from './hashArchivo';
 import type { CardStatement, MovimientoParseado, AjusteConsolidado, FamiliaConfig } from '../types';
 import { resolverNombreMiembro } from '../familia';
+import { medioPorDefecto, ALIAS_NOMBRE_MEDIO } from './medios';
 
 type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
 
@@ -200,6 +201,35 @@ export function calcularCuadre(
   };
 }
 
+// F9.139 §3 — `resumen.banco` es TEXTO LIBRE: lo escribe el modelo leyendo la carátula del PDF
+// (functions/src/index.ts:1229). Propagarlo crudo a `movimientos.banco` metía bancos que nadie
+// configuró — medidos 299 movimientos con "BBVA Argentina", que la app muestra como fila propia
+// separada de BBVA. Precedencia, de más autoritativa a menos:
+//   1. `config.tarjetas[].banco` por `tarjetaCodigo` — el mismo criterio que ya usaba `:409`.
+//      Medido: resuelto en 26/26 resúmenes de prod, así que en la práctica gana siempre.
+//   2. Match exacto contra los medios configurados.
+//   3. Tabla de alias explícita (ALIAS_NOMBRE_MEDIO). Explícita a propósito: el matcheo difuso
+//      convierte un banco desconocido en uno conocido sin que nadie se entere.
+//   4. El medio por defecto — y se loguea el string crudo, que es la señal de que falta un alias.
+function bancoCanonicoDeResumen(resumen: CardStatement, config: FamiliaConfig): string | null {
+  const porTarjeta = config.tarjetas.find(t => t.codigo === resumen.tarjetaCodigo)?.banco;
+  if (porTarjeta) return porTarjeta;
+
+  const crudo = (resumen.banco ?? '').trim();
+  if (crudo) {
+    const exacto = config.bancos.find(b => b.nombre === crudo);
+    if (exacto) return exacto.nombre;
+
+    const alias = ALIAS_NOMBRE_MEDIO[crudo.toLowerCase()];
+    if (alias) return alias;
+  }
+
+  // Sin mensaje inventado sobre la causa: el string crudo es el dato que sirve para saber
+  // qué alias agregar a la tabla.
+  console.warn('[F9.139] banco de resumen no resuelto:', JSON.stringify(crudo), '· tarjetaCodigo:', resumen.tarjetaCodigo);
+  return medioPorDefecto(config.bancos)?.nombre ?? null;
+}
+
 export async function confirmarResumenTarjeta(
   resumen: CardStatement,
   lineasEditadas: MovimientoParseado[],
@@ -207,6 +237,8 @@ export async function confirmarResumenTarjeta(
   config: FamiliaConfig,
 ): Promise<Resultado<void>> {
   try {
+    // Se resuelve UNA vez antes del batch: los cinco usos de abajo tienen que dar el mismo banco.
+    const bancoCanonico = bancoCanonicoDeResumen(resumen, config);
     // ── Cuadre check ──────────────────────────────────────────────────────────
     const cuadre = calcularCuadre(lineasEditadas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado);
     if (!cuadre.balanceARS || !cuadre.balanceUSD) {
@@ -264,7 +296,7 @@ export async function confirmarResumenTarjeta(
         categoria:           linea.categoria   ?? null,
         subcategoria:        linea.subcategoria ?? null,
         etiqueta:            null,
-        banco:               resumen.banco      || null,
+        banco:               bancoCanonico,
         cuenta:              null,
         tarjetaCodigo:       resumen.tarjetaCodigo,
         tarjeta:             resumen.tarjeta    || null,
@@ -302,9 +334,9 @@ export async function confirmarResumenTarjeta(
         moneda:              'ARS',
         tcUsdArs:            null,
         categoria:           'Tarjetas',
-        subcategoria:        resumen.banco || null,
+        subcategoria:        bancoCanonico,
         etiqueta:            null,
-        banco:               resumen.banco || null,
+        banco:               bancoCanonico,
         cuenta:              null,
         tarjetaCodigo:       resumen.tarjetaCodigo,
         tarjeta:             resumen.tarjeta || null,
@@ -340,9 +372,9 @@ export async function confirmarResumenTarjeta(
         moneda:              'USD',
         tcUsdArs:            null,
         categoria:           'Tarjetas',
-        subcategoria:        resumen.banco || null,
+        subcategoria:        bancoCanonico,
         etiqueta:            null,
-        banco:               resumen.banco || null,
+        banco:               bancoCanonico,
         cuenta:              null,
         tarjetaCodigo:       resumen.tarjetaCodigo,
         tarjeta:             resumen.tarjeta || null,

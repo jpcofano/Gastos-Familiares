@@ -241,14 +241,20 @@ export async function runChecks(db: Firestore, data: SheetData): Promise<Result[
       : `${personaInvalida.length} con persona no resuelta: ${[...new Set(personaInvalida.map(d => d.persona))].slice(0, 5).join(', ')} — correr scripts/seed/backfillPersonaMemberId.ts`,
   });
 
-  // banco: valores válidos (los 4 canónicos del modelo real, ver scripts/seed/transformers/config.ts)
-  const BANCOS_VALIDOS = new Set(['BBVA', 'Galicia', 'Personal Pay', 'Efectivo']);
+  // banco: valores válidos. F9.139 — el set se DERIVA de config/familia.bancos (`fam`, leído
+  // arriba) en vez de repetirse a mano. Era la tercera copia de la misma lista (medios.ts,
+  // seed/transformers/config.ts, acá) y ya había divergido en las dos direcciones: le faltaba
+  // "Mercado Pago" —que existe desde F9.23 y hoy tiene 167 movimientos— y le sobraba "Efectivo",
+  // que dejó de existir. Un set hardcodeado que se queda viejo miente de las dos maneras: rechaza
+  // lo válido y acepta lo que ya no lo es. Derivado, no puede pasar.
+  const bancosCfg: Array<{ nombre?: string }> = fam.exists ? (fam.data()!.bancos ?? []) : [];
+  const BANCOS_VALIDOS = new Set(bancosCfg.map(b => b.nombre).filter((n): n is string => !!n));
   const bancoInvalido = allMovs.filter(d => d.banco != null && !BANCOS_VALIDOS.has(d.banco as string));
   results.push({
     name: 'banco en set canónico',
     ok: bancoInvalido.length === 0,
     detail: bancoInvalido.length === 0
-      ? `OK (Efectivo cuenta aparte, se alias a Mercado Pago solo en display — F9.23)`
+      ? `OK (${BANCOS_VALIDOS.size} medios en config/familia.bancos)`
       : `${bancoInvalido.length} con banco fuera del set: ${[...new Set(bancoInvalido.map(d => d.banco))].slice(0, 5).join(', ')}`,
   });
 

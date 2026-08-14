@@ -23,8 +23,10 @@ function generarId(existentes: Set<string>): string {
   return id;
 }
 
-function MedioRow({ medio, bloqueado, onChange, onEliminar }: {
-  medio: MedioPago; bloqueado: boolean; onChange: (m: MedioPago) => void; onEliminar: () => void;
+// F9.139 §5 — se fue la prop `bloqueado`: existía solo para impedir borrar Mercado Pago mientras
+// Efectivo lo aliaseaba, y Efectivo ya no existe. Entra `onPorDefecto`.
+function MedioRow({ medio, onChange, onEliminar, onPorDefecto }: {
+  medio: MedioPago; onChange: (m: MedioPago) => void; onEliminar: () => void; onPorDefecto: () => void;
 }) {
   return (
     <div style={{ padding: '12px 10px', borderBottom: '1px solid var(--gf-gray-100)', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -45,18 +47,17 @@ function MedioRow({ medio, bloqueado, onChange, onEliminar }: {
         />
         <button
           onClick={onEliminar}
-          disabled={bloqueado}
-          title={bloqueado ? 'No se puede eliminar: Efectivo está aliasado a este medio' : 'Eliminar'}
+          title="Eliminar"
           style={{
             width: 26, height: 26, borderRadius: 999, border: 'none', flexShrink: 0,
-            background: bloqueado ? 'var(--gf-gray-100)' : '#ffe4e6', color: bloqueado ? 'var(--gf-gray-300)' : 'var(--gf-expense-700)',
-            cursor: bloqueado ? 'default' : 'pointer', fontSize: 12,
+            background: '#ffe4e6', color: 'var(--gf-expense-700)',
+            cursor: 'pointer', fontSize: 12,
           }}
         >
           ✕
         </button>
       </div>
-      <div style={{ display: 'flex', gap: 8, paddingLeft: 42 }}>
+      <div style={{ display: 'flex', gap: 8, paddingLeft: 42, alignItems: 'center' }}>
         <select value={medio.tipo} onChange={e => onChange({ ...medio, tipo: e.target.value as MedioPago['tipo'] })} style={{ ...inputStyle, flex: '0 0 130px' }}>
           <option value="Banco">Banco</option>
           <option value="Billetera">Billetera</option>
@@ -68,6 +69,18 @@ function MedioRow({ medio, bloqueado, onChange, onEliminar }: {
           style={{ ...inputStyle, flex: 1 }}
         />
       </div>
+      {/* F9.139 §5 — radio, no checkbox: el default es exclusivo. El `name` compartido deja que
+          el propio grupo garantice la exclusividad en el DOM, además del handler. */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 42, fontSize: 12.5, cursor: 'pointer', color: medio.porDefecto ? 'var(--color-text-strong)' : 'var(--color-text-sec)' }}>
+        <input
+          type="radio"
+          name="medio-por-defecto"
+          checked={medio.porDefecto === true}
+          onChange={onPorDefecto}
+          style={{ cursor: 'pointer' }}
+        />
+        Medio por defecto
+      </label>
     </div>
   );
 }
@@ -89,12 +102,22 @@ export default function MediosPago() {
 
   if (cargando || !medios) return <p style={{ color: 'var(--color-text-sec)' }}>Cargando…</p>;
 
-  const efectivo = medios.find(m => m.nombre === 'Efectivo');
+  // F9.139 §5 — se fue `const efectivo = medios.find(...)`, junto con el `bloqueado` que dependía
+  // de él: existía solo para que no se borrara Mercado Pago mientras Efectivo lo aliaseaba.
   const visibles = medios.filter(m => !m.oculto);
   const dirty = JSON.stringify(medios) !== JSON.stringify(original);
+  const cuantosDefault = medios.filter(m => m.porDefecto).length;
 
   function actualizarMedio(id: string, nuevo: MedioPago) {
     setMedios(prev => (prev ?? []).map(m => (m.id === id ? nuevo : m)));
+    setOk(false);
+  }
+
+  // F9.139 — el default es EXCLUSIVO, por eso es un radio y no un checkbox: marcar uno desmarca
+  // al resto acá mismo, en vez de dejar que el usuario arme un estado inválido y se lo rechacen
+  // al guardar.
+  function marcarPorDefecto(id: string) {
+    setMedios(prev => (prev ?? []).map(m => ({ ...m, porDefecto: m.id === id })));
     setOk(false);
   }
 
@@ -116,6 +139,17 @@ export default function MediosPago() {
   }
 
   async function guardar() {
+    // F9.139 §5 (Opción A) — la unicidad del default se valida ACÁ porque el callable
+    // `actualizarMediosPago` hace full-replace sin comprobarla, y agregársela obligaría a
+    // deployar functions. Queda anotado como hueco en docs/CLAUDE.md: otra vía de escritura
+    // podría dejar cero o dos defaults sin que nadie lo frene.
+    const n = (medios ?? []).filter(m => m.porDefecto).length;
+    if (n !== 1) {
+      setError(n === 0
+        ? 'Marcá un medio por defecto: es el que se asume cuando no se puede detectar ninguno.'
+        : `Hay ${n} medios marcados por defecto y tiene que ser exactamente uno.`);
+      return;
+    }
     setGuardando(true);
     setError(null);
     const res = await actualizarMediosPago(medios!);
@@ -135,9 +169,9 @@ export default function MediosPago() {
             <MedioRow
               key={m.id}
               medio={m}
-              bloqueado={efectivo?.aliasDe === m.id}
               onChange={nuevo => actualizarMedio(m.id, nuevo)}
               onEliminar={() => eliminarMedio(m.id)}
+              onPorDefecto={() => marcarPorDefecto(m.id)}
             />
           ))}
         </div>
@@ -145,9 +179,17 @@ export default function MediosPago() {
 
       <AddBtn onClick={agregarMedio}><Icon name="plus" size={18} /> Agregar medio de pago</AddBtn>
 
+      {/* F9.139 §5 — el texto dice QUÉ SIGNIFICA el default, no cómo funciona el radio.
+          El párrafo anterior explicaba el alias de Efectivo, que ya no existe. */}
       <p style={{ fontSize: 12, color: 'var(--color-text-sec)', margin: '0 4px', lineHeight: 1.5 }}>
-        Los medios de pago alimentan el desglose diario por banco del Resumen. Efectivo se
-        agrupa siempre con {medios.find(m => m.id === efectivo?.aliasDe)?.nombre ?? 'Mercado Pago'} al mostrar totales — no aparece como fila propia.
+        Los medios de pago alimentan el desglose diario por banco del Resumen. El marcado
+        <strong> por defecto</strong> es el que se asume cuando no se puede saber de dónde salió
+        la plata — por ejemplo al cargar un comprobante que no dice el banco.
+        {cuantosDefault !== 1 && (
+          <span style={{ color: 'var(--gf-err-text)' }}>
+            {' '}Ahora mismo hay {cuantosDefault === 0 ? 'ninguno' : cuantosDefault} marcado{cuantosDefault === 1 ? '' : 's'}: tiene que ser exactamente uno.
+          </span>
+        )}
       </p>
 
       {error && <p style={{ fontSize: 13, color: 'var(--gf-err-text)', margin: '0 4px' }}>{error}</p>}
