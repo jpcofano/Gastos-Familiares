@@ -150,6 +150,16 @@ service cloud.firestore {
     match /analisisPosiciones/{ticker} {
       allow read, write: if esDueno();
     }
+    // F9.141 — las escribe el cron actualizarPreciosDiarios vía Admin SDK (que se saltea
+    // las Rules); el cliente solo las lee.
+    match /preciosDiarios/{ticker} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
+    match /indicadoresPosicion/{ticker} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
     match /analisisSectorial/{id} {
       allow read, write: if esDueno();
     }

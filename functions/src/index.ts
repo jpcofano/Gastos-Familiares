@@ -19,6 +19,7 @@ import {
 } from './matchLogica';
 import { normalizar, type NormRule } from './normalizador';
 import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
+import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 
 if (!getApps().length) initializeApp();
 
@@ -1871,6 +1872,26 @@ export const actualizarTCDiario = onSchedule(
     );
 
     console.log(`[actualizarTCDiario] ${fechaHoy} → tcUsdArs=${venta}`);
+  },
+);
+
+// F9.141 — serie de precios diaria e indicadores por posición. Corre después del cierre
+// de BYMA. Fuente data912 (pública, sin API key, sin SLA): el cron degrada sin romper —
+// un ticker que falla no aborta el resto y NUNCA se pisa una serie buena con un error.
+export const actualizarPreciosDiarios = onSchedule(
+  {
+    schedule: '0 18 * * 1-5',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+    timeoutSeconds: 540,
+  },
+  async () => {
+    const r = await correrActualizacionPrecios(db, { escribir: true });
+    const porEstado: Record<string, number> = {};
+    for (const x of r.resultados) porEstado[x.estadoSerie] = (porEstado[x.estadoSerie] ?? 0) + 1;
+    console.log(`[actualizarPreciosDiarios] corrida=${r.fechaCorrida} objetivos=${r.objetivos} ` +
+      `estados=${JSON.stringify(porEstado)} fallos=${r.fallos.length}`);
+    for (const f of r.fallos) console.error(`[actualizarPreciosDiarios] ${f.ticker}: ${f.error}`);
   },
 );
 

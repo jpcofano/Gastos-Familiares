@@ -287,8 +287,121 @@ Implementación en cadena (cada una depende de la anterior):
   - Chip "vía chat" en sectorial y en análisis de posición cuando `origen === 'chat'`
   - `analizarConIA` refactorizado: `extraerResultado` helper (function declaration, hoisted); escribe `origen: 'api'`
 
+- **F9.141** — Serie de precios diaria e indicadores técnicos por posición *(cerrado)*
+  - data912 (`https://data912.com`), pública, sin API key. Colecciones `preciosDiarios` e
+    `indicadoresPosicion`, un doc por ticker. Cron `actualizarPreciosDiarios`, 18:00 ART.
+  - Contrato completo abajo, en "Precios y serie diaria".
+
 Fases pendientes:
-- Ninguna definida al 05/07/2026. Agregar en la próxima sesión.
+- **F9.142** — Ficha de posición (UI) sobre `indicadoresPosicion`. No incluida en F9.141.
+
+---
+
+## Precios y serie diaria (F9.141) — contrato
+
+### El panel se elige por `tipo`, nunca buscando el ticker
+
+Buscar un ticker entre paneles devuelve precios equivocados, que es peor que no devolver
+ninguno. Medido: la posición cripto **BTC existe como ticker listado en `usa_stocks`**, y los
+seis CEDEARs (B, BIOX, CVX, GLOB, VIST, VZ) existen en `usa_stocks` como el subyacente en USD,
+que no es el CEDEAR en ARS.
+
+| `tipo` | panel live | panel histórico |
+|---|---|---|
+| `accion` con `pais_riesgo: 'AR'` | `arg_stocks` | `stocks` |
+| `accion` con `pais_riesgo: 'global'` | `usa_stocks` | `usa_stocks` (solo cierre) |
+| `cedear` | `arg_cedears` | `cedears` |
+| `bono` | `arg_bonds` | `bonds` |
+| `on` | `arg_corp` | — (`/historical/corp/` da 404) |
+| `fci` | — (CAFCI, F9.104) | — |
+| `cripto` | — (fuera de alcance) | — |
+| `cash` | — (no tiene precio) | — |
+
+Lo que no está en la tabla se marca `sin_fuente`. No se adivina.
+
+**Valuación siempre por `c`**, nunca el punto medio de `px_bid`/`px_ask`: GLOB llegó a tener 25%
+de spread entre puntas.
+
+### `sa` no se usa. `dr` tampoco se guarda
+
+`dr` es el retorno del cierre crudo, derivable de `c`, y viene **sin ajustar por splits**: el día
+del split 10:1 de YPFD (2026-08-03) reporta −90,23% sobre un movimiento real de −2,35%.
+
+`sa` no es el factor de ajuste, y no es rescatable:
+
+- En el split de YPFD se mueve ×2,352, donde un 10:1 exigiría ×10 o ×0,1.
+- No es monótono ni acumulativo — en BMA sube 2821 ruedas y baja 2747.
+- **Queda contaminado por los mismos glitches que tendría que corregir.** El 2021-11-04 la fuente
+  publicó DICP y GD30 divididos por 1000 y los devolvió al día siguiente; `sa` tomó el valor del
+  retorno roto (1004,4372, igual a `dr`) y quedó congelado ahí.
+
+Ninguno de los dos se persiste, para que nadie los use más adelante creyendo que están ajustados.
+
+### El detector de splits marca; no reescala
+
+Solo dos capas modifican los precios, y las dos son certeza, no inferencia:
+
+1. **Tabla curada** `SPLITS_CONFIRMADOS`, a mano.
+2. **`cantidad` entre corridas**: si la cantidad se multiplicó por N y el precio implícito se
+   dividió por N, está probado con dato propio.
+
+La tercera capa — reconocer razones simples (10, 5, 4, 3, 2, 3/2 y sus inversas) en saltos de
+más de 35% — **corre siempre en modo reporte y nunca toca la serie.** Medido sobre las series
+completas de los 16 tickers con historia: en la ventana de 750 días que se retiene detecta 6
+saltos con razón simple y **solo uno es un split**. Los otros cinco son eventos macro y
+amortizaciones de bonos:
+
+```
+YPFD  2026-08-03  −90,23%  razón 10     ← split real
+TRAN  2023-08-04  +48,79%  razón 0,667  ← rebote de la devaluación post-PASO
+DICP  2023-08-04  +52,38%  razón 0,667  ← ídem
+TX26  2023-08-04  +52,24%  razón 0,667  ← ídem
+TX26  2025-11-07  −35,19%  razón 1,5    ← amortización
+TX26  2026-05-08  −49,76%  razón 2      ← amortización
+```
+
+Reescalar por parecido habría corrompido cinco series con un factor inventado. Lo que la capa 3
+ve queda en `saltosDetectados` y mueve `estadoSerie` a `sospechosa`, para que un humano lo
+resuelva y, si es un split, lo agregue a la capa 1.
+
+### `estadoSerie` manda sobre qué se calcula
+
+| estado | qué se calcula |
+|---|---|
+| `limpia` | todo |
+| `ajustada` | todo; los splits aplicados quedan en `splitsAplicados` |
+| `sospechosa` | solo ventanas que entran enteras después del último salto sin resolver |
+| `sin_serie` | nada; el ticker existe en el panel live pero la fuente no tiene historia |
+
+### Mínimos de puntos, sin excepciones
+
+Ningún indicador se calcula sobre menos puntos que su ventana. SMA200 sin 200 puntos válidos
+es `null` con semáforo `sin_datos`, nunca una media de 200 días sobre 40 datos. Los mínimos se
+cuentan **después** de recortar por `estadoSerie`, y `puntosDisponibles` queda visible en el doc
+para que la ausencia se entienda.
+
+Consecuencia medida de esto: `/historical/cedears/` arranca el 2025-11-12 para todos, o sea
+**183 puntos**. Ningún CEDEAR tiene SMA200, `max52s` completo ni `perf1a`, y no es un bug.
+
+`/historical/usa_stocks/` devuelve `{ticker, dates[], prices[]}` — **solo cierre, sin OHLCV**.
+Para ACN y GLOB-global eso deja `atrPct` y todos los indicadores de volumen en `null`
+permanente. No se sustituye por la serie del CEDEAR: está en ARS y mezcla el movimiento del
+papel con el del dólar.
+
+### El contrato de errores de data912 no se lee por status HTTP
+
+- Ticker inexistente → **HTTP 200** con `{"Error":"Nahh no tengo ese ticker loko"}`
+- Ruta inexistente → HTTP 404 con `{"detail":"Not Found"}`
+
+No hay 422. Discriminar por status guardaría el objeto de error como si fuera una serie: la
+validación es sobre la forma del payload.
+
+### Dónde vive el motor
+
+En `functions/src/patrimonioPrecios.ts`, **no** en `src/datos/`. El cron es quien calcula, y
+`functions/` tiene `rootDir: "src"` propio: no puede importar de `src/`. Para no repetir el
+error de tener dos motores, `src/datos/patrimonioPrecios.ts` solo **lee** las dos colecciones y
+no reimplementa nada de la tabla ni de los indicadores.
 
 ---
 
