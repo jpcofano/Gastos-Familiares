@@ -396,6 +396,75 @@ papel con el del dólar.
 No hay 422. Discriminar por status guardaría el objeto de error como si fuera una serie: la
 validación es sobre la forma del payload.
 
+### Un ticker no identifica una posición (F9.141.1)
+
+Lo que determina el ruteo es la tripleta **`ticker` + `tipo` + `paisRiesgo`**, y esa es la clave
+del universo de objetivos. GLOB es el caso testigo: el CEDEAR de la corrida y el plan de empleado
+en dólares comparten símbolo y no son el mismo instrumento — uno cotiza en ARS en BYMA y el otro
+en USD en Nueva York. Agruparlos por ticker le colgaría al plan de empleado los indicadores del
+CEDEAR, que es el falso positivo de BTC entrando por la puerta de atrás: F9.141 lo cerró en el
+routing y quedaba abierto en la identidad.
+
+**Convención de id:** ticker pelado mientras no haya ambigüedad; cuando dos posiciones comparten
+símbolo, la de la corrida conserva el ticker pelado y las demás se sufijan
+(`GLOB` y `GLOB__accion_global`). Así una colisión nueva no renombra documentos que ya existen.
+
+**El cliente nunca construye el id.** Cada documento lleva su propio `docId`, y
+`src/datos/patrimonioPrecios.ts` indexa `indicadoresPosicion` por la tripleta leída de los campos
+y usa ese `docId` para ir a buscar la serie. Si el cliente recalculara la convención habría dos
+implementaciones de la misma regla y la ambigüedad se decidiría distinto en cada lado.
+
+### Lo que `sospechosa` cuesta de verdad (F9.141.1 §0)
+
+Medido sobre las 10 series marcadas: **19 de los 21 saltos pendientes son eventos macro**
+verificables (17 la devaluación post-PASO del 3–4/8/2023, 2 el post-balotaje del 21/11/2023) y
+**2 son amortizaciones de TX26**. Ningún split sin clasificar.
+
+Y el costo es casi nulo: la ventana usable queda en 739 de 750 puntos para siete series y en 667
+para TRAN y YPFD. **Nueve de las diez conservan `sma200`, `max52s`, `perf1a` y `volAnualizada90d`
+completos.** La única que pierde todo es TX26, con 68 puntos — y su causa es la amortización de
+mayo, no el macro. Para un bono que amortiza, no tener indicadores de ventana larga es el
+resultado correcto, no una degradación.
+
+Conclusión: **no hay nada que hacer con los saltos macro.** Clasificarlos como "evento de
+mercado" para recuperar 11 puntos de serie no paga la complejidad de mantener un catálogo de
+fechas macro.
+
+### `/historical/` no soporta rango (F9.141.1 §3 — medido, no aplicable)
+
+El contrato declarado en `https://data912.com/openapi.json` da un solo parámetro para los tres
+endpoints históricos: `ticker:path`. Probadas nueve grafías (`from`, `desde`, `start`,
+`start_date`, `range`, `days`, `limit`, `period`, `interval+range`), las nueve devuelven las 4766
+filas completas de PAMP. **El fetch incremental no es implementable**; el cron seguirá bajando la
+serie entera. Punto cerrado.
+
+Nota del mismo relevamiento: `/historical/usa_stocks/{ticker}` **no figura en el OpenAPI** aunque
+responde 200. ACN y las acciones globales dependen de un endpoint fuera del contrato publicado.
+
+### Yahoo puede sembrar splits, pero su feed no se copia crudo (F9.141.1 §2)
+
+El gate del §2 **pasa**: Yahoo reporta `YPFD.BA 10:1 el 2026-08-03`, exactamente el caso testigo,
+y no reporta nada para TRAN, DICP ni TX26 en las fechas de sus saltos (los dos bonos ni siquiera
+existen en Yahoo: 404).
+
+Pero el feed **mezcla splits con dividendos en acciones**, y los codifica igual:
+
+```
+BMA.BA    2023-05-23 1.09:1 · 2023-06-05, 06-27, 07-26, 08-28, 09-26  1.090364:1
+TGSU2.BA  2019-11-11 1.038487:1
+CEPU.BA   2017-02-03 8:1
+YPFD.BA   2026-08-03 10:1
+```
+
+Sembrar eso sin filtro aplicaría seis reescalados de 1,09 a BMA, que hoy es `limpia` con 750
+puntos y ningún salto. Es el mismo modo de falla que motivó que la capa 3 no reescale, entrando
+desde una fuente que parece confiable.
+
+Si se implementa, hace falta un umbral explícito (razón ≥ 2 o ≤ 0,5 como split; el resto se
+reporta como dividendo en acciones y no se siembra). **Con ese umbral, hoy no agrega ninguna
+entrada dentro de la ventana de 750 días**: CEPU 8:1 es de 2017 y YPFD 10:1 ya está en la tabla.
+El valor de la siembra es prospectivo — atrapar el próximo split sin que nadie lo investigue.
+
 ### Dónde vive el motor
 
 En `functions/src/patrimonioPrecios.ts`, **no** en `src/datos/`. El cron es quien calcula, y

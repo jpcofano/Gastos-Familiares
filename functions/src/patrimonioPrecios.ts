@@ -76,6 +76,53 @@ export const ALIAS_TICKER: Record<string, string> = {};
 
 export const simboloDePanel = (ticker: string): string => ALIAS_TICKER[ticker] ?? ticker;
 
+// ── Identidad de una posición (F9.141.1) ─────────────────────────────────────
+// El ticker NO alcanza. GLOB es a la vez un CEDEAR en ARS (corrida) y una acción global en USD
+// (plan de empleado): mismo símbolo, dos instrumentos, dos ruteos. Agruparlos le colgaría al
+// plan los indicadores del CEDEAR.
+export type Identidad = { ticker: string; tipo: PosicionTipo; paisRiesgo: PaisRiesgo };
+
+export const claveIdentidad = (i: Identidad): string => `${i.ticker}|${i.tipo}|${i.paisRiesgo}`;
+
+/**
+ * Id del documento: ticker pelado mientras no haya ambigüedad, sufijo solo cuando la hay.
+ * Una colisión nueva no renombra documentos que ya existen.
+ */
+export const idDocumento = (i: Identidad, ambiguo: boolean): string =>
+  ambiguo ? `${i.ticker}__${i.tipo}_${i.paisRiesgo}` : i.ticker;
+
+/**
+ * Resuelve los ids de todo el universo de una vez, porque la ambigüedad es una propiedad del
+ * conjunto y no de la posición: hasta no ver las 36 no se sabe si GLOB es uno o son dos.
+ *
+ * Cuando un ticker está repetido, la posición de la corrida (`vigenteEnCorrida`) se queda con el
+ * ticker pelado y las demás se sufijan. El orden restante es determinístico (tipo, luego país)
+ * para que dos corridas seguidas no permuten los ids.
+ */
+export function resolverIds<T extends Identidad & { vigenteEnCorrida?: boolean }>(
+  objetivos: T[],
+): Map<string, string> {
+  const porTicker = new Map<string, T[]>();
+  for (const o of objetivos) {
+    if (!porTicker.has(o.ticker)) porTicker.set(o.ticker, []);
+    porTicker.get(o.ticker)!.push(o);
+  }
+
+  const ids = new Map<string, string>();
+  for (const [, grupo] of porTicker) {
+    if (grupo.length === 1) {
+      ids.set(claveIdentidad(grupo[0]), idDocumento(grupo[0], false));
+      continue;
+    }
+    const ordenado = [...grupo].sort((a, b) =>
+      Number(b.vigenteEnCorrida ?? false) - Number(a.vigenteEnCorrida ?? false) ||
+      a.tipo.localeCompare(b.tipo) ||
+      a.paisRiesgo.localeCompare(b.paisRiesgo));
+    ordenado.forEach((o, i) => ids.set(claveIdentidad(o), idDocumento(o, i > 0)));
+  }
+  return ids;
+}
+
 // ── Contrato de errores de data912 ───────────────────────────────────────────
 // Medido: ticker inexistente devuelve HTTP 200 con {"Error":"Nahh no tengo ese ticker loko"};
 // ruta inexistente devuelve 404 con {"detail":"Not Found"}. No hay 422. Discriminar por status

@@ -16,7 +16,7 @@
 import {
   panelesPara, detectarSaltos, aplicarSplits, parseSerie, esErrorDeFuente, decidirEscritura,
   calcIndicadores, recortarTope, recortarPorEstado, pedir, urlHistorico, urlLive,
-  SPLITS_CONFIRMADOS, TOPE_PUNTOS,
+  SPLITS_CONFIRMADOS, TOPE_PUNTOS, resolverIds, claveIdentidad,
   type PuntoSerie,
 } from '../functions/src/patrimonioPrecios';
 
@@ -194,6 +194,43 @@ async function main() {
     const r = recortarTope(ypfd);
     chequear('tope-750', r.length === TOPE_PUNTOS && r[r.length - 1].f === ypfd[ypfd.length - 1].f,
       `${ypfd.length} → ${r.length} puntos, recortado por el extremo viejo (desde ${r[0].f})`);
+  }
+
+  // ── 10 ter. F9.141.1 — un ticker no identifica una posición ────────────────
+  // En producción hoy NO hay colisión (posicionesManuales tiene solo ACN), así que el caso se
+  // ejercita con el conjunto sintético que sí la tiene. Si se probara solo contra los datos
+  // reales, este comportamiento quedaría sin cubrir hasta el día que vuelva a haber un GLOB
+  // manual — que es exactamente cuando se rompería.
+  {
+    const cedearGlob = { ticker: 'GLOB', tipo: 'cedear' as const, paisRiesgo: 'global' as const, vigenteEnCorrida: true };
+    const planGlob = { ticker: 'GLOB', tipo: 'accion' as const, paisRiesgo: 'global' as const, vigenteEnCorrida: false };
+    const acn = { ticker: 'ACN', tipo: 'accion' as const, paisRiesgo: 'global' as const, vigenteEnCorrida: false };
+    const pamp = { ticker: 'PAMP', tipo: 'accion' as const, paisRiesgo: 'AR' as const, vigenteEnCorrida: true };
+
+    const ids = resolverIds([cedearGlob, planGlob, acn, pamp]);
+    const idCedear = ids.get(claveIdentidad(cedearGlob));
+    const idPlan = ids.get(claveIdentidad(planGlob));
+
+    chequear('colision-dos-documentos', idCedear !== idPlan && !!idCedear && !!idPlan,
+      `cedear → ${idCedear} · plan de empleado → ${idPlan}`);
+    chequear('colision-corrida-conserva-ticker-pelado', idCedear === 'GLOB',
+      `la posición de la corrida se queda con "GLOB"; la manual se sufija`);
+    chequear('sin-colision-sin-sufijo',
+      ids.get(claveIdentidad(acn)) === 'ACN' && ids.get(claveIdentidad(pamp)) === 'PAMP',
+      `ACN → ${ids.get(claveIdentidad(acn))} · PAMP → ${ids.get(claveIdentidad(pamp))} (sin sufijo, los documentos ya escritos no se mueven)`);
+
+    // El orden de entrada no puede cambiar los ids: dos corridas seguidas tienen que dar lo mismo.
+    const ids2 = resolverIds([pamp, planGlob, acn, cedearGlob]);
+    const estable = [cedearGlob, planGlob, acn, pamp]
+      .every(o => ids.get(claveIdentidad(o)) === ids2.get(claveIdentidad(o)));
+    chequear('ids-estables-ante-el-orden', estable,
+      estable ? 'permutar la entrada da los mismos ids' : 'los ids dependen del orden de entrada');
+
+    // Y el ruteo de cada uno es el que corresponde a SU identidad, no a la del que llegó primero.
+    chequear('colision-ruteo-independiente',
+      panelesPara('cedear', 'global')?.historical === 'cedears' &&
+      panelesPara('accion', 'global')?.historical === 'usa_stocks',
+      `cedear → cedears (ARS) · accion global → usa_stocks (USD)`);
   }
 
   // ── 10 bis. El bootstrap y el orquestador ven el MISMO firebase-admin ──────

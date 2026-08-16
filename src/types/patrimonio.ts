@@ -101,6 +101,7 @@ export type SaltoDetectado = {
 };
 
 export type PreciosDiarios = {
+  docId: string;
   ticker: string;
   tipo: PosicionTipo;
   paisRiesgo: PaisRiesgo;
@@ -122,6 +123,7 @@ export type PreciosDiarios = {
 // Todo indicador es `null` cuando no hay puntos suficientes para su ventana; nunca una
 // media de 200 días calculada sobre 40 datos. `puntosDisponibles` explica la ausencia.
 export type IndicadoresPosicion = {
+  docId: string;
   ticker: string;
   tipo: PosicionTipo;
   paisRiesgo: PaisRiesgo;

@@ -8,22 +8,44 @@
 // Contrato: docs/patrimonio/CLAUDE-PATRIMONIO.md → "Precios y serie diaria (F9.141)".
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { PreciosDiarios, IndicadoresPosicion, Semaforo } from '../types/patrimonio';
+import type {
+  PreciosDiarios, IndicadoresPosicion, Semaforo, PosicionTipo, PaisRiesgo,
+} from '../types/patrimonio';
 
-export async function cargarPreciosDiarios(ticker: string): Promise<PreciosDiarios | null> {
-  const snap = await getDoc(doc(db, 'preciosDiarios', ticker));
+/**
+ * F9.141.1 — un ticker NO identifica una posición: GLOB es a la vez un CEDEAR en ARS y una
+ * acción global en USD. La identidad es la tripleta, y el id del documento la refleja solo
+ * cuando hay ambigüedad (`GLOB` y `GLOB__accion_global`).
+ *
+ * El cliente **no** reconstruye esa convención: el escritor estampa `docId` dentro de cada
+ * documento. Recalcularla acá sería una segunda implementación de la misma regla, decidiendo
+ * la ambigüedad con información distinta.
+ */
+export const claveIdentidad = (p: { ticker: string; tipo: PosicionTipo; pais_riesgo: PaisRiesgo }) =>
+  `${p.ticker}|${p.tipo}|${p.pais_riesgo}`;
+
+/** El `docId` sale del indicador; ver `cargarIndicadoresPorIdentidad`. */
+export async function cargarPreciosDiarios(docId: string): Promise<PreciosDiarios | null> {
+  const snap = await getDoc(doc(db, 'preciosDiarios', docId));
   return snap.exists() ? (snap.data() as PreciosDiarios) : null;
 }
 
-export async function cargarIndicadores(ticker: string): Promise<IndicadoresPosicion | null> {
-  const snap = await getDoc(doc(db, 'indicadoresPosicion', ticker));
+export async function cargarIndicadores(docId: string): Promise<IndicadoresPosicion | null> {
+  const snap = await getDoc(doc(db, 'indicadoresPosicion', docId));
   return snap.exists() ? (snap.data() as IndicadoresPosicion) : null;
 }
 
-/** Indexado por ticker, para pintar una grilla de posiciones sin N lecturas. */
-export async function cargarIndicadoresPorTicker(): Promise<Map<string, IndicadoresPosicion>> {
+/**
+ * Indexado por la tripleta leída de los campos del documento — no por `doc.id`, que puede venir
+ * sufijado. Es la entrada correcta para pintar una grilla: se cruza con cada posición por
+ * `claveIdentidad(pos)` y el `docId` del resultado abre la serie.
+ */
+export async function cargarIndicadoresPorIdentidad(): Promise<Map<string, IndicadoresPosicion>> {
   const snap = await getDocs(collection(db, 'indicadoresPosicion'));
-  return new Map(snap.docs.map(d => [d.id, d.data() as IndicadoresPosicion]));
+  return new Map(snap.docs.map(d => {
+    const x = d.data() as IndicadoresPosicion;
+    return [`${x.ticker}|${x.tipo}|${x.paisRiesgo}`, { ...x, docId: x.docId ?? d.id }];
+  }));
 }
 
 /**

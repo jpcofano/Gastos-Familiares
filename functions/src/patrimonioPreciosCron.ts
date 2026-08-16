@@ -12,11 +12,14 @@ export type ObjetivoPrecio = {
   paisRiesgo: PP.PaisRiesgo;
   valorUsd: number;
   vigente: boolean;
+  vigenteEnCorrida: boolean;   // F9.141.1 — desempata quién se queda con el ticker pelado
+  docId: string;
   observaciones: Array<{ fecha: string; cantidad: number; valorOrigen: number }>;
 };
 
 export type ResultadoTicker = {
   ticker: string;
+  docId: string;
   cobertura: 'con_serie' | 'solo_live' | 'sin_fuente';
   estadoSerie: PP.EstadoSerie;
   puntos: number;
@@ -48,7 +51,14 @@ export async function objetivosDePrecio(
   // Todas las corridas, no solo la vigente: la capa 2 del detector compara `cantidad`
   // entre corridas para probar un split con dato propio.
   const posSnap = await db.collection('posicionesPatrimonio').get();
-  const porTicker = new Map<string, ObjetivoPrecio>();
+
+  // F9.141.1 — la clave es la TRIPLETA, no el ticker. GLOB es a la vez un CEDEAR en ARS y una
+  // acción global en USD: agruparlos por símbolo le colgaría al plan de empleado la serie del
+  // CEDEAR, con el `tipo` y el `paisRiesgo` del primero que entró al mapa.
+  const porIdentidad = new Map<string, ObjetivoPrecio>();
+  const nuevo = (i: PP.Identidad): ObjetivoPrecio => ({
+    ...i, valorUsd: 0, vigente: false, vigenteEnCorrida: false, docId: i.ticker, observaciones: [],
+  });
 
   for (const doc of posSnap.docs) {
     const p = doc.data() as {
@@ -57,20 +67,20 @@ export async function objetivosDePrecio(
     };
     if (!p.ticker || !p.tipo) continue;
 
-    const entrada = porTicker.get(p.ticker) ?? {
-      ticker: p.ticker, tipo: p.tipo, paisRiesgo: p.pais_riesgo ?? 'AR',
-      valorUsd: 0, vigente: false, observaciones: [],
-    };
+    const id: PP.Identidad = { ticker: p.ticker, tipo: p.tipo, paisRiesgo: p.pais_riesgo ?? 'AR' };
+    const clave = PP.claveIdentidad(id);
+    const entrada = porIdentidad.get(clave) ?? nuevo(id);
     if (p.fechaCorrida === fechaVigente) {
       entrada.valorUsd += p.valorUsd ?? 0;
       entrada.vigente = true;
+      entrada.vigenteEnCorrida = true;
     }
     if (p.fechaCorrida && typeof p.cantidad === 'number' && typeof p.valor_origen === 'number') {
       entrada.observaciones.push({
         fecha: p.fechaCorrida, cantidad: p.cantidad, valorOrigen: p.valor_origen,
       });
     }
-    porTicker.set(p.ticker, entrada);
+    porIdentidad.set(clave, entrada);
   }
 
   const manSnap = await db.collection('posicionesManuales').get();
@@ -79,18 +89,24 @@ export async function objetivosDePrecio(
       ticker?: string; tipo?: PP.PosicionTipo; pais_riesgo?: PP.PaisRiesgo; valorUsd?: number;
     };
     if (!m.ticker) continue;
-    const entrada = porTicker.get(m.ticker) ?? {
+    const id: PP.Identidad = {
       ticker: m.ticker, tipo: m.tipo ?? 'accion', paisRiesgo: m.pais_riesgo ?? 'global',
-      valorUsd: 0, vigente: false, observaciones: [],
     };
+    const clave = PP.claveIdentidad(id);
+    const entrada = porIdentidad.get(clave) ?? nuevo(id);
     entrada.valorUsd += m.valorUsd ?? 0;
     entrada.vigente = true;
-    porTicker.set(m.ticker, entrada);
+    porIdentidad.set(clave, entrada);
   }
 
   // Se actualiza lo que se tiene HOY. Las corridas viejas aportan `observaciones` para la
   // capa 2 del detector, pero un ticker que ya no está en cartera no genera documento.
-  const objetivos = [...porTicker.values()].filter(o => o.vigente);
+  const objetivos = [...porIdentidad.values()].filter(o => o.vigente);
+
+  // La ambigüedad es propiedad del conjunto: recién con todos a la vista se sabe si un ticker
+  // necesita sufijo. Se resuelve una sola vez, después del filtro.
+  const ids = PP.resolverIds(objetivos);
+  for (const o of objetivos) o.docId = ids.get(PP.claveIdentidad(o)) ?? o.ticker;
   return {
     objetivos,
     totalUsd: objetivos.reduce((a, o) => a + o.valorUsd, 0),
@@ -192,13 +208,13 @@ async function actualizarUnTicker(
   tcHoy: number | null,
   escribir: boolean,
 ): Promise<ResultadoTicker> {
-  const refPrecios = db.collection('preciosDiarios').doc(o.ticker);
-  const refInd = db.collection('indicadoresPosicion').doc(o.ticker);
+  const refPrecios = db.collection('preciosDiarios').doc(o.docId);
+  const refInd = db.collection('indicadoresPosicion').doc(o.docId);
   const spec = PP.panelesPara(o.tipo, o.paisRiesgo);
   const simbolo = PP.simboloDePanel(o.ticker);
 
   const base = {
-    ticker: o.ticker, tipo: o.tipo, paisRiesgo: o.paisRiesgo,
+    docId: o.docId, ticker: o.ticker, tipo: o.tipo, paisRiesgo: o.paisRiesgo,
     actualizadoEn: FieldValue.serverTimestamp(),
   };
   const guardar = async (precios: object, indicadores: object) => {
@@ -223,7 +239,7 @@ async function actualizarUnTicker(
       { estadoSerie: 'sin_serie', motivo: 'sin_fuente', puntosDisponibles: 0, semaforos: sinDatos },
     );
     return {
-      ticker: o.ticker, cobertura: 'sin_fuente', estadoSerie: 'sin_serie',
+      ticker: o.ticker, docId: o.docId, cobertura: 'sin_fuente', estadoSerie: 'sin_serie',
       puntos: 0, saltosPendientes: 0, splitsAplicados: 0, motivo: 'sin_fuente',
     };
   }
@@ -250,7 +266,7 @@ async function actualizarUnTicker(
       },
     );
     return {
-      ticker: o.ticker, cobertura: 'solo_live', estadoSerie: 'sin_serie',
+      ticker: o.ticker, docId: o.docId, cobertura: 'solo_live', estadoSerie: 'sin_serie',
       puntos: 0, saltosPendientes: 0, splitsAplicados: 0, motivo: 'sin_historico',
     };
   }
@@ -269,7 +285,7 @@ async function actualizarUnTicker(
       if (escribir) await refPrecios.set({ ...base, ...campoPrecioLive, ultimoIntentoFallido: status }, { merge: true });
       const d = previo.data() ?? {};
       return {
-        ticker: o.ticker, cobertura: 'con_serie', estadoSerie: (d.estadoSerie as PP.EstadoSerie) ?? 'limpia',
+        ticker: o.ticker, docId: o.docId, cobertura: 'con_serie', estadoSerie: (d.estadoSerie as PP.EstadoSerie) ?? 'limpia',
         puntos: (d.puntos as number) ?? 0, saltosPendientes: 0, splitsAplicados: 0,
         motivo: 'conservado_por_fallo',
       };
@@ -288,7 +304,7 @@ async function actualizarUnTicker(
       },
     );
     return {
-      ticker: o.ticker, cobertura: 'solo_live', estadoSerie: 'sin_serie',
+      ticker: o.ticker, docId: o.docId, cobertura: 'solo_live', estadoSerie: 'sin_serie',
       puntos: 0, saltosPendientes: 0, splitsAplicados: 0, motivo: 'fuente_sin_serie',
     };
   }
@@ -332,7 +348,7 @@ async function actualizarUnTicker(
   );
 
   return {
-    ticker: o.ticker, cobertura: 'con_serie', estadoSerie: estado,
+    ticker: o.ticker, docId: o.docId, cobertura: 'con_serie', estadoSerie: estado,
     puntos: ind.puntosDisponibles, saltosPendientes: saltos.length,
     splitsAplicados: aplicados.length, motivo: null,
   };

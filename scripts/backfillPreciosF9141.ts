@@ -23,10 +23,10 @@ async function main() {
   const r = await correrActualizacionPrecios(db, { escribir });
 
   console.log(`\n=== corrida ${r.fechaCorrida} · ${r.objetivos} objetivos ===`);
-  console.log('ticker        cobertura    estadoSerie   puntos  splits  saltos  motivo');
-  for (const x of [...r.resultados].sort((a, b) => a.ticker.localeCompare(b.ticker))) {
+  console.log('docId                cobertura    estadoSerie   puntos  splits  saltos  motivo');
+  for (const x of [...r.resultados].sort((a, b) => a.docId.localeCompare(b.docId))) {
     console.log(
-      `${x.ticker.padEnd(13)} ${x.cobertura.padEnd(12)} ${x.estadoSerie.padEnd(13)} ` +
+      `${x.docId.padEnd(20)} ${x.cobertura.padEnd(12)} ${x.estadoSerie.padEnd(13)} ` +
       `${String(x.puntos).padStart(6)}  ${String(x.splitsAplicados).padStart(6)}  ` +
       `${String(x.saltosPendientes).padStart(6)}  ${x.motivo ?? ''}`,
     );
