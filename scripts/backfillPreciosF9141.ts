@@ -8,17 +8,19 @@
 //   npx tsx scripts/backfillPreciosF9141.ts --target=production --escribir   (puebla)
 //
 // Serial con pausa de 600 ms: data912 limita a 120 req/min.
+// getDbAdmin, NO scripts/seed/utils/firestore.ts: el db y los sentinelas de FieldValue tienen
+// que salir del mismo árbol de firebase-admin. Ver el comentario de functions/src/adminDb.ts.
 import { correrActualizacionPrecios } from '../functions/src/patrimonioPreciosCron';
-import { getDb } from './seed/utils/firestore';
+import { getDbAdmin } from '../functions/src/adminDb';
 
 const target = process.argv.includes('--target=production') ? 'production' : 'emulator';
 const escribir = process.argv.includes('--escribir');
 
 async function main() {
-  const db = getDb(target as 'emulator' | 'production');
+  const db = getDbAdmin(target as 'emulator' | 'production');
   console.log(`[backfill F9.141] target=${target} · modo=${escribir ? 'ESCRIBE' : 'EN SECO'}\n`);
 
-  const r = await correrActualizacionPrecios(db as any, { escribir });
+  const r = await correrActualizacionPrecios(db, { escribir });
 
   console.log(`\n=== corrida ${r.fechaCorrida} · ${r.objetivos} objetivos ===`);
   console.log('ticker        cobertura    estadoSerie   puntos  splits  saltos  motivo');
