@@ -3958,8 +3958,12 @@ export default function Patrimonio() {
       for (const a of lista) cache[a.ticker] = a;
       setAnalisisCache(cache);
     });
-    cargarConfigCafci().then(setConfigCafci);
-    cargarUltimasCarteras().then(setCafciCarteras);
+    // F9.142 — encadenado, no en paralelo: las carteras se filtran por la config, así que
+    // conviene leerla una sola vez y pasarla, en vez de que cada llamada la relea por su cuenta.
+    cargarConfigCafci().then(cfg => {
+      setConfigCafci(cfg);
+      return cargarUltimasCarteras(cfg.fondos);
+    }).then(setCafciCarteras);
     cargarMappings().then(setCafciMappings);
     // F9.127 §2 — una sola lectura del diccionario de overrides por montaje de la vista.
     cargarFactoresTicker().then(setFactores).catch(e => console.error('[factores] no se pudieron leer:', e));
@@ -4049,9 +4053,14 @@ export default function Patrimonio() {
     setShowModalFlujo(false);
   }
 
+  // F9.142 — al guardar la config hay que releer las carteras: ahora la config decide qué
+  // fondos entran al benchmark, así que sacar uno de la lista tiene que sacarlo del cálculo
+  // en el acto. Sin esto el estado quedaba mostrando el fondo recién eliminado hasta recargar
+  // la vista, que es justo la sensación de "lo saqué y sigue ahí" que este cambio elimina.
   async function handleGuardarConfigCafci(c: ConfigCafci) {
     await guardarConfigCafci(c);
     setConfigCafci(c);
+    setCafciCarteras(await cargarUltimasCarteras(c.fondos));
   }
 
   async function handleImportarFondosCafci() {
@@ -4059,7 +4068,8 @@ export default function Patrimonio() {
       const n = await importarFondosSugeridos();
       const updated = await cargarConfigCafci();
       setConfigCafci(updated);
-      if (n === 0) alert('Los 13 fondos sugeridos ya estaban en la lista.');
+      setCafciCarteras(await cargarUltimasCarteras(updated.fondos));
+      if (n === 0) alert('Los fondos sugeridos ya estaban en la lista.');
       else alert(`${n} fondo${n !== 1 ? 's' : ''} agregado${n !== 1 ? 's' : ''}.`);
     } catch (e) {
       console.error('[importarFondos]', e);
@@ -4097,7 +4107,7 @@ export default function Patrimonio() {
     try {
       const result = await sincronizarCafciCallable();
       // Recargar carteras tras sincronizar
-      const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(), cargarMappings()]);
+      const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(configCafci.fondos), cargarMappings()]);
       setCafciCarteras(carteras);
       setCafciMappings(mappings);
       const partes = [`CAFCI: ${result.sincronizados}/${configCafci.fondos.length} fondos`];
@@ -4120,7 +4130,7 @@ export default function Patrimonio() {
   // textarea); solo el éxito pasa por el toast compartido, igual que sincronizarCafci.
   async function handleImportarCafciManual(fondoId: string, claseId: string, json: string) {
     const result = await importarCafciManualCallable(fondoId, claseId, json);
-    const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(), cargarMappings()]);
+    const [carteras, mappings] = await Promise.all([cargarUltimasCarteras(configCafci.fondos), cargarMappings()]);
     setCafciCarteras(carteras);
     setCafciMappings(mappings);
     const partes = [`Importado: ${result.especies} especies · datos al ${result.fechaDatos}`];

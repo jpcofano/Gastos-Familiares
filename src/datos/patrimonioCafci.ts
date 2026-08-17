@@ -1,6 +1,7 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  query, orderBy, limit, writeBatch,
+  query, orderBy, limit, startAfter, writeBatch,
+  type QueryDocumentSnapshot, type QuerySnapshot,
 } from 'firebase/firestore';
 import { db, functions } from '../firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -61,20 +62,73 @@ export async function guardarConfigCafci(config: ConfigCafci): Promise<void> {
 }
 
 // ── Carteras ──────────────────────────────────────────────────────────────────
-export async function cargarUltimasCarteras(): Promise<CafciCartera[]> {
-  // Para cada fondoId, carga la corrida más reciente
-  const snap = await getDocs(
-    query(collection(db, 'cafciCarteras'), orderBy('fechaFetch', 'desc'), limit(50))
-  );
-  // Deduplica por fondoId: queda solo la última por fondo
+// F9.142 — tamaño de página y tope de páginas. La página es la de siempre (50); lo que cambia
+// es que ahora hay una segunda pasada si hace falta, en vez de cortar a ciegas. El tope existe
+// para que un fondo configurado que nunca sincronizó no dispare un scan de la colección entera.
+const CARTERAS_PAGINA = 50;
+const CARTERAS_MAX_PAGINAS = 4;
+
+/**
+ * Última cartera de cada fondo **configurado**.
+ *
+ * F9.142 — la config manda. Antes se leía `cafciCarteras` sin filtrar, así que un fondo sacado
+ * de la config seguía pesando en el benchmark con su última cartera, para siempre. Sacar un
+ * fondo tenía que poder hacerse desde la UI y no se podía. Los documentos huérfanos no se
+ * borran —la colección es historia y sirve para reconstruir corridas viejas—: se filtran acá,
+ * en lectura.
+ *
+ * `fondos` es opcional a propósito: si no viene, se lee la config. Un llamador que se olvide
+ * de pasarla obtiene el comportamiento gobernado igual, nunca el viejo.
+ *
+ * Sobre el `limit(50)` que había: con 13 fondos y una cartera semanal, un fondo que deje de
+ * sincronizar (403, timeout — ver F9.112) congela su `fechaFetch` y cae fuera del corte
+ * después de ~5 carteras nuevas de los demás; desaparecía del benchmark sin que nada lo
+ * dijera. La alternativa que evaluamos —`where('fondoId', 'in', …)` en tandas de 30— necesita
+ * un índice compuesto (`fondoId` + `fechaFetch`) que el proyecto no tiene, igual que el
+ * `__name__` descendente que pedía la variante por rango de docId: las dos obligan a deployar
+ * índices. Paginar no necesita ninguno, lee lo mismo que antes en el caso normal (una página
+ * alcanza para los 13 fondos de hoy) y convierte el truncamiento silencioso en un warning.
+ */
+export async function cargarUltimasCarteras(fondos?: CafciFondoConfig[]): Promise<CafciCartera[]> {
+  const configurados = fondos ?? (await cargarConfigCafci()).fondos;
+  if (configurados.length === 0) return [];
+  const permitidos = new Set(configurados.map(f => f.fondoId));
+
   const seen = new Set<string>();
   const result: CafciCartera[] = [];
-  for (const d of snap.docs) {
-    const data = d.data() as Omit<CafciCartera, 'id'>;
-    if (!seen.has(data.fondoId)) {
+  let cursor: QueryDocumentSnapshot | null = null;
+
+  for (let pagina = 0; pagina < CARTERAS_MAX_PAGINAS; pagina++) {
+    // El cursor es el snapshot del último documento, no su `fechaFetch`: una sincronización
+    // escribe los 13 documentos con el MISMO timestamp, así que `startAfter(valor)` se saltearía
+    // la tanda entera. La anotación de `snap` corta la inferencia circular (cursor ← snap ← cursor).
+    const snap: QuerySnapshot = await getDocs(
+      cursor
+        ? query(collection(db, 'cafciCarteras'), orderBy('fechaFetch', 'desc'), startAfter(cursor), limit(CARTERAS_PAGINA))
+        : query(collection(db, 'cafciCarteras'), orderBy('fechaFetch', 'desc'), limit(CARTERAS_PAGINA))
+    );
+    if (snap.empty) break;
+
+    for (const d of snap.docs) {
+      const data = d.data() as Omit<CafciCartera, 'id'>;
+      if (!permitidos.has(data.fondoId) || seen.has(data.fondoId)) continue;
       seen.add(data.fondoId);
       result.push({ id: d.id, ...data });
     }
+    if (seen.size === permitidos.size) return result;
+    if (snap.docs.length < CARTERAS_PAGINA) break;
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+
+  // Un fondo configurado sin cartera no es un caso raro que se pueda ignorar: es exactamente el
+  // "no está aportando al benchmark" que antes pasaba callado.
+  const faltantes = [...permitidos].filter(id => !seen.has(id));
+  if (faltantes.length > 0) {
+    console.warn(
+      `[cargarUltimasCarteras] sin cartera en las últimas ${CARTERAS_PAGINA * CARTERAS_MAX_PAGINAS} corridas: ` +
+      faltantes.map(id => configurados.find(f => f.fondoId === id)?.nombre ?? id).join(', ') +
+      ' — no aportan al benchmark. ¿Sincronizaste después de agregarlos?'
+    );
   }
   return result;
 }
@@ -103,6 +157,22 @@ export async function guardarMapping(especieNorm: string, ticker: string | null)
 }
 
 // ── Seed de fondos sugeridos (F9.97.1 §8a) ───────────────────────────────────
+// F9.142 — verificado fondo por fondo contra el catálogo de CAFCI
+// (estadisticas.cafci.org.ar/consulta-de-fondos.json) y la planilla diaria con patrimonio por
+// clase (api.pub.cafci.org.ar/pb_get), el 16/08/2026. Tres correcciones:
+//
+//   · `15/15` NO era "Pionero Acciones": es **Pionero Acciones Plus** (CNV 71, ARS 5.609 M),
+//     un fondo 8x más chico y con 57% de CEDEARs brasileños y globales. El que la etiqueta
+//     decía es `39/6174` (CNV 61, ARS 44.408 M). Se verificó por patrimonio, no por nombre:
+//     los dos nombres se parecen demasiado, y confundirlos a ojo es como nació el defecto.
+//   · `514/1038` (Consultatio Renta Variable) tiene patrimonio **0** y su última cartera es del
+//     2026-01-23. No es que falle la sincronización: CAFCI no publica carteras nuevas de un
+//     fondo vacío. Fuera del seed.
+//   · `505/1021` decía "MAF Acciones Argentinas"; el fondo es "MAF Acciones Argentina". Los ids
+//     apuntaban bien, era solo la etiqueta.
+//
+// El `claseId` elige la URL, no la cartera: la composición es del fondo (verificado idéntica
+// entre ?clase=39 y ?clase=6174). Va Clase B por consistencia con el resto de la lista.
 const FONDOS_SEED: CafciFondoConfig[] = [
   { fondoId: '216', claseId: '1634', nombre: 'Consultatio Acciones Argentina - Clase C' },
   { fondoId: '51',  claseId: '683',  nombre: 'Superfondo Renta Variable - Clase B' },
@@ -110,12 +180,11 @@ const FONDOS_SEED: CafciFondoConfig[] = [
   { fondoId: '370', claseId: '662',  nombre: 'Delta Acciones - Clase B' },
   { fondoId: '275', claseId: '275',  nombre: '1810 Renta Variable Argentina - única' },
   { fondoId: '436', claseId: '821',  nombre: 'SBS Acciones Argentina - Clase B' },
-  { fondoId: '15',  claseId: '15',   nombre: 'Pionero Acciones - Clase B' },
+  { fondoId: '39',  claseId: '6174', nombre: 'Pionero Acciones - Clase B' },
   { fondoId: '227', claseId: '227',  nombre: 'Premier Renta Variable - Clase A' },
-  { fondoId: '514', claseId: '1038', nombre: 'Consultatio Renta Variable - Clase B' },
   { fondoId: '441', claseId: '836',  nombre: 'Allaria Acciones - Clase B' },
   { fondoId: '615', claseId: '2249', nombre: 'Galileo Acciones - Clase B' },
-  { fondoId: '505', claseId: '1021', nombre: 'MAF Acciones Argentinas - Clase B' },
+  { fondoId: '505', claseId: '1021', nombre: 'MAF Acciones Argentina - Clase B' },
   { fondoId: '430', claseId: '804',  nombre: 'IAM Renta Variable - Clase B' },
 ];
 

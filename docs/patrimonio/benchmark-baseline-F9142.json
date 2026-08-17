@@ -1,0 +1,429 @@
+{
+  "generadoEl": "2026-08-17T02:01:57.697Z",
+  "spec": "F9.142 §0.3",
+  "fechaCorrida": "2026-08-14",
+  "fondosConfig": [
+    {
+      "claseId": "1634",
+      "nombre": "Consultatio Acciones Argentina - Clase C",
+      "fondoId": "216"
+    },
+    {
+      "nombre": "Superfondo Renta Variable - Clase B",
+      "fondoId": "51",
+      "claseId": "683"
+    },
+    {
+      "fondoId": "22",
+      "nombre": "Fima PB Acciones - Clase B",
+      "claseId": "1193"
+    },
+    {
+      "fondoId": "370",
+      "nombre": "Delta Acciones - Clase B",
+      "claseId": "662"
+    },
+    {
+      "fondoId": "275",
+      "nombre": "1810 Renta Variable Argentina - única",
+      "claseId": "275"
+    },
+    {
+      "claseId": "821",
+      "fondoId": "436",
+      "nombre": "SBS Acciones Argentina - Clase B"
+    },
+    {
+      "fondoId": "15",
+      "nombre": "Pionero Acciones - Clase B",
+      "claseId": "15"
+    },
+    {
+      "claseId": "227",
+      "nombre": "Premier Renta Variable - Clase A",
+      "fondoId": "227"
+    },
+    {
+      "nombre": "Consultatio Renta Variable - Clase B",
+      "fondoId": "514",
+      "claseId": "1038"
+    },
+    {
+      "nombre": "Allaria Acciones - Clase B",
+      "fondoId": "441",
+      "claseId": "836"
+    },
+    {
+      "claseId": "2249",
+      "nombre": "Galileo Acciones - Clase B",
+      "fondoId": "615"
+    },
+    {
+      "claseId": "1021",
+      "nombre": "MAF Acciones Argentinas - Clase B",
+      "fondoId": "505"
+    },
+    {
+      "claseId": "804",
+      "fondoId": "430",
+      "nombre": "IAM Renta Variable - Clase B"
+    }
+  ],
+  "fondosEnElCalculo": [
+    {
+      "fondoId": "615",
+      "docId": "615_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Galileo Acciones - Clase B"
+    },
+    {
+      "fondoId": "51",
+      "docId": "51_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Superfondo Renta Variable - Clase B"
+    },
+    {
+      "fondoId": "514",
+      "docId": "514_2026-01-23",
+      "fechaDatos": "2026-01-23",
+      "nombre": "Consultatio Renta Variable - Clase B"
+    },
+    {
+      "fondoId": "505",
+      "docId": "505_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "MAF Acciones Argentinas - Clase B"
+    },
+    {
+      "fondoId": "441",
+      "docId": "441_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Allaria Acciones - Clase B"
+    },
+    {
+      "fondoId": "436",
+      "docId": "436_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "SBS Acciones Argentina - Clase B"
+    },
+    {
+      "fondoId": "430",
+      "docId": "430_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "IAM Renta Variable - Clase B"
+    },
+    {
+      "fondoId": "370",
+      "docId": "370_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Delta Acciones - Clase B"
+    },
+    {
+      "fondoId": "275",
+      "docId": "275_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "1810 Renta Variable Argentina - única"
+    },
+    {
+      "fondoId": "22",
+      "docId": "22_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Fima PB Acciones - Clase B"
+    },
+    {
+      "fondoId": "227",
+      "docId": "227_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Premier Renta Variable - Clase A"
+    },
+    {
+      "fondoId": "216",
+      "docId": "216_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Consultatio Acciones Argentina - Clase C"
+    },
+    {
+      "fondoId": "15",
+      "docId": "15_2026-07-24",
+      "fechaDatos": "2026-07-24",
+      "nombre": "Pionero Acciones - Clase B"
+    }
+  ],
+  "base": {
+    "propioUsd": 51457.193121069184,
+    "propioPctDeCartera": 0.4877927481162411,
+    "fondoCoberturaProm": 0.8816666666666667,
+    "excluidoFondoProm": 0.11833333333333329,
+    "fondosEnBase": 12,
+    "fondosSalteados": 1
+  },
+  "filas": [
+    {
+      "ticker": "TRAN",
+      "propioUsd": 11670.386530398322,
+      "propioFrac": 0.22679796200581867,
+      "fondosAvgFrac": 0.01807987341483964,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.056902002107481565,
+      "fondosStdFrac": 0.0194485801041422,
+      "divergencia": 0.20871808859097904
+    },
+    {
+      "ticker": "GGAL",
+      "propioUsd": 1960,
+      "propioFrac": 0.03808991282109938,
+      "fondosAvgFrac": 0.1804117400851345,
+      "fondosMinFrac": 0.15059588299024923,
+      "fondosMaxFrac": 0.2544,
+      "fondosStdFrac": 0.02899716369273444,
+      "divergencia": 0.1423218272640351
+    },
+    {
+      "ticker": "VIST",
+      "propioUsd": 7374,
+      "propioFrac": 0.14330358017489125,
+      "fondosAvgFrac": 0.019568000762096506,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.15350877192982457,
+      "fondosStdFrac": 0.043146239936878966,
+      "divergencia": 0.12373557941279476
+    },
+    {
+      "ticker": "BBAR",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.07653734277001988,
+      "fondosMinFrac": 0.05579868708971554,
+      "fondosMaxFrac": 0.10154525386313468,
+      "fondosStdFrac": 0.015127927503963417,
+      "divergencia": 0.07653734277001988
+    },
+    {
+      "ticker": "BMA",
+      "propioUsd": 2910.619758909853,
+      "propioFrac": 0.05656390452665592,
+      "fondosAvgFrac": 0.10677927057396307,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.14348785871964684,
+      "fondosStdFrac": 0.03682262253011719,
+      "divergencia": 0.05021536604730715
+    },
+    {
+      "ticker": "BYMA",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.044511170732413584,
+      "fondosMinFrac": 0.026343519494204427,
+      "fondosMaxFrac": 0.0715059588299025,
+      "fondosStdFrac": 0.013180494619462534,
+      "divergencia": 0.044511170732413584
+    },
+    {
+      "ticker": "CEPU",
+      "propioUsd": 1500.2122641509434,
+      "propioFrac": 0.02915456854829263,
+      "fondosAvgFrac": 0.06694991541270755,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.09741784037558687,
+      "fondosStdFrac": 0.02369005853916236,
+      "divergencia": 0.03779534686441492
+    },
+    {
+      "ticker": "RV",
+      "propioUsd": 1211.0139412997903,
+      "propioFrac": 0.023534395637369886,
+      "fondosAvgFrac": 0,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0,
+      "fondosStdFrac": 0,
+      "divergencia": 0.023534395637369886
+    },
+    {
+      "ticker": "YPFD",
+      "propioUsd": 11371.855345911948,
+      "propioFrac": 0.22099641772445872,
+      "fondosAvgFrac": 0.19821476408538732,
+      "fondosMinFrac": 0.15899122807017546,
+      "fondosMaxFrac": 0.2512,
+      "fondosStdFrac": 0.023646891599830147,
+      "divergencia": 0.022781653639071392
+    },
+    {
+      "ticker": "PAMP",
+      "propioUsd": 8281.508778825995,
+      "propioFrac": 0.16093976908808744,
+      "fondosAvgFrac": 0.14032990654427308,
+      "fondosMinFrac": 0.11147902869757176,
+      "fondosMaxFrac": 0.15479876160990713,
+      "fondosStdFrac": 0.01337053794801409,
+      "divergencia": 0.02060986254381436
+    },
+    {
+      "ticker": "TGSU2",
+      "propioUsd": 3440.1303721174004,
+      "propioFrac": 0.06685421733018773,
+      "fondosAvgFrac": 0.05219371071825429,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.08359133126934985,
+      "fondosStdFrac": 0.019173757796820887,
+      "divergencia": 0.014660506611933445
+    },
+    {
+      "ticker": "LOMA",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.014444999540756683,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.030959752321981428,
+      "fondosStdFrac": 0.01452143037235856,
+      "divergencia": 0.014444999540756683
+    },
+    {
+      "ticker": "TXAR",
+      "propioUsd": 1265.4661294549267,
+      "propioFrac": 0.024592599259689908,
+      "fondosAvgFrac": 0.038306268004722706,
+      "fondosMinFrac": 0.024918743228602387,
+      "fondosMaxFrac": 0.06469298245614036,
+      "fondosStdFrac": 0.009999407863772783,
+      "divergencia": 0.013713668745032798
+    },
+    {
+      "ticker": "SUPV",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.01078406610492976,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.04442036836403034,
+      "fondosStdFrac": 0.015887007543691063,
+      "divergencia": 0.01078406610492976
+    },
+    {
+      "ticker": "TGNO4",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.009529645493689317,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.03611971104231167,
+      "fondosStdFrac": 0.013720190302808586,
+      "divergencia": 0.009529645493689317
+    },
+    {
+      "ticker": "TECO2",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.009412848867825173,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.08333333333333334,
+      "fondosStdFrac": 0.02373221912640224,
+      "divergencia": 0.009412848867825173
+    },
+    {
+      "ticker": "BCMMUSDA",
+      "propioUsd": 411,
+      "propioFrac": 0.007987221515036657,
+      "fondosAvgFrac": 0,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0,
+      "fondosStdFrac": 0,
+      "divergencia": 0.007987221515036657
+    },
+    {
+      "ticker": "ECOG",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.007576515142071148,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.04083885209713026,
+      "fondosStdFrac": 0.013651430209937233,
+      "divergencia": 0.007576515142071148
+    },
+    {
+      "ticker": "VALO",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.0022831050228310505,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.027397260273972605,
+      "fondosStdFrac": 0.0075722027177063935,
+      "divergencia": 0.0022831050228310505
+    },
+    {
+      "ticker": "CRES",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.00217219589257504,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.02606635071090048,
+      "fondosStdFrac": 0.007204358746822554,
+      "divergencia": 0.00217219589257504
+    },
+    {
+      "ticker": "ALUA",
+      "propioUsd": null,
+      "propioFrac": null,
+      "fondosAvgFrac": 0.0019146608315098472,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0.022975929978118165,
+      "fondosStdFrac": 0.006350211578908043,
+      "divergencia": 0.0019146608315098472
+    },
+    {
+      "ticker": "BIOX",
+      "propioUsd": 61,
+      "propioFrac": 0.0011854513684117665,
+      "fondosAvgFrac": 0,
+      "fondosMinFrac": 0,
+      "fondosMaxFrac": 0,
+      "fondosStdFrac": 0,
+      "divergencia": 0.0011854513684117665
+    }
+  ],
+  "soloEnPropio": [
+    "RV",
+    "BCMMUSDA",
+    "BIOX"
+  ],
+  "soloenFondos": [
+    {
+      "ticker": "BBAR",
+      "avgFrac": 0.07653734277001988
+    },
+    {
+      "ticker": "BYMA",
+      "avgFrac": 0.044511170732413584
+    },
+    {
+      "ticker": "LOMA",
+      "avgFrac": 0.014444999540756683
+    },
+    {
+      "ticker": "SUPV",
+      "avgFrac": 0.01078406610492976
+    },
+    {
+      "ticker": "TGNO4",
+      "avgFrac": 0.009529645493689317
+    },
+    {
+      "ticker": "TECO2",
+      "avgFrac": 0.009412848867825173
+    },
+    {
+      "ticker": "ECOG",
+      "avgFrac": 0.007576515142071148
+    },
+    {
+      "ticker": "VALO",
+      "avgFrac": 0.0022831050228310505
+    },
+    {
+      "ticker": "CRES",
+      "avgFrac": 0.00217219589257504
+    },
+    {
+      "ticker": "ALUA",
+      "avgFrac": 0.0019146608315098472
+    }
+  ]
+}

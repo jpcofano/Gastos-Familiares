@@ -292,8 +292,23 @@ Implementación en cadena (cada una depende de la anterior):
     `indicadoresPosicion`, un doc por ticker. Cron `actualizarPreciosDiarios`, 18:00 ART.
   - Contrato completo abajo, en "Precios y serie diaria".
 
+- **F9.142** — La config de CAFCI gobierna el benchmark *(cerrado)*
+  - `cargarUltimasCarteras` filtra por `configPatrimonio/cafci` y pagina hasta cubrir los fondos
+    configurados, en vez de cortar en 50 documentos a ciegas.
+  - Seed corregido: `15/15` (Pionero Acciones **Plus**) → `39/6174` (Pionero Acciones), fuera
+    `514/1038` (fondo con patrimonio 0), etiqueta de `505/1021` sin la "s".
+  - Contrato completo abajo, en "Benchmark CAFCI".
+  - Auditoría previa y línea de base: `scripts/auditF9142.ts`,
+    `docs/patrimonio/benchmark-baseline-F9142.json`. Verificación: `scripts/verificarF9142.ts`.
+
 Fases pendientes:
-- **F9.142** — Ficha de posición (UI) sobre `indicadoresPosicion`. No incluida en F9.141.
+- **F9.143** — Universo completo del segmento + ponderación por patrimonio. Hoy los 13 fondos
+  cubren 29,5% del patrimonio de Renta Variable / Argentina (62 fondos), falta el #1 del
+  segmento, y `calcBenchmark` promedia equiponderado. Cambia la definición del número, no lo
+  corrige: por eso F9.142 guardó la línea de base.
+- **F9.144** — Ficha de posición (UI) sobre `indicadoresPosicion`. No incluida en F9.141.
+  *(Era "F9.142" en este roadmap; renumerada porque F9.142/F9.143 quedaron tomadas por el
+  trabajo de CAFCI.)*
 
 ---
 
@@ -471,6 +486,65 @@ En `functions/src/patrimonioPrecios.ts`, **no** en `src/datos/`. El cron es quie
 `functions/` tiene `rootDir: "src"` propio: no puede importar de `src/`. Para no repetir el
 error de tener dos motores, `src/datos/patrimonioPrecios.ts` solo **lee** las dos colecciones y
 no reimplementa nada de la tabla ni de los indicadores.
+
+---
+
+## Benchmark CAFCI (F9.142) — contrato
+
+### La config es la fuente de verdad del universo; `cafciCarteras` es historia
+
+`configPatrimonio/cafci` define **qué fondos componen el benchmark**. `cafciCarteras` es el
+registro histórico de lo que se descargó, y se **filtra en lectura**: nunca se borra un
+documento para sacar un fondo del cálculo.
+
+Antes de F9.142, `cargarUltimasCarteras` leía la colección sin mirar la config. Sacar un fondo
+desde la UI lo sacaba de la sincronización pero **no del benchmark**: su última cartera seguía
+pesando para siempre, y no había forma de corregirlo desde la aplicación. Los documentos
+huérfanos no son basura —sirven para reconstruir una corrida vieja— pero no votan.
+
+Corolario: **agregar un fondo nuevo para reemplazar a otro no reemplaza nada** si el viejo no
+sale de la config. Con `15/15` y `39/6174` configurados a la vez, el benchmark tendría los dos
+Pioneros.
+
+### Qué fondo es un `fondoId`: la etiqueta de la config no es evidencia
+
+`cafciCarteras.nombreFondo` y `.nombreClase` **no sirven para auditar la identidad de un
+fondo**. En la vía automática, `sincronizarCafci` pasa `fondo.nombre` dos veces a
+`parsearFichaCafci` (`functions/src/index.ts:3653`), así que ambos campos son un eco de la
+etiqueta que escribió la config. Comparar uno contra otro da coincidencia perfecta siempre.
+Solo `importarCafciManual`, y solo con el envoltorio JSON de la API vieja, extrae el nombre real.
+
+Para verificar identidad hay que ir a la fuente:
+
+- `https://estadisticas.cafci.org.ar/consulta-de-fondos.json` — catálogo completo (fondos,
+  clases, CNV, tipo de renta, región). Es el que dice qué fondo es cada `fondoId/claseId`.
+- `https://api.pub.cafci.org.ar/pb_get` — planilla diaria (xlsx) con **patrimonio por clase**.
+
+Y hay que verificar **por patrimonio, no por nombre**: así nació el defecto de F9.142, con
+`15/15` etiquetado "Pionero Acciones" cuando es "Pionero Acciones **Plus**", un fondo 8x más
+chico y con 57% de CEDEARs brasileños. Los nombres se parecen demasiado para distinguirlos a ojo.
+
+### El `claseId` elige la URL, no la cartera
+
+La composición de cartera es del **fondo**, no de la clase: se verificó que el bloque es
+idéntico entre `?clase=39` y `?clase=6174` del mismo fondo. El `claseId` solo cambia el
+patrimonio y el valor de cuotaparte que muestra la ficha. Por convención la config usa Clase B.
+
+### `BASE_FONDO_MINIMA` no es un filtro de calidad de fondo
+
+El umbral de 40 (`src/datos/patrimonioCafci.ts`) existe para no renormalizar sobre una base
+flaca, no para decidir qué fondo pertenece al segmento. Cuando atajó a Pionero Plus lo hizo por
+casualidad y por siete décimas (base 39,30): una semana antes ese mismo fondo tenía base 41,00 y
+entraba al promedio. **Un fondo que no corresponde al segmento se saca de la config**, no se
+deja rebotar contra el umbral.
+
+### Frescura: un fondo vacío sigue pesando un enésimo
+
+`calcBenchmark` promedia equiponderado y no mira la fecha. Consultatio Renta Variable
+(`514/1038`) tenía patrimonio **0** y su cartera congelada desde 2026-01-23 —CAFCI no publica
+carteras nuevas de un fondo sin plata adentro— y aportaba un doceavo del benchmark con la foto
+de enero. `fechaDatos` y `advertenciaCobertura` están en cada documento; conviene mirarlos
+antes de creerle al promedio.
 
 ---
 
