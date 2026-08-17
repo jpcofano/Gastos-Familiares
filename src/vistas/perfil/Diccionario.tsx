@@ -59,16 +59,24 @@ export default function Diccionario() {
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // F9.146 — getDocs directo, sin capa de datos que lo envuelva: puede rechazar y dejaba la
+  // pantalla en "Cargando…" para siempre.
   async function cargar() {
     setCargando(true);
-    const snap = await getDocs(collection(db, 'diccionario'));
-    const lista: EntradaConId[] = snap.docs.map(d => ({
-      id: d.id,
-      ...(d.data() as EntradaDict),
-    }));
-    lista.sort((a, b) => (a.patron ?? '').localeCompare(b.patron ?? '', 'es-AR', { sensitivity: 'base' }));
-    setEntradas(lista);
-    setCargando(false);
+    try {
+      const snap = await getDocs(collection(db, 'diccionario'));
+      const lista: EntradaConId[] = snap.docs.map(d => ({
+        id: d.id,
+        ...(d.data() as EntradaDict),
+      }));
+      lista.sort((a, b) => (a.patron ?? '').localeCompare(b.patron ?? '', 'es-AR', { sensitivity: 'base' }));
+      setEntradas(lista);
+    } catch (err) {
+      console.error('[Diccionario] lectura falló:', err);
+      setErrorMsg(`No se pudo leer el diccionario: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {

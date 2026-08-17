@@ -97,7 +97,13 @@ export default function TarjetasViewer() {
   const [periodoSel, setPeriodoSel] = useState<string | null>(null);
 
   useEffect(() => {
-    cargarFamiliaConfig().then(cfg => { setConfig(cfg); setCargando(false); });
+    // F9.146 — sin catch, un rechazo dejaba el visor en su estado de carga para siempre.
+    // Los resúmenes llegan por onSnapshot aparte, así que sin config la pantalla igual sirve
+    // (pierde los últimos-4 de la cara de tarjeta) — mejor eso que no mostrar nada.
+    cargarFamiliaConfig()
+      .then(cfg => setConfig(cfg))
+      .catch(err => console.error('[TarjetasViewer] cargarFamiliaConfig falló:', err))
+      .finally(() => setCargando(false));
   }, []);
 
   useEffect(() => suscribirResumenesTarjeta(setResumenes), []);

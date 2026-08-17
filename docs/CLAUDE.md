@@ -1697,6 +1697,63 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   posiciones.
   Frontend puro. `tsc`: 41 → 41 (medido con `grep -c "error TS"`), 0 en `functions/`; `vite build`
   OK. Deploy: `--only hosting`.
+- F9.146 — **el spinner eterno: un `await` de Firestore sin red deja un estado de carga colgado**.
+  Bug en producción: subir el `.txt` en "Actualizar posiciones" dejaba el wizard en "Validando…"
+  para siempre, sin mensaje. `PatrimonioIngesta.tsx` tenía **cuatro caminos de salida y tres
+  estaban bien**: el `await tcParaFecha(fechaDate)` era el único fuera de un `try`, así que un
+  rechazo no tocaba `step` y no había forma de saber que había fallado ni de reintentar.
+  **§1 — el `try/catch` que faltaba**, con `setStep('upload')` y el error **crudo** en pantalla,
+  mismo criterio que los otros tres. El error no se interpreta ni se traduce a una causa
+  supuesta: hacerlo es lo que costó tres sesiones en F9.102.x ("CloudFront bloquea por IP") y
+  F9.104 (la API estaba muerta, no bloqueada).
+  **§2 — `tcParaFecha` gana el MISMO fallback que `cargarTCReciente`**, no uno nuevo. F9.113 le
+  puso red a una de las dos lecturas de `tcDiario` y no a la otra, y **esa asimetría es la que
+  colgó la ingesta**. El fallback se extrajo a `leerTcDiarioDesc()` (única copia): el id del doc
+  ES la fecha, así que ordenar en cliente da el mismo resultado, y es la misma lectura completa
+  que ya hace `cargarEstadoTcDiario`. Corre solo en el camino degradado, así que no se cachea.
+  **Los otros dos llamadores de `tcParaFecha` estaban rotos igual** (`AltaMovimiento.tsx:183`,
+  `EditarMovimiento.tsx:90`): `.then()` sin `.catch()` dejaba `tcCargando` en `true` para
+  siempre. En Alta **no es solo el cartel "Buscando TC…"**: ese flag gatea el auto-confirmar de
+  F9.106, así que un comprobante en USD con confianza ≥0.9 se quedaba sin cargar y sin decir nada.
+  **§3 — barrido de `src/` entero: 9 estados colgados, los 9 arreglados.** Los tres de arriba,
+  más las cargas de catálogos de `AltaMovimiento` y `EditarMovimiento` (modal en "Cargando…"
+  eterno), `TarjetasViewer` (`cargarFamiliaConfig`), y las tres pantallas de admin cuyo `cargar()`
+  usa un `getDocs` pelado sin capa de datos que lo envuelva: `perfil/Destinos`,
+  `perfil/Diccionario`, `perfil/Normalizacion`. **Los otros 17 candidatos NO son bugs y conviene
+  no volver a auditarlos:** todos esperan funciones que devuelven `Resultado<T>` (`{ok, error}`),
+  o sea que la capa de datos ya atrapa y **no pueden rechazar** — `crearMovimiento`,
+  `subirEntrante`, `llamarTarjeta`, `actualizarMediosPago`, `confirmarResumenTarjeta` y compañía.
+  `Patrimonio.tsx:3990` tiene `.finally`, `ResumenesTarjeta`/`TipoCambio`/`DiccionarioContext`
+  tienen `.catch`, e `ItemsEsperadosContext` usa el callback de error de `onSnapshot`.
+  **La regla, que es lo que hay que recordar:** un `await` de Firestore en un handler de UI es
+  seguro si —y solo si— lo que espera devuelve `Resultado`; contra Firestore directo hace falta
+  `try/finally`, y el `finally` es el que importa, porque el `catch` sin `finally` deja el flag
+  prendido en cualquier rama que no pase por él.
+  El detector quedó en `scripts/auditarEstadosColgados.mjs` (rastrea profundidad de bloques `try`
+  por llaves, no por texto): la **v1 no encontró el bug real**, porque `onFile` sí tiene un `try`
+  — para el `JSON.parse` — y el `await` roto estaba afuera. Buscar "función sin catch" no sirve;
+  hay que preguntar si **ese** `await` está cubierto.
+  **§4 — el índice NO se agrega a `firestore.indexes.json`, y la premisa del reporte no se
+  confirma.** El diagnóstico decía que `orderBy(documentId(),'desc') + startAt` exige un índice
+  compuesto ausente. Evidencia en contra, del propio reporte: el fallback que se ve dispararse en
+  consola es el de `cargarTCReciente`, cuya consulta es `orderBy(documentId(),'desc') + limit(n)`
+  — un orden de un solo campo sobre `__name__`, que **ningún índice compuesto puede arreglar ni
+  romper**. Si esa falla, la causa es otra (reglas, red, cache offline). Crear el índice habría
+  fosilizado un diagnóstico sin verificar, que es el patrón que este repo ya pagó tres veces. Y
+  el fallback alcanza para las dos consultas, así que el índice sería innecesario aun si la
+  premisa fuera cierta. **Con §1 el error real ahora llega crudo a pantalla y a consola: la
+  próxima vez se diagnostica con el mensaje, no con una hipótesis.**
+  **§5 — verificado contra la `tcParaFecha` real bundleada con esbuild** (`scripts/
+  verificarF9146.mjs`, `node scripts/verificarF9146.mjs`), no contra una reimplementación: 7/7 en
+  verde — fecha con doc exacto, domingo sin doc, **consulta ordenada rota → no rechaza y cae al
+  TC del viernes** (el bug), `cargarTCReciente` usando el mismo fallback, fecha previa al
+  historial → `null`, y colección también rota → **sí rechaza**, para que el `try/catch` del
+  wizard lo muestre en vez de tragarlo. **Lo que NO se verificó rindiendo el componente:** el
+  repo no tiene runner de DOM (ni jsdom ni react-test-renderer) y no se instaló ninguno; el
+  `try/catch` de `PatrimonioIngesta` está cubierto por lectura y por el detector, no por un
+  render. Queda pendiente la prueba manual en el navegador.
+  Frontend puro. `tsc`: 41 → 41 (los 3 de `perfil/Destinos.tsx` son pre-existentes, medidos
+  iguales antes y después), 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

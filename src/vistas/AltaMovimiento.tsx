@@ -148,8 +148,16 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
             }
           }
         }
-        setCargandoCatalogos(false);
-      });
+      })
+      // F9.146 — mismo patrón: sin catch, un rechazo dejaba `cargandoCatalogos` en true y el alta
+      // no montaba nunca (y el auto-confirmar tampoco disparaba). Bajamos el flag igual y dejamos
+      // el error a la vista: el form arranca con los catálogos vacíos, que se ve y se puede
+      // reintentar, en vez de un modal congelado que no se ve.
+      .catch(err => {
+        console.error('[AltaMovimiento] carga de catálogos falló:', err);
+        setErrorMsg(`No se pudieron cargar los catálogos: ${err instanceof Error ? err.message : String(err)}`);
+      })
+      .finally(() => setCargandoCatalogos(false));
   }, [esAdmin]);
 
   // Reset subcategoria cuando cambia la categoría (saltar mount inicial y cambios de sugerencia)
@@ -180,11 +188,20 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   useEffect(() => {
     if (moneda === 'ARS') { setTcUsdArs(null); return; }
     setTcCargando(true);
-    tcParaFecha(new Date(fecha + 'T12:00:00')).then(tc => {
-      setTcUsdArs(tc);
-      if (tc === null) console.warn('[AltaMovimiento] tcUsdArs null para', fecha);
-      setTcCargando(false);
-    });
+    tcParaFecha(new Date(fecha + 'T12:00:00'))
+      .then(tc => {
+        setTcUsdArs(tc);
+        if (tc === null) console.warn('[AltaMovimiento] tcUsdArs null para', fecha);
+      })
+      // F9.146 — sin catch, un rechazo dejaba `tcCargando` en true para siempre. No es solo el
+      // cartel "Buscando TC…": ese flag gatea el auto-confirmar de F9.106 (:297), así que un
+      // comprobante en USD con confianza ≥0.9 se quedaba sin cargar y sin decir nada.
+      // El movimiento se guarda igual con tcUsdArs null, que ya es un caso contemplado.
+      .catch(err => {
+        console.error('[AltaMovimiento] tcParaFecha falló:', err);
+        setTcUsdArs(null);
+      })
+      .finally(() => setTcCargando(false));
   }, [fecha, moneda]);
 
   const subcatsFiltradas = subcats.filter(s => s.categoriaPadre === categoria);

@@ -66,8 +66,13 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
       .then(([s, fam]) => {
         setSubcats(s);
         if (fam) setConfig(fam);
-        setCargando(false);
-      });
+      })
+      // F9.146 — sin catch, un rechazo dejaba el modal en "Cargando…" para siempre.
+      .catch(err => {
+        console.error('[EditarMovimiento] carga de catálogos falló:', err);
+        setErrorMsg(`No se pudieron cargar los catálogos: ${err instanceof Error ? err.message : String(err)}`);
+      })
+      .finally(() => setCargando(false));
   }, []);
 
   // Reset subcat cuando cambia categoría (saltear el valor inicial)
@@ -87,10 +92,14 @@ export default function EditarMovimiento({ movimiento: m, onGuardado, onEliminad
   useEffect(() => {
     if (moneda === 'ARS') { setTcUsdArs(null); return; }
     setTcCargando(true);
-    tcParaFecha(new Date(fecha + 'T12:00:00')).then(tc => {
-      setTcUsdArs(tc);
-      setTcCargando(false);
-    });
+    tcParaFecha(new Date(fecha + 'T12:00:00'))
+      .then(tc => setTcUsdArs(tc))
+      // F9.146 — sin catch, "Buscando TC…" quedaba fijo y el campo nunca resolvía.
+      .catch(err => {
+        console.error('[EditarMovimiento] tcParaFecha falló:', err);
+        setTcUsdArs(null);
+      })
+      .finally(() => setTcCargando(false));
   }, [fecha, moneda]);
 
   const subcatsFiltradas  = subcats.filter(s => s.categoriaPadre === categoria);

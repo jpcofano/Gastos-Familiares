@@ -166,7 +166,23 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
 
     const data = raw as CorraidaJSON;
     const fechaDate = new Date(data.meta.fecha_corrida + 'T12:00:00');
-    const tcFecha = await tcParaFecha(fechaDate);
+
+    // F9.146 — era el único await del handler sin red. Si la promesa rechazaba, nadie tocaba
+    // `step` y el wizard quedaba en "Validando…" para siempre, sin mensaje: el usuario no tenía
+    // forma de saber que había fallado ni de reintentar. Los otros tres caminos de salida ya
+    // caían a 'upload' con el error a la vista; este es el mismo criterio.
+    let tcFecha: number | null;
+    try {
+      tcFecha = await tcParaFecha(fechaDate);
+    } catch (err) {
+      // El error va CRUDO a pantalla y a consola, sin interpretarlo: si lo traducimos a una
+      // causa supuesta, la próxima vez se diagnostica la suposición en vez del error real.
+      console.error('[PatrimonioIngesta] tcParaFecha falló:', err);
+      setErrors([`No se pudo leer el tipo de cambio: ${err instanceof Error ? err.message : String(err)}`]);
+      setStep('upload');
+      return;
+    }
+
     const tcUsado = tcFecha ?? 0;
 
     if (!tcFecha) {

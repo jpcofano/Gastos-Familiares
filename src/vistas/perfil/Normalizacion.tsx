@@ -48,10 +48,17 @@ export default function Normalizacion() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
 
+  // F9.146 — `listarReglas` es un getDocs pelado: puede rechazar y dejaba "Cargando…" fijo.
   async function cargar() {
     setCargando(true);
-    setReglas(await listarReglas());
-    setCargando(false);
+    try {
+      setReglas(await listarReglas());
+    } catch (err) {
+      console.error('[Normalizacion] listarReglas falló:', err);
+      setErrorMsg(`No se pudieron leer las reglas: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => { cargar(); }, []);

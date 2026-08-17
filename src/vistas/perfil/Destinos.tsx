@@ -57,12 +57,20 @@ export default function Destinos() {
   const [guardando, setGuardando] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // F9.146 — `listarDestinos` es un getDocs pelado (no devuelve Resultado), así que puede
+  // rechazar; sin try/finally la pantalla se quedaba en "Cargando…" sin decir nada.
   async function cargar() {
     setCargando(true);
-    const lista = await listarDestinos();
-    lista.sort((a, b) => a.destinoNorm.localeCompare(b.destinoNorm, 'es-AR', { sensitivity: 'base' }));
-    setDestinos(lista);
-    setCargando(false);
+    try {
+      const lista = await listarDestinos();
+      lista.sort((a, b) => a.destinoNorm.localeCompare(b.destinoNorm, 'es-AR', { sensitivity: 'base' }));
+      setDestinos(lista);
+    } catch (err) {
+      console.error('[Destinos] listarDestinos falló:', err);
+      setErrorMsg(`No se pudieron leer los destinos: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCargando(false);
+    }
   }
 
   useEffect(() => {

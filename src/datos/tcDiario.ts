@@ -4,6 +4,25 @@ import { db, functions } from '../firebase';
 import { claveSemanaISO } from './patrimonioOptimizacion';
 import { TC_FALLBACK } from './money';
 
+// F9.113 / F9.146 — fallback ÚNICO sin consulta ordenada, compartido por las dos lecturas
+// de tcDiario. El id del doc ES la fecha (YYYY-MM-DD), así que el orden lexicográfico
+// descendente es el cronológico y ordenar en cliente da exactamente el mismo resultado.
+// Es la misma lectura completa que ya hace cargarEstadoTcDiario: preferimos leer de más
+// antes que dejar una pantalla sin TC.
+//
+// Que sea uno solo es el punto: F9.113 le puso red a cargarTCReciente y no a tcParaFecha,
+// y esa asimetría es la que colgó la ingesta de patrimonio en producción.
+//
+// Corre solo en el camino degradado (la consulta ordenada ya falló), así que no se cachea:
+// una repetición de la lectura completa cuando la consulta normal está rota es más barata
+// que un cache con invalidación que haya que razonar después.
+async function leerTcDiarioDesc(): Promise<Array<{ id: string; tcUsdArs: number; origen?: TCDiarioItem['origen'] }>> {
+  const snap = await getDocs(collection(db, 'tcDiario'));
+  return snap.docs
+    .map(d => ({ id: d.id, tcUsdArs: d.data().tcUsdArs as number, origen: d.data().origen as TCDiarioItem['origen'] }))
+    .sort((a, b) => (a.id < b.id ? 1 : -1));
+}
+
 export async function tcParaFecha(fecha: Date): Promise<number | null> {
   const dateStr = fecha.toISOString().slice(0, 10);
 
@@ -14,17 +33,26 @@ export async function tcParaFecha(fecha: Date): Promise<number | null> {
   // requería un índice compuesto en Firestore. startAt en desc order incluye dateStr y
   // todos los IDs menores (fechas anteriores), por lo que el primer resultado es el
   // día exacto o el más reciente anterior.
-  const snap = await getDocs(
-    query(
-      collection(db, 'tcDiario'),
-      orderBy(documentId(), 'desc'),
-      startAt(dateStr),
-      limit(1),
-    ),
-  );
-  if (snap.empty) return null;
-  const hit = snap.docs[0];
-  return hit.id <= dateStr ? ((hit.data().tcUsdArs as number) ?? null) : null;
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, 'tcDiario'),
+        orderBy(documentId(), 'desc'),
+        startAt(dateStr),
+        limit(1),
+      ),
+    );
+    if (snap.empty) return null;
+    const hit = snap.docs[0];
+    return hit.id <= dateStr ? ((hit.data().tcUsdArs as number) ?? null) : null;
+  } catch (err) {
+    // El error se loguea CRUDO, sin interpretarlo: dar por sentado el motivo ("falta el
+    // índice", "lo bloquea CloudFront") es lo que costó tres sesiones en F9.102.x y F9.104.
+    console.warn('[tcParaFecha] consulta ordenada falló, uso fallback sin índice:', err);
+    const docs = await leerTcDiarioDesc();
+    const hit = docs.find(d => d.id <= dateStr);
+    return hit ? (hit.tcUsdArs ?? null) : null;
+  }
 }
 
 export interface TCDiarioItem {
@@ -57,17 +85,12 @@ export async function cargarTCReciente(n = 10): Promise<TCDiarioItem[]> {
     );
     return cachear(snap.docs.map(aItem));
   } catch (err) {
-    // F9.113 — fallback sin índice: el id ES la fecha (YYYY-MM-DD), así que ordenar en
-    // cliente da el mismo resultado. La colección es chica (un doc por día) y es la misma
-    // lectura completa que ya hace cargarEstadoTcDiario. Preferimos leer de más antes que
-    // dejar la pantalla sin valor de TC.
+    // F9.113 — fallback sin índice. F9.146 lo movió a leerTcDiarioDesc para que tcParaFecha
+    // use exactamente el mismo, en vez de tener red una función y la otra no.
     console.warn('[cargarTCReciente] consulta ordenada falló, uso fallback sin índice:', err);
-    const snap = await getDocs(collection(db, 'tcDiario'));
+    const docs = await leerTcDiarioDesc();
     return cachear(
-      snap.docs
-        .map(aItem)
-        .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
-        .slice(0, n),
+      docs.slice(0, n).map(d => ({ fecha: d.id, tcUsdArs: d.tcUsdArs, origen: d.origen })),
     );
   }
 }
