@@ -1663,6 +1663,40 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   Verificado en prod: `PHWX7clkikjA17bz4sst` con `pagado=true confirmadoPago=true`;
   `limpiarPagadoIncoherente.ts` en dry-run → **0 incoherentes sobre 100 confirmados**.
   Frontend puro. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
+- F9.145 — **el Paso 2 de "Actualizar posiciones" vive en la app**. Ver
+  `docs/prompts/F9.145-paso2-ingesta.md`. El wizard numeraba "Paso 1 — Subir archivo" y "Paso 3 —
+  Confirmar" y se salteaba el del medio, porque ese paso ocurría **afuera**: el prompt de extracción
+  vivía en `docs/patrimonio/patrimonio-extraccion.md`, o sea **solo en el repo**, y para actualizar
+  posiciones había que abrir el código fuente.
+  **§1 — una sola copia, y la del código manda.** El prompt pasa a
+  `src/datos/patrimonioPromptExtraccion.ts` y el `.md` se **reemplaza por una nota** que apunta ahí
+  (no se borra: tres docs lo referencian por esa ruta y así los punteros siguen resolviendo). La
+  constante **se generó mecánicamente desde el `.md`, no se transcribió** — es la única forma de que
+  "no reformatear al portarlo" sea verificable y no una intención: ese texto está calibrado contra
+  los resúmenes reales de PPI, Balanz, Nexo y Bitfinex. Verificado con diff línea por línea contra
+  `git show HEAD:docs/patrimonio/patrimonio-extraccion.md`: **154 líneas de los dos lados, 2
+  distintas**, y son exactamente las de la cabecera.
+  **Cabecera: `FECHA_CORRIDA` se prellena, `TC_REFERENCIA_ARS_USD` NO.** El TC es informativo y la
+  app valúa con su propio `tcDiario`; poner un número ahí invitaría a creer que ese valor entra al
+  cálculo. Queda como placeholder `<completar a mano: MEP del dia>` con la aclaración al lado.
+  **§2 — se renumeró, no se insertó.** `Step` gana `'prompt'` como estado **inicial** y los títulos
+  quedan `Paso 1 — Generar el JSON` / `Paso 2 — Subir archivo` / `Paso 3 — Confirmar`, en el orden
+  real. Los números 1 y 3 anteriores no significaban nada.
+  **El atajo ES el selector de archivo, y esa es la decisión que importa.** "Se tiene que poder
+  saltear" + "no puede quedar más largo que antes" son incompatibles si el atajo navega al Paso 2:
+  eso sumaría un toque. El enlace "Ya tengo el JSON — subir archivo →" dispara el `<input type=
+  "file">` directo (que subió a nivel del wizard, compartido por los dos pasos), así que el camino
+  queda en **1 toque en la app, igual que antes**. Un archivo inválido cae al Paso 2 con los errores,
+  que es donde corresponde.
+  **Copiar/Descargar replicados de `ModalPromptChat`, no extraídos**, con el comentario que dice por
+  qué: cualquier extracción a componente compartido obliga a tocar el flujo de Research, y el spec
+  acota el alcance a esta pantalla.
+  **Fuera de alcance a propósito:** nada de "generar automáticamente". El paso es manual porque el
+  usuario pega PDFs y fotos en un chat aparte; convertirlo en llamada a API es otra feature, con otro
+  costo y otras decisiones. No se tocó el parseo, la validación, el diff del Paso 3 ni el contrato de
+  posiciones.
+  Frontend puro. `tsc`: 41 → 41 (medido con `grep -c "error TS"`), 0 en `functions/`; `vite build`
+  OK. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
@@ -2711,7 +2745,8 @@ Aislamiento absoluto: colecciones propias (`posiciones`, `snapshotsPortafolio`);
 
 Contrato completo: `docs/patrimonio/CLAUDE-PATRIMONIO.md` (fuente de verdad técnica).
 Resumen de sesión de diseño: `docs/patrimonio/RESUMEN-SESION.md`.
-Prompt de extracción: `docs/patrimonio/patrimonio-extraccion.md`.
+Prompt de extracción: `src/datos/patrimonioPromptExtraccion.ts` (F9.145 — única copia; el `.md`
+de `docs/patrimonio/` quedó como nota que apunta acá).
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
 **Implementado hasta F9.101.** Detalle completo en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.

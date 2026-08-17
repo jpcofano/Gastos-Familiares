@@ -1,8 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { Card } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import { tcParaFecha } from '../datos/tcDiario';
 import { confirmarIngesta } from '../datos/patrimonio';
+import { promptExtraccionPosiciones, hoyArgentinaISO } from '../datos/patrimonioPromptExtraccion';
 import type { CorraidaJSON, Posicion, PosicionRaw, ActivoFijo } from '../types/patrimonio';
 
 // ── Validador manual (sin ajv) ─────────────────────────────────────────────────
@@ -97,17 +98,47 @@ type Props = {
   onClose: () => void;
 };
 
-type Step = 'upload' | 'validating' | 'confirm' | 'saving';
+type Step = 'prompt' | 'upload' | 'validating' | 'confirm' | 'saving';
+
+const TITULO_PASO: Record<Step, string> = {
+  prompt: 'Paso 1 — Generar el JSON',
+  upload: 'Paso 2 — Subir archivo',
+  validating: 'Paso 2 — Subir archivo',
+  confirm: 'Paso 3 — Confirmar',
+  saving: 'Paso 3 — Confirmar',
+};
 
 export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, totalManualesUsd, metricasJson, onConfirmado, onClose }: Props) {
-  const [step, setStep] = useState<Step>('upload');
+  const [step, setStep] = useState<Step>('prompt');
   const [errors, setErrors] = useState<string[]>([]);
   const [checksumWarning, setChecksumWarning] = useState<string | null>(null);
   const [corrida, setCorrida] = useState<CorraidaJSON | null>(null);
   const [posicionesEnriquecidas, setPosicionesEnriquecidas] = useState<Posicion[]>([]);
   const [tc, setTc] = useState<number>(0);
   const [errorGuardar, setErrorGuardar] = useState<string | null>(null);
+  const [copiado, setCopiado] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // FECHA_CORRIDA prellenada con hoy en zona Argentina; el TC queda como placeholder
+  // a propósito (la app usa su propio tcDiario, ver patrimonioPromptExtraccion.ts).
+  const fechaHoy = useMemo(() => hoyArgentinaISO(), []);
+  const prompt = useMemo(() => promptExtraccionPosiciones(fechaHoy), [fechaHoy]);
+
+  // Copiar/descargar replicados de ModalPromptChat (Patrimonio.tsx): extraerlos a un
+  // componente compartido obligaba a tocar el flujo de Research, que no está en alcance.
+  function copiarPrompt() {
+    navigator.clipboard.writeText(prompt);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
+  }
+
+  function descargarPrompt() {
+    const blob = new Blob([prompt], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `prompt-posiciones-${fechaHoy}.txt`; a.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -189,17 +220,74 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
         <div>
           <div style={{ fontSize: 16, fontWeight: 800 }}>Actualizar posiciones</div>
           <div style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
-            {step === 'upload' || step === 'validating' ? 'Paso 1 — Subir archivo' : step === 'confirm' || step === 'saving' ? 'Paso 3 — Confirmar' : ''}
+            {TITULO_PASO[step]}
           </div>
         </div>
       </div>
 
+      {/* Único para todo el wizard: lo dispara el Paso 1 (atajo) y el Paso 2 (dropzone). */}
+      <input ref={fileRef} type="file" accept=".txt,.json" style={{ display: 'none' }} onChange={onFile} />
+
       <div style={{ flex: 1, padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-        {/* ── Paso 1: Upload ──────────────────────────────────────────────────── */}
+        {/* ── Paso 1: Generar el JSON ─────────────────────────────────────────── */}
+        {step === 'prompt' && (
+          <>
+            <div style={{ fontSize: 13, color: 'var(--color-text-sec)', lineHeight: 1.5 }}>
+              Pegá este prompt en un chat de Claude junto con los resúmenes de las cuentas (PDFs y
+              fotos), y volvé con el JSON que devuelva.
+            </div>
+
+            {/* Atajo: abre el selector de archivo directo, sin pasar por el Paso 2.
+                Va arriba para que se vea sin scrollear y no sume toques a quien ya tiene el JSON. */}
+            <button
+              onClick={() => fileRef.current?.click()}
+              style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--color-accent)', fontFamily: 'var(--font-base)' }}
+            >
+              Ya tengo el JSON — subir archivo →
+            </button>
+
+            <textarea
+              readOnly
+              value={prompt}
+              rows={14}
+              style={{ fontSize: 11.5, borderRadius: 10, border: '1px solid var(--gf-gray-200)', padding: '10px 12px', resize: 'vertical', background: 'var(--gf-gray-50)', fontFamily: 'var(--font-base)', color: 'var(--color-text)', lineHeight: 1.45 }}
+            />
+            <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', lineHeight: 1.45, marginTop: -6 }}>
+              <strong>FECHA_CORRIDA</strong> ya viene con la fecha de hoy ({fechaHoy}).
+              <strong> TC_REFERENCIA_ARS_USD</strong> lo completás a mano: es informativo, la app
+              valúa con su propio tipo de cambio diario.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={copiarPrompt}
+                style={{ flex: 1, padding: '11px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-base)', background: copiado ? 'var(--gf-emerald)' : 'var(--gf-gray-100)', color: copiado ? '#fff' : 'var(--color-text)' }}
+              >
+                <Icon name={copiado ? 'check' : 'copy'} size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                {copiado ? 'Copiado' : 'Copiar'}
+              </button>
+              <button
+                onClick={descargarPrompt}
+                style={{ flex: 1, padding: '11px 16px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-base)', background: 'var(--gf-gray-100)', color: 'var(--color-text)' }}
+              >
+                <Icon name="download" size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+                Descargar .txt
+              </button>
+            </div>
+
+            <button
+              onClick={() => setStep('upload')}
+              style={{ padding: '13px 16px', borderRadius: 12, border: 'none', background: 'var(--color-accent)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+            >
+              Ir al Paso 2 — Subir archivo →
+            </button>
+          </>
+        )}
+
+        {/* ── Paso 2: Upload ──────────────────────────────────────────────────── */}
         {(step === 'upload' || step === 'validating') && (
           <>
-            <input ref={fileRef} type="file" accept=".txt,.json" style={{ display: 'none' }} onChange={onFile} />
             <div
               onClick={() => fileRef.current?.click()}
               style={{ border: '2px dashed var(--gf-gray-200)', borderRadius: 16, padding: '36px 20px', textAlign: 'center', cursor: 'pointer', background: 'var(--gf-gray-50)' }}
@@ -228,7 +316,7 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
           </>
         )}
 
-        {/* ── Paso 3: Confirmar ───────────────────────────────────────────────── */}
+        {/* ── Paso 3: Confirmar ──────────────────────────────────────────────── */}
         {(step === 'confirm' || step === 'saving') && corrida && (
           <>
             {/* Checksum warning */}
