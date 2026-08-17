@@ -58,6 +58,18 @@ async function main() {
     ? configNueva.split(',').map(p => ({ fondoId: p.split('/')[0], claseId: p.split('/')[1] ?? '', nombre: p }))
     : fondosCfg;
 
+  // La identidad contra la línea de base solo es exigible si se está corriendo con LA MISMA
+  // config con la que se tomó la base. Ése era el punto del §1 —el filtro no cambia el número—
+  // y se verificó con los 13 fondos originales. Con la config corregida del §2 el número TIENE
+  // que moverse: pedir identidad ahí convertiría el chequeo en un falso rojo permanente.
+  const claveCfg = (f: { fondoId: string; claseId: string }) => `${f.fondoId}/${f.claseId}`;
+  const mismaConfigQueLaBase =
+    JSON.stringify(fondos.map(claveCfg).sort()) ===
+    JSON.stringify((baseline.fondosConfig ?? []).map(claveCfg).sort());
+  console.log(mismaConfigQueLaBase
+    ? '\nconfig == la de la línea de base → se exige identidad bit a bit'
+    : '\nconfig != la de la línea de base → se reporta el delta, no se exige identidad');
+
   const snap = await db.collection('cafciCarteras').orderBy('fechaFetch', 'desc').get();
   const todos = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
 
@@ -119,10 +131,10 @@ async function main() {
   const idsVieja = vieja.map(c => c.id).sort();
   const idsNueva = nueva.map(c => c.id).sort();
   const mismos = JSON.stringify(idsVieja) === JSON.stringify(idsNueva);
-  chequear('selección nueva (config + docId desc) == selección vieja (fechaFetch desc + limit 50)',
-    mismos || !!configNueva,
+  chequear('selección nueva (config + paginado) == selección vieja (fechaFetch desc + limit 50)',
+    mismos || !mismaConfigQueLaBase,
     mismos ? `${idsNueva.length} documentos idénticos ✓`
-      : `vieja=[${idsVieja.join(', ')}] nueva=[${idsNueva.join(', ')}]${configNueva ? ' (esperado: config distinta)' : ''}`);
+      : `${idsVieja.length} → ${idsNueva.length} documentos (esperado: la config cambió) · fuera: ${idsVieja.filter(i => !idsNueva.includes(i)).join(', ') || '—'}`);
   console.log(`\nselección vieja (${idsVieja.length}): ${idsVieja.join(', ')}`);
   console.log(`selección nueva (${idsNueva.length}): ${idsNueva.join(', ')}`);
   console.log(`lecturas: vieja = ${Math.min(50, todos.length)} docs en 1 query · nueva = ${Math.min(PAGINA * paginasUsadas, todos.length)} docs en ${paginasUsadas} query(s)\n`);
@@ -164,10 +176,11 @@ async function main() {
     if (r.base[k] !== baseline.base[k]) difs.push(`base.${k}: ${baseline.base[k]} → ${r.base[k]}`);
   }
   chequear('benchmark recalculado == línea de base (bit a bit, 22 filas + base)',
-    difs.length === 0 || !!configNueva,
-    difs.length === 0 ? `${r.filas.length} filas idénticas ✓` : difs.join(' · '));
+    difs.length === 0 || !mismaConfigQueLaBase,
+    difs.length === 0 ? `${r.filas.length} filas idénticas ✓`
+      : `${difs.length} diferencias — esperadas, la config cambió (ver el delta arriba)`);
 
-  if (configNueva) {
+  if (!mismaConfigQueLaBase) {
     console.log('=== DELTA contra la línea de base (config nueva) ===');
     console.log('ticker   | propio  | bench base | bench nuevo | delta pp');
     const pct = (x: number) => (x * 100).toFixed(2).padStart(6) + '%';
