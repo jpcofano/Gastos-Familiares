@@ -1821,6 +1821,52 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   configuración editable) y `functions/`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` y
   `functions build` OK. **Deploy: `--only functions,hosting,firestore:rules`.** Post-deploy:
   "Sincronizar" en Config y volver a correr `verificarF9143.ts` para cerrar los 3 pendientes.
+- F9.144 — **ficha de posición: los datos duros, antes de la opinión**. Ver
+  `docs/prompts/F9.144-ficha-posicion.md`. F9.141 construyó `indicadoresPosicion` y **nadie lo
+  miraba**: `src/datos/patrimonioPrecios.ts` no tenía un solo consumidor en `src/vistas/`. Ahora
+  Tenencias abre con TENENCIA → INDICADORES → DIAGNÓSTICO y **después** el análisis del modelo,
+  que no se tocó. Componente nuevo `src/vistas/FichaPosicion.tsx`.
+  **La ficha es por IDENTIDAD, no por ticker.** La lista sigue consolidando por ticker (así se
+  venía viendo), pero un ticker con dos identidades muestra **dos fichas**: GLOB es a la vez un
+  CEDEAR en ARS y una acción global en USD, y buscar por ticker le daría al plan de empleado los
+  indicadores del CEDEAR. Es el defecto que F9.141.1 cerró en el escritor y que no se
+  reintrodujo en el lector.
+  **Medición previa (§0.4), sobre la corrida 2026-08-17:** 35 identidades, **32 con documento**,
+  3 sin. De las 32: **16 con datos reales**, 9 `sin_fuente` (cripto, FCI, cash), 6
+  `fuente_sin_serie`, 1 `sin_historico`. De las 16 con datos, **10 `sospechosa` y 6 `limpia`** —
+  exactamente lo que anticipaba el spec.
+  **Hallazgo: `GLOB|accion|global` no tiene documento**, así que el criterio de §6 "dos fichas
+  con su docId" no se puede cumplir literalmente hoy. **No es el lector**: el cron corrió por
+  última vez el 2026-08-16T16:18Z y la corrida vigente se ingirió el 2026-08-17, así que la
+  identidad nueva todavía no pasó por él (mismo motivo por el que quedaron 4 docs de cash
+  huérfanos con los nombres viejos `DOLARES`/`PESOS`). Se resuelve solo en la próxima corrida del
+  cron. La ficha **no lo tapa**: muestra TENENCIA y dice "Sin datos de precio para este ticker"
+  en vez de colgarle los indicadores del CEDEAR, que es justo lo que había que evitar.
+  **`MINIMO_PUNTOS` es un gemelo declarado** de las ventanas de `functions/src/patrimonioPrecios.ts`.
+  No sirve para calcular nada —la ficha nunca decide si un indicador existe— sino para **explicar**
+  una ausencia: "SMA200: faltan puntos (183 de 200)" en vez de un guión mudo. Si el motor cambia
+  una ventana, el texto miente sobre el mínimo: hay que tocar las dos.
+  **`estadoSerie` va visible** ("serie sospechosa · 739 ruedas" en el encabezado), no escondido:
+  un SMA200 calculado sobre una ventana recortada por un salto sin resolver no vale lo mismo que
+  uno limpio. **`ruedasParaSalir` tiene bloque propio** arriba de todo. **No hay semáforo agregado
+  por posición**, a propósito: componerlo exigiría ponderar indicadores entre sí con pesos
+  arbitrarios y un verde compuesto escondería un rojo de liquidez detrás de tres verdes de
+  tendencia. `sin_datos` se pinta con borde, distinto de un verde apagado.
+  **Marca de origen `CALC` desde ahora, aunque hoy todo sea calculado** (§4): cuando F9.147 sume
+  números reportados por búsqueda web, un P/E de internet y un peso calculado sobre la corrida se
+  van a ver idénticos en la misma tabla. Agregar la marca entonces es cuando se olvida.
+  **Sobre los umbrales, que el spec pedía reportar si pintaban mal — dos salen mal, en direcciones
+  opuestas:** `drawdown` da **amarillo o rojo en 10 de 16** (verde 6 · amarillo 7 · rojo 3), o sea
+  marca al 62% de la cartera y deja de señalar; y `liquidez` da **verde en 15 de 16** (el otro es
+  `sin_datos`), o sea no se enciende nunca. Los otros dos se ven razonables (`volatilidad` 8/4/3,
+  `peso` 12/2/2). **Es información sobre el umbral, no sobre las posiciones**, y no se tocó nada:
+  los umbrales viven en F9.141 §5 y corregirlos es decisión aparte.
+  Verificación: `npx tsx scripts/verificarF9144.ts` — **7/7 OK**, corriendo `motivoDeAusencia` y la
+  tabla `MINIMO_PUNTOS` reales bundleadas de `src/`, no copias. Auditoría previa:
+  `scripts/auditF9144.ts`.
+  **Cero escrituras y cero lecturas de `preciosDiarios` desde el cliente** (verificado con un
+  barrido de `src/`: el único archivo que lo menciona es la propia capa de datos). Frontend puro.
+  `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

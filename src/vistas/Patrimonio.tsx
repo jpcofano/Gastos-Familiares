@@ -32,7 +32,9 @@ import {
   cargarUltimaOptimizacion, guardarOptimizacion, testMinVarAnalitico, testMinVarConstraintWmax,
   type ResultadoOptimizacion, type PuntoPrecio, type DiagnosticoSerie,
 } from '../datos/patrimonioOptimizacion';
-import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics } from '../types/patrimonio';
+import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics, IndicadoresPosicion } from '../types/patrimonio';
+import { cargarIndicadoresPorIdentidad } from '../datos/patrimonioPrecios';
+import FichaPosicion, { type PosicionFicha } from './FichaPosicion';
 import {
   cargarFlujos, crearFlujo, actualizarFlujo, eliminarFlujo, calcRetorno,
   type FlujoPatrimonio, type NuevoFlujo,
@@ -1234,8 +1236,31 @@ type ConsolidadoTicker = {
   tieneStale: boolean;
 };
 
-function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, configIA, onAnalizar, onAbrirChat, agenda, sectorial }: {
+// F9.144 — la lista de Tenencias consolida por TICKER (así se venía viendo y no se cambia), pero
+// el indicador se busca por IDENTIDAD. Un ticker con dos identidades muestra dos fichas.
+function agruparPorIdentidad(filas: FilaTenencia[]): Array<[string, PosicionFicha[]]> {
+  const m = new Map<string, PosicionFicha[]>();
+  for (const f of filas) {
+    const p = f.origen === 'corrida' ? f.pos : f.pm;
+    const tipo = (p.tipo ?? 'accion') as PosicionTipo;
+    const pais = p.pais_riesgo ?? 'AR';
+    const clave = `${p.ticker}|${tipo}|${pais}`;
+    if (!m.has(clave)) m.set(clave, []);
+    m.get(clave)!.push({
+      ticker: p.ticker, tipo, paisRiesgo: pais,
+      cuenta: p.cuenta ?? '—',
+      cantidad: typeof p.cantidad === 'number' ? p.cantidad : null,
+      valorUsd: p.valorUsd,
+      monedaOrigen: f.origen === 'corrida' ? f.pos.moneda_origen : 'USD',
+    });
+  }
+  return [...m.entries()].sort((a, b) =>
+    b[1].reduce((s, x) => s + x.valorUsd, 0) - a[1].reduce((s, x) => s + x.valorUsd, 0));
+}
+
+function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, analisisCache, configIA, onAnalizar, onAbrirChat, agenda, sectorial }: {
   M: PatMetrics; posiciones: Posicion[]; manuales: PosicionManual[]; fechaCorrida: string;
+  indicadores: Map<string, IndicadoresPosicion>;
   analisisCache: Record<string, AnalisisPosicion>;
   configIA: ConfigIA;
   onAnalizar: (ticker: string, contexto: Record<string, unknown>) => void;
@@ -1371,6 +1396,20 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, analisisCache, co
                       </div>
                     );
                   })}
+                  {/* F9.144 — la ficha va ANTES del análisis: primero el dato duro, después la
+                      opinión. Una ficha POR IDENTIDAD (ticker|tipo|paisRiesgo), no por ticker:
+                      GLOB es a la vez un CEDEAR en ARS y una acción global en USD, y buscar por
+                      ticker le daría al plan de empleado los indicadores del CEDEAR. Es el
+                      defecto que F9.141.1 cerró en el escritor; no se reintroduce en el lector. */}
+                  {agruparPorIdentidad(c.filas).map(([ident, fichaFilas]) => (
+                    <FichaPosicion
+                      key={ident}
+                      ident={ident}
+                      filas={fichaFilas}
+                      ind={indicadores.get(ident) ?? null}
+                      privado={$.privado}
+                    />
+                  ))}
                   {/* F9.93: Análisis IA por ticker */}
                   <AnalisisIASection
                     ticker={c.ticker}
@@ -3927,6 +3966,9 @@ export default function Patrimonio() {
   const [cafciCarteras,      setCafciCarteras]      = useState<CafciCartera[]>([]);
   const [cafciMappings,      setCafciMappings]      = useState<Record<string, string | null>>({});
   const [universoCafci,      setUniversoCafci]      = useState<UniversoCafci | null>(null);
+  // F9.144 — una sola lectura de `indicadoresPosicion` por montaje de la vista, indexada por
+  // identidad. NUNCA se lee `preciosDiarios` desde el cliente: son ~30 KB por documento.
+  const [indicadores,        setIndicadores]        = useState<Map<string, IndicadoresPosicion>>(new Map());
   const [factores,           setFactores]           = useState<Record<string, Factor>>({});
   const [sincronizandoCafci, setSincronizandoCafci] = useState(false);
 
@@ -3981,6 +4023,8 @@ export default function Patrimonio() {
     cargarMappings().then(setCafciMappings);
     // F9.127 §2 — una sola lectura del diccionario de overrides por montaje de la vista.
     cargarFactoresTicker().then(setFactores).catch(e => console.error('[factores] no se pudieron leer:', e));
+    cargarIndicadoresPorIdentidad().then(setIndicadores)
+      .catch(e => console.error('[indicadores] no se pudieron leer:', e));
     cargarUltimaOptimizacion().then(setOptimizacion);
   }, []);
 
@@ -4564,6 +4608,7 @@ export default function Patrimonio() {
           {tab === 'tenencias' && (
             <TenenciasTab
               M={M} posiciones={posiciones} manuales={posicionesManuales} fechaCorrida={fechaCorrida}
+              indicadores={indicadores}
               analisisCache={analisisCache}
               configIA={configIA}
               onAnalizar={handleAnalizarPosicion}

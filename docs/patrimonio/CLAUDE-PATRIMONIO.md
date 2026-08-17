@@ -310,8 +310,17 @@ Implementación en cadena (cada una depende de la anterior):
   - Investigación previa: `docs/patrimonio/investigacion-universo-benchmark-resultados.md`,
     `docs/patrimonio/universo-rv-argentina-20260817.json`.
 
+- **F9.144** — Ficha de posición sobre `indicadoresPosicion` *(cerrado)*
+  - `src/vistas/FichaPosicion.tsx`, dentro de la card expandida de Tenencias, **antes** del
+    análisis del modelo. Orden: TENENCIA → INDICADORES → DIAGNÓSTICO → (F9.147: análisis).
+  - **Una ficha por IDENTIDAD (`ticker|tipo|paisRiesgo`), no por ticker.** GLOB muestra dos.
+  - `MINIMO_PUNTOS` es gemelo declarado de las ventanas del motor: sirve para **explicar** una
+    ausencia ("faltan puntos: 183 de 200"), nunca para calcular. Si el motor cambia una ventana,
+    hay que tocar las dos.
+  - Solo lectura. **Nunca `preciosDiarios` desde el cliente** (~30 KB por documento).
+  - Verificación: `scripts/verificarF9144.ts`. Auditoría previa: `scripts/auditF9144.ts`.
+
 Fases pendientes:
-- **F9.144** — Ficha de posición (UI) sobre `indicadoresPosicion`. No incluida en F9.141.
   *(Era "F9.142" en este roadmap; renumerada porque F9.142/F9.143 quedaron tomadas por el
   trabajo de CAFCI.)*
 
