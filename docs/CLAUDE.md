@@ -1733,16 +1733,21 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   por llaves, no por texto): la **v1 no encontró el bug real**, porque `onFile` sí tiene un `try`
   — para el `JSON.parse` — y el `await` roto estaba afuera. Buscar "función sin catch" no sirve;
   hay que preguntar si **ese** `await` está cubierto.
-  **§4 — el índice NO se agrega a `firestore.indexes.json`, y la premisa del reporte no se
-  confirma.** El diagnóstico decía que `orderBy(documentId(),'desc') + startAt` exige un índice
-  compuesto ausente. Evidencia en contra, del propio reporte: el fallback que se ve dispararse en
-  consola es el de `cargarTCReciente`, cuya consulta es `orderBy(documentId(),'desc') + limit(n)`
-  — un orden de un solo campo sobre `__name__`, que **ningún índice compuesto puede arreglar ni
-  romper**. Si esa falla, la causa es otra (reglas, red, cache offline). Crear el índice habría
-  fosilizado un diagnóstico sin verificar, que es el patrón que este repo ya pagó tres veces. Y
-  el fallback alcanza para las dos consultas, así que el índice sería innecesario aun si la
-  premisa fuera cierta. **Con §1 el error real ahora llega crudo a pantalla y a consola: la
-  próxima vez se diagnostica con el mensaje, no con una hipótesis.**
+  **§4 — el índice NO se agrega a `firestore.indexes.json`.** La decisión sigue en pie: el
+  fallback alcanza para las dos consultas, y crear un índice contra un diagnóstico sin verificar
+  es el patrón que este repo ya pagó tres veces. **Con §1 el error real llega crudo a pantalla y
+  a consola: la próxima vez se diagnostica con el mensaje, no con una hipótesis.**
+  **CORRECCIÓN (F9.143, medido el 17/08) — el razonamiento que había acá era falso.** Esta
+  entrada afirmaba que un `orderBy` sobre `__name__` "ningún índice compuesto puede arreglar ni
+  romper", y de ahí concluía que la causa tenía que ser otra. **Firestore sí exige un índice para
+  ordenar `__name__` DESCENDENTE**: el índice automático es ascendente. Se midió construyendo
+  `cafciUniverso`, donde `orderBy('__name__','desc')` devolvió `FAILED_PRECONDITION` con el link
+  de creación, con el Admin SDK y sobre una colección de un solo documento. O sea que la premisa
+  del reporte original (falta un índice) era **correcta** y la refutación de acá, equivocada.
+  Lo que no cambia es qué hacer: el fallback que lee la colección y ordena en cliente resuelve
+  las dos consultas sin índice, y sigue siendo preferible a declarar uno. **Regla que queda:
+  ningún `orderBy` descendente sobre `__name__` en este repo** — se lee y se ordena en memoria,
+  que además es exacto porque en `tcDiario` y en `cafciUniverso` el id ES la fecha.
   **§5 — verificado contra la `tcParaFecha` real bundleada con esbuild** (`scripts/
   verificarF9146.mjs`, `node scripts/verificarF9146.mjs`), no contra una reimplementación: 7/7 en
   verde — fecha con doc exacto, domingo sin doc, **consulta ordenada rota → no rechaza y cae al
@@ -1754,6 +1759,68 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   render. Queda pendiente la prueba manual en el navegador.
   Frontend puro. `tsc`: 41 → 41 (los 3 de `perfil/Destinos.tsx` son pre-existentes, medidos
   iguales antes y después), 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
+- F9.143 — **el benchmark es el segmento, ponderado por patrimonio**. Ver
+  `docs/prompts/F9.143-benchmark-segmento-ponderado.md` y el contrato en
+  `docs/patrimonio/CLAUDE-PATRIMONIO.md` §"Benchmark CAFCI (F9.143)". Paso 2 de 2: F9.142 corrigió
+  los datos, esto cambia la **definición**. El número viejo no estaba roto, medía otra cosa —
+  "qué hace el gestor típico" contra "cómo se mueve el dinero del segmento".
+  **§1 — el universo se deriva, no se configura.** Join determinístico de
+  `consulta-de-fondos.json` (identidad + el `fondoId` de la URL) ⋈ `pb_get` (patrimonio por
+  clase), guardado fechado en `cafciUniverso/{YYYY-MM-DD}`. Vive en `scripts/cafciUniverso.ts`
+  y no en `functions/` porque parsear la planilla necesita `xlsx`, que no es dependencia de
+  functions y no se justifica agregarla para un job trimestral.
+  **La trampa central, con su testigo: el patrimonio es del FONDO, no de la clase.** 54 de 60
+  fondos tienen más de una y la planilla trae una fila por clase. Superfondo Renta Variable
+  (`51`) suma **ARS 175.889 M en nueve clases**; la config apuntaba a su Clase B, que sola vale
+  39.084 M — ponderar por ahí lo subestimaría **4,5×**. Es el error de identidad de Pionero y
+  GLOB con otra cara: confundir la parte con el todo. El `claseTop` se usa **sólo para armar la
+  URL de ficha**. Verificado: `scripts/verificarF9143.ts` falla si ese fondo entra con menos de
+  ARS 150.000 M.
+  **`configPatrimonio/cafci` NO desaparece: queda como override manual**, y la precedencia es
+  "universo si existe, config si no", nunca los dos a la vez — mezclarlos dejaría entrar por la
+  config a un fondo que el universo ya sacó, sin que se note. La decisión de si algún día
+  desaparece es del dueño; la medición de qué lo consume está en el §1 del reporte.
+  **§2 — `calcBenchmark` gana un cuarto parámetro `pesos?`** (patrimonio por `fondoId`). Los
+  pesos se normalizan **sobre los fondos que entraron a la base**, no sobre el universo: si
+  `BASE_FONDO_MINIMA` saltea seis, sus patrimonios no cuentan en el denominador. Sin `pesos` el
+  promedio queda equiponderado y las fórmulas colapsan exactamente en las de antes — es opcional
+  a propósito, para no romper a los llamadores que no tienen el universo a mano.
+  **`fondosStdFrac` se pondera con los MISMOS pesos que el promedio**, no se deja sin ponderar:
+  una dispersión que no corresponde al promedio de al lado es justo el campo que después se lee
+  como si midiera otra cosa. `min`/`max` no cambian (son extremos observados). `fondoCoberturaProm`
+  **sí** queda sin ponderar, a propósito y comentado: describe la calidad del parseo, no una
+  magnitud de dinero; ponderarla la haría dominar por Superfondo y dejaría de decir lo que dice.
+  `BaseComparable` suma `ponderado` y `patrimonioBaseArs`, y la UI declara la masa arriba de la
+  tabla — un promedio ponderado sin decir sobre qué se ponderó induce a error, mismo criterio que
+  `propioPctDeCartera`.
+  **Regresión atajada de paso:** `cargarUltimasCarteras` tenía un tope fijo de 4 páginas (200
+  docs). Con 13 fondos toleraba ~15 sincronizaciones antes de que un fondo congelado cayera fuera
+  del corte; con 54 daba **3,7**, o sea el truncamiento silencioso que F9.142 vino a cerrar volvía
+  cuadruplicado. El tope pasa a derivarse de la cantidad de fondos (`SINCRONIZACIONES_TOLERADAS`).
+  **§3 — `UMBRAL_COBERTURA_MINIMA` 95 → 85.** Disparaba en 42 de 60; una alarma que suena en el
+  70% de los casos deja de mirarse. El mínimo real del segmento es 82,4 (Ciclo Nova Value). El
+  log pasa de un `console.warn` por fondo a **una línea agregada** con el conteo y los nombres.
+  `advertenciaSuma` y `BASE_FONDO_MINIMA` **no se tocan**: son detectores distintos.
+  **§4/§5 — rebalanceo trimestral y monitor que avisa.** `scripts/construirUniversoCafci.ts`
+  (dry-run por defecto) el primer día hábil de enero/abril/julio/octubre; conserva vigente +
+  anterior. `scripts/monitorDerivaCafci.ts` es de **solo lectura, sin rama de escritura ni
+  detrás de un flag**: reporta quién entraría, quién saldría y **cuánto se movió el peso relativo
+  de los que ya están** —medido en peso y no en monto, porque con inflación todos los montos
+  suben a la vez y un delta absoluto no distingue "creció" de "hubo inflación"—. **Sin umbral de
+  aviso**, a propósito: se define con el primer trimestre.
+  **Estado medido (`npx tsx scripts/verificarF9143.ts`): sin fallos, 3 PENDIENTES.** El universo
+  reproduce la referencia exacto (60 fondos, ARS 1.826.178 M, diferencia 0,000%) y el testigo de
+  Superfondo pasa. Los tres pendientes **no son fallas, son datos que todavía no existen**:
+  `cafciCarteras` tiene 13 fondos y el universo tiene 60, así que lo que se mide hoy es la
+  variante B (set viejo, ponderado) y no la D. Comparar eso contra los 9,08 pp simulados daría una
+  conclusión falsa en cualquier dirección, así que el script lo marca PEND en vez de OK o FAIL.
+  **No se pobló `cafciCarteras` a mano** aunque las 60 fichas ya estaban descargadas de la
+  investigación: escribirlas por script saltearía el code path de `sincronizarCafci`, que es
+  justo lo que hay que verificar.
+  Toca Firestore Rules (`cafciUniverso`, read dueño / **write:false** — es una medición, no
+  configuración editable) y `functions/`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` y
+  `functions build` OK. **Deploy: `--only functions,hosting,firestore:rules`.** Post-deploy:
+  "Sincronizar" en Config y volver a correr `verificarF9143.ts` para cerrar los 3 pendientes.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

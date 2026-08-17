@@ -301,11 +301,16 @@ Implementación en cadena (cada una depende de la anterior):
   - Auditoría previa y línea de base: `scripts/auditF9142.ts`,
     `docs/patrimonio/benchmark-baseline-F9142.json`. Verificación: `scripts/verificarF9142.ts`.
 
+- **F9.143** — El benchmark es el segmento, ponderado por patrimonio *(cerrado)*
+  - Universo derivado del join `consulta-de-fondos.json` ⋈ `pb_get`, guardado fechado en
+    `cafciUniverso/{YYYY-MM-DD}`. Rebalanceo trimestral, fechas fijas.
+  - `calcBenchmark` pondera por patrimonio **del fondo** (suma de clases), no equiponderado.
+  - `UMBRAL_COBERTURA_MINIMA` 95 → 85, con log agregado en una línea.
+  - Contrato completo abajo, en "Benchmark CAFCI (F9.143)".
+  - Investigación previa: `docs/patrimonio/investigacion-universo-benchmark-resultados.md`,
+    `docs/patrimonio/universo-rv-argentina-20260817.json`.
+
 Fases pendientes:
-- **F9.143** — Universo completo del segmento + ponderación por patrimonio. Hoy los 13 fondos
-  cubren 29,5% del patrimonio de Renta Variable / Argentina (62 fondos), falta el #1 del
-  segmento, y `calcBenchmark` promedia equiponderado. Cambia la definición del número, no lo
-  corrige: por eso F9.142 guardó la línea de base.
 - **F9.144** — Ficha de posición (UI) sobre `indicadoresPosicion`. No incluida en F9.141.
   *(Era "F9.142" en este roadmap; renumerada porque F9.142/F9.143 quedaron tomadas por el
   trabajo de CAFCI.)*
@@ -489,9 +494,84 @@ no reimplementa nada de la tabla ni de los indicadores.
 
 ---
 
+## Benchmark CAFCI (F9.143) — qué mide hoy
+
+**El benchmark es el segmento de renta variable argentina, ponderado por el patrimonio de cada
+fondo.** No es un promedio de fondos elegidos a mano, y no es equiponderado.
+
+Eso responde la pregunta *cómo se mueve el dinero del segmento*. La versión anterior
+(doce fondos, equiponderado) respondía *qué hace el gestor típico*. **Son dos benchmarks
+distintos, no uno bueno y uno malo** — el número viejo no estaba roto, medía otra cosa. La
+única foto del anterior es `docs/patrimonio/benchmark-baseline-F9142.json`.
+
+### El universo se deriva, no se configura
+
+`cafciUniverso/{YYYY-MM-DD}` es la fuente de verdad del universo, y se construye con un join
+determinístico de las dos fuentes de CAFCI:
+
+1. `estadisticas.cafci.org.ar/consulta-de-fondos.json` — filtrar `tipo_renta = 'Renta Variable'`,
+   `region = 'Argentina'`, `moneda = 'Peso Argentina'`. Aporta identidad y, sobre todo, el
+   **`fondo.id` que es el `fondoId` de la URL de ficha**, junto con `clases[].id` (= `claseId`).
+2. `api.pub.cafci.org.ar/pb_get` — planilla diaria XLSX, **una fila por clase**. Aporta el
+   patrimonio, joineando por `claseId` = columna `Código CAFCI`.
+
+Ninguna de las dos alcanza sola: el catálogo no trae patrimonio y la planilla no trae el
+`fondoId`. La columna `Id Fondo CAFCI padre` de la planilla **parece** ser ese id y viene
+**vacía en las 4.236 filas** — no usarla. (F9.105 daba por sentado que había que scrapear el
+buscador por nombre para resolver el `fondoId`; no hace falta, el catálogo lo trae.)
+
+### **El patrimonio es del FONDO, no de la clase**
+
+Es la trampa central de esta fase. **54 de 60 fondos del segmento tienen más de una clase**, y
+el patrimonio en la planilla viene por clase. El patrimonio con el que un fondo pondera es la
+**suma de todas sus clases**.
+
+Testigo: Superfondo Renta Variable (`fondoId 51`) tiene **nueve** clases y suma
+**ARS 175.889 M**. La config apuntaba a su Clase B, que sola vale **ARS 39.084 M**. Ponderar por
+la clase configurada lo subestimaría **4,5×**.
+
+Es el mismo error de identidad que ya se pagó con Pionero y con GLOB, con otra cara: confundir
+la parte con el todo. El `claseTop` (la clase de mayor patrimonio) se usa **solo para armar la
+URL de ficha** — la cartera es del fondo, no de la clase.
+
+### Calendario: rebalanceo trimestral, fechas fijas
+
+El universo se recalcula el **primer día hábil de enero, abril, julio y octubre**. Fechas fijas
+y no "cada 90 días", para que dos mediciones del mismo trimestre sean comparables sin tener que
+pensar.
+
+Entre rebalanceos el universo **no cambia**, aunque la planilla se actualice todos los días.
+Un fondo que crece, se achica, entra o sale del segmento en febrero entra al benchmark en abril.
+
+Se guardan el universo **vigente y el anterior** (`cafciUniverso`, id = fecha de cálculo), y
+cada cálculo de benchmark registra cuál usó. Sin eso, un salto dentro de seis meses no se puede
+atribuir: ¿cambió la cartera, el mercado, o entró un fondo? Es la misma lógica de la línea de
+base de F9.142, que ya sirvió dos veces.
+
+### El monitor de deriva avisa, no actúa
+
+`scripts/monitorDerivaCafci.ts` rehace el join y compara contra el universo vigente: qué fondos
+entrarían, cuáles saldrían, y **cuánto se movió el patrimonio de los que ya están** — este
+último es el que importa con ponderación por patrimonio, porque un fondo grande que se achica
+mueve el benchmark aunque no entre ni salga nadie.
+
+**No rebalancea, y no debe hacerlo.** El rebalanceo es trimestral. El monitor existe para que el
+recálculo del trimestre siguiente sea una decisión informada en vez de una sorpresa.
+
+`pb_get` soporta `If-Modified-Since` → **304**, así que consultar si cambió cuesta casi nada.
+
+**No hay umbral de aviso todavía**, a propósito: no hay base para elegirlo y un umbral
+arbitrario es peor que ninguno. Se define con el primer trimestre de datos.
+
+---
+
 ## Benchmark CAFCI (F9.142) — contrato
 
 ### La config es la fuente de verdad del universo; `cafciCarteras` es historia
+
+**Superado por F9.143 en cuanto al universo** (ahora se deriva, ver arriba). Lo que sigue vale
+para entender `cafciCarteras`, la identidad de un `fondoId` y por qué `configPatrimonio/cafci`
+sigue existiendo como override manual.
 
 `configPatrimonio/cafci` define **qué fondos componen el benchmark**. `cafciCarteras` es el
 registro histórico de lo que se descargó, y se **filtra en lectura**: nunca se borra un
@@ -539,6 +619,11 @@ entraba al promedio. **Un fondo que no corresponde al segmento se saca de la con
 deja rebotar contra el umbral.
 
 ### Frescura: un fondo vacío sigue pesando un enésimo
+
+*(F9.143: ya no pesa "un enésimo" sino en proporción a su patrimonio, lo que además desactiva
+buena parte de este caso — un fondo con patrimonio 0 ni siquiera entra al universo. El párrafo
+queda porque `fechaDatos` y `advertenciaCobertura` siguen siendo lo que hay que mirar antes de
+creerle al promedio.)*
 
 `calcBenchmark` promedia equiponderado y no mira la fecha. Consultatio Renta Variable
 (`514/1038`) tenía patrimonio **0** y su cartera congelada desde 2026-01-23 —CAFCI no publica

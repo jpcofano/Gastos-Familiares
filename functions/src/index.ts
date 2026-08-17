@@ -3468,7 +3468,13 @@ type ParseoFichaCafci = {
 
 // F9.104 — bajo esta cobertura identificada, la cartera se considera truncada de forma severa
 // para entrar al benchmark (elección de diseño, no constante técnica — ver spec §5).
-const UMBRAL_COBERTURA_MINIMA = 95;
+//
+// F9.143 — baja de 95 a 85. Con doce fondos elegidos a mano era una alarma útil; medida contra
+// el segmento entero disparaba en 42 de 60, y una alarma que suena en el 70% de los casos deja
+// de mirarse. El mínimo real del segmento es 82,4 (Ciclo Nova Value), así que en 85 quedan una o
+// dos — las que valen. El HTML anómalo de verdad (Balanz Soja, totalPct = 215,7) lo agarra
+// `advertenciaSuma`, que NO se tocó: son dos detectores distintos y este cambio no afecta a ese.
+const UMBRAL_COBERTURA_MINIMA = 85;
 
 // F9.112 — CloudFront rechaza con 403 el UA recortado 'Mozilla/5.0'. Medido el 31/07/2026:
 // misma IP y mismo POP (EZE50-P7), sólo cambiando headers → 403 vs 200. NO es bloqueo por
@@ -3603,16 +3609,40 @@ export const sincronizarCafci = onCall(
     const email = request.auth.token?.email ?? '';
     if (email.toLowerCase() !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
 
-    const configSnap = await db.collection('configPatrimonio').doc('cafci').get();
-    if (!configSnap.exists) throw new HttpsError('not-found', 'Configuración CAFCI no existe. Agregá al menos un fondo en Configuración.');
-
-    const config = configSnap.data() as { fondos?: Array<{ fondoId: string; claseId: string; nombre: string }> };
-    const fondos = config.fondos ?? [];
+    // F9.143 — el universo derivado manda; `configPatrimonio/cafci` queda como override manual
+    // para el caso en que haga falta forzar un set (y como camino de vuelta si el join falla).
+    // El orden es "universo si existe, config si no": nunca los dos a la vez, porque mezclarlos
+    // haría que un fondo sacado del universo siguiera entrando por la config sin que se note.
+    type FondoSync = { fondoId: string; claseId: string; nombre: string };
+    // Sin `orderBy('__name__','desc')`: MEDIDO el 17/08 que pide un índice compuesto (el índice
+    // automático es ascendente sobre `__name__`). La colección tiene dos documentos por diseño,
+    // así que se lee entera y se ordena acá — el id ES la fecha.
+    const univSnap = await db.collection('cafciUniverso').get();
+    const universoVigente = univSnap.docs.sort((a, b) => (a.id < b.id ? 1 : -1))[0];
+    let fondos: FondoSync[] = [];
+    let origenUniverso = '';
+    if (universoVigente) {
+      const u = universoVigente.data() as { fondos?: Array<FondoSync & { patrimonioArs: number }> };
+      fondos = (u.fondos ?? []).map(f => ({ fondoId: f.fondoId, claseId: f.claseId, nombre: f.nombre }));
+      origenUniverso = `universo ${universoVigente.id}`;
+    }
+    if (fondos.length === 0) {
+      const configSnap = await db.collection('configPatrimonio').doc('cafci').get();
+      if (!configSnap.exists) throw new HttpsError('not-found', 'No hay universo CAFCI ni configuración. Corré scripts/construirUniversoCafci.ts o agregá un fondo en Configuración.');
+      const config = configSnap.data() as { fondos?: FondoSync[] };
+      fondos = config.fondos ?? [];
+      origenUniverso = 'configPatrimonio/cafci (override manual)';
+    }
     if (fondos.length === 0) throw new HttpsError('failed-precondition', 'No hay fondos configurados');
+    console.log(`[sincronizarCafci] ${fondos.length} fondos desde ${origenUniverso}`);
 
     let sincronizados = 0;
     const pendientesMapeo: string[] = [];
     const errores: Array<{ fondo: string; mensaje: string }> = [];
+    // F9.143 — se acumulan para un log AGREGADO al final. Con 54 fondos, 42 console.warn sueltos
+    // no se leen; una línea con el conteo y los nombres sí.
+    const bajoCobertura: Array<{ nombre: string; cobertura: number }> = [];
+    const sumaFueraDeRango: Array<{ nombre: string; totalPct: number }> = [];
     const fechaFetch = new Date().toISOString();
     const inicioLote = Date.now();
     const TIMEOUT_FETCH_MS = 15_000;  // F9.112 — por fondo, evita que un fetch colgado se coma el presupuesto
@@ -3652,12 +3682,8 @@ export const sincronizarCafci = onCall(
         }
         const parseo = await parsearFichaCafci(items as unknown as Array<Record<string, unknown>>, fechaDatos, fondo.nombre, fondo.nombre);
 
-        if (parseo.advertenciaSuma) {
-          console.warn(`[sincronizarCafci] ${fondo.nombre}: suma porcentaje = ${parseo.totalPct.toFixed(2)} (fuera de [98,102])`);
-        }
-        if (parseo.advertenciaCobertura) {
-          console.warn(`[sincronizarCafci] ${fondo.nombre}: cobertura identificada = ${parseo.coberturaIdentificada.toFixed(2)} (< ${UMBRAL_COBERTURA_MINIMA}, Resto de Activos = ${parseo.pesoResto.toFixed(2)})`);
-        }
+        if (parseo.advertenciaSuma) sumaFueraDeRango.push({ nombre: fondo.nombre, totalPct: parseo.totalPct });
+        if (parseo.advertenciaCobertura) bajoCobertura.push({ nombre: fondo.nombre, cobertura: parseo.coberturaIdentificada });
 
         const docId = `${fondo.fondoId}_${parseo.fechaDatos}`;
         await db.collection('cafciCarteras').doc(docId).set({
@@ -3683,8 +3709,31 @@ export const sincronizarCafci = onCall(
       }
     }
 
+    // F9.143 — log agregado, una línea por advertencia. Los dos detectores son distintos y se
+    // reportan por separado: `advertenciaSuma` es HTML roto, `advertenciaCobertura` es cartera
+    // truncada. Mezclarlos en un contador único perdería la distinción que hace útil a cada uno.
+    const dur = ((Date.now() - inicioLote) / 1000).toFixed(1);
+    console.log(`[sincronizarCafci] ${sincronizados}/${fondos.length} en ${dur}s (presupuesto ${PRESUPUESTO_MS / 1000}s) · ${errores.length} errores`);
+    if (bajoCobertura.length > 0) {
+      console.warn(
+        `[sincronizarCafci] cobertura < ${UMBRAL_COBERTURA_MINIMA} en ${bajoCobertura.length}/${sincronizados}: ` +
+        bajoCobertura.map(b => `${b.nombre} (${b.cobertura.toFixed(1)})`).join(', ')
+      );
+    }
+    if (sumaFueraDeRango.length > 0) {
+      console.warn(
+        `[sincronizarCafci] suma fuera de [98,102] en ${sumaFueraDeRango.length}/${sincronizados}: ` +
+        sumaFueraDeRango.map(s => `${s.nombre} (${s.totalPct.toFixed(1)})`).join(', ')
+      );
+    }
+
     return {
       sincronizados,
+      total: fondos.length,
+      origenUniverso,
+      duracionSegundos: Number(dur),
+      bajoCobertura: bajoCobertura.length,
+      sumaFueraDeRango: sumaFueraDeRango.length,
       pendientesMapeo: [...new Set(pendientesMapeo)].slice(0, 20),
       errores: errores.slice(0, 13),
     };

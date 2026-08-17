@@ -61,12 +61,87 @@ export async function guardarConfigCafci(config: ConfigCafci): Promise<void> {
   await setDoc(doc(db, 'configPatrimonio', 'cafci'), config, { merge: true });
 }
 
+// ── Universo del segmento (F9.143) ────────────────────────────────────────────
+// El universo dejó de configurarse a mano: se DERIVA del join catálogo ⋈ planilla de CAFCI y se
+// guarda fechado en `cafciUniverso/{YYYY-MM-DD}`. Se construye desde `scripts/construirUniversoCafci.ts`
+// (necesita parsear un XLSX, y `xlsx` no es dependencia de functions/); acá sólo se lee.
+//
+// `configPatrimonio/cafci` NO desaparece: queda como override manual. Ver §1 del cierre de F9.143.
+
+export type CafciFondoUniverso = {
+  fondoId: string;
+  claseId: string;        // claseTop — SOLO para armar la URL de ficha, la cartera es del fondo
+  nombre: string;
+  cnv: string | null;
+  patrimonioArs: number;  // suma de TODAS las clases del fondo
+  clases: number;
+};
+
+export type UniversoCafci = {
+  fecha: string;            // YYYY-MM-DD, id del documento
+  fechaPlanilla: string;    // la planilla de la que salió el patrimonio
+  fechaCatalogo: string;
+  totalPatrimonioArs: number;
+  fondos: CafciFondoUniverso[];
+};
+
+/**
+ * Vigente + anterior, para comparar. F9.143 §4 no guarda serie completa: alcanza con dos.
+ *
+ * Se lee la colección entera y se ordena en memoria, sin `orderBy`. MEDIDO el 17/08:
+ * `orderBy('__name__', 'desc')` devuelve FAILED_PRECONDITION pidiendo un índice compuesto — el
+ * índice automático de Firestore es ASCENDENTE sobre `__name__`, el descendente hay que
+ * declararlo. Como la colección tiene dos documentos por diseño, ordenar acá no cuesta nada y no
+ * agrega un índice al proyecto. (Mismo criterio que el fallback de `tcDiario`, F9.113/F9.146.)
+ */
+export async function cargarUniversos(n = 2): Promise<UniversoCafci[]> {
+  const snap = await getDocs(collection(db, 'cafciUniverso'));
+  return snap.docs
+    .map(d => ({ ...(d.data() as Omit<UniversoCafci, 'fecha'>), fecha: d.id }))
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+    .slice(0, n);
+}
+
+/** Universo vigente (el de fecha más reciente), o null si todavía no se construyó ninguno. */
+export async function cargarUniversoVigente(): Promise<UniversoCafci | null> {
+  return (await cargarUniversos(1))[0] ?? null;
+}
+
+/** Pesos de ponderación para `calcBenchmark`: patrimonio del FONDO por `fondoId`. */
+export function pesosDeUniverso(u: UniversoCafci | null): Record<string, number> | undefined {
+  if (!u) return undefined;
+  const out: Record<string, number> = {};
+  for (const f of u.fondos) out[f.fondoId] = f.patrimonioArs;
+  return out;
+}
+
+/** El universo expresado como config de fondos, para reusar `cargarUltimasCarteras`. */
+export function fondosDeUniverso(u: UniversoCafci): CafciFondoConfig[] {
+  return u.fondos.map(f => ({ fondoId: f.fondoId, claseId: f.claseId, nombre: f.nombre }));
+}
+
+/** `undefined` (no `[]`) si no hay universo, para que el `??` caiga a la config. */
+function fondosDeUniversoOVacio(u: UniversoCafci | null): CafciFondoConfig[] | undefined {
+  if (!u || u.fondos.length === 0) return undefined;
+  return fondosDeUniverso(u);
+}
+
 // ── Carteras ──────────────────────────────────────────────────────────────────
 // F9.142 — tamaño de página y tope de páginas. La página es la de siempre (50); lo que cambia
 // es que ahora hay una segunda pasada si hace falta, en vez de cortar a ciegas. El tope existe
 // para que un fondo configurado que nunca sincronizó no dispare un scan de la colección entera.
 const CARTERAS_PAGINA = 50;
-const CARTERAS_MAX_PAGINAS = 4;
+
+// F9.143 — el tope de páginas se DERIVA de cuántos fondos hay que cubrir, no es una constante.
+// Con 13 fondos y un tope fijo de 4 páginas (200 docs) se toleraban ~15 sincronizaciones antes de
+// que un fondo congelado cayera fuera del corte. Con 54 fondos ese mismo tope da ~3,7: el
+// truncamiento silencioso que F9.142 vino a cerrar volvía por la ventana, cuadruplicado.
+// SINCRONIZACIONES_TOLERADAS es cuántas corridas puede quedarse atrás un fondo antes de que
+// haga falta paginar de más para encontrarlo.
+const SINCRONIZACIONES_TOLERADAS = 12;
+function maxPaginas(nFondos: number): number {
+  return Math.max(4, Math.ceil((nFondos * SINCRONIZACIONES_TOLERADAS) / CARTERAS_PAGINA));
+}
 
 /**
  * Última cartera de cada fondo **configurado**.
@@ -90,15 +165,21 @@ const CARTERAS_MAX_PAGINAS = 4;
  * alcanza para los 13 fondos de hoy) y convierte el truncamiento silencioso en un warning.
  */
 export async function cargarUltimasCarteras(fondos?: CafciFondoConfig[]): Promise<CafciCartera[]> {
-  const configurados = fondos ?? (await cargarConfigCafci()).fondos;
+  // F9.143 — sin argumento, el universo derivado manda y la config es el respaldo. Misma
+  // precedencia que `sincronizarCafci`: nunca los dos juntos, porque mezclarlos dejaría entrar
+  // por la config a un fondo que el universo ya no incluye, sin que se note.
+  const configurados = fondos
+    ?? fondosDeUniversoOVacio(await cargarUniversoVigente())
+    ?? (await cargarConfigCafci()).fondos;
   if (configurados.length === 0) return [];
   const permitidos = new Set(configurados.map(f => f.fondoId));
 
   const seen = new Set<string>();
   const result: CafciCartera[] = [];
   let cursor: QueryDocumentSnapshot | null = null;
+  const topePaginas = maxPaginas(permitidos.size);
 
-  for (let pagina = 0; pagina < CARTERAS_MAX_PAGINAS; pagina++) {
+  for (let pagina = 0; pagina < topePaginas; pagina++) {
     // El cursor es el snapshot del último documento, no su `fechaFetch`: una sincronización
     // escribe los 13 documentos con el MISMO timestamp, así que `startAfter(valor)` se saltearía
     // la tanda entera. La anotación de `snap` corta la inferencia circular (cursor ← snap ← cursor).
@@ -125,7 +206,7 @@ export async function cargarUltimasCarteras(fondos?: CafciFondoConfig[]): Promis
   const faltantes = [...permitidos].filter(id => !seen.has(id));
   if (faltantes.length > 0) {
     console.warn(
-      `[cargarUltimasCarteras] sin cartera en las últimas ${CARTERAS_PAGINA * CARTERAS_MAX_PAGINAS} corridas: ` +
+      `[cargarUltimasCarteras] sin cartera en los últimos ${CARTERAS_PAGINA * topePaginas} documentos: ` +
       faltantes.map(id => configurados.find(f => f.fondoId === id)?.nombre ?? id).join(', ') +
       ' — no aportan al benchmark. ¿Sincronizaste después de agregarlos?'
     );
@@ -293,6 +374,12 @@ export type ResultadoSincronizarCafci = {
   sincronizados: number;
   pendientesMapeo: string[];
   errores: Array<{ fondo: string; mensaje: string }>;
+  // F9.143 — opcionales: una respuesta de una función desplegada antes de F9.143 no los trae.
+  total?: number;
+  origenUniverso?: string;
+  duracionSegundos?: number;
+  bajoCobertura?: number;
+  sumaFueraDeRango?: number;
 };
 
 export async function sincronizarCafci(): Promise<ResultadoSincronizarCafci> {
@@ -335,9 +422,15 @@ export type FilaBenchmark = {
   ticker: string;
   propioUsd: number | null;    // null si no está en cartera propia
   propioFrac: number | null;   // fracción sobre total propio
-  fondosAvgFrac: number;       // promedio entre TODOS los fondos del set (los que no la tienen pesan 0)
+  // F9.143 — promedio PONDERADO por el patrimonio del fondo cuando se pasan `pesos`; los fondos
+  // que no tienen el papel pesan 0 (siguen en el denominador). Sin `pesos`, equiponderado.
+  fondosAvgFrac: number;
   fondosMinFrac: number;
   fondosMaxFrac: number;
+  // F9.143 — `std` se pondera con los MISMOS pesos que el promedio. La alternativa (dejarla sin
+  // ponderar) daba una dispersión que no correspondía al promedio de al lado, y es justo el tipo
+  // de campo que después se lee como si midiera otra cosa. Min y max no cambian: son extremos
+  // observados, la ponderación no los toca.
   fondosStdFrac: number;
   divergencia: number;         // |propioFrac - fondosAvgFrac|, para ordenar
 };
@@ -352,16 +445,28 @@ export type BaseComparable = {
   // Agregados sobre el spec: sin esto, "se saltearon fondos" es una decisión invisible.
   fondosEnBase: number;
   fondosSalteados: number;
+  // F9.143 — un promedio ponderado sin decir sobre qué masa se ponderó induce a error, mismo
+  // criterio que `propioPctDeCartera`. `ponderado:false` = no se pasaron pesos y el promedio
+  // quedó equiponderado; ahí `patrimonioBaseArs` es 0 y no significa nada.
+  ponderado: boolean;
+  patrimonioBaseArs: number;  // suma del patrimonio de los fondos que entraron a la base
 };
 
 // Un fondo cuya porción comparable no llega a este piso no se renormaliza: dividir por una base
 // flaca amplifica el ruido en vez de medir. Está en escala 0–100, como pesoPct.
 const BASE_FONDO_MINIMA = 40;
 
+/**
+ * @param pesos F9.143 — patrimonio en ARS por `fondoId` (suma de TODAS las clases del fondo, ver
+ *   CLAUDE-PATRIMONIO §"El patrimonio es del FONDO, no de la clase"). Si se omite, el promedio
+ *   queda equiponderado como antes de F9.143 — es opcional a propósito para no romper a los
+ *   llamadores que no tienen el universo a mano (informe viejo, scripts de auditoría).
+ */
 export function calcBenchmark(
   posicionesPropias: Posicion[],
   carteras: CafciCartera[],
-  mappings: Record<string, string | null>
+  mappings: Record<string, string | null>,
+  pesos?: Record<string, number>
 ): {
   filas: FilaBenchmark[];
   soloenFondos: Array<{ ticker: string; avgFrac: number }>;
@@ -370,7 +475,7 @@ export function calcBenchmark(
 } {
   const baseVacia: BaseComparable = {
     propioUsd: 0, propioPctDeCartera: 0, fondoCoberturaProm: 0, excluidoFondoProm: 0,
-    fondosEnBase: 0, fondosSalteados: 0,
+    fondosEnBase: 0, fondosSalteados: 0, ponderado: false, patrimonioBaseArs: 0,
   };
   if (carteras.length === 0) return { filas: [], soloenFondos: [], soloEnPropio: [], base: baseVacia };
 
@@ -399,7 +504,7 @@ export function calcBenchmark(
   // puede *encontrar* solapamiento (VIST, que Galileo tiene al 13,5%), nunca mostrarte un CEDEAR de
   // riesgo argentino que el fondo tenga y vos no. La alternativa —un registro propio de riesgo-país
   // por CEDEAR— es un dato que la app no tiene.
-  const enBase: Array<{ comparables: CafciPosicion[]; baseFondo: number }> = [];
+  const enBase: Array<{ comparables: CafciPosicion[]; baseFondo: number; fondoId: string }> = [];
   let fondosSalteados = 0;
   for (const cartera of carteras) {
     const comparables = cartera.posiciones.filter(pos => {
@@ -412,8 +517,26 @@ export function calcBenchmark(
     });
     const baseFondo = comparables.reduce((s, p) => s + p.pesoPct, 0);
     if (baseFondo < BASE_FONDO_MINIMA) { fondosSalteados++; continue; }
-    enBase.push({ comparables, baseFondo });
+    enBase.push({ comparables, baseFondo, fondoId: cartera.fondoId });
   }
+
+  // F9.143 — pesos de ponderación, normalizados sobre los fondos que EFECTIVAMENTE entraron a la
+  // base, no sobre el universo entero: si BASE_FONDO_MINIMA saltea seis, sus patrimonios no
+  // cuentan en el denominador (si contaran, el promedio sumaría menos de 1 y todos los pesos
+  // quedarían diluidos por fondos que no aportaron ningún papel).
+  const ponderado = !!pesos;
+  const patrimonioDe = (fondoId: string) => (pesos ? (pesos[fondoId] ?? 0) : 1);
+  const patrimonioBaseArs = ponderado ? enBase.reduce((s, f) => s + patrimonioDe(f.fondoId), 0) : 0;
+  // Un universo con pesos donde ninguno de los que entró tiene patrimonio (>0) sería una división
+  // por cero: se cae a equiponderado y se avisa, en vez de devolver NaN en cada fila.
+  const sinMasa = ponderado && patrimonioBaseArs <= 0;
+  if (sinMasa) {
+    console.warn('[calcBenchmark] se pasaron pesos pero ningún fondo en base tiene patrimonio > 0 — se pondera equiponderado');
+  }
+  const totalPeso = enBase.reduce((s, f) => s + (ponderado && !sinMasa ? patrimonioDe(f.fondoId) : 1), 0);
+  const wDe = (idx: number) =>
+    totalPeso > 0 ? (ponderado && !sinMasa ? patrimonioDe(enBase[idx].fondoId) : 1) / totalPeso : 0;
+  const pesosNorm = enBase.map((_, idx) => wDe(idx));
 
   // Pesos de fondos por ticker, renormalizados sobre la base comparable de cada fondo.
   const fondosByTicker: Record<string, number[]> = {};
@@ -448,11 +571,13 @@ export function calcBenchmark(
     const propioUsd = propioByTicker[ticker] ?? null;
     const propioFrac = propioUsd !== null ? propioUsd / (totalPropio || 1) : null;
     const pcts = fondosByTicker[ticker] ?? [];
-    const avg = pcts.length > 0 ? pcts.reduce((s, x) => s + x, 0) / pcts.length : 0;
+    // F9.143 — promedio y desviación ponderados con los MISMOS pesos. Sin `pesos`, `pesosNorm`
+    // es 1/n para todos y las dos fórmulas colapsan exactamente en las de antes.
+    const avg = pcts.reduce((s, x, i) => s + x * pesosNorm[i], 0);
     const min = pcts.length > 0 ? Math.min(...pcts) : 0;
     const max = pcts.length > 0 ? Math.max(...pcts) : 0;
     const std = pcts.length > 1
-      ? Math.sqrt(pcts.reduce((s, x) => s + (x - avg) ** 2, 0) / pcts.length)
+      ? Math.sqrt(pcts.reduce((s, x, i) => s + pesosNorm[i] * (x - avg) ** 2, 0))
       : 0;
     filas.push({
       ticker,
@@ -486,6 +611,9 @@ export function calcBenchmark(
     .filter(f => f.fondosAvgFrac === 0 && f.propioFrac !== null)
     .map(f => f.ticker);
 
+  // La cobertura promedio se deja SIN ponderar a propósito: describe la calidad del parseo del
+  // set de fondos ("cuánto de la cartera media pudimos identificar"), no una magnitud de dinero.
+  // Ponderarla haría que el número lo dominara Superfondo y dejaría de decir lo que dice.
   const coberturaProm = enBase.length > 0
     ? enBase.reduce((s, c) => s + c.baseFondo / 100, 0) / enBase.length
     : 0;
@@ -496,6 +624,8 @@ export function calcBenchmark(
     excluidoFondoProm: enBase.length > 0 ? 1 - coberturaProm : 0,
     fondosEnBase: enBase.length,
     fondosSalteados,
+    ponderado: ponderado && !sinMasa,
+    patrimonioBaseArs,
   };
 
   return { filas, soloenFondos, soloEnPropio, base };

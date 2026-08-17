@@ -172,6 +172,15 @@ service cloud.firestore {
     match /cafciMapping/{id} {
       allow read, write: if esDueno();
     }
+    // F9.143 — universo del segmento, derivado del join catálogo ⋈ planilla y guardado fechado
+    // (id = YYYY-MM-DD). Lo escribe scripts/construirUniversoCafci.ts con el Admin SDK; el
+    // cliente sólo lee. `write:false` porque no es configuración editable a mano: es una
+    // medición, y dejarla escribible desde la UI invitaría a "corregirla" en vez de rehacer
+    // el join, que es lo único que la hace reproducible.
+    match /cafciUniverso/{fecha} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
     // F9.127 — override de factor de riesgo por ticker. Mismo alcance que cafciMapping: es
     // configuración de análisis del dueño, no dato familiar compartido.
     match /factoresTicker/{ticker} {

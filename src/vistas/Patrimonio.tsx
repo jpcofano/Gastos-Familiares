@@ -47,8 +47,9 @@ import {
   importarFondosSugeridos, importarMappingSeed,
   importarCafciManual as importarCafciManualCallable, fechaDatosDeFondo,
   testsGemeloNormalizarEspecie,
+  cargarUniversoVigente, fondosDeUniverso, pesosDeUniverso,
   type ConfigCafci, type CafciCartera, type CafciFondoConfig, type ResultadoSincronizarCafci,
-  type ResultadoImportarCafciManual,
+  type ResultadoImportarCafciManual, type UniversoCafci,
 } from '../datos/patrimonioCafci';
 import { cargarFactoresTicker, importarFactoresSeed, cargarCustodiaCuenta } from '../datos/patrimonioFactores';
 import {
@@ -3008,10 +3009,11 @@ function DeclaracionesCard({ posiciones, manuales, factores }: {
 }
 
 // ── Solapa Benchmark ──────────────────────────────────────────────────────────
-function BenchmarkTab({ posiciones, carteras, mappings }: {
+function BenchmarkTab({ posiciones, carteras, mappings, universo }: {
   posiciones: Posicion[];
   carteras: CafciCartera[];
   mappings: Record<string, string | null>;
+  universo: UniversoCafci | null;
 }) {
   const $ = useDinero();
   if (carteras.length === 0) {
@@ -3029,7 +3031,9 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
 
   // F9.122.1 §B — se pasan las posiciones completas, no {ticker, valorUsd}: calcBenchmark necesita
   // `tipo` y `pais_riesgo` para filtrar la base con bloqueDe().
-  const { filas, soloenFondos, soloEnPropio, base } = calcBenchmark(posiciones, carteras, mappings);
+  // F9.143 — los pesos salen del universo vigente (patrimonio del FONDO, suma de clases). Sin
+  // universo el promedio queda equiponderado, que es el comportamiento previo.
+  const { filas, soloenFondos, soloEnPropio, base } = calcBenchmark(posiciones, carteras, mappings, pesosDeUniverso(universo));
   const filasEnAmbos = filas.filter(f => f.propioFrac !== null && f.fondosAvgFrac > 0);
   const fmtFrac = (x: number) => (Math.round(x * 1000) / 10).toFixed(1) + '%';
 
@@ -3053,6 +3057,12 @@ function BenchmarkTab({ posiciones, carteras, mappings }: {
             {base.fondosSalteados !== 1 ? 'ron' : ''} afuera: su porción comparable no llega al 40% y
             renormalizar sobre una base tan flaca amplifica el ruido en vez de medir.</>
           )}
+          {/* F9.143 — sobre qué masa se ponderó. Un promedio ponderado sin declarar el denominador
+              es una cifra que induce a error, mismo criterio que `propioPctDeCartera`. */}
+          {base.ponderado
+            ? <> Ponderado por patrimonio del fondo{!$.privado && <> sobre ARS {(base.patrimonioBaseArs / 1e6).toLocaleString('es-AR', { maximumFractionDigits: 0 })} M</>}
+                {universo && <> · universo {universo.fecha}</>}.</>
+            : <> <strong>Equiponderado</strong>: no hay universo con patrimonio cargado, cada fondo pesa igual.</>}
         </div>
         {filasEnAmbos.length === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--gf-gray-400)', lineHeight: 1.5 }}>
@@ -3916,6 +3926,7 @@ export default function Patrimonio() {
   const [configCafci,        setConfigCafci]        = useState<ConfigCafci>({ fondos: [] });
   const [cafciCarteras,      setCafciCarteras]      = useState<CafciCartera[]>([]);
   const [cafciMappings,      setCafciMappings]      = useState<Record<string, string | null>>({});
+  const [universoCafci,      setUniversoCafci]      = useState<UniversoCafci | null>(null);
   const [factores,           setFactores]           = useState<Record<string, Factor>>({});
   const [sincronizandoCafci, setSincronizandoCafci] = useState(false);
 
@@ -3960,10 +3971,13 @@ export default function Patrimonio() {
     });
     // F9.142 — encadenado, no en paralelo: las carteras se filtran por la config, así que
     // conviene leerla una sola vez y pasarla, en vez de que cada llamada la relea por su cuenta.
-    cargarConfigCafci().then(cfg => {
-      setConfigCafci(cfg);
-      return cargarUltimasCarteras(cfg.fondos);
-    }).then(setCafciCarteras);
+    // F9.143 — el universo derivado gobierna el benchmark; la config queda como override manual y
+    // se sigue leyendo porque la card de Config la muestra y la edita.
+    cargarConfigCafci().then(setConfigCafci).catch(e => console.error('[configCafci]', e));
+    cargarUniversoVigente()
+      .then(u => { setUniversoCafci(u); return cargarUltimasCarteras(u ? fondosDeUniverso(u) : undefined); })
+      .then(setCafciCarteras)
+      .catch(e => console.error('[universoCafci] no se pudo leer:', e));
     cargarMappings().then(setCafciMappings);
     // F9.127 §2 — una sola lectura del diccionario de overrides por montaje de la vista.
     cargarFactoresTicker().then(setFactores).catch(e => console.error('[factores] no se pudieron leer:', e));
@@ -4567,7 +4581,7 @@ export default function Patrimonio() {
           )}
           {tab === 'riesgo'    && <RiesgoTab M={M} posiciones={todasPosiciones} />}
           {tab === 'benchmark' && (
-            <BenchmarkTab posiciones={todasPosiciones} carteras={cafciCarteras} mappings={cafciMappings} />
+            <BenchmarkTab posiciones={todasPosiciones} carteras={cafciCarteras} mappings={cafciMappings} universo={universoCafci} />
           )}
           {tab === 'plan' && (
             <PlanTab
