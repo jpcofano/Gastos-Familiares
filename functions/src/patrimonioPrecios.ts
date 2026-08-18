@@ -429,11 +429,100 @@ export type Indicadores = {
   monedaPerformance: 'ARS' | 'USD';
   /** Por qué la performance no está en dólares, cuando no lo está. null si sí lo está. */
   motivoPerfEnMoneda: 'ya_en_usd' | 'sin_tc_completo' | null;
+  // F9.149 — la distribución de caídas del PROPIO activo, que es de dónde salen las bandas del
+  // semáforo. Se persisten para que la ficha pueda explicar por qué una posición está en rojo
+  // en vez de mostrar un color sin fundamento.
+  ddMediana: number | null;      // magnitud, positiva
+  ddCdar80: number | null;       // magnitud, positiva; media del peor 20%
+  ddObservaciones: number;       // cuántas entraron en la distribución
+  ulcerIndex126: number | null;  // profundidad + duración en un número; sin semáforo
 };
 
 const RUEDAS = { mes: 21, tri: 63, sem: 126, anio: 252, cincuentaydos: 252 };
 
 const media = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+// ── Distribución de caídas del propio activo (F9.149) ────────────────────────
+// El umbral de caída sale de la distribución del propio activo, no de un número elegido a mano.
+// Las bandas fijas de F9.141 §5 marcaban 11 de 17 posiciones y por lo tanto no señalaban nada:
+// comparar la caída de hoy contra un número fijo trata una realización de un camino como si
+// fuera una distribución.
+//
+// Método: CDaR — Chekhlov, Uryasev y Zabarankin, "Drawdown Measure in Portfolio Optimization"
+// (IJTAF 8(1), 2005): el CVaR aplicado a las observaciones de drawdown. Media de cola y NO
+// percentil, por la misma razón por la que se prefiere CVaR sobre VaR: con pocas observaciones
+// independientes un promedio de cola es mucho más estable que un cuantil.
+//
+// La curva es la de VENTANA MÓVIL de 52 semanas, no la del máximo corrido desde el inicio, por
+// dos razones medidas:
+//  · Es el MISMO objeto que `distanciaMax52sPct`, que es el valor que se clasifica. Con el
+//    máximo corrido se estaría comparando un estadístico contra la distribución de otro, y como
+//    max(toda la serie) ≥ max(últimas 252), el valor de hoy es sistemáticamente menor en
+//    magnitud que la curva contra la que se lo compara: sub-marcaría.
+//  · Es mucho mejor estimador. Dispersión de CDaR(0,8) entre ventanas de 400: **3% con ventana
+//    móvil contra 31% con máximo corrido**. El máximo corrido es monótono no decreciente, así
+//    que su curva tiene deriva de nivel y no se estabiliza nunca en el rango disponible.
+export const BETA_CDAR = 0.8;
+
+/**
+ * Mínimo de observaciones para estimar la distribución. **Medido, no elegido** (F9.149 §2):
+ * con ventanas deslizantes sobre las 13 series largas, a 400 observaciones CDaR(0,8) varía 3% y
+ * la mediana 18%; a 300 el CDaR ya está estable (4%) pero la mediana todavía baila 34%. 400 es
+ * donde los dos son aceptables a la vez.
+ *
+ * Como la curva necesita 252 ruedas para dar su PRIMERA observación, una serie necesita 652
+ * puntos para tener banda. Por debajo va `sin_datos`, nunca una banda inventada.
+ */
+export const MINIMO_OBS_DRAWDOWN = 400;
+
+/** Caída contra el máximo de las últimas 52 semanas, rueda a rueda. Magnitudes positivas. */
+export function curvaCaida52s(cierres: number[]): number[] {
+  const v = RUEDAS.cincuentaydos;
+  if (cierres.length < v) return [];
+  const out: number[] = [];
+  // Máximo deslizante por fuerza bruta: son 750 puntos y corre una vez por ticker por día.
+  for (let i = v - 1; i < cierres.length; i++) {
+    let max = -Infinity;
+    for (let k = i - v + 1; k <= i; k++) if (cierres[k] > max) max = cierres[k];
+    out.push(Math.abs(cierres[i] / max - 1));
+  }
+  return out;
+}
+
+function medianaDe(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/** CDaR(β): media del peor (1−β)·100% de las observaciones. Espera magnitudes positivas. */
+export function cdar(magnitudes: number[], beta = BETA_CDAR): number | null {
+  if (!magnitudes.length) return null;
+  const s = [...magnitudes].sort((a, b) => b - a);            // peor primero
+  const n = Math.max(1, Math.ceil(s.length * (1 - beta)));
+  return media(s.slice(0, n));
+}
+
+/**
+ * Ulcer Index — Martin y McCann, "The Investor's Guide to Fidelity Funds" (1989). Raíz de la
+ * media de las caídas al cuadrado. Captura profundidad Y duración en un número: dos posiciones
+ * con la misma caída máxima se viven distinto si una se recuperó en tres meses y la otra sigue
+ * abajo. Va SIN semáforo: no hay base para elegirle bandas y F9.149 existe para dejar de
+ * inventarlas.
+ */
+export function ulcerIndex(cierres: number[], ventana = RUEDAS.sem): number | null {
+  if (cierres.length < ventana) return null;
+  const tramo = cierres.slice(-ventana);
+  let max = -Infinity;
+  let suma = 0;
+  for (const c of tramo) {
+    if (c > max) max = c;
+    const dd = c / max - 1;
+    suma += dd * dd;
+  }
+  return Math.sqrt(suma / tramo.length);
+}
 
 /** null si no hay al menos `ventana` puntos. Nunca una media de 200 días sobre 40 datos. */
 function sma(cierres: number[], ventana: number): number | null {
@@ -537,6 +626,14 @@ export function calcIndicadores(
   const motivoPerfEnMoneda = opciones?.yaEnUsd ? 'ya_en_usd' as const
     : usdCompleta ? null : 'sin_tc_completo' as const;
 
+  // F9.149 — la distribución de caídas propia. Se calcula sobre TODA la serie utilizable, no
+  // sobre la ventana de 52 semanas: la ventana define el objeto de cada observación, la serie
+  // entera define cuántas observaciones hay para estimar la distribución.
+  const curva = curvaCaida52s(cierres);
+  const hayDistribucion = curva.length >= MINIMO_OBS_DRAWDOWN;
+  const ddMediana = hayDistribucion ? medianaDe(curva) : null;
+  const ddCdar80 = hayDistribucion ? cdar(curva) : null;
+
   const montos = serie.map(p => (p.v === null ? null : p.c * p.v));
   const hayMontos = montos.length >= 30 && montos.slice(-30).every(m => m !== null);
   const montoProm30 = hayMontos ? media(montos.slice(-30) as number[]) : null;
@@ -563,6 +660,8 @@ export function calcIndicadores(
     montoOperadoUltimo: montoUlt,
     ratioVolumen: montoProm30 && montoUlt !== null && montoProm30 > 0 ? montoUlt / montoProm30 : null,
     monedaPerformance, motivoPerfEnMoneda,
+    ddMediana, ddCdar80, ddObservaciones: curva.length,
+    ulcerIndex126: ulcerIndex(cierres),
   };
 }
 
@@ -574,9 +673,11 @@ export type ClaseUmbral = 'accionAr' | 'accionGlobal' | 'cedear' | 'bonoAr' | 'o
 
 export const UMBRALES = {
   peso:      { verde: 0.04, amarillo: 0.08 },
-  // F9.148 §3 — las bandas son las mismas, pero ahora miden `distanciaMax52sPct` en vez de
-  // `drawdownDesdeMaxPct`. Ver `calcSemaforos`.
-  caida52s: {
+  // F9.149 — REFERENCIA HISTÓRICA, ya no gobierna el semáforo. Estos tres números los inventó
+  // el asistente en F9.141 §5 y marcaban 11 de 17 posiciones. Quedan para poder comparar la
+  // banda vieja contra la nueva (`bandaCaidaFija`) hasta que el método calibrado tenga uso
+  // suficiente; el semáforo sale de `bandaCaidaCalibrada`.
+  caidaFija: {
     accionAr:     { verde: 0.20, amarillo: 0.40 },
     cripto:       { verde: 0.20, amarillo: 0.40 },
     accionGlobal: { verde: 0.15, amarillo: 0.30 },
@@ -622,23 +723,50 @@ function banda(valor: number | null, u: { verde: number; amarillo: number }): Se
   return 'rojo';
 }
 
+/** F9.149 — la banda vieja, de umbral fijo por tipo. Se conserva SOLO para comparar. */
+export function bandaCaidaFija(ind: Indicadores, clase: ClaseUmbral): Semaforo {
+  return banda(ind.distanciaMax52sPct, UMBRALES.caidaFija[clase]);
+}
+
 /**
- * F9.148 §3 — dos cambios, los dos medidos, ninguno de los dos por gusto.
+ * F9.149 — la banda calibrada contra la distribución del PROPIO activo.
  *
- * 1. `drawdown` → `caida52s`. La referencia dejó de ser el máximo de TODA la serie retenida y
- *    pasó a ser el máximo de 52 semanas (`distanciaMax52sPct`, que ya se calculaba). El máximo
- *    de la serie mide contra una ventana que dura 750 ruedas en unas posiciones y 183 en otras:
- *    el mismo semáforo comparaba cosas distintas. 52 semanas es ventana fija y comparable.
- *    Cuando no hay 252 ruedas devuelve `sin_datos`, igual que el resto de los indicadores de
- *    ventana: nunca una banda calculada sobre menos historia de la que dice medir.
+ * 🟢 por debajo de su mediana · 🟡 entre mediana y CDaR(0,8) · 🔴 por encima de CDaR(0,8).
+ * Sin distribución estimable (menos de `MINIMO_OBS_DRAWDOWN` observaciones) va `sin_datos`:
+ * nunca una banda inventada.
  *
- *    HONESTIDAD SOBRE EL ALCANCE: esto NO destraba la distribución cargada. Medido después de
- *    §1 y §2, entre las 12 series con las dos referencias definidas, amarillo-o-rojo pasa de
- *    8/12 a 7/12 — se mueve una sola posición (TXAR). La hipótesis del spec de que el punto
- *    podrido inflaba los drawdowns era falsa: ese punto era un POZO, y un pozo nunca es el
- *    máximo desde el que se mide una caída. **El umbral sigue siendo el problema abierto.**
+ * QUÉ SIGNIFICA 🔴, y hay que escribirlo así en la ficha: "este papel estuvo así de caído o peor
+ * solo una fracción chica del tiempo de su historia". Es **porcentaje de tiempo, no probabilidad
+ * de un evento** — las observaciones diarias de caída están fuertemente autocorreladas (una
+ * caída persiste día tras día), así que 750 ruedas contienen muchos menos episodios
+ * distinguibles que observaciones. Sigue sin significar "vendé" (F9.144 §3).
  *
- * 2. `liquidez` se fue. Ver `UMBRALES`.
+ * Sobre cuánto marca: superar CDaR(0,8) pasa BASTANTE MENOS que el 20% del tiempo, porque
+ * CDaR(0,8) es la MEDIA del peor 20% y cae más adentro de la cola que el percentil 80. Medido
+ * sobre la cartera: 1 de 13 con datos. Y amarillo-o-rojo da ~50% por construcción, porque el
+ * borde verde/amarillo ES la mediana — ese número no se puede comparar contra el viejo.
+ */
+export function bandaCaidaCalibrada(ind: Indicadores): Semaforo {
+  const v = ind.distanciaMax52sPct;
+  if (v === null || !Number.isFinite(v)) return 'sin_datos';
+  if (ind.ddMediana === null || ind.ddCdar80 === null) return 'sin_datos';
+  const a = Math.abs(v);
+  if (a < ind.ddMediana) return 'verde';
+  if (a <= ind.ddCdar80) return 'amarillo';
+  return 'rojo';
+}
+
+/**
+ * F9.148 §3 — `liquidez` se fue (ver `UMBRALES`), y la referencia de la caída pasó a ser el
+ * máximo de 52 semanas: el máximo de toda la serie retenida mide contra una ventana que dura
+ * 750 ruedas en unas posiciones y 183 en otras, o sea que el mismo semáforo comparaba cosas
+ * distintas.
+ *
+ * F9.149 — `caida52s` dejó de usar umbral fijo. Sigue midiendo `distanciaMax52sPct`: lo que
+ * cambió es cómo se clasifica, no qué se mide.
+ *
+ * `volatilidad` y `peso` NO se tocan. Aplicarles el mismo método sería consistente, pero cambiar
+ * tres umbrales de una vez impide atribuir después qué mejoró.
  */
 export function calcSemaforos(
   ind: Indicadores,
@@ -647,7 +775,7 @@ export function calcSemaforos(
 ): Record<string, Semaforo> {
   return {
     peso: banda(pesoEnCartera, UMBRALES.peso),
-    caida52s: banda(ind.distanciaMax52sPct, UMBRALES.caida52s[clase]),
+    caida52s: bandaCaidaCalibrada(ind),
     volatilidad: banda(ind.volAnualizada90d, UMBRALES.volatilidad[clase]),
   };
 }

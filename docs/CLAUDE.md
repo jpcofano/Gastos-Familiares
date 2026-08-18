@@ -1821,6 +1821,47 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   configuración editable) y `functions/`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` y
   `functions build` OK. **Deploy: `--only functions,hosting,firestore:rules`.** Post-deploy:
   "Sincronizar" en Config y volver a correr `verificarF9143.ts` para cerrar los 3 pendientes.
+- F9.149 — **el semáforo de caída se calibra contra la distribución del propio activo**. Ver
+  `docs/prompts/F9.149-drawdown-calibrado.md`. Los tres umbrales fijos de caída **los inventó el
+  asistente en F9.141 §5** y marcaban 11 de 17 posiciones: comparar la caída de hoy contra un
+  número fijo trata **una realización de un camino como si fuera una distribución**. Ahora salen
+  de CDaR (Chekhlov/Uryasev/Zabarankin 2005, el CVaR aplicado a las observaciones de drawdown):
+  🟢 bajo su mediana · 🟡 hasta CDaR(0,8) · 🔴 por encima. Media de cola y no percentil, por la
+  misma razón que CVaR sobre VaR.
+  **La distribución es la del MISMO estadístico que se clasifica, y el spec no lo era.** Construía
+  la curva con el máximo corrido pero dejaba `distanciaMax52sPct` como valor clasificado: como
+  `max(toda la serie) ≥ max(últimas 252)`, el valor de hoy es sistemáticamente menor en magnitud
+  que la curva contra la que se lo compara, y sub-marca. Se usa la curva de **ventana móvil de 52
+  semanas**, que además es **mucho mejor estimador**: dispersión de CDaR(0,8) entre ventanas de
+  400 de **3% contra 31%** del máximo corrido, que no se estabiliza nunca porque es monótono no
+  decreciente y su curva tiene deriva de nivel.
+  **`MINIMO_OBS_DRAWDOWN = 400`, medido y no elegido**, con ventanas deslizantes: a 400 la
+  dispersión es 3% en CDaR y 18% en la mediana; a 300, 4% y 34%; a 250, 16% y 51%. Como la curva
+  necesita 252 ruedas para su primera observación, hacen falta **652 puntos** para tener banda —
+  las tres series de 183 y TX26 quedan en `sin_datos`, que es lo correcto.
+  **Dos correcciones al spec.** El "~20% en rojo" esperado no es lo que la definición produce:
+  CDaR(0,8) es la **media** del peor 20% y cae más adentro de la cola que el percentil 80.
+  Verificado: CDaR(0,8) ≥ p80 en las 13 series y el tiempo por encima promedia **8,7%**; la
+  cartera da **1 de 13 en rojo (8%)**, exactamente lo predicho. Y amarillo-o-rojo da ~50% **por
+  construcción**, porque el borde verde/amarillo *es* la mediana: ese número no se puede comparar
+  contra el 69% viejo.
+  **6 de 17 cambian de banda, y los dos extremos son el argumento.** **GD30 pasa a rojo**: un bono
+  que normalmente cae 10,4% y cuyo peor 20% promedia 15,6% está hoy en 17,2%, afuera de su propia
+  cola, y el umbral fijo lo llamaba amarillo. **GLOB pasa a verde**: vive más de 62% abajo de su
+  máximo de 52 semanas, así que −48,6% es *mejor* que lo típico para él, y el umbral fijo lo
+  pintaba rojo sin informar nada. `UMBRALES.caidaFija` y `bandaCaidaFija` **no se borraron**.
+  **`ulcerIndex126`** (Martin/McCann 1989) como número **sin semáforo**: captura profundidad y
+  duración juntas —dos posiciones con la misma caída máxima se viven distinto si una se recuperó
+  y la otra sigue abajo— pero no hay base para elegirle bandas, y esta fase existe para dejar de
+  inventarlas.
+  **Volatilidad y peso sin tocar**, verificado: un umbral por vez, o después no se puede atribuir
+  qué mejoró. La ficha explica la banda con los números de la distribución del papel y dice que
+  🔴 es *"estuvo así o peor solo una fracción chica del **tiempo**"*, no una probabilidad — las
+  observaciones de caída están fuertemente autocorreladas y 750 ruedas contienen muchos menos
+  episodios distinguibles que observaciones.
+  Verificación: `npx tsx scripts/verificarF9149.ts` — **16/16 OK**. Auditoría previa:
+  `scripts/auditF9149.ts`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK.
+  **Deploy pendiente: `--only functions,hosting`.**
 - F9.148 — **el punto podrido, el umbral del detector, los semáforos y la performance en
   dólares**. Ver `docs/prompts/F9.148-punto-podrido-umbrales-y-performance-usd.md` y los
   resultados de la investigación previa en

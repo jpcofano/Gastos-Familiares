@@ -160,21 +160,25 @@ async function main() {
     return o;
   };
   const claseDe = (c: Caso) => PP.claseUmbral(c.tipo as any, c.pais === 'global' ? 'global' : 'AR');
+  // Este bloque mide lo que cambió F9.148: la REFERENCIA (máximo de la serie → máximo de 52
+  // semanas), a umbral fijo de los dos lados. F9.149 después cambió la clasificación y renombró
+  // la tabla a `caidaFija`, que es la que hay que usar acá para que la comparación siga siendo
+  // la de F9.148 y no una mezcla de los dos cambios.
   const viejo = cnt(c => {
-    const u = PP.UMBRALES.caida52s[claseDe(c)];
+    const u = PP.UMBRALES.caidaFija[claseDe(c)];
     const v = c.ind.drawdownDesdeMaxPct;
     if (v == null) return 'sin_datos';
     const a = Math.abs(v);
     return a < u.verde ? 'verde' : a <= u.amarillo ? 'amarillo' : 'rojo';
   });
-  const nuevo = cnt(c => c.sem.caida52s);
+  const nuevo = cnt(c => PP.bandaCaidaFija(c.ind, claseDe(c)));
   const f = (o: Record<string, number>) => `verde=${o.verde} amarillo=${o.amarillo} rojo=${o.rojo} sin_datos=${o.sin_datos} -> cargados=${o.amarillo + o.rojo}/${casos.length}`;
   console.log(`  referencia vieja (max de la serie): ${f(viejo)}`);
   console.log(`  referencia nueva (max 52 semanas):  ${f(nuevo)}`);
   const ambas = casos.filter(c => c.ind.drawdownDesdeMaxPct != null && c.ind.distanciaMax52sPct != null);
   console.log(`  entre las ${ambas.length} con las dos referencias definidas, cambian de banda:`);
   for (const c of ambas) {
-    const u = PP.UMBRALES.caida52s[claseDe(c)];
+    const u = PP.UMBRALES.caidaFija[claseDe(c)];
     const b = (v: number) => Math.abs(v) < u.verde ? 'verde' : Math.abs(v) <= u.amarillo ? 'amarillo' : 'rojo';
     const a = b(c.ind.drawdownDesdeMaxPct!), n = b(c.ind.distanciaMax52sPct!);
     if (a !== n) console.log(`    ${c.id.padEnd(8)} ${pct(c.ind.drawdownDesdeMaxPct)} (${a}) -> ${pct(c.ind.distanciaMax52sPct)} (${n})`);

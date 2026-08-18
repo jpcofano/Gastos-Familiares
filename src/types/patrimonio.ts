@@ -151,6 +151,12 @@ export type IndicadoresPosicion = {
   // `monedaSerie`. Es dato del motor, no se infiere: los docs viejos no lo traen.
   monedaPerformance?: 'ARS' | 'USD';
   motivoPerfEnMoneda?: 'ya_en_usd' | 'sin_tc_completo' | null;
+  // F9.149 — la distribución de caídas del propio activo, de donde salen las bandas del
+  // semáforo `caida52s`. Opcionales: los documentos escritos antes de F9.149 no las traen.
+  ddMediana?: number | null;
+  ddCdar80?: number | null;
+  ddObservaciones?: number;
+  ulcerIndex126?: number | null;   // profundidad + duración; SIN semáforo, a propósito
   rsi14: number | null; atrPct: number | null;
   montoOperadoProm30d: number | null; montoOperadoUltimo: number | null;
   ratioVolumen: number | null;

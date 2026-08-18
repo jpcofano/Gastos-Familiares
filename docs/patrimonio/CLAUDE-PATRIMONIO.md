@@ -333,6 +333,16 @@ Implementación en cadena (cada una depende de la anterior):
   - Verificación: `scripts/verificarF9148.ts`. Auditoría previa: `scripts/auditF9148.ts`.
     Backfill del TC: `scripts/backfillTcF9148.ts` (dry-run por defecto, `--apply` para escribir).
 
+- **F9.149** — El semáforo de caída se calibra contra la distribución del propio activo *(cerrado)*
+  - CDaR (Chekhlov/Uryasev/Zabarankin 2005) sobre la curva de caída de ventana móvil de 52
+    semanas: 🟢 bajo su mediana · 🟡 hasta CDaR(0,8) · 🔴 por encima. **Ningún número lo elige
+    una persona.** `UMBRALES.caidaFija` queda como referencia, no gobierna.
+  - `MINIMO_OBS_DRAWDOWN = 400`, **medido** con ventanas deslizantes, no elegido.
+  - `ulcerIndex126` (Martin/McCann 1989) como número, **sin semáforo**.
+  - `volatilidad` y `peso` sin tocar: un umbral por vez, o después no se puede atribuir qué mejoró.
+  - Contrato completo abajo, en "Precios y serie diaria".
+  - Verificación: `scripts/verificarF9149.ts`. Auditoría previa: `scripts/auditF9149.ts`.
+
 Fases pendientes:
   *(Era "F9.142" en este roadmap; renumerada porque F9.142/F9.143 quedaron tomadas por el
   trabajo de CAFCI.)*
@@ -499,6 +509,123 @@ el problema abierto.**
 Los dos semáforos retirados se borran con `FieldValue.delete()` en cada escritura: `set` con
 `merge: true` **fusiona** los mapas anidados, así que sacarlos del objeto calculado no los saca
 del documento — quedarían colgados con el valor de la última corrida vieja.
+
+### El semáforo de caída se calibra contra la distribución del propio activo (F9.149)
+
+Las bandas fijas por tipo de activo (🟢 <20% · 🟡 20–40% · 🔴 >40% para acción AR) **las inventó el
+asistente en F9.141 §5**, no salieron de ningún lado, y marcaban 11 de 17 posiciones. Comparar el
+drawdown de hoy contra un número fijo trata **una realización de un camino como si fuera una
+distribución**: no medía riesgo, reflejaba que las acciones argentinas caen mucho.
+
+**Método: CDaR** — Chekhlov, Uryasev y Zabarankin, *Drawdown Measure in Portfolio Optimization*
+(IJTAF 8(1), 2005): el CVaR aplicado a las observaciones de drawdown. Por activo, sobre su propia
+serie: 🟢 por debajo de su mediana · 🟡 entre mediana y CDaR(0,8) · 🔴 por encima de CDaR(0,8).
+**Media de cola y no percentil**, por la misma razón que CVaR sobre VaR: con pocas observaciones
+independientes, un promedio de cola es mucho más estable que un cuantil.
+
+Se usa el objeto de CDaR y **no el de CED** (Goldberg y Mahmoud, *Drawdown: From Practice to Theory
+and Back Again*, Math. Fin. Econ. 2016): CED distribuye *máximos de ventana*, que por construcción
+son peores que una observación típica, así que comparar el drawdown puntual de hoy contra esa
+distribución sub-marcaría sistemáticamente.
+
+#### La distribución es la del MISMO estadístico que se clasifica
+
+El spec construía la distribución con el máximo corrido (`dd_t = p_t / max(p_0..p_t) − 1`) pero
+dejaba `distanciaMax52sPct` como valor clasificado. **Son objetos distintos** y clasificar X contra
+la distribución de Y es un error: como `max(toda la serie) ≥ max(últimas 252)`, el valor de hoy es
+sistemáticamente menor en magnitud que la curva contra la que se lo compara, y sub-marca.
+
+Implementado con la curva de drawdown **de ventana móvil de 52 semanas**
+(`dd_t = p_t / max(p_{t−251..t}) − 1`), que es el mismo objeto que `distanciaMax52sPct`. Medido: la
+variante incoherente cambia la banda de 1 de las 13 series con datos (GLOB), así que hoy el costo
+es chico — pero además la curva de ventana móvil es **mucho mejor estimador**, ver abajo.
+
+#### El mínimo de observaciones está medido, no elegido
+
+Ventanas deslizantes de largo N sobre la curva de drawdown, dispersión `(p90−p10)/valor_total` del
+estimador entre ventanas, promediada sobre las 13 series largas:
+
+| N | mediana (ventana 52s) | CDaR(0,8) (ventana 52s) | mediana (máx. corrido) | CDaR(0,8) (máx. corrido) |
+|---|---|---|---|---|
+| 150 | 112% | 47% | 148% | 64% |
+| 200 | 82% | 27% | 130% | 55% |
+| 250 | 51% | 16% | 104% | 47% |
+| 300 | 34% | **4%** | 97% | 41% |
+| 400 | **18%** | **3%** | 65% | 31% |
+
+**`MINIMO_OBS_DRAWDOWN = 400`.** Es donde los dos estimadores son aceptables a la vez: CDaR(0,8)
+varía 3% y la mediana 18%. A 300 el CDaR ya está estable (4%) pero la mediana todavía baila 34%.
+
+**La curva de máximo corrido no se estabiliza nunca** en el rango disponible (31% de dispersión en
+CDaR con N=400, diez veces peor). Es esperable: el máximo corrido es monótono no decreciente, así
+que la curva tiene deriva de nivel y dos ventanas de la misma serie miden cosas distintas. Es la
+segunda razón, independiente de la coherencia, para usar la ventana móvil.
+
+Como la curva necesita 252 ruedas para dar su **primera** observación, una serie necesita
+**652 puntos** para tener banda. Las tres de 183 puntos y TX26 (68) quedan en `sin_datos`, que es
+lo correcto: no hay distribución que estimar.
+
+#### Qué cambia en la cartera, medido
+
+Umbral fijo `verde=5 amarillo=6 rojo=2 sin_datos=4` → calibrado `verde=3 amarillo=9 rojo=1
+sin_datos=4`. **6 de 17 cambian de banda**, y los casos interesantes son los dos extremos:
+
+| ticker | caída hoy | su mediana | su CDaR(0,8) | fija | calibrada |
+|---|---|---|---|---|---|
+| **GD30** | −17,2% | 10,4% | 15,6% | amarillo | **rojo** |
+| **GLOB** | −48,6% | **62,4%** | 74,3% | rojo | **verde** |
+| ACN | −36,9% | 30,1% | 45,8% | rojo | amarillo |
+| GD35 | −6,4% | 3,2% | 7,7% | verde | amarillo |
+| PAMP | −11,6% | 10,9% | 21,8% | verde | amarillo |
+| TGSU2 | −14,2% | 10,4% | 20,3% | verde | amarillo |
+
+**GD30 es el caso que justifica el método**: un bono que normalmente cae 10% y cuyo peor 20%
+promedia 15,6% está hoy en 17,2%, o sea afuera de su propia cola — el umbral fijo de bonos
+(8%/20%) lo llamaba amarillo. **GLOB es el caso inverso**: pasa la mayor parte del tiempo más de
+62% abajo de su máximo de 52 semanas, así que −48,6% es *mejor* que lo típico para él, y el umbral
+fijo de CEDEARs (15%/30%) lo pintaba rojo sin informar nada.
+
+`UMBRALES.caidaFija` y `bandaCaidaFija` **no se borraron**: siguen disponibles para comparar hasta
+que el método calibrado tenga uso suficiente.
+
+#### Cómo se lee, y dos correcciones al spec que hay que tener presentes
+
+🔴 significa *"este papel estuvo así de caído o peor solo una fracción chica del tiempo de su
+historia"*. **Es porcentaje de tiempo, no probabilidad de un evento**, y esa distinción no es
+pedantería: las observaciones diarias de drawdown están fuertemente autocorreladas —un drawdown
+persiste día tras día— así que 750 ruedas contienen muchos menos episodios distinguibles que
+observaciones. Goldberg y Mahmoud señalan justamente la sensibilidad de estas medidas a la
+correlación serial. Sigue sin significar "vendé" (F9.144 §3).
+
+1. **El "~20% en rojo" esperado no es lo que la definición produce.** CDaR(0,8) es la **media** del
+   peor 20%, que cae más adentro de la cola que el percentil 80: superarla pasa bastante menos que
+   el 20% del tiempo. Verificado sobre las 13 series: CDaR(0,8) ≥ p80 en todas, y el tiempo por
+   encima de CDaR(0,8) promedia **8,7%**. La cartera da **1 de 13 en rojo (8%)**, que es
+   exactamente lo que la definición predice. No es una anomalía.
+2. **Amarillo-o-rojo ≈ 50% es por construcción**, porque el borde verde/amarillo *es* la mediana.
+   No se puede comparar contra el 69% viejo: son criterios distintos. Lo que importa es el rojo.
+
+**Cambio de régimen, anotado y sin corregir.** La historia cubre cepo y post-cepo, y la
+investigación de indicadores en dólares midió que la correlación papel/MEP se dio vuelta entre 2024
+y 2025. La distribución de 2023-24 puede no describir cómo se mueve esto hoy. Recortar la historia
+empeoraría la estimación —y el mínimo medido de 400 observaciones no dejaría margen—, así que se
+deja como está y se anota.
+
+#### Ulcer Index: número, no banda
+
+`ulcerIndex126` — Martin y McCann, *The Investor's Guide to Fidelity Funds* (1989): raíz de la
+media de los drawdowns al cuadrado sobre 126 ruedas. Captura **profundidad y duración en un solo
+número**: dos posiciones con la misma caída máxima se viven distinto si una se recuperó en tres
+meses y la otra sigue abajo, y el drawdown puntual no las distingue.
+
+**Va sin semáforo, a propósito.** No hay base para elegirle bandas y esta fase existe justamente
+para dejar de inventarlas. Si con uso se ve que distingue algo, se calibra con el método de arriba.
+
+**Lo que este método NO resuelve, y es deliberado.** Hay una segunda calibración legítima que no se
+puede derivar de datos: el umbral como **presupuesto de riesgo** —cuánto está dispuesto a ver caer
+el dueño antes de actuar—. Esa es una pregunta sobre él, no sobre el activo. La estadística dice
+"esto es raro para este papel"; el presupuesto dice "esto excede lo que tolero". Si alguna vez se
+quiere la segunda, es **agregar** una banda, no reemplazar ésta.
 
 ### La performance va en dólares; todo lo demás, en la moneda de la serie (F9.148 §4)
 

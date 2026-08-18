@@ -27,6 +27,7 @@ const MINIMO_PUNTOS: Record<string, number> = {
   perf1m: 22, perf3m: 64, perf6m: 127, perf1a: 253,
   rsi14: 15, atrPct: 15,
   montoOperadoProm30d: 30,
+  ulcerIndex126: 126,
 };
 
 // ── Tipos que tienen serie de precios ─────────────────────────────────────────
@@ -72,6 +73,9 @@ const GRUPOS: Array<{ titulo: string; campos: Campo[]; moneda: MonedaGrupo }> = 
   ]},
   { titulo: 'Riesgo', moneda: 'serie', campos: [
     { clave: 'drawdownDesdeMaxPct', label: 'Drawdown desde máx.', fmt: fmtPct },
+    // F9.149 — sin semáforo a propósito: no hay base para elegirle bandas, y esta fase existe
+    // justamente para dejar de inventarlas.
+    { clave: 'ulcerIndex126', label: 'Ulcer Index 126d', fmt: fmtPct },
     { clave: 'volAnualizada30d', label: 'Volatilidad 30d', fmt: fmtPct, semaforo: 'volatilidad' },
     { clave: 'volAnualizada90d', label: 'Volatilidad 90d', fmt: fmtPct },
     { clave: 'atrPct', label: 'ATR %', fmt: fmtPct },
@@ -134,6 +138,34 @@ function MarcaMoneda({ grupo, ind }: { grupo: MonedaGrupo; ind: IndicadoresPosic
         color: degradado ? 'var(--gf-out)' : 'var(--gf-gray-400)',
       }}
     >{moneda}{degradado ? ' (sin TC)' : ''}</span>
+  );
+}
+
+// ── De dónde salen las bandas de caída (F9.149) ───────────────────────────────
+// El semáforo `caida52s` no usa un umbral elegido a mano: sale de la distribución de caídas del
+// propio papel. Mostrar los dos cortes es lo que hace la banda auditable — un color sin los
+// números detrás es lo mismo que un umbral inventado, solo que menos visible.
+function CalibracionCaida({ ind }: { ind: IndicadoresPosicion }) {
+  const { ddMediana, ddCdar80, ddObservaciones } = ind;
+  if (ddMediana == null || ddCdar80 == null) {
+    // Sin distribución estimable no se pinta nada de más: el semáforo ya dice `sin_datos`.
+    return ddObservaciones !== undefined ? (
+      <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', lineHeight: 1.5, marginBottom: 6 }}>
+        La banda de <strong>caída</strong> necesita una historia que este papel todavía no tiene
+        ({ddObservaciones} observaciones): se muestra como <strong>sin datos suficientes</strong>,
+        no con un umbral inventado.
+      </div>
+    ) : null;
+  }
+  return (
+    <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', lineHeight: 1.5, marginBottom: 6 }}>
+      La banda de <strong>caída</strong> se calibra contra este papel, no contra un umbral fijo:
+      sobre {ddObservaciones} observaciones de su propia historia, su caída típica es{' '}
+      <strong>{fmtPct(-ddMediana)}</strong> y el promedio de su peor 20% es{' '}
+      <strong>{fmtPct(-ddCdar80)}</strong>. Verde es estar por encima de lo típico; rojo significa
+      que <strong>estuvo así de caído o peor solo una fracción chica del tiempo de su historia</strong>
+      {' '}— es porcentaje de <em>tiempo</em>, no probabilidad de que pase algo.
+    </div>
   );
 }
 
@@ -334,6 +366,7 @@ export default function FichaPosicion({ ident, filas, ind, privado }: {
               </span>
             ))}
           </div>
+          <CalibracionCaida ind={ind} />
           <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', lineHeight: 1.5 }}>
             {LEYENDA_SEMAFOROS}
             {' '}Un indicador <strong>sin datos suficientes</strong> se muestra como tal y no cuenta
