@@ -1,0 +1,1154 @@
+{
+  "medidoEl": "2026-08-17",
+  "spec": "docs/prompts/investigacion-indicadores-en-dolares.md",
+  "escriturasEnFirestore": 0,
+  "artefacto": {
+    "fecha": "2023-08-03",
+    "fuente": "data912",
+    "corregidoEnOrigen": false,
+    "seriesAfectadas": [
+      "DICP",
+      "GD30",
+      "GD35",
+      "GGAL",
+      "PAMP",
+      "TGSU2",
+      "TRAN",
+      "TX26",
+      "TXAR",
+      "YPFD"
+    ]
+  },
+  "tcDiario": {
+    "docs": 778,
+    "primera": "2024-07-01",
+    "ultima": "2026-08-17",
+    "huecos": 0,
+    "tipo": "MEP (dolarapi bolsa / ArgentinaDatos bolsa)",
+    "convencionFecha": "D = cierre de D-1",
+    "coincidenciasApiDMenos1": "775/778"
+  },
+  "posiciones": [
+    {
+      "id": "ACN",
+      "tipo": "accion",
+      "pais": "global",
+      "clase": "accionGlobal",
+      "monedaSerie": "USD",
+      "puntos": 750,
+      "estadoHoy": "limpia",
+      "saltosAntes": [],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.1274,
+          "vsSma50Pct": 0.173,
+          "distanciaMax52sPct": -0.3687,
+          "drawdownDesdeMaxPct": -0.538,
+          "volAnualizada90d": 0.5721,
+          "volAnualizada30d": 0.4718,
+          "perf1a": -0.2342,
+          "perf6m": -0.2094,
+          "perf3m": 0.1315,
+          "perf1m": 0.3027
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.1274,
+          "vsSma50Pct": 0.173,
+          "distanciaMax52sPct": -0.3687,
+          "drawdownDesdeMaxPct": -0.538,
+          "volAnualizada90d": 0.5721,
+          "volAnualizada30d": 0.4718,
+          "perf1a": -0.2342,
+          "perf6m": -0.2094,
+          "perf3m": 0.1315,
+          "perf1m": 0.3027
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.1274,
+          "vsSma50Pct": 0.173,
+          "distanciaMax52sPct": -0.3687,
+          "drawdownDesdeMaxPct": -0.538,
+          "volAnualizada90d": 0.5721,
+          "volAnualizada30d": 0.4718,
+          "perf1a": -0.2342,
+          "perf6m": -0.2094,
+          "perf3m": 0.1315,
+          "perf1m": 0.3027
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "BIOX",
+      "tipo": "cedear",
+      "pais": "AR",
+      "clase": "cedear",
+      "monedaSerie": "ARS",
+      "puntos": 183,
+      "estadoHoy": "limpia",
+      "saltosAntes": [],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.2167,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.7431,
+          "volAnualizada90d": 0.7464,
+          "volAnualizada30d": 0.5119,
+          "perf1a": null,
+          "perf6m": -0.1977,
+          "perf3m": 0.0556,
+          "perf1m": 0.2392
+        },
+        "usdMep": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.204,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.7544,
+          "volAnualizada90d": 0.7466,
+          "volAnualizada30d": 0.5199,
+          "perf1a": null,
+          "perf6m": -0.2362,
+          "perf3m": -0.0069,
+          "perf1m": 0.2344
+        },
+        "usdCcl": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.2021,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.7595,
+          "volAnualizada90d": 0.7553,
+          "volAnualizada30d": 0.5284,
+          "perf1a": null,
+          "perf6m": -0.2408,
+          "perf3m": -0.0086,
+          "perf1m": 0.2344
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "BMA",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "limpia",
+      "saltosAntes": [],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.0434,
+          "vsSma50Pct": -0.1361,
+          "distanciaMax52sPct": -0.2217,
+          "drawdownDesdeMaxPct": -0.2217,
+          "volAnualizada90d": 0.5189,
+          "volAnualizada30d": 0.4508,
+          "perf1a": 0.3098,
+          "perf6m": -0.119,
+          "perf3m": 0.1507,
+          "perf1m": -0.1425
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.0756,
+          "vsSma50Pct": -0.1442,
+          "distanciaMax52sPct": -0.2502,
+          "drawdownDesdeMaxPct": -0.3373,
+          "volAnualizada90d": 0.5317,
+          "volAnualizada30d": 0.4632,
+          "perf1a": 0.1665,
+          "perf6m": -0.1612,
+          "perf3m": 0.0824,
+          "perf1m": -0.1458
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.081,
+          "vsSma50Pct": -0.1456,
+          "distanciaMax52sPct": -0.2535,
+          "drawdownDesdeMaxPct": -0.3476,
+          "volAnualizada90d": 0.541,
+          "volAnualizada30d": 0.4666,
+          "perf1a": 0.1291,
+          "perf6m": -0.1663,
+          "perf3m": 0.0807,
+          "perf1m": -0.1458
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "CEPU",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "limpia",
+      "saltosAntes": [],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.1011,
+          "vsSma50Pct": -0.0968,
+          "distanciaMax52sPct": -0.2434,
+          "drawdownDesdeMaxPct": -0.2434,
+          "volAnualizada90d": 0.3741,
+          "volAnualizada30d": 0.3277,
+          "perf1a": 0.2821,
+          "perf6m": -0.1169,
+          "perf3m": -0.023,
+          "perf1m": -0.083
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.1328,
+          "vsSma50Pct": -0.1055,
+          "distanciaMax52sPct": -0.2575,
+          "drawdownDesdeMaxPct": -0.2575,
+          "volAnualizada90d": 0.3828,
+          "volAnualizada30d": 0.3389,
+          "perf1a": 0.1419,
+          "perf6m": -0.1592,
+          "perf3m": -0.081,
+          "perf1m": -0.0866
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.1377,
+          "vsSma50Pct": -0.1069,
+          "distanciaMax52sPct": -0.2631,
+          "drawdownDesdeMaxPct": -0.2631,
+          "volAnualizada90d": 0.3932,
+          "volAnualizada30d": 0.3484,
+          "perf1a": 0.1052,
+          "perf6m": -0.1644,
+          "perf3m": -0.0825,
+          "perf1m": -0.0866
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "CVX",
+      "tipo": "cedear",
+      "pais": "global",
+      "clase": "cedear",
+      "monedaSerie": "ARS",
+      "puntos": 183,
+      "estadoHoy": "limpia",
+      "saltosAntes": [],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.0974,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": 0,
+          "volAnualizada90d": 0.3064,
+          "volAnualizada30d": 0.3173,
+          "perf1a": null,
+          "perf6m": 0.1677,
+          "perf3m": 0.1419,
+          "perf1m": 0.0948
+        },
+        "usdMep": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.0875,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.0527,
+          "volAnualizada90d": 0.2989,
+          "volAnualizada30d": 0.3152,
+          "perf1a": null,
+          "perf6m": 0.1117,
+          "perf3m": 0.0742,
+          "perf1m": 0.0905
+        },
+        "usdCcl": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.086,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.056,
+          "volAnualizada90d": 0.2917,
+          "volAnualizada30d": 0.3091,
+          "perf1a": null,
+          "perf6m": 0.1049,
+          "perf3m": 0.0724,
+          "perf1m": 0.0905
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "DICP",
+      "tipo": "bono",
+      "pais": "AR",
+      "clase": "bonoAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.5238
+        }
+      ],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": 0.0285,
+          "vsSma50Pct": -0.0293,
+          "distanciaMax52sPct": -0.0933,
+          "drawdownDesdeMaxPct": -0.0933,
+          "volAnualizada90d": 0.1662,
+          "volAnualizada30d": 0.0444,
+          "perf1a": 0.3214,
+          "perf6m": 0.0909,
+          "perf3m": -0.0465,
+          "perf1m": 0.0015
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.008,
+          "vsSma50Pct": -0.0391,
+          "distanciaMax52sPct": -0.133,
+          "drawdownDesdeMaxPct": -0.133,
+          "volAnualizada90d": 0.1919,
+          "volAnualizada30d": 0.0711,
+          "perf1a": 0.1769,
+          "perf6m": 0.0386,
+          "perf3m": -0.103,
+          "perf1m": -0.0023
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.0134,
+          "vsSma50Pct": -0.0407,
+          "distanciaMax52sPct": -0.1367,
+          "drawdownDesdeMaxPct": -0.1426,
+          "volAnualizada90d": 0.2015,
+          "volAnualizada30d": 0.0778,
+          "perf1a": 0.1391,
+          "perf6m": 0.0323,
+          "perf3m": -0.1045,
+          "perf1m": -0.0023
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "GD30",
+      "tipo": "bono",
+      "pais": "AR",
+      "clase": "bonoAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-03",
+          "retorno": -0.4064
+        },
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.7243
+        }
+      ],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.0685,
+          "vsSma50Pct": -0.0571,
+          "distanciaMax52sPct": -0.1724,
+          "drawdownDesdeMaxPct": -0.1724,
+          "volAnualizada90d": 0.258,
+          "volAnualizada30d": 0.4193,
+          "perf1a": 0.0417,
+          "perf6m": -0.0396,
+          "perf3m": -0.0531,
+          "perf1m": -0.0056
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.1009,
+          "vsSma50Pct": -0.0664,
+          "distanciaMax52sPct": -0.1834,
+          "drawdownDesdeMaxPct": -0.2616,
+          "volAnualizada90d": 0.2487,
+          "volAnualizada30d": 0.4121,
+          "perf1a": -0.0722,
+          "perf6m": -0.0856,
+          "perf3m": -0.1092,
+          "perf1m": -0.0094
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.1062,
+          "vsSma50Pct": -0.068,
+          "distanciaMax52sPct": -0.1915,
+          "drawdownDesdeMaxPct": -0.2761,
+          "volAnualizada90d": 0.2408,
+          "volAnualizada30d": 0.3958,
+          "perf1a": -0.102,
+          "perf6m": -0.0912,
+          "perf3m": -0.1107,
+          "perf1m": -0.0094
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "GD35",
+      "tipo": "bono",
+      "pais": "AR",
+      "clase": "bonoAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-03",
+          "retorno": -0.4189
+        },
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.7581
+        }
+      ],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": 0.0622,
+          "vsSma50Pct": -0.0213,
+          "distanciaMax52sPct": -0.0639,
+          "drawdownDesdeMaxPct": -0.0639,
+          "volAnualizada90d": 0.1308,
+          "volAnualizada30d": 0.1397,
+          "perf1a": 0.3704,
+          "perf6m": 0.0605,
+          "perf3m": 0.0732,
+          "perf1m": -0.0332
+        },
+        "usdMep": {
+          "vsSma200Pct": 0.0256,
+          "vsSma50Pct": -0.0303,
+          "distanciaMax52sPct": -0.0589,
+          "drawdownDesdeMaxPct": -0.0589,
+          "volAnualizada90d": 0.118,
+          "volAnualizada30d": 0.1214,
+          "perf1a": 0.2205,
+          "perf6m": 0.0097,
+          "perf3m": 0.0096,
+          "perf1m": -0.0369
+        },
+        "usdCcl": {
+          "vsSma200Pct": 0.0199,
+          "vsSma50Pct": -0.0318,
+          "distanciaMax52sPct": -0.0636,
+          "drawdownDesdeMaxPct": -0.0636,
+          "volAnualizada90d": 0.1206,
+          "volAnualizada30d": 0.1084,
+          "perf1a": 0.1814,
+          "perf6m": 0.0035,
+          "perf3m": 0.008,
+          "perf1m": -0.0369
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "GGAL",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-03",
+          "retorno": -0.4468
+        },
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.8973
+        }
+      ],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.0728,
+          "vsSma50Pct": -0.123,
+          "distanciaMax52sPct": -0.255,
+          "drawdownDesdeMaxPct": -0.255,
+          "volAnualizada90d": 0.4429,
+          "volAnualizada30d": 0.4215,
+          "perf1a": 0.0239,
+          "perf6m": -0.0818,
+          "perf3m": 0.1039,
+          "perf1m": -0.1285
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.1042,
+          "vsSma50Pct": -0.1314,
+          "distanciaMax52sPct": -0.2648,
+          "drawdownDesdeMaxPct": -0.3923,
+          "volAnualizada90d": 0.457,
+          "volAnualizada30d": 0.4261,
+          "perf1a": -0.0881,
+          "perf6m": -0.1258,
+          "perf3m": 0.0385,
+          "perf1m": -0.1319
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.1096,
+          "vsSma50Pct": -0.1328,
+          "distanciaMax52sPct": -0.2795,
+          "drawdownDesdeMaxPct": -0.4018,
+          "volAnualizada90d": 0.4673,
+          "volAnualizada30d": 0.4314,
+          "perf1a": -0.1173,
+          "perf6m": -0.1311,
+          "perf3m": 0.0368,
+          "perf1m": -0.1319
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "amarillo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "GLOB",
+      "tipo": "cedear",
+      "pais": "global",
+      "clase": "cedear",
+      "monedaSerie": "ARS",
+      "puntos": 183,
+      "estadoHoy": "limpia",
+      "saltosAntes": [],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.1127,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.4551,
+          "volAnualizada90d": 0.692,
+          "volAnualizada30d": 0.6365,
+          "perf1a": null,
+          "perf6m": -0.3337,
+          "perf3m": 0.1676,
+          "perf1m": 0.1707
+        },
+        "usdMep": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.1022,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.4701,
+          "volAnualizada90d": 0.6915,
+          "volAnualizada30d": 0.6285,
+          "perf1a": null,
+          "perf6m": -0.3656,
+          "perf3m": 0.0983,
+          "perf1m": 0.1661
+        },
+        "usdCcl": {
+          "vsSma200Pct": null,
+          "vsSma50Pct": 0.1008,
+          "distanciaMax52sPct": null,
+          "drawdownDesdeMaxPct": -0.4775,
+          "volAnualizada90d": 0.6907,
+          "volAnualizada30d": 0.6172,
+          "perf1a": null,
+          "perf6m": -0.3695,
+          "perf3m": 0.0966,
+          "perf1m": 0.1662
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "PAMP",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-03",
+          "retorno": -0.4711
+        },
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.8932
+        }
+      ],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.0129,
+          "vsSma50Pct": -0.043,
+          "distanciaMax52sPct": -0.116,
+          "drawdownDesdeMaxPct": -0.116,
+          "volAnualizada90d": 0.3001,
+          "volAnualizada30d": 0.2542,
+          "perf1a": 0.2321,
+          "perf6m": 0,
+          "perf3m": 0.0544,
+          "perf1m": -0.0235
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.0472,
+          "vsSma50Pct": -0.0519,
+          "distanciaMax52sPct": -0.1414,
+          "drawdownDesdeMaxPct": -0.164,
+          "volAnualizada90d": 0.3164,
+          "volAnualizada30d": 0.2761,
+          "perf1a": 0.0974,
+          "perf6m": -0.0479,
+          "perf3m": -0.0081,
+          "perf1m": -0.0273
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.0526,
+          "vsSma50Pct": -0.0533,
+          "distanciaMax52sPct": -0.1479,
+          "drawdownDesdeMaxPct": -0.1769,
+          "volAnualizada90d": 0.3198,
+          "volAnualizada30d": 0.2764,
+          "perf1a": 0.0621,
+          "perf6m": -0.0538,
+          "perf3m": -0.0097,
+          "perf1m": -0.0273
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "TGSU2",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-03",
+          "retorno": -0.3775
+        },
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.6639
+        }
+      ],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.0376,
+          "vsSma50Pct": -0.0599,
+          "distanciaMax52sPct": -0.1416,
+          "drawdownDesdeMaxPct": -0.1416,
+          "volAnualizada90d": 0.3614,
+          "volAnualizada30d": 0.3345,
+          "perf1a": 0.1434,
+          "perf6m": -0.0067,
+          "perf3m": 0.0051,
+          "perf1m": -0.0545
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.0715,
+          "vsSma50Pct": -0.0688,
+          "distanciaMax52sPct": -0.1896,
+          "drawdownDesdeMaxPct": -0.1896,
+          "volAnualizada90d": 0.3761,
+          "volAnualizada30d": 0.3542,
+          "perf1a": 0.0184,
+          "perf6m": -0.0543,
+          "perf3m": -0.0545,
+          "perf1m": -0.0582
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.0767,
+          "vsSma50Pct": -0.0702,
+          "distanciaMax52sPct": -0.1899,
+          "drawdownDesdeMaxPct": -0.1899,
+          "volAnualizada90d": 0.3834,
+          "volAnualizada30d": 0.359,
+          "perf1a": -0.0143,
+          "perf6m": -0.0601,
+          "perf3m": -0.056,
+          "perf1m": -0.0582
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "TRAN",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.4879
+        },
+        {
+          "fecha": "2023-11-21",
+          "retorno": 0.3992
+        }
+      ],
+      "saltosTrasSacarArtefacto": [
+        {
+          "fecha": "2023-11-21",
+          "retorno": 0.3992
+        }
+      ],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.0803,
+          "vsSma50Pct": -0.0781,
+          "distanciaMax52sPct": -0.2152,
+          "drawdownDesdeMaxPct": -0.2152,
+          "volAnualizada90d": 0.3439,
+          "volAnualizada30d": 0.1804,
+          "perf1a": 0.2795,
+          "perf6m": -0.1475,
+          "perf3m": -0.0771,
+          "perf1m": -0.0501
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.114,
+          "vsSma50Pct": -0.0873,
+          "distanciaMax52sPct": -0.2527,
+          "drawdownDesdeMaxPct": -0.2527,
+          "volAnualizada90d": 0.3553,
+          "volAnualizada30d": 0.1763,
+          "perf1a": 0.1396,
+          "perf6m": -0.1883,
+          "perf3m": -0.1318,
+          "perf1m": -0.0538
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.1187,
+          "vsSma50Pct": -0.0888,
+          "distanciaMax52sPct": -0.2517,
+          "drawdownDesdeMaxPct": -0.2517,
+          "volAnualizada90d": 0.3585,
+          "volAnualizada30d": 0.1778,
+          "perf1a": 0.103,
+          "perf6m": -0.1933,
+          "perf3m": -0.1332,
+          "perf1m": -0.0538
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "TX26",
+      "tipo": "bono",
+      "pais": "AR",
+      "clase": "bonoAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.5224
+        },
+        {
+          "fecha": "2025-11-07",
+          "retorno": -0.3519
+        },
+        {
+          "fecha": "2026-05-08",
+          "retorno": -0.4976
+        }
+      ],
+      "saltosTrasSacarArtefacto": [
+        {
+          "fecha": "2025-11-07",
+          "retorno": -0.3519
+        },
+        {
+          "fecha": "2026-05-08",
+          "retorno": -0.4976
+        }
+      ],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": -0.3234,
+          "vsSma50Pct": 0.0228,
+          "distanciaMax52sPct": -0.5651,
+          "drawdownDesdeMaxPct": -0.6394,
+          "volAnualizada90d": 1.1475,
+          "volAnualizada30d": 0.0174,
+          "perf1a": -0.5129,
+          "perf6m": -0.3974,
+          "perf3m": 0.0624,
+          "perf1m": 0.0221
+        },
+        "usdMep": {
+          "vsSma200Pct": -0.3484,
+          "vsSma50Pct": 0.0133,
+          "distanciaMax52sPct": -0.5766,
+          "drawdownDesdeMaxPct": -0.7341,
+          "volAnualizada90d": 1.1528,
+          "volAnualizada30d": 0.0608,
+          "perf1a": -0.5661,
+          "perf6m": -0.4263,
+          "perf3m": -0.0006,
+          "perf1m": 0.0181
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.3529,
+          "vsSma50Pct": 0.0117,
+          "distanciaMax52sPct": -0.5863,
+          "drawdownDesdeMaxPct": -0.7331,
+          "volAnualizada90d": 1.1484,
+          "volAnualizada30d": 0.0743,
+          "perf1a": -0.5801,
+          "perf6m": -0.4298,
+          "perf3m": -0.0022,
+          "perf1m": 0.0181
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "rojo",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "TXAR",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-03",
+          "retorno": -0.4373
+        },
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.7271
+        }
+      ],
+      "saltosTrasSacarArtefacto": [],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": 0.039,
+          "vsSma50Pct": 0.0692,
+          "distanciaMax52sPct": -0.1669,
+          "drawdownDesdeMaxPct": -0.363,
+          "volAnualizada90d": 0.3308,
+          "volAnualizada30d": 0.3177,
+          "perf1a": 0.113,
+          "perf6m": 0.055,
+          "perf3m": 0.1834,
+          "perf1m": 0.0979
+        },
+        "usdMep": {
+          "vsSma200Pct": 0.0029,
+          "vsSma50Pct": 0.0591,
+          "distanciaMax52sPct": -0.2006,
+          "drawdownDesdeMaxPct": -0.6296,
+          "volAnualizada90d": 0.3436,
+          "volAnualizada30d": 0.3156,
+          "perf1a": -0.0087,
+          "perf6m": 0.0044,
+          "perf3m": 0.1133,
+          "perf1m": 0.0936
+        },
+        "usdCcl": {
+          "vsSma200Pct": -0.0032,
+          "vsSma50Pct": 0.0575,
+          "distanciaMax52sPct": -0.2181,
+          "drawdownDesdeMaxPct": -0.6248,
+          "volAnualizada90d": 0.3414,
+          "volAnualizada30d": 0.3039,
+          "perf1a": -0.0406,
+          "perf6m": -0.0017,
+          "perf3m": 0.1115,
+          "perf1m": 0.0936
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "amarillo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "rojo",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    },
+    {
+      "id": "YPFD",
+      "tipo": "accion",
+      "pais": "AR",
+      "clase": "accionAr",
+      "monedaSerie": "ARS",
+      "puntos": 750,
+      "estadoHoy": "sospechosa",
+      "saltosAntes": [
+        {
+          "fecha": "2023-08-03",
+          "retorno": -0.434
+        },
+        {
+          "fecha": "2023-08-04",
+          "retorno": 0.804
+        },
+        {
+          "fecha": "2023-11-21",
+          "retorno": 0.3862
+        }
+      ],
+      "saltosTrasSacarArtefacto": [
+        {
+          "fecha": "2023-11-21",
+          "retorno": 0.3862
+        }
+      ],
+      "indicadores": {
+        "ars": {
+          "vsSma200Pct": 0.2495,
+          "vsSma50Pct": 0.0163,
+          "distanciaMax52sPct": -0.059,
+          "drawdownDesdeMaxPct": -0.059,
+          "volAnualizada90d": 0.3711,
+          "volAnualizada30d": 0.3212,
+          "perf1a": 0.7331,
+          "perf6m": 0.3866,
+          "perf3m": 0.2097,
+          "perf1m": 0.0385
+        },
+        "usdMep": {
+          "vsSma200Pct": 0.2065,
+          "vsSma50Pct": 0.0064,
+          "distanciaMax52sPct": -0.0995,
+          "drawdownDesdeMaxPct": -0.0995,
+          "volAnualizada90d": 0.3813,
+          "volAnualizada30d": 0.3373,
+          "perf1a": 0.5436,
+          "perf6m": 0.3202,
+          "perf3m": 0.138,
+          "perf1m": 0.0345
+        },
+        "usdCcl": {
+          "vsSma200Pct": 0.2006,
+          "vsSma50Pct": 0.005,
+          "distanciaMax52sPct": -0.1046,
+          "drawdownDesdeMaxPct": -0.1046,
+          "volAnualizada90d": 0.3842,
+          "volAnualizada30d": 0.3348,
+          "perf1a": 0.494,
+          "perf6m": 0.3121,
+          "perf3m": 0.1361,
+          "perf1m": 0.0345
+        }
+      },
+      "semaforos": {
+        "ars": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        },
+        "usdMep": {
+          "peso": "sin_datos",
+          "drawdown": "verde",
+          "volatilidad": "verde",
+          "liquidez": "sin_datos"
+        }
+      }
+    }
+  ]
+}
