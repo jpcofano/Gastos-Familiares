@@ -1821,6 +1821,58 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   configuración editable) y `functions/`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` y
   `functions build` OK. **Deploy: `--only functions,hosting,firestore:rules`.** Post-deploy:
   "Sincronizar" en Config y volver a correr `verificarF9143.ts` para cerrar los 3 pendientes.
+- F9.148 — **el punto podrido, el umbral del detector, los semáforos y la performance en
+  dólares**. Ver `docs/prompts/F9.148-punto-podrido-umbrales-y-performance-usd.md` y los
+  resultados de la investigación previa en
+  `docs/patrimonio/investigacion-indicadores-en-dolares-resultados.md`.
+  **§1 — el 2023-08-03 de data912 es una fila inventada, y se marca en vez de borrarse.**
+  Verificado contra Yahoo (`.BA`): coinciden **al centavo** en todas las demás ruedas de 750 y
+  solo ese día difieren ~45%; el retorno real de PAMP fue −2,0%, no −47,1%. **La fuente no lo
+  corrigió en tres años** — se volvió a pedir el 2026-08-18 y devuelve lo mismo. `PUNTOS_MALOS`
+  le pone `malo: true`, el punto **sigue en `serie`** y queda fuera de todo cálculo: borrarlo
+  haría que la serie no coincida con la fuente y la próxima sincronización lo traería de vuelta.
+  **Lista explícita, no comodín, y eso se midió**: barrido completo de los tres paneles —acciones
+  32 podridas de 60 con fila, bonos 18 de 41, cedears 32 de 50—; BMA, CEPU, ALUA, BBAR, COME y
+  otras 23 tienen el dato bien y un comodín les tiraría un punto bueno. El criterio se validó
+  contra Yahoo en 37 acciones, **37/37**.
+  **§2 — `UMBRAL_SALTO` 0,35 → 0,45, y la razón simple dispara sola.** 0,35 fallaba de los dos
+  lados: dejaba pasar el rally REAL del 2025-10-27 al expresarlo en dólares (+28% en pesos más un
+  MEP que cayó 6,8% = **+37%**), lo que hacía que `recortarPorEstado` tirara **554 puntos en cinco
+  series** y bloqueaba el §4; y dejaba invisibles caídas del 33,4%. Como la razón más chica es
+  1,5, el segundo criterio no puede disparar por debajo de ~30%: no agrega ruido y es lo que
+  sigue marcando las amortizaciones de TX26.
+  **§1+§2 juntos: 9 de las 10 series `sospechosa` pasan a `limpia` y se recuperan +234 ruedas**,
+  con cero regresiones. El spec pedía 7; salieron 9 porque los saltos del 2023-11-21 de TRAN e
+  YPFD eran **reales** (ballotage, confirmados por Yahoo) y eran falsos positivos del umbral viejo.
+  **§3 — el semáforo de liquidez se eliminó, no se recalibró.** `ruedasParaSalir` va de 2,3e-6 a
+  **1,8e-2** en las 16: ninguna llega a 0,05 ruedas, o sea que la posición más ilíquida se liquida
+  en el 2% de una rueda y **no hay umbral que informe algo**. El número sigue en la ficha. Y
+  `drawdown` → `caida52s`, que mide `distanciaMax52sPct` (ventana fija) en vez del máximo de la
+  serie retenida, que dura 750 ruedas en unas posiciones y 183 en otras.
+  **Lo que hay que decir del §3: cambiar la referencia NO destrabó la distribución cargada** —
+  entre las 12 series con las dos referencias definidas, amarillo-o-rojo pasa de 8/12 a 7/12 y se
+  mueve **una sola** posición (TXAR). La hipótesis del spec de que el punto podrido inflaba los
+  drawdowns era falsa: ese punto es un **pozo**, y un pozo nunca es el máximo desde el que se mide
+  una caída. **El umbral sigue siendo el problema abierto.**
+  **§4 — solo la performance va en dólares.** `perf1m/3m/6m/1a` sobre la serie convertida; medias,
+  máximos, drawdown, volatilidad, RSI y ATR **siguen en la moneda de la serie**, porque dolarizar
+  esos los empeora: la correlación diaria entre el retorno del papel en ARS y el del MEP pasó de
+  +0,2/+0,5 (bajo cepo, convertir cancelaba ruido) a **−0,2/−0,46** en 2025 (se mueven en contra y
+  convertir amplifica), y la volatilidad **sube** en 13 de 15 al dolarizar. La performance es el
+  caso opuesto: `perf1a` cambia de signo en **3 de 12** (GD30, GGAL, TXAR) y en pesos da positiva
+  el 86% del tiempo. `tcDiario` backfilleado de 2024-07-01 a **2023-06-01** (1.175 docs, sin
+  huecos, 396 escrituras aditivas y cero pisadas); `serieTcDeMercado` lee el documento `D+1` para
+  el día `D`, y el solapamiento dio **779/779**. Si falta el TC de una sola rueda la conversión se
+  descarta entera y `monedaPerformance` lo dice — una serie con agujeros correría la ventana de
+  252 ruedas sin que se note.
+  El backfill se extrajo a `functions/src/tcBackfill.ts` porque tiene dos entradas (el callable y
+  el script) y dos copias del shift habrían sido dos verdades sobre la convención de fecha.
+  Los semáforos retirados se borran con `FieldValue.delete()`: `set` con `merge: true` **fusiona**
+  los mapas anidados, así que sacarlos del objeto calculado los dejaría colgados en el documento.
+  Verificación: `npx tsx scripts/verificarF9148.ts` — **16/16 OK**, con las funciones reales del
+  motor sobre las series reales. Auditoría previa: `scripts/auditF9148.ts`.
+  `tsc`: 41 → 41 (medido con `grep -c "error TS"`), 0 en `functions/`; `vite build` OK.
+  **Deploy pendiente: `--only functions,hosting`** (toca el motor y la ficha).
 - F9.144 — **ficha de posición: los datos duros, antes de la opinión**. Ver
   `docs/prompts/F9.144-ficha-posicion.md`. F9.141 construyó `indicadoresPosicion` y **nadie lo
   miraba**: `src/datos/patrimonioPrecios.ts` no tenía un solo consumidor en `src/vistas/`. Ahora

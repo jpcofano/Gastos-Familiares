@@ -79,6 +79,9 @@ export type PuntoSerie = {
   l: number | null;
   c: number;
   v: number | null;          // nominales operados
+  // F9.148 — dato probadamente malo de la fuente (data912, 2023-08-03). Se conserva para que
+  // el problema quede visible y el arreglo sea idempotente, y se excluye de todo cálculo.
+  malo?: true;
 };
 
 export type SplitAplicado = {
@@ -112,6 +115,7 @@ export type PreciosDiarios = {
   cobertura: CoberturaPrecio;
   estadoSerie: EstadoSerie;
   puntos: number;
+  puntosMalos?: number;      // F9.148 — cuántos de `puntos` están marcados y no se calcularon
   primeraFecha: string | null;
   ultimaFecha: string | null;
   precioLive: number | null;
@@ -143,6 +147,10 @@ export type IndicadoresPosicion = {
   drawdownDesdeMaxPct: number | null;
   volAnualizada30d: number | null; volAnualizada90d: number | null;
   perf1m: number | null; perf3m: number | null; perf6m: number | null; perf1a: number | null;
+  // F9.148 §4 — la performance (y SOLO la performance) va en dólares; el resto está en
+  // `monedaSerie`. Es dato del motor, no se infiere: los docs viejos no lo traen.
+  monedaPerformance?: 'ARS' | 'USD';
+  motivoPerfEnMoneda?: 'ya_en_usd' | 'sin_tc_completo' | null;
   rsi14: number | null; atrPct: number | null;
   montoOperadoProm30d: number | null; montoOperadoUltimo: number | null;
   ratioVolumen: number | null;

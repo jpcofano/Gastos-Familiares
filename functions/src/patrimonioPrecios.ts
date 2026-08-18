@@ -24,6 +24,8 @@ export type PuntoSerie = {
   l: number | null;
   c: number;
   v: number | null;
+  /** F9.148 — dato probadamente malo de la fuente. Se conserva y se excluye de todo cálculo. */
+  malo?: true;
 };
 
 export type SplitAplicado = {
@@ -208,6 +210,55 @@ function ordenar(pts: PuntoSerie[]): PuntoSerie[] {
   return [...porFecha.values()].sort((a, b) => (a.f < b.f ? -1 : a.f > b.f ? 1 : 0));
 }
 
+// ── Puntos malos de la fuente ────────────────────────────────────────────────
+// F9.148 — data912 sirve una fila OHLCV inventada para el 2023-08-03. Verificado contra Yahoo
+// Finance (`.BA`): las dos fuentes coinciden AL CENTAVO en todas las demás ruedas de la ventana
+// de 750, y solo ese día difieren ~45%. El retorno real de PAMP fue −2,0%, no −47,1%. No es un
+// cierre mal capturado: es la fila entera, con volumen propio distinto del real.
+//
+// SE MARCA, NO SE BORRA. Borrarlo haría que `preciosDiarios` no coincida con lo que la fuente
+// devuelve, y la próxima sincronización lo traería de vuelta sin que nadie entienda por qué
+// reapareció. Marcado, el problema queda visible y el arreglo es idempotente.
+//
+// LISTA EXPLÍCITA, NO COMODÍN — y es una medición, no una intuición. Se barrieron los tres
+// paneles argentinos completos (2026-08-18): acciones 32 podridas de 60 con fila, bonos 18 de 41,
+// cedears 32 de 50. **BMA, CEPU, ALUA, BBAR, COME y otras 23 acciones tienen el dato bien** y un
+// comodín les tiraría un punto bueno. El criterio usado (pozo de un día: el cierre se desvía >20%
+// del vecino previo Y del siguiente, con los vecinos a menos de 15% entre sí) se validó contra
+// Yahoo en 37 acciones: **37/37 de acuerdo**, sin un solo falso positivo ni negativo.
+//
+// La fuente NO lo corrigió en tres años: se volvió a pedir la serie el 2026-08-18 y sigue
+// devolviendo el mismo valor. Hay que asumir que vuelve en cada corrida.
+export const PUNTOS_MALOS: Record<string, string[]> = {
+  '2023-08-03': [
+    // acciones (panel `stocks`)
+    'EDN', 'FERR', 'FIPL', 'GARO', 'GBAN', 'GCDI', 'GCLA', 'GGAL', 'HARG', 'HAVA', 'INVJ',
+    'IRSA', 'LEDE', 'LOMA', 'LONG', 'METR', 'MIRG', 'MOLA', 'MOLI', 'MORI', 'OEST', 'PAMP',
+    'PATA', 'RICH', 'SAMI', 'SUPV', 'TECO2', 'TGNO4', 'TGSU2', 'TRAN', 'TXAR', 'YPFD',
+    // bonos (panel `bonds`). Las especies en dólares (sufijo C/D) están sanas salvo BA37D.
+    'AE38', 'AL29', 'AL30', 'AL35', 'AL41', 'BA37D', 'CUAP', 'DICP', 'GD29', 'GD30', 'GD35',
+    'GD38', 'GD41', 'GD46', 'PARP', 'TVPA', 'TX26', 'TX28',
+    // cedears (panel `cedears`)
+    'EEM', 'EWZ', 'GE', 'GOOGL', 'GS', 'HPQ', 'IBM', 'INTC', 'IWM', 'KO', 'LMT', 'MCD', 'MELI',
+    'META', 'MO', 'MSFT', 'NFLX', 'PBR', 'PFE', 'PYPL', 'QCOM', 'QQQ', 'SPY', 'TEN', 'TSLA',
+    'TXR', 'V', 'WFC', 'WMT', 'XLE', 'XLF', 'XOM',
+  ],
+};
+
+/** Puntos de la serie que NO están marcados como dato malo. Es la base de todo cálculo. */
+export const soloBuenos = (serie: PuntoSerie[]): PuntoSerie[] => serie.filter(p => !p.malo);
+
+/**
+ * Marca (no elimina) los puntos que `PUNTOS_MALOS` declara podridos para este símbolo.
+ * Idempotente: correrla dos veces da lo mismo.
+ */
+export function marcarPuntosMalos(serie: PuntoSerie[], simbolo: string): PuntoSerie[] {
+  const fechas = Object.keys(PUNTOS_MALOS).filter(f => PUNTOS_MALOS[f].includes(simbolo));
+  if (!fechas.length) return serie;
+  const malas = new Set(fechas);
+  return serie.map(p => (malas.has(p.f) ? { ...p, malo: true as const } : p));
+}
+
 // ── Splits ───────────────────────────────────────────────────────────────────
 // F9.141 — splits confirmados. Certeza, no inferencia. Se agrega a mano cuando se detecta uno.
 export const SPLITS_CONFIRMADOS: Record<string, { fecha: string; razon: number }[]> = {
@@ -216,8 +267,30 @@ export const SPLITS_CONFIRMADOS: Record<string, { fecha: string; razon: number }
 
 export const RAZONES_SIMPLES = [10, 5, 4, 3, 2, 1.5];
 const CANDIDATAS = [...RAZONES_SIMPLES, ...RAZONES_SIMPLES.map(r => 1 / r)];
-export const UMBRAL_SALTO = 0.35;
+
+// F9.148 — era 0,35. El umbral tiene que separar SPLITS de MOVIMIENTOS DE MERCADO, y esos dos
+// difieren en orden de magnitud: el split más chico que existe en la tabla es 3:2 (±33%/+50%),
+// y de ahí para arriba; el mercado argentino hace ±40% en un día extremo.
+//
+// 0,35 fallaba de los dos lados, medido:
+//  · Dejaba pasar el rally REAL del 2025-10-27 (post-legislativas) cuando la serie se expresa en
+//    dólares: +28% en pesos más un MEP que cayó 6,8% da +37%, cruza el umbral, y
+//    `recortarPorEstado` tiraba 554 puntos en cinco series. Es lo que bloqueaba F9.148 §4.
+//  · Y al mismo tiempo dejaba invisibles caídas del 33,4% justo debajo del corte.
+// 0,45 cubre el 37% del rally dolarizado y sigue por debajo del 50% de un split 2:1.
+export const UMBRAL_SALTO = 0.45;
 export const TOLERANCIA_RAZON = 0.05;
+
+/** La razón simple que explica el cociente, o null. Separada para que el gate la pueda usar. */
+function razonPara(cociente: number): { razon: number; residuo: number } | null {
+  let mejor: { razon: number; residuo: number } | null = null;
+  for (const razon of CANDIDATAS) {
+    if (Math.abs(cociente / razon - 1) > TOLERANCIA_RAZON) continue;
+    const residuo = razon / cociente - 1;
+    if (!mejor || Math.abs(residuo) < Math.abs(mejor.residuo)) mejor = { razon, residuo };
+  }
+  return mejor;
+}
 
 /**
  * Capa 3 — SOLO REPORTE. Nunca reescala.
@@ -227,21 +300,25 @@ export const TOLERANCIA_RAZON = 0.05;
  * (devaluación post-PASO 2023) y amortizaciones de bonos. Reescalar por parecido habría
  * corrompido cinco series con un factor inventado — exactamente el modo de falla que este
  * spec existe para evitar.
+ *
+ * F9.148 — el umbral dejó de ser el único disparador. Un movimiento se reporta si es grande
+ * **o** si su cociente matchea una razón simple, aunque quede debajo del umbral: un split 3:2
+ * es ~33% y con 0,45 pasaría desapercibido. Como la razón más chica es 1,5, este segundo
+ * criterio no puede disparar por debajo de ~30% — no agrega ruido de movimientos normales.
  */
 export function detectarSaltos(serie: PuntoSerie[]): SaltoDetectado[] {
+  // F9.148 — los puntos marcados no participan: el salto se mide entre los dos buenos que
+  // rodean al malo. Sin esto, un dato podrido genera DOS saltos fantasma (la ida y la vuelta).
+  const buenos = soloBuenos(serie);
   const out: SaltoDetectado[] = [];
-  for (let i = 1; i < serie.length; i++) {
-    const a = serie[i - 1], b = serie[i];
+  for (let i = 1; i < buenos.length; i++) {
+    const a = buenos[i - 1], b = buenos[i];
     const ret = b.c / a.c - 1;
-    if (Math.abs(ret) <= UMBRAL_SALTO) continue;
 
     const cociente = a.c / b.c;
-    let mejor: { razon: number; residuo: number } | null = null;
-    for (const razon of CANDIDATAS) {
-      if (Math.abs(cociente / razon - 1) > TOLERANCIA_RAZON) continue;
-      const residuo = (b.c * razon) / a.c - 1;
-      if (!mejor || Math.abs(residuo) < Math.abs(mejor.residuo)) mejor = { razon, residuo };
-    }
+    const mejor = razonPara(cociente);
+    if (Math.abs(ret) <= UMBRAL_SALTO && !mejor) continue;
+
     out.push({
       fecha: b.f, cAnterior: a.c, cPosterior: b.c,
       retornoCrudo: ret, cocienteCrudo: cociente,
@@ -345,6 +422,13 @@ export type Indicadores = {
   perf1m: number | null; perf3m: number | null; perf6m: number | null; perf1a: number | null;
   rsi14: number | null;  atrPct: number | null;
   montoOperadoProm30d: number | null; montoOperadoUltimo: number | null; ratioVolumen: number | null;
+  /**
+   * F9.148 §4 — en qué moneda están `perf1m/3m/6m/1a`, y SOLO ellos. Todo lo demás está en
+   * `monedaSerie`. Nunca se infiere en la UI: el motor dice cuál usó.
+   */
+  monedaPerformance: 'ARS' | 'USD';
+  /** Por qué la performance no está en dólares, cuando no lo está. null si sí lo está. */
+  motivoPerfEnMoneda: 'ya_en_usd' | 'sin_tc_completo' | null;
 };
 
 const RUEDAS = { mes: 21, tri: 63, sem: 126, anio: 252, cincuentaydos: 252 };
@@ -405,7 +489,32 @@ function atrPct(serie: PuntoSerie[], ventana = 14): number | null {
   return ultimo > 0 ? media(trs) / ultimo : null;
 }
 
-export function calcIndicadores(serie: PuntoSerie[]): Indicadores {
+/**
+ * F9.148 §4 — la performance se calcula en DÓLARES; todo lo demás, en la moneda de la serie.
+ *
+ * No es una inconsistencia, es el resultado de una medición: dolarizar volatilidad, drawdown y
+ * medias las EMPEORA. La correlación diaria entre el retorno del papel en ARS y el del MEP pasó
+ * de +0,2/+0,5 (2023-24, bajo cepo: se movían juntos y convertir cancelaba ruido) a −0,2/−0,46
+ * (2025: se mueven en contra y convertir amplifica). Medido: la volatilidad SUBE en 13 de 15
+ * posiciones al dolarizar.
+ *
+ * La performance es el caso opuesto y por eso es la única que se convierte: `perf1a` cambia de
+ * signo en 3 de 12 posiciones, ARS y USD discrepan el 15,0% de los días, y en pesos la
+ * performance a un año da positiva el 86% del tiempo —100% en cuatro papeles—, que es la
+ * deriva nominal contestando "¿gané o perdí?" con un sí que no significa nada.
+ *
+ * @param serieUsd la MISMA serie convertida, rueda a rueda. Si no cubre todas las ruedas buenas
+ *   (falta TC en alguna), NO se usa: se calcula en la moneda de la serie y se dice por qué.
+ *   Recortar el índice sobre una serie con agujeros correría la ventana de 252 ruedas sin avisar.
+ */
+export function calcIndicadores(
+  serieConMalos: PuntoSerie[],
+  opciones?: { serieUsd?: PuntoSerie[] | null; yaEnUsd?: boolean },
+): Indicadores {
+  // F9.148 — un punto marcado como dato malo no entra en NINGÚN indicador: ni medias, ni
+  // máximos y mínimos, ni drawdown, ni volatilidad, ni performance, ni RSI, ni ATR, ni volumen.
+  // `puntosDisponibles` cuenta los buenos, que es lo que efectivamente se usó para calcular.
+  const serie = soloBuenos(serieConMalos);
   const cierres = serie.map(p => p.c);
   const ultimo = cierres.length ? cierres[cierres.length - 1] : null;
   const rel = (base: number | null) => (base === null || ultimo === null ? null : ultimo / base - 1);
@@ -419,6 +528,14 @@ export function calcIndicadores(serie: PuntoSerie[]): Indicadores {
 
   // Drawdown desde el máximo de la serie retenida; sin serie mínima no se informa.
   const maxHist = cierres.length >= 20 ? Math.max(...cierres) : null;
+
+  // ── Performance: la única familia que cambia de moneda (F9.148 §4) ──────────
+  const usd = opciones?.serieUsd ? soloBuenos(opciones.serieUsd) : null;
+  const usdCompleta = !!usd && usd.length === serie.length;
+  const cierresPerf = opciones?.yaEnUsd ? cierres : usdCompleta ? usd!.map(p => p.c) : cierres;
+  const monedaPerformance: 'ARS' | 'USD' = opciones?.yaEnUsd || usdCompleta ? 'USD' : 'ARS';
+  const motivoPerfEnMoneda = opciones?.yaEnUsd ? 'ya_en_usd' as const
+    : usdCompleta ? null : 'sin_tc_completo' as const;
 
   const montos = serie.map(p => (p.v === null ? null : p.c * p.v));
   const hayMontos = montos.length >= 30 && montos.slice(-30).every(m => m !== null);
@@ -436,15 +553,16 @@ export function calcIndicadores(serie: PuntoSerie[]): Indicadores {
     drawdownDesdeMaxPct: rel(maxHist),
     volAnualizada30d: volAnualizada(cierres, 30),
     volAnualizada90d: volAnualizada(cierres, 90),
-    perf1m: perf(cierres, RUEDAS.mes),
-    perf3m: perf(cierres, RUEDAS.tri),
-    perf6m: perf(cierres, RUEDAS.sem),
-    perf1a: perf(cierres, RUEDAS.anio),
+    perf1m: perf(cierresPerf, RUEDAS.mes),
+    perf3m: perf(cierresPerf, RUEDAS.tri),
+    perf6m: perf(cierresPerf, RUEDAS.sem),
+    perf1a: perf(cierresPerf, RUEDAS.anio),
     rsi14: rsi(cierres),
     atrPct: atrPct(serie),
     montoOperadoProm30d: montoProm30,
     montoOperadoUltimo: montoUlt,
     ratioVolumen: montoProm30 && montoUlt !== null && montoProm30 > 0 ? montoUlt / montoProm30 : null,
+    monedaPerformance, motivoPerfEnMoneda,
   };
 }
 
@@ -456,7 +574,9 @@ export type ClaseUmbral = 'accionAr' | 'accionGlobal' | 'cedear' | 'bonoAr' | 'o
 
 export const UMBRALES = {
   peso:      { verde: 0.04, amarillo: 0.08 },
-  drawdown: {
+  // F9.148 §3 — las bandas son las mismas, pero ahora miden `distanciaMax52sPct` en vez de
+  // `drawdownDesdeMaxPct`. Ver `calcSemaforos`.
+  caida52s: {
     accionAr:     { verde: 0.20, amarillo: 0.40 },
     cripto:       { verde: 0.20, amarillo: 0.40 },
     accionGlobal: { verde: 0.15, amarillo: 0.30 },
@@ -474,7 +594,13 @@ export const UMBRALES = {
     on:           { verde: 0.20, amarillo: 0.35 },
     fciMM:        { verde: 0.05, amarillo: 0.12 },
   },
-  liquidez:  { verde: 1, amarillo: 5 },  // ruedas necesarias para salir
+  // F9.148 §3 — el semáforo de liquidez SE ELIMINÓ, no se recalibró. Medido sobre las 16
+  // series: `ruedasParaSalir` va de 2,3e-6 a 1,8e-2 y las 15 con dato dan verde. Ninguna llega
+  // siquiera a 0,05 ruedas, así que no hay umbral que informe algo — la posición más ilíquida
+  // de la cartera se liquida en el 2% de una rueda. Un semáforo que nunca cambia de color no es
+  // información: entrena a no mirarlo. El número sigue en la ficha, que es lo que sí sirve.
+  // Si algún día la cartera crece un orden de magnitud, se recalibra con la distribución de
+  // entonces y no con una banda inventada para que algo se encienda.
 } as const;
 
 export function claseUmbral(tipo: PosicionTipo, pais: PaisRiesgo): ClaseUmbral {
@@ -496,17 +622,33 @@ function banda(valor: number | null, u: { verde: number; amarillo: number }): Se
   return 'rojo';
 }
 
+/**
+ * F9.148 §3 — dos cambios, los dos medidos, ninguno de los dos por gusto.
+ *
+ * 1. `drawdown` → `caida52s`. La referencia dejó de ser el máximo de TODA la serie retenida y
+ *    pasó a ser el máximo de 52 semanas (`distanciaMax52sPct`, que ya se calculaba). El máximo
+ *    de la serie mide contra una ventana que dura 750 ruedas en unas posiciones y 183 en otras:
+ *    el mismo semáforo comparaba cosas distintas. 52 semanas es ventana fija y comparable.
+ *    Cuando no hay 252 ruedas devuelve `sin_datos`, igual que el resto de los indicadores de
+ *    ventana: nunca una banda calculada sobre menos historia de la que dice medir.
+ *
+ *    HONESTIDAD SOBRE EL ALCANCE: esto NO destraba la distribución cargada. Medido después de
+ *    §1 y §2, entre las 12 series con las dos referencias definidas, amarillo-o-rojo pasa de
+ *    8/12 a 7/12 — se mueve una sola posición (TXAR). La hipótesis del spec de que el punto
+ *    podrido inflaba los drawdowns era falsa: ese punto era un POZO, y un pozo nunca es el
+ *    máximo desde el que se mide una caída. **El umbral sigue siendo el problema abierto.**
+ *
+ * 2. `liquidez` se fue. Ver `UMBRALES`.
+ */
 export function calcSemaforos(
   ind: Indicadores,
   clase: ClaseUmbral,
   pesoEnCartera: number | null,
-  ruedasParaSalir: number | null,
 ): Record<string, Semaforo> {
   return {
     peso: banda(pesoEnCartera, UMBRALES.peso),
-    drawdown: banda(ind.drawdownDesdeMaxPct, UMBRALES.drawdown[clase]),
+    caida52s: banda(ind.distanciaMax52sPct, UMBRALES.caida52s[clase]),
     volatilidad: banda(ind.volAnualizada90d, UMBRALES.volatilidad[clase]),
-    liquidez: banda(ruedasParaSalir, UMBRALES.liquidez),
   };
 }
 

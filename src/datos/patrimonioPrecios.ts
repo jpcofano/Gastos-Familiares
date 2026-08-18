@@ -84,3 +84,15 @@ export const ETIQUETA_SEMAFORO: Record<Semaforo, string> = {
   rojo: 'fuera de banda',
   sin_datos: 'sin datos suficientes',
 };
+
+/**
+ * F9.148 §3 — nombre legible de cada semáforo. Antes la ficha pintaba la clave cruda del mapa
+ * ("caida52s"), que es un identificador, no una etiqueta. Los docs viejos pueden traer claves ya
+ * retiradas hasta que el cron los reescriba: se muestran con su nombre crudo antes que
+ * desaparecer sin explicación.
+ */
+export const ETIQUETA_CAMPO_SEMAFORO: Record<string, string> = {
+  peso: 'Peso en cartera',
+  caida52s: 'Caída desde máx. 52 sem.',
+  volatilidad: 'Volatilidad 90d',
+};

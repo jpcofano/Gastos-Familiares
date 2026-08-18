@@ -320,6 +320,19 @@ Implementación en cadena (cada una depende de la anterior):
   - Solo lectura. **Nunca `preciosDiarios` desde el cliente** (~30 KB por documento).
   - Verificación: `scripts/verificarF9144.ts`. Auditoría previa: `scripts/auditF9144.ts`.
 
+- **F9.148** — Punto podrido, umbral del detector, semáforos y performance en dólares *(cerrado)*
+  - §1 `PUNTOS_MALOS` marca (no borra) el 2023-08-03 de data912. Lista explícita de 82 símbolos,
+    medida con un barrido completo de los tres paneles y validada contra Yahoo 37/37.
+  - §2 `UMBRAL_SALTO` 0,35 → **0,45**, y la razón simple pasa a disparar sola. §1+§2 juntos:
+    **9 de 10 series `sospechosa` → `limpia`, +234 ruedas**, cero regresiones.
+  - §3 semáforo de liquidez **eliminado** (15/15 verdes, ninguna llega a 0,05 ruedas);
+    `drawdown` → `caida52s`, que mide `distanciaMax52sPct`. No destrabó la distribución cargada.
+  - §4 **solo** `perf1m/3m/6m/1a` en dólares. `tcDiario` backfilleado a 2023-06-01 (1.175 docs,
+    sin huecos). `serieTcDeMercado` respeta la convención `D` = cierre de `D−1`.
+  - Contrato completo abajo, en "Precios y serie diaria".
+  - Verificación: `scripts/verificarF9148.ts`. Auditoría previa: `scripts/auditF9148.ts`.
+    Backfill del TC: `scripts/backfillTcF9148.ts` (dry-run por defecto, `--apply` para escribir).
+
 Fases pendientes:
   *(Era "F9.142" en este roadmap; renumerada porque F9.142/F9.143 quedaron tomadas por el
   trabajo de CAFCI.)*
@@ -424,6 +437,97 @@ papel con el del dólar.
 
 No hay 422. Discriminar por status guardaría el objeto de error como si fuera una serie: la
 validación es sobre la forma del payload.
+
+### El punto podrido del 2023-08-03 se marca, no se borra (F9.148 §1)
+
+data912 sirve una **fila OHLCV inventada** para el 2023-08-03 en los tres paneles argentinos.
+Verificado contra Yahoo Finance (`.BA`): las dos fuentes coinciden **al centavo** en todas las
+demás ruedas de la ventana de 750, y solo ese día difieren ~45%. El retorno real de PAMP fue
+**−2,0%**, no −47,1%. No es un cierre mal capturado: es la fila entera, con volumen propio.
+
+**La fuente no lo corrigió en tres años** — se volvió a pedir la serie el 2026-08-18 y devuelve
+el mismo valor. Hay que asumir que vuelve en cada corrida.
+
+`PUNTOS_MALOS` lo marca con `malo: true`; **el punto sigue en `serie`** y queda fuera de todo
+cálculo (`soloBuenos`). Borrarlo haría que `preciosDiarios` no coincida con lo que la fuente
+devuelve y la próxima sincronización lo traería de vuelta sin que nadie entienda por qué.
+`puntos` cuenta lo que la fuente dio; `puntosMalos` explica por qué `puntosDisponibles` es menor.
+
+**Es lista explícita, no comodín, y eso es una medición.** Barrido completo de los tres paneles
+(2026-08-18): acciones **32 podridas de 60** con fila, bonos **18 de 41**, cedears **32 de 50**.
+BMA, CEPU, ALUA, BBAR, COME y otras 23 acciones tienen el dato bien y un comodín les tiraría un
+punto bueno. En los bonos, las especies en dólares (sufijo C/D) están sanas salvo BA37D. El
+criterio —pozo de un día: se desvía >20% del vecino previo *y* del siguiente, con los vecinos a
+menos de 15% entre sí— se validó contra Yahoo en 37 acciones: **37/37 de acuerdo**.
+
+### `UMBRAL_SALTO` es 0,45, y la razón simple dispara sola (F9.148 §2)
+
+Era 0,35 y fallaba de los dos lados:
+
+- **Dejaba pasar** el rally REAL del 2025-10-27 (post-legislativas) cuando la serie se expresa en
+  dólares: +28% en pesos más un MEP que cayó 6,8% da **+37%**, cruzaba el umbral, y
+  `recortarPorEstado` tiraba **554 puntos en cinco series**. Era lo que bloqueaba §4.
+- **Y dejaba invisibles** caídas del 33,4%, justo debajo del corte.
+
+0,45 cubre el 37% del rally dolarizado y sigue por debajo del 50% de un split 2:1. Además el
+umbral dejó de ser el único disparador: un movimiento se reporta si es grande **o** si su
+cociente matchea una razón simple. Como la razón más chica es 1,5, ese segundo criterio no puede
+disparar por debajo de ~30%, así que no agrega ruido — y es lo que sigue marcando las
+amortizaciones de TX26 (2025-11-07 razón 1,5; 2026-05-08 razón 2).
+
+**Efecto medido de §1 + §2 juntos:** 9 de las 10 series `sospechosa` pasan a `limpia`,
+**+234 ruedas utilizables**, cero regresiones. Solo queda TX26. Los saltos del 2023-11-21 de TRAN
+e YPFD eran **reales** (ballotage, confirmados por Yahoo) y eran falsos positivos del umbral viejo.
+
+### El semáforo de liquidez se eliminó; el de rango mide 52 semanas (F9.148 §3)
+
+**Liquidez: eliminado, no recalibrado.** Medido sobre las 16 series, `ruedasParaSalir` va de
+**2,3e-6 a 1,8e-2** y daba verde en las 15 con dato. Ninguna llega siquiera a 0,05 ruedas: la
+posición más ilíquida se liquida en el 2% de una rueda. Un semáforo que nunca cambia de color no
+es información, entrena a no mirarlo. **El número sigue en la ficha**, que es lo que decide.
+
+**`drawdown` → `caida52s`.** La referencia dejó de ser el máximo de toda la serie retenida y pasó
+a `distanciaMax52sPct`. El máximo de la serie mide contra una ventana de 750 ruedas en unas
+posiciones y de 183 en otras: el mismo semáforo comparaba cosas distintas.
+
+**Esto NO destrabó la distribución cargada, y hay que decirlo:** entre las 12 series con las dos
+referencias definidas, amarillo-o-rojo pasa de 8/12 a 7/12 — se mueve **una sola** posición
+(TXAR). La hipótesis de que el punto podrido inflaba los drawdowns era falsa: ese punto es un
+**pozo**, y un pozo nunca es el máximo desde el que se mide una caída. **El umbral sigue siendo
+el problema abierto.**
+
+Los dos semáforos retirados se borran con `FieldValue.delete()` en cada escritura: `set` con
+`merge: true` **fusiona** los mapas anidados, así que sacarlos del objeto calculado no los saca
+del documento — quedarían colgados con el valor de la última corrida vieja.
+
+### La performance va en dólares; todo lo demás, en la moneda de la serie (F9.148 §4)
+
+`perf1m/3m/6m/1a` se calculan sobre la serie convertida. **Nada más se convierte**, y no es una
+inconsistencia sino el resultado de una medición (investigación del 2026-08-17):
+
+- **Dolarizar volatilidad, drawdown y medias las EMPEORA.** La correlación diaria entre el
+  retorno del papel en ARS y el del MEP pasó de **+0,2/+0,5** (2023-24, bajo cepo: se movían
+  juntos y convertir cancelaba ruido) a **−0,2/−0,46** (2025: se mueven en contra y convertir
+  amplifica). La volatilidad **sube** en 13 de 15 posiciones al dolarizar.
+- **La performance es el caso opuesto**: `perf1a` cambia de signo en 3 de 12 posiciones (GD30,
+  GGAL, TXAR), ARS y USD discrepan el **15,0% de los días**, y en pesos da positiva el **86% del
+  tiempo** —100% en cuatro papeles—, que es la deriva nominal contestando "¿gané o perdí?" con un
+  sí que no significa nada.
+
+`monedaPerformance` lo dice explícitamente por posición; la ficha marca la moneda de cada grupo
+de indicadores para que nadie reste un `perf1a` en dólares de un drawdown en pesos.
+
+**La conversión usa `serieTcDeMercado`, que lee el documento `D+1` para el día de mercado `D`.**
+`tcDiario` no está indexado por fecha de mercado: el cron corre a las 09:00 ART, antes de que
+abra el mercado de bonos que arma el MEP, así que guarda el cierre de ayer bajo el rótulo de hoy.
+Reconfirmado en F9.148: **779/779** documentos coinciden con `api[D−1]`. Es MEP, no CCL — la
+brecha contra los ADRs es ~3% de nivel, que no cambia el signo de una performance anual.
+
+**Si falta el TC de una sola rueda, `dolarizarSerie` devuelve `null`** y la performance queda en
+pesos, dicho en `motivoPerfEnMoneda`. Una serie con agujeros correría la ventana de 252 ruedas de
+`perf1a` sin que se note. Por eso el default del backfill se retrocedió a **2023-06-01**:
+`tcDiario` quedó en **1.175 documentos, 2023-06-01 .. 2026-08-18, sin huecos**, y las 15 series
+en ARS tienen TC en todas sus ruedas.
 
 ### Un ticker no identifica una posición (F9.141.1)
 

@@ -161,6 +161,56 @@ async function tcHoyAdmin(db: Firestore, diasAtras = 10): Promise<number | null>
 }
 
 /**
+ * F9.148 §4 — serie de TC con FECHA DE MERCADO, que es lo que hace falta para convertir un
+ * precio de cierre.
+ *
+ * `tcDiario` NO está indexado por fecha de mercado: el cron `actualizarTCDiario` corre a las
+ * 09:00 ART, antes de que abra el mercado de bonos que arma el MEP, así que dolarapi todavía
+ * devuelve el cierre de AYER y se guarda bajo el rótulo de HOY. Medido tres veces: F9.103
+ * (198/200), la investigación de F9.148 (775/778 contra `api[D−1]` y **0/778** contra `api[D]`)
+ * y el backfill de F9.148 §4, que revalidó el solapamiento completo en **779/779**.
+ *
+ * Por eso el TC del día de mercado `D` se lee del documento `D+1`. Sin este corrimiento toda la
+ * serie convertida queda corrida un día — un error que no rompe nada visible y ensucia todos
+ * los números.
+ */
+export async function serieTcDeMercado(db: Firestore): Promise<Map<string, number>> {
+  const snap = await db.collection('tcDiario').get();
+  const out = new Map<string, number>();
+  for (const d of snap.docs) {
+    const v = (d.data() as { tcUsdArs?: unknown }).tcUsdArs;
+    if (typeof v !== 'number' || !(v > 0)) continue;
+    out.set(diaAnterior(d.id), v);
+  }
+  return out;
+}
+
+function diaAnterior(f: string): string {
+  const [y, m, d] = f.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  t.setUTCDate(t.getUTCDate() - 1);
+  return t.toISOString().slice(0, 10);
+}
+
+/**
+ * Convierte la serie rueda a rueda. Devuelve null si falta el TC de alguna rueda buena: una
+ * serie con agujeros correría la ventana de 252 ruedas de `perf1a` sin que se note.
+ */
+export function dolarizarSerie(
+  serie: PP.PuntoSerie[],
+  tc: Map<string, number>,
+): PP.PuntoSerie[] | null {
+  const buenos = PP.soloBuenos(serie);
+  const out: PP.PuntoSerie[] = [];
+  for (const p of buenos) {
+    const t = tc.get(p.f);
+    if (!t || !(t > 0)) return null;
+    out.push({ ...p, c: p.c / t, o: null, h: null, l: null, v: null });
+  }
+  return out;
+}
+
+/**
  * @param escribir false = corrida en seco: calcula y reporta exactamente lo mismo, sin tocar
  *                 Firestore. Es lo que permite ver el resultado antes del primer deploy.
  */
@@ -181,13 +231,14 @@ export async function correrActualizacionPrecios(
   }
   const live = await bajarPanelesLive(panelesLive);
   const tcHoy = await tcHoyAdmin(db);
+  const tcSerie = await serieTcDeMercado(db);   // F9.148 §4 — una sola lectura para todos
 
   const resultados: ResultadoTicker[] = [];
   const fallos: Array<{ ticker: string; error: string }> = [];
 
   for (const o of objetivos) {
     try {
-      const r = await actualizarUnTicker(db, o, live, totalUsd, tcHoy, escribir);
+      const r = await actualizarUnTicker(db, o, live, totalUsd, tcHoy, tcSerie, escribir);
       resultados.push(r);
       if (r.cobertura === 'con_serie' || r.motivo === 'fuente_sin_serie') await dormir(PAUSA_MS);
     } catch (e) {
@@ -206,6 +257,7 @@ async function actualizarUnTicker(
   live: Map<PP.PanelLive, Map<string, number>>,
   totalUsd: number,
   tcHoy: number | null,
+  tcSerie: Map<string, number>,
   escribir: boolean,
 ): Promise<ResultadoTicker> {
   const refPrecios = db.collection('preciosDiarios').doc(o.docId);
@@ -222,8 +274,17 @@ async function actualizarUnTicker(
     await refPrecios.set({ ...base, ...precios }, { merge: true });
     await refInd.set({ ...base, ...indicadores }, { merge: true });
   };
+  // F9.148 §3 — `drawdown` y `liquidez` se retiraron. `set(..., {merge:true})` FUSIONA los mapas
+  // anidados, así que sacarlas del objeto calculado no las borra del documento: quedarían
+  // colgadas para siempre, con el valor de la última corrida vieja, y la ficha las seguiría
+  // pintando. Se borran explícitamente. El sentinel es idempotente: borrar lo ya borrado no falla.
+  const retirados = {
+    drawdown: FieldValue.delete(),
+    liquidez: FieldValue.delete(),
+  } as unknown as Record<string, PP.Semaforo>;
   const sinDatos = {
-    peso: 'sin_datos', drawdown: 'sin_datos', volatilidad: 'sin_datos', liquidez: 'sin_datos',
+    ...retirados,
+    peso: 'sin_datos', caida52s: 'sin_datos', volatilidad: 'sin_datos',
   } as Record<string, PP.Semaforo>;
 
   // Sin panel para el tipo: cripto, fci y cash. BTC entra por acá — no se consulta ningún
@@ -272,7 +333,10 @@ async function actualizarUnTicker(
   }
 
   const { status, body } = await PP.pedir(PP.urlHistorico(spec.historical, simbolo));
-  const serieCruda = PP.parseSerie(body);
+  const serieSinMarcar = PP.parseSerie(body);
+  // F9.148 — se marca ANTES de splits y detección: el punto podrido no debe generar saltos
+  // fantasma ni contaminar la fecha que `splitsPorCantidad` busca en la serie.
+  const serieCruda = serieSinMarcar && PP.marcarPuntosMalos(serieSinMarcar, simbolo);
 
   if (!serieCruda) {
     console.warn(`[precios] ${o.ticker} sin serie · HTTP ${status} · ${JSON.stringify(body).slice(0, 160)}`);
@@ -324,7 +388,12 @@ async function actualizarUnTicker(
   const saltos = PP.detectarSaltos(serie).filter(s => !explicadas.has(s.fecha));
   const { util, estado } = PP.recortarPorEstado(serie, saltos, aplicados.length > 0);
 
-  const ind = PP.calcIndicadores(util);
+  // F9.148 §4 — la serie de la que sale la performance. `usa_stocks` ya viene en dólares y no
+  // se toca; lo que está en pesos se convierte rueda a rueda, y si falta un solo TC la
+  // conversión se descarta entera (`dolarizarSerie` devuelve null) y la performance queda en
+  // pesos, dicho en `monedaPerformance`. Nunca una serie con agujeros.
+  const serieUsd = monedaSerie === 'USD' ? null : dolarizarSerie(util, tcSerie);
+  const ind = PP.calcIndicadores(util, { serieUsd, yaEnUsd: monedaSerie === 'USD' });
   const peso = totalUsd > 0 ? o.valorUsd / totalUsd : null;
   const ruedas = ruedasParaSalir(o.valorUsd, ind.montoOperadoProm30d, monedaSerie, tcHoy);
 
@@ -333,6 +402,9 @@ async function actualizarUnTicker(
       panelLive: spec.live, panelHistorico: spec.historical, monedaSerie,
       fuente: `data912:historical/${spec.historical}`, cobertura: 'con_serie',
       estadoSerie: estado, puntos: serie.length,
+      // F9.148 — `puntos` cuenta lo que la fuente devolvió (el punto malo incluido, porque sigue
+      // guardado); `puntosMalos` explica por qué `puntosDisponibles` es menor.
+      puntosMalos: serie.length - PP.soloBuenos(serie).length,
       primeraFecha: serie[0].f, ultimaFecha: serie[serie.length - 1].f,
       ...campoPrecioLive, splitsAplicados: aplicados, saltosDetectados: saltos,
       ultimoIntentoFallido: FieldValue.delete(),
@@ -343,7 +415,7 @@ async function actualizarUnTicker(
       estadoSerie: estado, monedaSerie, motivo: null,
       pesoEnCartera: peso, ruedasParaSalir: ruedas,
       ...ind,
-      semaforos: PP.calcSemaforos(ind, PP.claseUmbral(o.tipo, o.paisRiesgo), peso, ruedas),
+      semaforos: { ...retirados, ...PP.calcSemaforos(ind, PP.claseUmbral(o.tipo, o.paisRiesgo), peso) },
     },
   );
 

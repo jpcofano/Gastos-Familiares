@@ -9,7 +9,7 @@
 // Los fundamentals (P/E, ROE…) llegan por búsqueda web del modelo y son F9.147.
 import { Card } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
-import { motivoDeAusencia, LEYENDA_SEMAFOROS, ETIQUETA_SEMAFORO } from '../datos/patrimonioPrecios';
+import { motivoDeAusencia, LEYENDA_SEMAFOROS, ETIQUETA_SEMAFORO, ETIQUETA_CAMPO_SEMAFORO } from '../datos/patrimonioPrecios';
 import type { IndicadoresPosicion, Semaforo, PosicionTipo } from '../types/patrimonio';
 
 // ── Mínimos de ventana ────────────────────────────────────────────────────────
@@ -47,8 +47,14 @@ const fmtFecha = (iso: string) => { const [a, m, d] = iso.split('-'); return `${
 
 type Campo = { clave: keyof IndicadoresPosicion; label: string; fmt: (v: number) => string; semaforo?: string };
 
-const GRUPOS: Array<{ titulo: string; campos: Campo[] }> = [
-  { titulo: 'Tendencia', campos: [
+// F9.148 §4 — un `perf1a` en dólares al lado de un drawdown en pesos son dos números que no
+// cierran entre sí, y si la ficha no lo dice alguien los va a restar. Cada grupo declara en qué
+// moneda está: `serie` = la moneda de la serie (ARS para papeles locales), `usd` = dólares
+// siempre, `ninguna` = adimensional (porcentajes de sí mismo, RSI, ratios).
+type MonedaGrupo = 'serie' | 'usd' | 'ninguna';
+
+const GRUPOS: Array<{ titulo: string; campos: Campo[]; moneda: MonedaGrupo }> = [
+  { titulo: 'Tendencia', moneda: 'serie', campos: [
     { clave: 'sma20',  label: 'SMA 20',  fmt: v => fmtNum(v) },
     { clave: 'vsSma20Pct',  label: 'vs SMA 20',  fmt: fmtPct },
     { clave: 'sma50',  label: 'SMA 50',  fmt: v => fmtNum(v) },
@@ -56,25 +62,27 @@ const GRUPOS: Array<{ titulo: string; campos: Campo[] }> = [
     { clave: 'sma200', label: 'SMA 200', fmt: v => fmtNum(v) },
     { clave: 'vsSma200Pct', label: 'vs SMA 200', fmt: fmtPct },
   ]},
-  { titulo: 'Rango', campos: [
+  { titulo: 'Rango', moneda: 'serie', campos: [
     { clave: 'max52s', label: 'Máx. 52 sem.', fmt: v => fmtNum(v) },
-    { clave: 'distanciaMax52sPct', label: 'Distancia al máx.', fmt: fmtPct },
+    // F9.148 §3 — el semáforo se mudó acá desde "Drawdown desde máx.": la banda mide esta
+    // ventana fija de 52 semanas, no el máximo de toda la serie retenida.
+    { clave: 'distanciaMax52sPct', label: 'Distancia al máx.', fmt: fmtPct, semaforo: 'caida52s' },
     { clave: 'min52s', label: 'Mín. 52 sem.', fmt: v => fmtNum(v) },
     { clave: 'distanciaMin52sPct', label: 'Distancia al mín.', fmt: fmtPct },
   ]},
-  { titulo: 'Riesgo', campos: [
-    { clave: 'drawdownDesdeMaxPct', label: 'Drawdown desde máx.', fmt: fmtPct, semaforo: 'drawdown' },
+  { titulo: 'Riesgo', moneda: 'serie', campos: [
+    { clave: 'drawdownDesdeMaxPct', label: 'Drawdown desde máx.', fmt: fmtPct },
     { clave: 'volAnualizada30d', label: 'Volatilidad 30d', fmt: fmtPct, semaforo: 'volatilidad' },
     { clave: 'volAnualizada90d', label: 'Volatilidad 90d', fmt: fmtPct },
     { clave: 'atrPct', label: 'ATR %', fmt: fmtPct },
   ]},
-  { titulo: 'Performance', campos: [
+  { titulo: 'Performance', moneda: 'usd', campos: [
     { clave: 'perf1m', label: '1 mes',  fmt: fmtPct },
     { clave: 'perf3m', label: '3 meses', fmt: fmtPct },
     { clave: 'perf6m', label: '6 meses', fmt: fmtPct },
     { clave: 'perf1a', label: '1 año',  fmt: fmtPct },
   ]},
-  { titulo: 'Momentum', campos: [
+  { titulo: 'Momentum', moneda: 'ninguna', campos: [
     { clave: 'rsi14', label: 'RSI 14', fmt: v => fmtNum(v, 1) },
   ]},
 ];
@@ -101,6 +109,31 @@ function MarcaOrigen({ tipo }: { tipo: 'calculado' | 'reportado' }) {
         color: tipo === 'calculado' ? 'var(--gf-gray-400)' : 'var(--gf-out)', flexShrink: 0,
       }}
     >{tipo === 'calculado' ? 'CALC' : 'EXT'}</span>
+  );
+}
+
+// ── Marca de moneda (F9.148 §4) ───────────────────────────────────────────────
+// La performance está en dólares y el resto en la moneda de la serie. Dos números en unidades
+// distintas que se ven idénticos necesitan que la diferencia esté a la vista — misma lógica que
+// la marca CALC. Cuando la conversión no se pudo hacer, lo dice en vez de mentir.
+function MarcaMoneda({ grupo, ind }: { grupo: MonedaGrupo; ind: IndicadoresPosicion | null }) {
+  if (!ind || grupo === 'ninguna') return null;
+  const moneda = grupo === 'usd' ? (ind.monedaPerformance ?? ind.monedaSerie) : ind.monedaSerie;
+  if (!moneda) return null;
+  const degradado = grupo === 'usd' && ind.motivoPerfEnMoneda === 'sin_tc_completo';
+  return (
+    <span
+      title={degradado
+        ? 'Debería estar en dólares, pero falta tipo de cambio en alguna rueda de la serie: se muestra en la moneda de la serie para no mezclar unidades.'
+        : grupo === 'usd'
+          ? 'La performance se mide en dólares: en pesos la inflación la vuelve positiva casi siempre.'
+          : 'En la moneda en que cotiza la serie. Convertir volatilidad y drawdown a dólares los empeora — medido.'}
+      style={{
+        fontSize: 9, fontWeight: 800, letterSpacing: 0.3, padding: '1px 4px', borderRadius: 4,
+        background: degradado ? 'rgba(245,158,11,.18)' : 'var(--gf-gray-100)',
+        color: degradado ? 'var(--gf-out)' : 'var(--gf-gray-400)',
+      }}
+    >{moneda}{degradado ? ' (sin TC)' : ''}</span>
   );
 }
 
@@ -239,8 +272,10 @@ export default function FichaPosicion({ ident, filas, ind, privado }: {
               respuesta a "si quiero reducir, ¿en cuántos días salgo sin mover el precio?", y en
               BYMA con papeles finos es un dato de decisión que ninguna ficha estándar trae. */}
           <div style={{ background: 'var(--gf-gray-50)', borderRadius: 10, padding: '9px 11px', marginBottom: 10 }}>
+            {/* F9.148 §3 — sin semáforo: `ruedasParaSalir` va de 2,3e-6 a 1,8e-2 en las 16
+                posiciones y daba verde en las 15 con dato. Una banda que nunca cambia de color
+                entrena a no mirar. El número queda, que es lo que sí decide. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Punto s={ind.semaforos?.liquidez ?? 'sin_datos'} />
               <span style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>Ruedas para salir</span>
               <span style={{ fontSize: 16, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>
                 {ind.ruedasParaSalir !== null ? fmtNum(ind.ruedasParaSalir, 1) : '—'}
@@ -258,7 +293,10 @@ export default function FichaPosicion({ ident, filas, ind, privado }: {
             if (filasG.length === 0) return null;
             return (
               <div key={g.titulo} style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--gf-gray-400)', letterSpacing: 0.3, marginBottom: 2 }}>{g.titulo.toUpperCase()}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--gf-gray-400)', letterSpacing: 0.3 }}>{g.titulo.toUpperCase()}</div>
+                  <MarcaMoneda grupo={g.moneda} ind={ind} />
+                </div>
                 {filasG}
               </div>
             );
@@ -291,7 +329,7 @@ export default function FichaPosicion({ ident, filas, ind, privado }: {
                 background: 'var(--gf-gray-50)', borderRadius: 999, padding: '4px 9px',
               }}>
                 <Punto s={s} />
-                <span style={{ fontWeight: 600 }}>{k}</span>
+                <span style={{ fontWeight: 600 }}>{ETIQUETA_CAMPO_SEMAFORO[k] ?? k}</span>
                 <span style={{ color: 'var(--gf-gray-400)' }}>{ETIQUETA_SEMAFORO[s]}</span>
               </span>
             ))}
