@@ -67,17 +67,28 @@ const GRUPOS: Array<{ titulo: string; campos: Campo[]; moneda: MonedaGrupo }> = 
     { clave: 'max52s', label: 'Máx. 52 sem.', fmt: v => fmtNum(v) },
     // F9.148 §3 — el semáforo se mudó acá desde "Drawdown desde máx.": la banda mide esta
     // ventana fija de 52 semanas, no el máximo de toda la serie retenida.
-    { clave: 'distanciaMax52sPct', label: 'Distancia al máx.', fmt: fmtPct, semaforo: 'caida52s' },
+    // F9.150 §2 — la etiqueta dice CUÁL máximo. Antes ésta era "Distancia al máx." y la de
+    // Riesgo "Drawdown desde máx.": dos nombres casi iguales, a doce renglones, para dos
+    // ventanas distintas. En 14 de 17 posiciones dan el mismo número y se leen redundantes;
+    // en 3 difieren hasta 31,9 pp (GLOB: −53,6% contra −85,5%) y se leen contradictorias.
+    { clave: 'distanciaMax52sPct', label: 'Caída desde máx. 52 sem.', fmt: fmtPct, semaforo: 'caida52s' },
     { clave: 'min52s', label: 'Mín. 52 sem.', fmt: v => fmtNum(v) },
-    { clave: 'distanciaMin52sPct', label: 'Distancia al mín.', fmt: fmtPct },
+    { clave: 'distanciaMin52sPct', label: 'Distancia al mín. 52 sem.', fmt: fmtPct },
   ]},
   { titulo: 'Riesgo', moneda: 'serie', campos: [
-    { clave: 'drawdownDesdeMaxPct', label: 'Drawdown desde máx.', fmt: fmtPct },
+    // Se conserva (opción A): que GLOB esté 85,5% abajo de lo que llegó a valer es información
+    // real, y el problema era la etiqueta, no el dato. El semáforo sigue colgado del de 52
+    // semanas, que es el único con calibración (F9.149).
+    { clave: 'drawdownDesdeMaxPct', label: 'Caída desde máx. histórico', fmt: fmtPct },
     // F9.149 — sin semáforo a propósito: no hay base para elegirle bandas, y esta fase existe
     // justamente para dejar de inventarlas.
     { clave: 'ulcerIndex126', label: 'Ulcer Index 126d', fmt: fmtPct },
-    { clave: 'volAnualizada30d', label: 'Volatilidad 30d', fmt: fmtPct, semaforo: 'volatilidad' },
-    { clave: 'volAnualizada90d', label: 'Volatilidad 90d', fmt: fmtPct },
+    { clave: 'volAnualizada30d', label: 'Volatilidad 30d', fmt: fmtPct },
+    // F9.150 §1 — el semáforo estaba colgado de la fila de 30d y el motor lo calcula sobre 90d.
+    // No era cosmético: en GD30 el punto decía "en el borde" (amarillo, por su 90d de 25,8%)
+    // al lado de un 30d de 41,9%, que con las bandas de bono AR es ROJO. Y en TX26 pintaba
+    // `sin_datos` sobre una fila que sí tenía número. El cálculo estaba bien; la fila, no.
+    { clave: 'volAnualizada90d', label: 'Volatilidad 90d', fmt: fmtPct, semaforo: 'volatilidad' },
     { clave: 'atrPct', label: 'ATR %', fmt: fmtPct },
   ]},
   { titulo: 'Performance', moneda: 'usd', campos: [

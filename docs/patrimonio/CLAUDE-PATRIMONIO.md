@@ -333,6 +333,16 @@ Implementación en cadena (cada una depende de la anterior):
   - Verificación: `scripts/verificarF9148.ts`. Auditoría previa: `scripts/auditF9148.ts`.
     Backfill del TC: `scripts/backfillTcF9148.ts` (dry-run por defecto, `--apply` para escribir).
 
+- **F9.150** — Semáforo en el renglón equivocado, drawdown ambiguo y seeds fósiles *(cerrado)*
+  - El semáforo `volatilidad` colgaba de la fila de 30d y el motor lo calcula sobre **90d**.
+    Dos casos reales donde mentía: GD30 (30d rojo, 90d amarillo) y TX26 (30d verde, 90d `n/d`).
+  - Etiquetas: **"Caída desde máx. 52 sem."** (con semáforo) y **"Caída desde máx. histórico"**
+    (sin). Difieren en 3 de 17, hasta **31,9 pp** en GLOB.
+  - `MANUALES_SEED`: ACN corregido (50→43 papeles) y **GLOB eliminado** — sus 60 papeles del ESPP
+    vienen en la corrida, así que el seed lo habría **duplicado**. Regla en `docs/CLAUDE.md`.
+  - **Cero cambios en el motor**, verificado.
+  - Verificación: `scripts/verificarF9150.ts`. Auditoría previa: `scripts/auditF9150.ts`.
+
 - **F9.147** — Fundamentals y el orden de la salida del análisis *(cerrado)*
   - El contexto del prompt de posición pasó de **4 campos a la ficha entera**, por IDENTIDAD.
     `contextoPosicion` vive en `src/datos/patrimonioIA.ts` porque es puro y verificable.

@@ -1821,6 +1821,38 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   configuración editable) y `functions/`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` y
   `functions build` OK. **Deploy: `--only functions,hosting,firestore:rules`.** Post-deploy:
   "Sincronizar" en Config y volver a correr `verificarF9143.ts` para cerrar los 3 pendientes.
+- F9.150 — **el semáforo en el renglón equivocado, el drawdown ambiguo y los seeds fósiles**. Ver
+  `docs/prompts/F9.150-semaforo-drawdown-y-seeds.md`. Tres defectos chicos e independientes,
+  encontrados mirando la ficha con datos reales. **Cero cambios en el motor**, verificado.
+  **§1 — el semáforo de volatilidad colgaba de la fila de 30d y el motor lo calcula sobre 90d.**
+  El cálculo estaba bien; la fila donde se pintaba, no. En **GD30** el punto decía "en el borde"
+  —amarillo, por su 90d de 25,8%— al lado de un 30d de **41,9%**, que con las bandas de bono AR es
+  **rojo**. El barrido encontró un **segundo caso que el spec no tenía**: **TX26**, donde el punto
+  pintaba `sin_datos` sobre una fila que sí traía número (1,6%), porque su 90d es `n/d`. Las otras
+  15 posiciones coincidían por casualidad —incluida GLOB, que el spec daba por rota y no lo
+  estaba: su 30d (65,7%) y su 90d (69,2%) caen los dos en rojo—. El barrido de las tres claves de
+  `semaforos` contra las métricas del motor dio **un solo desajuste**, y ninguna fila apuntaba a
+  un semáforo retirado.
+  **§2 — dos caídas con nombres casi iguales, a doce renglones.** "Distancia al máx." (52 semanas)
+  y "Drawdown desde máx." (máximo corrido de toda la serie). Se implementó **A**: pasan a
+  **"Caída desde máx. 52 sem."** y **"Caída desde máx. histórico"**, y el chip del diagnóstico usa
+  la misma etiqueta que la fila. El campo se conserva porque el dato es real —GLOB está 85,5%
+  abajo de lo que llegó a valer— y el problema era el nombre. Difieren en **3 de 17**: ACN 16,1 pp,
+  TXAR 18,8 pp y GLOB **31,9 pp**; en las otras 14 dan el mismo número y se leían redundantes.
+  **§3 — el seed fósil resultó peor que desactualizado.** ACN corregido contra producción:
+  **50 → 43 papeles**, USD 6.870 → **7.746,02**, valuación 02/07 → **12/08/2026** (y la nota, que
+  también mentía: decía USD 137,35/acción cuando el implícito es **180,14**). Pero **GLOB se
+  eliminó del seed**, que no era lo que el spec pedía: `posicionesManuales` tiene **un solo
+  documento** y GLOB no está: sus **60 papeles del ESPP vienen en la corrida**
+  (`Globant ESPP 0000010348`, USD 2.243 al 17/08). Resembrarlo no lo dejaba desactualizado, **lo
+  duplicaba** contra la corrida. Al tocar un seed la pregunta no es "¿está actualizado?" sino
+  "¿esto todavía tiene que existir acá?" — la regla quedó en Reglas operativas, con los **tres**
+  modos de falla del mismo patrón (F9.139 sembraba un medio eliminado, F9.142 reinyectaba el
+  `claseId` equivocado, F9.150 habría duplicado una tenencia).
+  Verificación: `npx tsx scripts/verificarF9150.ts` — **15/15 OK**, cruzando el código real de las
+  dos puntas (la tabla `GRUPOS` de la ficha y `calcSemaforos` del motor) contra los indicadores de
+  producción. Auditoría previa: `scripts/auditF9150.ts`. F9.147 y F9.149 siguen pasando.
+  `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. **Deploy pendiente: `--only hosting`.**
 - F9.147 — **fundamentals, y el análisis deja de empezar por la opinión**. Ver
   `docs/prompts/F9.147-fundamentals-y-orden-del-analisis.md`. Paso 2 de 2 de la ficha: F9.144
   construyó los bloques calculados, esto agrega lo que trae el modelo y reordena la salida a
@@ -2454,6 +2486,19 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
 - El formato de `numeroComprobante` para altas manuales (`YYYY-MM-<slug>`) vive en DOS lugares:
   el prompt de extracción (lo genera el modelo) y `generarNumeroManual()` en AltaMovimiento.tsx.
   Mantenerlos consistentes a mano al modificar cualquiera de los dos.
+- **Un seed que solo corre `if (snap.empty)` no es inofensivo: es un fósil con detonador.**
+  No pisa nada mientras la colección tenga datos, así que se lo deja envejecer sin que nada
+  avise; el día que alguien la vacía, resiembra números viejos como si fueran ciertos.
+  **Cuando el dato real cambia, el seed se actualiza en el MISMO commit.** Y cuando la posición
+  deja de existir en esa colección, la entrada **se borra del seed** — un seed que resiembra algo
+  que hoy llega por otra vía no queda desactualizado, queda duplicando.
+  Va por tercera vez, con los tres modos de falla distintos: Efectivo en `MEDIOS_FALLBACK`
+  (F9.139) sembraba un medio de pago eliminado; Pionero en `FONDOS_SEED` (F9.142) reinyectaba el
+  `claseId` equivocado y torcía el benchmark; `MANUALES_SEED` (F9.150) tenía ACN con 50 acciones
+  cuando son 43, y GLOB con 50 cuando esa posición **ya no es manual** —viene de la corrida—, así
+  que resembrarla habría duplicado la tenencia, no solo desactualizado el número.
+  Al tocar un seed, la pregunta no es "¿está actualizado?" sino "¿esto todavía tiene que existir
+  acá?", y se contesta **leyendo producción**, no el archivo.
 
 ## Compromisos para fases posteriores
 

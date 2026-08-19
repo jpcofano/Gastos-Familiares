@@ -62,13 +62,21 @@ export async function eliminarActivoFijo(id: string): Promise<void> {
 }
 
 // ── Posiciones manuales (planes de empleado, etc.) ────────────────────────────
+// F9.150 §3 — este seed solo corre `if (snap.empty)`, o sea que no pisa nada hoy y por eso
+// envejeció sin que nada avisara. Es el tercer caso del mismo patrón en el repo (Efectivo en
+// `MEDIOS_FALLBACK` de F9.139, Pionero en `FONDOS_SEED` de F9.142). La regla está en
+// `docs/CLAUDE.md` → Reglas operativas: cuando el dato real cambia, el seed cambia en el mismo
+// commit, y cuando la posición deja de ser manual, la entrada se BORRA.
+//
+// Corregido contra producción el 2026-08-19 (`posicionesManuales`), no contra lo que decía acá:
+//   · ACN  cantidad 50 → 43 · valorUsd 6870 → 7746,02 · valuación 02/07 → 12/08/2026
+//   · GLOB ELIMINADO. Ya no es una posición manual: los 60 papeles del ESPP vienen en la corrida
+//     (`Globant ESPP 0000010348`, USD 2.243 al 17/08). Resembrarlo no lo dejaba desactualizado,
+//     lo DUPLICABA contra la corrida.
 const MANUALES_SEED: PosicionManual[] = [
-  { id: 'acn',  ticker: 'ACN',  nombre: 'Accenture', cantidad: 50, valorUsd: 6870,
-    fechaValuacion: '2026-07-02', tipo: 'accion', sector: 'tech', pais_riesgo: 'global',
-    cuenta: 'Plan empleado ACN',  notas: '~USD 137,35/acción al 02/07/2026' },
-  { id: 'glob', ticker: 'GLOB', nombre: 'Globant',   cantidad: 50, valorUsd: 1626,
-    fechaValuacion: '2026-07-03', tipo: 'accion', sector: 'tech', pais_riesgo: 'global',
-    cuenta: 'Plan empleado GLOB', notas: '~USD 32,51/acción al 03/07/2026' },
+  { id: 'acn',  ticker: 'ACN',  nombre: 'Accenture', cantidad: 43, valorUsd: 7746.02,
+    fechaValuacion: '2026-08-12', tipo: 'accion', sector: 'tech', pais_riesgo: 'global',
+    cuenta: 'Plan empleado ACN',  notas: '~USD 180,14/acción al 12/08/2026' },
 ];
 
 export async function cargarPosicionesManuales(): Promise<PosicionManual[]> {
