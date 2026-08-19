@@ -3105,10 +3105,18 @@ export const eliminarDestino = onCall(
 // ── F9.93 — Análisis IA de patrimonio (por posición y sectorial) ──────────────
 const DUENO_EMAIL = 'jpcofano@gmail.com';
 
+// F9.147 — el contexto pasó de cuatro campos (ticker, sector, peso, valorUsd) a la ficha entera:
+// precio con fecha, medias, rango, drawdown con su distribución calibrada, volatilidad,
+// performance en dólares, liquidez, semáforos y `estadoSerie`. El análisis se apoya en datos
+// duros en vez de estimarlos, y el modelo tiene PROHIBIDO recalcular lo que ya viene dado.
 function buildPromptPosicion(contexto: Record<string, unknown>): string {
+  const pedidos = (contexto['fundamentalsPedidos'] as string[] | undefined) ?? [];
+  const listaPedidos = pedidos.length
+    ? pedidos.map(x => `"${x}"`).join(', ')
+    : '(este tipo de activo no lleva fundamentals: devolvé "fundamentals": null)';
   return `Sos un analista financiero especialista en mercados argentinos e internacionales. Analizás una posición de una cartera familiar.
 
-POSICIÓN A ANALIZAR:
+POSICIÓN A ANALIZAR — los datos de "fichas" ya están calculados y auditados por la app:
 ${JSON.stringify(contexto, null, 2)}
 
 Respondé ÚNICAMENTE con un JSON válido (sin markdown, sin texto antes ni después) con este shape exacto:
@@ -3117,6 +3125,14 @@ Respondé ÚNICAMENTE con un JSON válido (sin markdown, sin texto antes ni desp
   "situacionActual": "3-5 frases con lo relevante HOY (resultados, regulación, precio vs historia) — usá web_search para información reciente",
   "riesgos": ["3 a 5 riesgos específicos de ESTE papel, concretos"],
   "rolEnCartera": "1-3 frases usando el contexto provisto: peso, con qué otras posiciones comparte driver, qué le aporta o concentra",
+  "fundamentals": {
+    "metricas": [
+      { "nombre": "P/E", "valor": 12.4, "unidad": null, "comentario": "opcional, 1 frase corta" }
+    ],
+    "fuente": "de dónde salió el dato (sitio o informe concreto)",
+    "fechaDato": "YYYY-MM-DD del dato, NO de hoy",
+    "motivoSinDatos": "solo si metricas viene vacío: por qué"
+  },
   "proximosEventos": [
     { "cuando": "YYYY-MM-DD o YYYY-MM (null si no hay fecha conocida)", "evento": "descripción corta del evento" }
   ],
@@ -3127,17 +3143,41 @@ Respondé ÚNICAMENTE con un JSON válido (sin markdown, sin texto antes ni desp
       "costo": "el trade-off principal de actuar (impositivo, upside resignado, timing)"
     }
   ],
+  "recomendacion": {
+    "accion": "Mantener|Comprar|Aumentar|Reducir|Vender, o null si no podés sostenerla con datos",
+    "indicadoresCitados": [ { "nombre": "vsSma200", "valor": "+20.7%" } ],
+    "motivoSinRecomendacion": "solo si accion es null: por qué"
+  },
+  "justificacion": ["2 a 5 razones, cada una anclada a un dato de la ficha o a una fuente citada"],
   "fuentes": ["urls o medios consultados"]
 }
 
+FUNDAMENTALS — pedí SOLO estos, que son los que aplican a este tipo de activo:
+${listaPedidos}
+- No agregues métricas fuera de esa lista: el dueño no quiere la pantalla llena de ratios.
+- Si una métrica no la encontrás con fuente confiable, incluíla igual con "valor": null. UN HUECO EXPLÍCITO ES PREFERIBLE A UN NÚMERO INVENTADO.
+- "fuente" y "fechaDato" son obligatorios cuando hay al menos una métrica con valor. Sin fuente verificable, el valor va null.
+
+NO RECALCULES LO QUE YA ESTÁ EN EL CONTEXTO — regla dura:
+- Precio, medias, distancia al máximo/mínimo, drawdown, volatilidad, performance, RSI, ATR y liquidez YA vienen en "fichas". Usá ESOS números tal cual, citándolos.
+- PROHIBIDO buscar o estimar tu propia versión de esos números. Dos valores distintos para lo mismo en la misma pantalla es peor que uno solo.
+- Ojo con la moneda: "performance.moneda" dice en qué moneda está la performance (normalmente USD) y "monedaSerie" en qué está TODO lo demás. No los mezcles ni los restes entre sí.
+- "calibracionCaida" explica el semáforo de caída: la banda NO es un umbral fijo, sale de la distribución de caídas del propio papel. Por eso un −48% puede ser verde (si ese papel suele estar más caído) y un −17% rojo. Interpretalo así y no con umbrales genéricos.
+- "estadoSerie": si es "sospechosa" la serie está recortada y los indicadores se calcularon sobre menos historia; decilo si afecta la lectura.
+
+RECOMENDACIÓN — reemplaza a la vieja prohibición de imperativos, y es más exigente que ella:
+- La recomendación SOLO se emite si podés citar indicadores concretos del contexto que la sostengan, por nombre y valor, en "indicadoresCitados".
+- Si no podés citar ninguno, "accion" va null y explicás por qué en "motivoSinRecomendacion". Una recomendación sin datos que la anclen no se emite.
+- Sigue PROHIBIDO: precios objetivo presentados como certeza, y urgencia ("hay que salir ya").
+- NO asumas que una posición debe venderse porque está en ganancia ni comprarse porque está en pérdida. La decisión se apoya en perspectivas, valuación, riesgo y rol en la cartera.
+- La recomendación NO reemplaza a "queHariaEnCadaCaso": los dos van. El veredicto responde "qué hago hoy"; los escenarios responden "qué hago si pasa X".
+
 REGLAS INNEGOCIABLES:
 - Español rioplatense.
-- PROHIBIDO: imperativos sin condición ("vendé", "comprá", "recomiendo salir/entrar"), precios objetivo como certeza.
-- PERMITIDO: condicionales con opciones ("si X, convendría evaluar A o B porque…"), siempre con el costo/trade-off explícito.
 - 2 a 4 casos en queHariaEnCadaCaso, del más probable al menos. Los casos deben ser observables (un dato, un evento, un precio), no vaguedades.
 - La decisión es del titular: cada caso presenta opciones, nunca una única salida obligada.
 - Si no hay información confiable de algo, decirlo en vez de inventar.
-- Máx ~300 palabras en total.`;
+- Máx ~400 palabras en total (sin contar fundamentals).`;
 }
 
 function buildPromptSectorial(contexto: Record<string, unknown>): string {
@@ -3278,8 +3318,11 @@ export const analizarConIA = onCall(
           ? buildPromptManuales(contexto)
           : buildPromptSectorial(contexto);
 
-    const maxWebSearch = modo === 'agenda' ? 5 : modo === 'manuales' ? 5 : 3;
-    const maxTokens    = modo === 'posicion' ? 1500 : modo === 'agenda' ? 4000 : modo === 'manuales' ? 1500 : 3000;
+    // F9.147 — el modo posición pasó a pedir fundamentals además del análisis: necesita más
+    // búsquedas (los ratios no salen de la misma consulta que la situación actual) y más tokens
+    // de salida (fundamentals + recomendación + justificación sobre el shape que ya había).
+    const maxWebSearch = modo === 'agenda' ? 5 : modo === 'manuales' ? 5 : modo === 'posicion' ? 5 : 3;
+    const maxTokens    = modo === 'posicion' ? 2500 : modo === 'agenda' ? 4000 : modo === 'manuales' ? 1500 : 3000;
 
     const response = await client.messages.create({
       model: modeloUsado,
@@ -4099,6 +4142,42 @@ function validarResultadoImportado(
     const reqs = ['queEs', 'situacionActual', 'riesgos', 'rolEnCartera'];
     const faltantes = reqs.filter(k => !(k in r));
     if (faltantes.length > 0) return `Campos faltantes: ${faltantes.join(', ')}`;
+
+    // F9.147 §3 — los campos nuevos NO son obligatorios: los 40 análisis ya guardados no los
+    // traen y el pegado manual de una respuesta vieja tiene que seguir funcionando. Pero si
+    // vienen, se valida la regla que los justifica.
+    const rec = r['recomendacion'];
+    if (rec !== undefined && rec !== null) {
+      if (typeof rec !== 'object' || Array.isArray(rec)) return 'recomendacion debe ser un objeto o null';
+      const acc = (rec as Record<string, unknown>)['accion'];
+      const citados = (rec as Record<string, unknown>)['indicadoresCitados'];
+      const ACCIONES = ['Mantener', 'Comprar', 'Aumentar', 'Reducir', 'Vender'];
+      if (acc !== null && acc !== undefined) {
+        if (typeof acc !== 'string' || !ACCIONES.includes(acc)) {
+          return `recomendacion.accion debe ser una de ${ACCIONES.join('/')} o null`;
+        }
+        // La regla dura de F9.147: una recomendación que no cita nada no se emite.
+        if (!Array.isArray(citados) || citados.length === 0) {
+          return 'recomendacion.accion sin indicadoresCitados: una recomendación que no puede ' +
+            'citar los indicadores que la sostienen va con accion null y motivoSinRecomendacion';
+        }
+      }
+    }
+    const fun = r['fundamentals'];
+    if (fun !== undefined && fun !== null) {
+      if (typeof fun !== 'object' || Array.isArray(fun)) return 'fundamentals debe ser un objeto o null';
+      const m = (fun as Record<string, unknown>)['metricas'];
+      if (m !== undefined && !Array.isArray(m)) return 'fundamentals.metricas debe ser un array';
+      // Fuente y fecha son parte del dato: un número reportado sin procedencia no se puede juzgar.
+      const conValor = Array.isArray(m)
+        ? (m as Array<Record<string, unknown>>).filter(x => x?.['valor'] !== null && x?.['valor'] !== undefined)
+        : [];
+      if (conValor.length > 0 && !(fun as Record<string, unknown>)['fuente']) {
+        return 'fundamentals con métricas pero sin fuente: el dato reportado necesita procedencia';
+      }
+    }
+    const just = r['justificacion'];
+    if (just !== undefined && !Array.isArray(just)) return 'justificacion debe ser un array de strings';
   }
   if (modo === 'agenda') {
     if (!Array.isArray(r['eventos']) || (r['eventos'] as unknown[]).length === 0) {

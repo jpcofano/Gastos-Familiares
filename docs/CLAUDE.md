@@ -1821,6 +1821,40 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   configuración editable) y `functions/`. `tsc`: 41 → 41, 0 en `functions/`; `vite build` y
   `functions build` OK. **Deploy: `--only functions,hosting,firestore:rules`.** Post-deploy:
   "Sincronizar" en Config y volver a correr `verificarF9143.ts` para cerrar los 3 pendientes.
+- F9.147 — **fundamentals, y el análisis deja de empezar por la opinión**. Ver
+  `docs/prompts/F9.147-fundamentals-y-orden-del-analisis.md`. Paso 2 de 2 de la ficha: F9.144
+  construyó los bloques calculados, esto agrega lo que trae el modelo y reordena la salida a
+  TENENCIA → INDICADORES → DIAGNÓSTICO → ANÁLISIS → RECOMENDACIÓN → JUSTIFICACIÓN.
+  **El contexto del prompt pasó de CUATRO campos a la ficha entera.** Antes mandaba `ticker`,
+  `totalUsd`, `totalPortafolio` y `sectorDisp`: el modelo opinaba sobre una posición de la que no
+  sabía nada y reconstruía por su cuenta datos que la app ya tenía calculados y auditados. Ahora
+  van precio con fecha, medias, rango, riesgo, `calibracionCaida`, performance **con su moneda**,
+  liquidez, semáforos y `estadoSerie` — y **una entrada por IDENTIDAD, no por ticker**, así que
+  GLOB manda las dos fichas. `contextoPosicion` vive en `src/datos/patrimonioIA.ts` y no dentro de
+  `Patrimonio.tsx` porque es puro, y es lo único de la fase que se puede verificar sin pintar.
+  **El prompt prohíbe recalcular lo que ya viene dado**: dos números distintos para lo mismo en la
+  misma pantalla es peor que uno solo. Y advierte sobre la moneda (performance en USD, el resto en
+  `monedaSerie`) y sobre la banda calibrada de F9.149, sin la cual leería un −48% verde como error.
+  **Fundamentals: reportados, no calculados.** Bloque aparte, marca `EXT`, **fuente y fecha
+  obligatorias** —el validador rechaza métricas con valor y sin fuente— y **sin semáforo**: un
+  umbral sobre algo que la app no puede verificar convierte un dato dudoso en un veredicto. 5 a 8
+  por tipo (`FUNDAMENTALS_POR_TIPO`), porque el dueño no quiere la pantalla llena de ratios, y
+  `null` explícito cuando no se encuentra: el hueco es información, el número inventado es daño.
+  **La recomendación reemplaza a la prohibición vieja, no la borra.** La regla era "PROHIBIDO
+  imperativos sin condición" y existía por un motivo válido; la nueva es **más exigente**: la
+  recomendación solo se emite si cita indicadores por nombre y valor, y si no puede citar ninguno
+  va `accion: null` con motivo. El validador lo fuerza. `queHariaEnCadaCaso` **sigue presente**: el
+  veredicto responde "qué hago hoy", los escenarios "qué hago si pasa X".
+  **Los 40 análisis guardados no se tocan.** Los campos nuevos son opcionales y los cuatro
+  obligatorios no cambiaron: verificado que los 40 siguen pasando el validador nuevo y renderizan
+  degradados. **`buildPromptLote` NO se tocó a propósito**: pide ~150 palabras por ticker para toda
+  la cartera y meterle fundamentals reventaría el presupuesto de tokens — consecuencia asumida, un
+  análisis por lote no trae los campos nuevos.
+  Verificación: `npx tsx scripts/verificarF9147.ts` — **33/33 OK**, con `contextoPosicion`,
+  `buildPromptPosicion`, `extraerResultado` y `validarResultadoImportado` REALES (bundleados de
+  `src/` y `functions/`, no copiados) sobre datos de producción, incluyendo la ida y vuelta del
+  pegado manual. Auditoría previa: `scripts/auditF9147.ts`. `tsc`: 41 → 41, 0 en `functions/`;
+  `vite build` OK. **Deploy pendiente: `--only functions,hosting`.**
 - F9.149 — **el semáforo de caída se calibra contra la distribución del propio activo**. Ver
   `docs/prompts/F9.149-drawdown-calibrado.md`. Los tres umbrales fijos de caída **los inventó el
   asistente en F9.141 §5** y marcaban 11 de 17 posiciones: comparar la caída de hoy contra un

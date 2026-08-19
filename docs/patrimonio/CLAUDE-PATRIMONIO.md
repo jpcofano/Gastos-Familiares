@@ -333,6 +333,17 @@ Implementación en cadena (cada una depende de la anterior):
   - Verificación: `scripts/verificarF9148.ts`. Auditoría previa: `scripts/auditF9148.ts`.
     Backfill del TC: `scripts/backfillTcF9148.ts` (dry-run por defecto, `--apply` para escribir).
 
+- **F9.147** — Fundamentals y el orden de la salida del análisis *(cerrado)*
+  - El contexto del prompt de posición pasó de **4 campos a la ficha entera**, por IDENTIDAD.
+    `contextoPosicion` vive en `src/datos/patrimonioIA.ts` porque es puro y verificable.
+  - Fundamentals **reportados**, marca `EXT`, con fuente y fecha obligatorias, bloque aparte y
+    **sin semáforo**. 5–8 por tipo (`FUNDAMENTALS_POR_TIPO`); `null` explícito antes que inventar.
+  - `recomendacion` + `justificacion` conviven con `queHariaEnCadaCaso`. La recomendación **solo
+    se emite si cita indicadores por nombre y valor**; si no, `accion: null` con motivo.
+  - El prompt prohíbe recalcular lo que ya viene en el contexto.
+  - Contrato completo abajo, en "El análisis del modelo".
+  - Verificación: `scripts/verificarF9147.ts`. Auditoría previa: `scripts/auditF9147.ts`.
+
 - **F9.149** — El semáforo de caída se calibra contra la distribución del propio activo *(cerrado)*
   - CDaR (Chekhlov/Uryasev/Zabarankin 2005) sobre la curva de caída de ventana móvil de 52
     semanas: 🟢 bajo su mediana · 🟡 hasta CDaR(0,8) · 🔴 por encima. **Ningún número lo elige
@@ -655,6 +666,71 @@ pesos, dicho en `motivoPerfEnMoneda`. Una serie con agujeros correría la ventan
 `perf1a` sin que se note. Por eso el default del backfill se retrocedió a **2023-06-01**:
 `tcDiario` quedó en **1.175 documentos, 2023-06-01 .. 2026-08-18, sin huecos**, y las 15 series
 en ARS tienen TC en todas sus ruedas.
+
+## El análisis del modelo (F9.147) — contrato
+
+### Lo calculado y lo reportado no se mezclan
+
+Los números de `indicadoresPosicion` salen de Firestore y se auditan contra `preciosDiarios`. Los
+fundamentals salen de una búsqueda web y **la app no los puede verificar**. En una grilla se ven
+idénticos, y un P/E equivocado al lado de un semáforo verde se lee como dato de la app.
+
+Por eso los reportados viajan en su propia estructura (`Fundamentals`), se pintan en un **bloque
+aparte** con la marca `EXT`, y llevan **fuente y fecha obligatorias** — el validador rechaza
+métricas con valor y sin fuente: un número reportado sin procedencia no se puede juzgar.
+
+**Sin semáforo, y no es un olvido.** Un umbral aplicado a algo no verificable convierte un dato
+dudoso en un veredicto. Si alguna vez se quiere, primero hay que medir qué tan estables son entre
+corridas — el mismo criterio que F9.149 aplicó al drawdown: la banda se calibra, no se elige.
+
+**`null` explícito antes que un número inventado.** Una métrica que no se encontró viaja con
+`valor: null` y se muestra en la línea "Sin dato: …". El hueco es información; el número inventado
+es daño.
+
+### El contexto es la ficha entera, por identidad
+
+Eran cuatro campos (`ticker`, `totalUsd`, `totalPortafolio`, `sectorDisp`): el modelo opinaba sobre
+una posición de la que no sabía nada y reconstruía por su cuenta datos que la app ya tenía
+calculados. Ahora `contextoPosicion` manda precio con fecha, tendencia, rango, riesgo,
+`calibracionCaida`, performance con su moneda, momentum, liquidez, semáforos y `estadoSerie`.
+
+**Una entrada por IDENTIDAD (`ticker|tipo|paisRiesgo`), no por ticker** — GLOB manda dos fichas, la
+del CEDEAR en ARS y la de la acción global en USD. Es la misma regla de F9.141.1 y F9.144.
+
+Vive en `src/datos/patrimonioIA.ts` y no dentro de `Patrimonio.tsx` porque es una transformación
+pura: es lo único de esta fase que se puede verificar sin pintar.
+
+**El prompt prohíbe recalcular lo que ya viene dado**, y advierte sobre la moneda: la performance
+está en USD y el resto en `monedaSerie`, así que no se restan entre sí. También explica que la
+banda de caída no es un umbral fijo — sin eso, el modelo leería un −48% verde como un error.
+
+### La recomendación reemplaza a la prohibición vieja, no la borra
+
+La regla anterior era *"PROHIBIDO imperativos sin condición"*, y existía por un motivo válido: una
+recomendación categórica sin condición es una opinión con cara de conclusión. La nueva es **más
+exigente**, no más laxa:
+
+- La recomendación **solo se emite si cita indicadores concretos, por nombre y valor**.
+- Si no puede citar ninguno, `accion: null` con `motivoSinRecomendacion`. El validador lo fuerza:
+  `accion` sin `indicadoresCitados` es un error de importación.
+- `justificacion` son 2 a 5 razones, cada una anclada a un dato de la ficha o a una fuente.
+- **No reemplaza a `queHariaEnCadaCaso`**: el veredicto responde "qué hago hoy", los escenarios
+  "qué hago si pasa X". Los dos van.
+- Sigue escrito en el prompt que **no se asume que una posición deba venderse por estar en
+  ganancia ni comprarse por estar en pérdida**.
+
+### Los campos nuevos son opcionales, y eso es deliberado
+
+Los 40 análisis guardados al 2026-08-19 (todos `origen: chat`) no traen `fundamentals`,
+`recomendacion` ni `justificacion`. **Renderizan degradados, no se migran ni se borran**, y el
+validador sigue aceptándolos: los cuatro campos obligatorios no cambiaron. Verificado sobre los 40.
+
+### El prompt de lote NO cambió, a propósito
+
+`buildPromptLote` produce análisis con el mismo shape y escribe en la misma colección, pero pide
+~150 palabras por ticker para toda la cartera de una vez. Meterle fundamentals por posición
+reventaría el presupuesto de tokens y desvirtuaría para qué existe. **Consecuencia asumida:** un
+análisis generado por lote no trae los campos nuevos, igual que los viejos.
 
 ### Un ticker no identifica una posición (F9.141.1)
 

@@ -23,9 +23,10 @@ import {
   cargarConfigIA, guardarConfigIA,
   normalizarEventoProximo,
   generarPromptIA, importarAnalisisIA,
-  splitSectorialPorDriver, tickerADriver,
+  splitSectorialPorDriver, tickerADriver, contextoPosicion,
   type AnalisisPosicion, type AnalisisSectorial, type ConfigIA,
   type AgendaMacro, type EventoAgenda, type ModoIA,
+  type Fundamentals, type Recomendacion,
 } from '../datos/patrimonioIA';
 import {
   obtenerSeriesPrecios, calcularOptimizacion, cargarTCRango, dolarizarSerie, correrTests,
@@ -34,7 +35,7 @@ import {
 } from '../datos/patrimonioOptimizacion';
 import type { Posicion, ActivoFijo, PosicionManual, PosicionTipo, PatMetrics, IndicadoresPosicion } from '../types/patrimonio';
 import { cargarIndicadoresPorIdentidad } from '../datos/patrimonioPrecios';
-import FichaPosicion, { type PosicionFicha } from './FichaPosicion';
+import FichaPosicion, { MarcaOrigen, type PosicionFicha } from './FichaPosicion';
 import {
   cargarFlujos, crearFlujo, actualizarFlujo, eliminarFlujo, calcRetorno,
   type FlujoPatrimonio, type NuevoFlujo,
@@ -1416,6 +1417,19 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
                     totalUsd={c.totalUsd}
                     totalPortafolio={M.total}
                     sectorDisp={c.sectorDisp}
+                    // F9.147 §1 — la ficha entra al contexto del prompt. Misma agrupación por
+                    // IDENTIDAD que usa la ficha de arriba: si el modelo va a opinar sobre GLOB,
+                    // tiene que ver las DOS (el CEDEAR en ARS y la acción global en USD), no una
+                    // mezcla. Se arma acá y no adentro para no volver a resolver identidades.
+                    identidades={agruparPorIdentidad(c.filas).map(([ident, fichaFilas]) => ({
+                      identidad: ident,
+                      tipo: fichaFilas[0].tipo,
+                      paisRiesgo: fichaFilas[0].paisRiesgo,
+                      valorUsd: fichaFilas.reduce((s, x) => s + x.valorUsd, 0),
+                      cantidad: fichaFilas.every(x => x.cantidad !== null)
+                        ? fichaFilas.reduce((s, x) => s + (x.cantidad ?? 0), 0) : null,
+                      ind: indicadores.get(ident) ?? null,
+                    }))}
                     analisis={analisisCache[c.ticker] ?? null}
                     analizando={analizando.has(c.ticker)}
                     configIA={configIA}
@@ -1948,8 +1962,99 @@ function renderMarkdownLite(text: string): JSX.Element {
 }
 
 // ── Análisis IA por ticker (dentro del acordeón de Tenencias) ────────────────
-function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, analisis, analizando, configIA, onAnalizar, onAbrirChat, agenda, sectorial }: {
+// ── F9.147 §1 — fundamentals: reportados, no calculados ───────────────────────
+// Bloque visualmente distinto y marca EXT, porque en una grilla se ven idénticos a los de la
+// ficha y un P/E equivocado al lado de un semáforo verde se lee como dato de la app.
+// **Fuente y fecha son parte del dato**: sin ellas el número no se puede juzgar.
+// SIN SEMÁFORO: un umbral sobre algo no verificable convierte un dato dudoso en un veredicto.
+function BloqueFundamentals({ f }: { f: Fundamentals | null }) {
+  if (!f) return null;
+  const conValor = f.metricas?.filter(m => m.valor !== null && m.valor !== undefined) ?? [];
+  const sinValor = f.metricas?.filter(m => m.valor === null || m.valor === undefined) ?? [];
+  if (conValor.length === 0 && !f.motivoSinDatos && sinValor.length === 0) return null;
+
+  return (
+    <div style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.25)', borderRadius: 8, padding: '8px 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)' }}>Fundamentals</span>
+        <MarcaOrigen tipo="reportado" />
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--gf-gray-400)' }}>
+          {f.fuente ?? 'sin fuente'}{f.fechaDato ? ` · ${f.fechaDato}` : ''}
+        </span>
+      </div>
+      {conValor.map((m, i) => (
+        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 11.5, padding: '1.5px 0' }}>
+          <span style={{ color: 'var(--color-text-sec)', flex: 1 }}>{m.nombre}</span>
+          <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+            {typeof m.valor === 'number' ? m.valor.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : m.valor}
+            {m.unidad ? ` ${m.unidad}` : ''}
+          </span>
+          {m.comentario && <span style={{ fontSize: 10, color: 'var(--gf-gray-400)', flexBasis: '100%' }}>{m.comentario}</span>}
+        </div>
+      ))}
+      {/* Un hueco explícito vale más que un número inventado: se muestra que se buscó y no había. */}
+      {sinValor.length > 0 && (
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 3 }}>
+          Sin dato: {sinValor.map(m => m.nombre).join(', ')}
+        </div>
+      )}
+      {f.motivoSinDatos && (
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 3 }}>{f.motivoSinDatos}</div>
+      )}
+      <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 5, lineHeight: 1.4 }}>
+        <strong>EXT</strong> = reportado por el modelo vía búsqueda web. La app no lo puede
+        verificar contra su propia serie, y por eso no lleva semáforo.
+      </div>
+    </div>
+  );
+}
+
+// ── F9.147 §3 — recomendación y justificación ─────────────────────────────────
+// La recomendación explícita convive con `queHariaEnCadaCaso`; no lo reemplaza. Y solo se emite
+// si cita indicadores concretos: sin eso va `null` con el motivo a la vista, que es la versión
+// exigente de la regla vieja ("prohibido imperativos sin condición"), no su eliminación.
+function BloqueRecomendacion({ r, justificacion }: { r: Recomendacion | null; justificacion?: string[] }) {
+  if (!r && !(justificacion && justificacion.length > 0)) return null;
+  const citados = r?.indicadoresCitados ?? [];
+  const emitida = !!r?.accion && citados.length > 0;
+
+  return (
+    <div style={{ marginTop: 2, paddingTop: 6, borderTop: '1px solid var(--gf-gray-100)' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 4 }}>Recomendación</div>
+      {emitida ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 4 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800, background: 'var(--gf-gray-100)', borderRadius: 6, padding: '3px 9px' }}>
+            {r!.accion}
+          </span>
+          {citados.map((c, i) => (
+            <span key={i} style={{ fontSize: 10.5, color: 'var(--color-text-sec)', background: 'var(--gf-gray-50)', borderRadius: 5, padding: '2px 6px' }}>
+              {c.nombre}: <strong>{c.valor}</strong>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: 11.5, color: 'var(--gf-gray-400)', marginBottom: 4, lineHeight: 1.5 }}>
+          Sin recomendación
+          {r?.motivoSinRecomendacion ? `: ${r.motivoSinRecomendacion}` : (r?.accion && citados.length === 0
+            ? ': el modelo propuso una acción pero no citó indicadores que la sostengan, así que no se muestra.'
+            : '.')}
+        </div>
+      )}
+      {justificacion && justificacion.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', marginBottom: 2 }}>Por qué</div>
+          {justificacion.map((j, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0', lineHeight: 1.45 }}>· {j}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, identidades, analisis, analizando, configIA, onAnalizar, onAbrirChat, agenda, sectorial }: {
   ticker: string; totalUsd: number; totalPortafolio: number; sectorDisp: string;
+  identidades: Parameters<typeof contextoPosicion>[4];
   analisis: AnalisisPosicion | null;
   analizando: boolean;
   configIA: ConfigIA;
@@ -1959,8 +2064,10 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
   sectorial: AnalisisSectorial | null;
 }) {
   const [panoramaExpandido, setPanoramaExpandido] = useState(false);
-  const pct = (x: number) => Math.round(x * 100) + '%';
-  const contexto = { ticker, sector: sectorDisp, pesoEnCartera: pct(totalUsd / (totalPortafolio || 1)), valorUsd: Math.round(totalUsd) };
+  // F9.147 §1 — el contexto pasó de cuatro campos a la ficha completa. La transformación vive en
+  // `src/datos/patrimonioIA.ts` porque es pura y es lo único de esto que se puede verificar sin
+  // pintar (`scripts/verificarF9147.ts`).
+  const contexto = contextoPosicion(ticker, sectorDisp, totalUsd, totalPortafolio, identidades);
 
   const diasAntiguo = analisis
     ? Math.floor((Date.now() - new Date(analisis.generadoEnISO).getTime()) / 86400000)
@@ -2016,6 +2123,10 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
 
       {analisis && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {/* F9.147 §1 — los fundamentals van ANTES de la prosa (son dato, no opinión) pero en
+              bloque propio y marcados EXT: no son verificables por la app, a diferencia de todo
+              lo de la ficha de arriba. Sin semáforo, a propósito. */}
+          <BloqueFundamentals f={analisis.resultado.fundamentals ?? null} />
           {analisis.resultado.queEs && (
             <div style={{ fontSize: 12, lineHeight: 1.5 }}>
               <span style={{ fontWeight: 700 }}>Qué es: </span>
@@ -2086,6 +2197,12 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, anal
               ))}
             </div>
           )}
+          {/* F9.147 §3 — el orden termina en RECOMENDACIÓN → JUSTIFICACIÓN, después de los
+              escenarios condicionales, que siguen presentes: el veredicto no los reemplaza. */}
+          <BloqueRecomendacion
+            r={analisis.resultado.recomendacion ?? null}
+            justificacion={analisis.resultado.justificacion}
+          />
         </div>
       )}
 

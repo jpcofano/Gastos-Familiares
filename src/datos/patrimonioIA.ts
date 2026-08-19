@@ -4,11 +4,51 @@ import {
   query, orderBy, limit, type Timestamp,
 } from 'firebase/firestore';
 import { db, functions } from '../firebase';
+import type { IndicadoresPosicion } from '../types/patrimonio';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 export type EventoProximo =
   | { cuando: string | null; evento: string }  // formato estructurado (F9.95+)
   | string;                                     // retrocompat: string suelto
+
+// F9.147 §1 — LO REPORTADO POR EL MODELO, que la app NO puede verificar.
+//
+// Los números de `indicadoresPosicion` salen de Firestore y se auditan contra `preciosDiarios`.
+// Éstos salen de una búsqueda web y no hay con qué contrastarlos. En una tabla se ven idénticos,
+// y un P/E equivocado al lado de un semáforo verde se lee como dato de la app. Por eso viajan en
+// su propia estructura, con fuente y fecha OBLIGATORIAS, y se pintan en un bloque aparte.
+//
+// SIN SEMÁFORO, y no es un olvido: un umbral aplicado a un número que no se puede verificar
+// convierte un dato dudoso en un veredicto. Si alguna vez se quiere, primero hay que medir qué
+// tan estables son entre corridas — el criterio que F9.149 aplicó al drawdown.
+export type MetricaReportada = {
+  nombre: string;
+  valor: string | number | null;   // null explícito = no se encontró; NUNCA un número inventado
+  unidad?: string | null;
+  comentario?: string | null;
+};
+
+export type Fundamentals = {
+  metricas: MetricaReportada[];
+  fuente: string | null;
+  fechaDato: string | null;        // YYYY-MM-DD del dato, no de la corrida
+  motivoSinDatos?: string | null;  // por qué no hay nada, cuando `metricas` viene vacío
+};
+
+export type AccionRecomendada = 'Mantener' | 'Comprar' | 'Aumentar' | 'Reducir' | 'Vender';
+
+// F9.147 §3 — la recomendación explícita CONVIVE con `queHariaEnCadaCaso`, no lo reemplaza: los
+// escenarios condicionales son los que responden "qué hago si pasa X".
+//
+// La regla vieja ("prohibido imperativos sin condición") existía por un motivo válido —una
+// recomendación categórica sin condición es una opinión con cara de conclusión— así que se
+// reemplazó por una MÁS exigente, no se borró: la recomendación tiene que citar los indicadores
+// que la sostienen, por nombre y valor. Si no puede citar ninguno, `accion` va en null con motivo.
+export type Recomendacion = {
+  accion: AccionRecomendada | null;
+  indicadoresCitados?: { nombre: string; valor: string }[];
+  motivoSinRecomendacion?: string | null;
+};
 
 export type AnalisisPosicion = {
   ticker: string;
@@ -24,6 +64,11 @@ export type AnalisisPosicion = {
     queHariaEnCadaCaso?: { caso: string; acciones: string[]; costo: string }[];
     senalesAVigilar?: string[];
     fuentes?: string[];
+    // F9.147 — opcionales a propósito: los 40 análisis guardados al 2026-08-19 no los traen y
+    // tienen que seguir renderizando degradados, no romper ni migrarse.
+    fundamentals?: Fundamentals | null;
+    recomendacion?: Recomendacion | null;
+    justificacion?: string[];
   };
 };
 
@@ -259,4 +304,109 @@ export function tickerADriver(ticker: string, sectorDisp: string): Driver {
   if (/peso|cer|ajust|local|captur/.test(s)) return 'cer_pesos';
   if (/tech|eeuu/.test(s)) return 'tech_global';
   return 'otro';
+}
+
+// ── F9.147 §1 — el contexto del prompt de posición ────────────────────────────
+//
+// Antes eran CUATRO campos (ticker, sector, peso, valorUsd): el modelo opinaba sobre una
+// posición de la que no sabía nada y reconstruía por su cuenta datos que la app ya tiene
+// calculados y auditados. Ahora la ficha entera de F9.144/F9.148/F9.149 entra al prompt.
+//
+// Vive acá y no dentro de `Patrimonio.tsx` porque es una transformación pura y es lo único
+// verificable sin pintar: `scripts/verificarF9147.ts` la corre sobre datos reales.
+
+/** Los fundamentals que aplican a cada tipo. Lo que no aplica no se pide, y así no se muestra. */
+export const FUNDAMENTALS_POR_TIPO: Record<string, string[]> = {
+  accion: ['P/E', 'EV/EBITDA', 'margen operativo', 'ROE', 'deuda/EBITDA', 'crecimiento de ingresos'],
+  cedear: ['P/E', 'EV/EBITDA', 'margen operativo', 'ROE', 'deuda/EBITDA', 'ratio de conversión del CEDEAR'],
+  bono:   ['TIR', 'duration', 'paridad', 'vencimiento', 'calificación'],
+  on:     ['TIR', 'duration', 'vencimiento', 'calificación', 'deuda/EBITDA del emisor'],
+  fci:    ['rendimiento 12m', 'comisión de administración', 'composición de cartera', 'duration si es de renta fija'],
+  cripto: ['market cap', 'dominancia', 'oferta circulante', 'métricas propias del activo'],
+  cash:   [],
+};
+
+export type FichaParaPrompt = {
+  identidad: string;
+  tipo: string;
+  paisRiesgo: string;
+  valorUsd: number;
+  cantidad: number | null;
+  estadoSerie?: string;
+  motivoSinDatos?: string | null;
+} & Record<string, unknown>;
+
+/**
+ * Arma el contexto de una posición para el prompt. Una entrada por IDENTIDAD
+ * (`ticker|tipo|paisRiesgo`), no por ticker: GLOB es a la vez un CEDEAR en ARS y una acción
+ * global en USD, y colapsarlos le daría al plan de empleado los indicadores del CEDEAR.
+ *
+ * Los indicadores viajan AGRUPADOS igual que en la ficha (tendencia / rango / riesgo /
+ * performance / liquidez) y **con su moneda**, para que el modelo no reste un `perf1a` en
+ * dólares de un drawdown en pesos.
+ */
+export function contextoPosicion(
+  ticker: string,
+  sectorDisp: string,
+  totalUsd: number,
+  totalPortafolio: number,
+  identidades: Array<{
+    identidad: string;
+    tipo: string;
+    paisRiesgo: string;
+    valorUsd: number;
+    cantidad: number | null;
+    ind: IndicadoresPosicion | null;
+  }>,
+): Record<string, unknown> {
+  const num = (x: number | null | undefined, dec = 2) =>
+    x === null || x === undefined || !Number.isFinite(x) ? null : Number(x.toFixed(dec));
+  const p = (x: number | null | undefined) =>
+    x === null || x === undefined || !Number.isFinite(x) ? null : `${(x * 100).toFixed(1)}%`;
+
+  const fichas: FichaParaPrompt[] = identidades.map(id => {
+    const i = id.ind;
+    const base: FichaParaPrompt = {
+      identidad: id.identidad, tipo: id.tipo, paisRiesgo: id.paisRiesgo,
+      valorUsd: Math.round(id.valorUsd), cantidad: id.cantidad,
+    };
+    if (!i || i.motivo !== null) {
+      return { ...base, estadoSerie: i?.estadoSerie ?? 'sin_serie', motivoSinDatos: i?.motivo ?? 'sin indicadores' };
+    }
+    return {
+      ...base,
+      estadoSerie: i.estadoSerie,
+      monedaSerie: i.monedaSerie,
+      puntosDisponibles: i.puntosDisponibles,
+      precio: { valor: num(i.precio, 4), fecha: i.fechaUltimoPrecio, moneda: i.monedaSerie },
+      tendencia: { sma20: num(i.sma20, 4), sma50: num(i.sma50, 4), sma200: num(i.sma200, 4),
+        vsSma20: p(i.vsSma20Pct), vsSma50: p(i.vsSma50Pct), vsSma200: p(i.vsSma200Pct) },
+      rango: { max52s: num(i.max52s, 4), min52s: num(i.min52s, 4),
+        distanciaAlMax: p(i.distanciaMax52sPct), distanciaAlMin: p(i.distanciaMin52sPct) },
+      riesgo: { drawdownDesdeMax: p(i.drawdownDesdeMaxPct), ulcerIndex126: p(i.ulcerIndex126),
+        volatilidad30d: p(i.volAnualizada30d), volatilidad90d: p(i.volAnualizada90d), atr: p(i.atrPct) },
+      // La banda de caída de F9.149 no es un umbral fijo: sin estos números el modelo no puede
+      // entender por qué un −48% puede ser verde y un −17% rojo.
+      calibracionCaida: i.ddMediana == null ? null : {
+        metodo: 'CDaR(0,8) sobre la distribución de caídas del propio activo',
+        caidaTipica: p(i.ddMediana), promedioDelPeor20: p(i.ddCdar80), observaciones: i.ddObservaciones,
+      },
+      performance: { moneda: i.monedaPerformance ?? i.monedaSerie,
+        p1m: p(i.perf1m), p3m: p(i.perf3m), p6m: p(i.perf6m), p1a: p(i.perf1a) },
+      momentum: { rsi14: num(i.rsi14, 1) },
+      liquidez: { ruedasParaSalir: num(i.ruedasParaSalir, 4),
+        montoOperadoProm30d: num(i.montoOperadoProm30d, 0), ratioVolumen: num(i.ratioVolumen, 2) },
+      semaforos: i.semaforos ?? {},
+    };
+  });
+
+  const tipos = [...new Set(identidades.map(x => x.tipo))];
+  return {
+    ticker,
+    sector: sectorDisp,
+    pesoEnCartera: `${Math.round((totalUsd / (totalPortafolio || 1)) * 100)}%`,
+    valorUsd: Math.round(totalUsd),
+    fundamentalsPedidos: [...new Set(tipos.flatMap(t => FUNDAMENTALS_POR_TIPO[t] ?? []))],
+    fichas,
+  };
 }

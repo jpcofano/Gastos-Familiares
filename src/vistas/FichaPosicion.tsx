@@ -101,7 +101,7 @@ const CAMPOS_LIQUIDEZ: Campo[] = [
 // Hoy TODO es calculado, así que la marca no distingue nada todavía. Va igual, porque cuando
 // F9.147 sume números REPORTADOS por el modelo vía búsqueda web los dos tipos van a convivir en
 // la misma ficha y se van a ver idénticos. Agregarla entonces es cuando se olvida.
-function MarcaOrigen({ tipo }: { tipo: 'calculado' | 'reportado' }) {
+export function MarcaOrigen({ tipo }: { tipo: 'calculado' | 'reportado' }) {
   return (
     <span
       title={tipo === 'calculado'
