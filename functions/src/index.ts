@@ -18,6 +18,9 @@ import {
   type PropuestaMatch,
 } from './matchLogica';
 import { normalizar, type NormRule } from './normalizador';
+// F9.152 §1 — el media_type sale de los bytes, no del string que declaró el cliente. Ver el
+// encabezado de tipoArchivo.ts para el porqué (dos 400 en producción, 2026-08-31 y 2026-09-02).
+import { detectarTipoReal, motivoFormatoNoSoportado } from './tipoArchivo';
 import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
 import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 import { backfillTc } from './tcBackfill';
@@ -109,26 +112,15 @@ Esquema de salida EXACTO:
 }`;
 }
 
-type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
-export const extraerComprobante = onDocumentCreated(
-  {
-    document:       'comprobantes/{hash}',
-    secrets:        [anthropicKey],
-    timeoutSeconds: 120,
-    memory:         '512MiB',
-  },
-  async (event) => {
-    const snap = event.data;
-    if (!snap) return;
-
-    const comp = snap.data();
-
-    // Idempotencia: solo procesar docs recién subidos
-    if (comp.estado !== 'subido') return;
-
-    const ref = db.collection('comprobantes').doc(snap.id);
-
+// F9.152 §2 — cuerpo extraído para que lo compartan la creación y el reintento, mismo patrón que
+// `procesarResumenTarjeta` (que ya comparten extraerResumenTarjeta y reintentarResumenTarjeta).
+// No cambia una línea de la lógica de extracción: solo deja de estar pegada al trigger de create.
+async function procesarComprobante(
+  compId: string,
+  ref: FirebaseFirestore.DocumentReference,
+  comp: FirebaseFirestore.DocumentData,
+): Promise<void> {
     try {
       const [fileBytes] = await storage
         .bucket()
@@ -140,8 +132,13 @@ export const extraerComprobante = onDocumentCreated(
       }
 
       const base64      = fileBytes.toString('base64');
-      const contentType = comp.contentType as string;
-      const isPdf       = contentType === 'application/pdf';
+      // F9.152 §1 — el tipo sale de los bytes ya descargados, no de `comp.contentType`.
+      const declarado   = (comp.contentType as string | undefined) ?? '(sin contentType)';
+      const tipoReal    = detectarTipoReal(fileBytes);
+      if (!tipoReal) throw new Error(motivoFormatoNoSoportado(fileBytes, declarado));
+      if (tipoReal !== declarado) {
+        console.warn(`[procesarComprobante] ${compId} — contentType declarado "${declarado}" != bytes reales "${tipoReal}"; mando "${tipoReal}"`);
+      }
       const hoy         = hoyArgentinaISO();
 
       const client   = new Anthropic({ apiKey: anthropicKey.value() });
@@ -152,13 +149,14 @@ export const extraerComprobante = onDocumentCreated(
         messages: [
           {
             role: 'user',
-            content: isPdf
+            content: tipoReal === 'application/pdf'
               ? [
                   { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 } },
                   { type: 'text'     as const, text: 'Extraé este comprobante.' },
                 ]
               : [
-                  { type: 'image' as const, source: { type: 'base64' as const, media_type: contentType as ImageMediaType, data: base64 } },
+                  // `tipoReal` acá está narrowed a ImageMediaType por el ternario — sin cast.
+                  { type: 'image' as const, source: { type: 'base64' as const, media_type: tipoReal, data: base64 } },
                   { type: 'text'  as const, text: 'Extraé este comprobante.' },
                 ],
           },
@@ -209,7 +207,7 @@ export const extraerComprobante = onDocumentCreated(
       }
 
       if (typeof parsed.fecha === 'string' && parsed.fecha > hoy) {
-        console.warn(`[extraerComprobante] ${snap.id} → fecha futura sospechosa: ${parsed.fecha} (hoy=${hoy})`);
+        console.warn(`[procesarComprobante] ${compId} → fecha futura sospechosa: ${parsed.fecha} (hoy=${hoy})`);
       }
 
       await ref.update({
@@ -219,17 +217,57 @@ export const extraerComprobante = onDocumentCreated(
         actualizadoEn:   FieldValue.serverTimestamp(),
       });
 
-      console.log(`[extraerComprobante] ${snap.id} → extraido (${String(tipoDocumento)}, ${String(moneda)})`);
+      console.log(`[procesarComprobante] ${compId} → extraido (${String(tipoDocumento)}, ${String(moneda)})`);
 
     } catch (e) {
       const mensaje = e instanceof Error ? e.message : String(e);
-      console.error(`[extraerComprobante] error en ${snap.id}:`, mensaje);
+      console.error(`[procesarComprobante] error en ${compId}:`, mensaje);
       await ref.update({
         estado:          'error',
         errorExtraccion: mensaje,
         actualizadoEn:   FieldValue.serverTimestamp(),
       });
     }
+}
+
+export const extraerComprobante = onDocumentCreated(
+  {
+    document:       'comprobantes/{hash}',
+    secrets:        [anthropicKey],
+    timeoutSeconds: 120,
+    memory:         '512MiB',
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const comp = snap.data();
+
+    // Idempotencia: solo procesar docs recién subidos
+    if (comp.estado !== 'subido') return;
+
+    await procesarComprobante(snap.id, db.collection('comprobantes').doc(snap.id), comp);
+  },
+);
+
+// F9.152 §2 — reintento cuando el usuario setea estado:'subido' desde la UI (error → subido).
+// Espejo exacto de `reintentarResumenTarjeta` (misma guarda, mismo disparador): sin esto un
+// comprobante en `error` es terminal y el archivo se pierde —re-subirlo es un no-op porque
+// `subirEntrante` deduplica por hash de contenido (src/datos/entrantes.ts:46-48)—.
+export const reintentarComprobante = onDocumentUpdated(
+  {
+    document:       'comprobantes/{hash}',
+    secrets:        [anthropicKey],
+    timeoutSeconds: 120,
+    memory:         '512MiB',
+  },
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after  = event.data?.after?.data();
+    if (!before || !after) return;
+    if (before.estado !== 'error' || after.estado !== 'subido') return;
+    const ref = db.collection('comprobantes').doc(event.params.hash);
+    await procesarComprobante(event.params.hash, ref, after);
   },
 );
 

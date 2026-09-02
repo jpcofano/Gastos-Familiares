@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, type ObligacionAbierta } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, type ObligacionAbierta } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -818,6 +818,18 @@ function ComprobanteCard({
   const [descartando,   setDescartando]   = useState(false);
   const [errDescartar,  setErrDescartar]  = useState<string | null>(null);
   const [advertencia,   setAdvertencia]   = useState<string | null>(null);
+  // F9.152 §2 — reintento de extracción (error → subido dispara reintentarComprobante).
+  const [reintentando,  setReintentando]  = useState(false);
+  const [errReintento,  setErrReintento]  = useState<string | null>(null);
+
+  async function handleReintentar() {
+    setReintentando(true);
+    setErrReintento(null);
+    const res = await reintentarComprobante(comp.id);
+    setReintentando(false);
+    if (!res.ok) setErrReintento(res.error.message);
+    // si ok, onSnapshot repinta el card en estado 'subido' y después 'extraido'
+  }
 
   async function handleDescartar() {
     if (!confirm('¿Descartar este comprobante? Se borra el archivo y su movimiento si fue creado desde este comprobante.')) return;
@@ -854,6 +866,17 @@ function ComprobanteCard({
       {comp.estado === 'error' && comp.errorExtraccion && (
         <p style={{ fontSize: 12, color: 'var(--gf-err-text)', marginTop: 6 }}>{comp.errorExtraccion}</p>
       )}
+      {/* F9.152 §2 — un comprobante en error era terminal: no había reintento en ningún lado y
+          re-subir el archivo es un no-op (subirEntrante deduplica por hash). Espejo del botón de
+          ResumenesTarjeta.tsx:346-355. Admin-only: firestore.rules:99 solo deja updatear a admin. */}
+      {comp.estado === 'error' && esAdmin && (
+        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Button variant="primary" size="sm" disabled={reintentando} onClick={handleReintentar}>
+            {reintentando ? 'Reintentando…' : 'Reintentar'}
+          </Button>
+          {errReintento && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errReintento}</span>}
+        </div>
+      )}
       {comp.estado === 'extraido' && comp.propuestaMatch && (
         <PropuestaCard comp={comp} items={items} agenda={agenda} memberId={memberId} miembro={miembro} esAdmin={esAdmin} config={config} autoAbrir={autoAbrir} />
       )}
@@ -871,7 +894,37 @@ function ComprobanteCard({
 
 // ── Bandeja de entrada ────────────────────────────────────────────────────────
 
-function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
+// F9.152 §4 — el estado del doc destino de un entrante, con `'desconocido'` explícito para cuando
+// todavía no cargó (o no se puede leer). Hay DOS preguntas sobre este dato y sus defaults ante la
+// incertidumbre son OPUESTOS, por eso el tri-estado y no un booleano:
+//   · ¿lo saco de la bandeja? Solo con evidencia positiva de que terminó. Sin evidencia se muestra
+//     —el usuario tiene que ver lo que acaba de subir—. Es lo que ya hacía el filtro.
+//   · ¿ofrezco "Descartar"? Solo con evidencia positiva de que NO está bloqueado, porque
+//     `descartarEntranteCompleto` rechaza 'vinculado'/'confirmado' con failed-precondition. Sin
+//     evidencia no se ofrece: un botón que el backend rechaza por diseño es peor que no tenerlo.
+// Antes `puedeDscartar` no miraba el destino en absoluto y se apoyaba en que el filtro estuviera
+// bien; con la lista todavía cargando el filtro deja pasar el entrante y el botón aparecía igual.
+type EstadoDestino = 'terminado' | 'abierto' | 'desconocido';
+
+function estadoDelDestino(
+  e: Entrante,
+  comprobantes: Comprobante[],
+  resumenes: CardStatement[],
+): EstadoDestino {
+  // Sin destino creado (pendiente, ambiguo, error, o ruteado sin destino) no hay nada que bloquee.
+  if (e.estado !== 'ruteado' || !e.destino) return 'abierto';
+  if (e.destino.coleccion === 'comprobantes') {
+    const c = comprobantes.find(c => c.id === e.destino!.id);
+    return !c ? 'desconocido' : (c.estado === 'vinculado' ? 'terminado' : 'abierto');
+  }
+  if (e.destino.coleccion === 'resumenesTarjeta') {
+    const r = resumenes.find(r => r.id === e.destino!.id);
+    return !r ? 'desconocido' : (r.estado === 'confirmado' ? 'terminado' : 'abierto');
+  }
+  return 'desconocido';
+}
+
+function EntranteCard({ e, esAdmin, destino }: { e: Entrante; esAdmin: boolean; destino: EstadoDestino }) {
   const [resolviendo,  setResolviendo]  = useState(false);
   const [descartando,  setDescartando]  = useState(false);
   const [errLocal,     setErrLocal]     = useState<string | null>(null);
@@ -896,7 +949,10 @@ function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
 
   const nombre = e.nombreArchivo ?? e.hash.slice(0, 16) + '…';
   const kb     = e.tamano != null ? `${(e.tamano / 1024).toFixed(0)} KB` : '';
-  const puedeDscartar = esAdmin && (e.estado === 'ruteado' || e.estado === 'error');
+  // F9.152 §4 — corregido el typo `puedeDscartar` → `puedeDescartar` (declarado, no en silencio) y
+  // agregada la condición que faltaba. `=== 'abierto'` y no `!== 'terminado'`: con el destino
+  // desconocido no se ofrece el botón (ver estadoDelDestino).
+  const puedeDescartar = esAdmin && (e.estado === 'ruteado' || e.estado === 'error') && destino === 'abierto';
 
   return (
     <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--gf-gray-100)' }}>
@@ -904,7 +960,7 @@ function EntranteCard({ e, esAdmin }: { e: Entrante; esAdmin: boolean }) {
         <BadgeEntrante estado={e.estado} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nombre}</span>
         {kb && <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', flexShrink: 0 }}>{kb}</span>}
-        {puedeDscartar && (
+        {puedeDescartar && (
           <Button variant="secondary" size="sm" disabled={descartando} onClick={descartar}>
             {descartando ? 'Descartando…' : 'Descartar'}
           </Button>
@@ -1170,11 +1226,14 @@ export default function Comprobantes() {
           padding: '30px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
           cursor: 'pointer', fontFamily: 'var(--font-base)', width: '100%', boxSizing: 'border-box',
         }}>
+          {/* F9.152 §3 — el accept era `image/*`, que deja pasar HEIC (foto de iPhone): la API de
+              imágenes acepta solo estos cuatro y el pipeline moría con un 400. Es una sugerencia del
+              navegador, no una garantía — por eso el sniff de §1 igual tiene que fallar limpio. */}
           <input
             id="cmp-file"
             ref={inputRef}
             type="file"
-            accept="application/pdf,image/*"
+            accept="application/pdf,image/jpeg,image/png,image/gif,image/webp"
             style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' }}
             onChange={e => {
               setArchivo(e.target.files?.[0] ?? null);
@@ -1213,19 +1272,9 @@ export default function Comprobantes() {
             Los ruteados cuyo destino ya está vinculado/confirmado se ocultan:
             salieron de la bandeja y están en el historial. */}
         {(() => {
-          const bandejaEntrantes = entrantes.filter(e => {
-            if (e.estado !== 'ruteado') return true;
-            if (!e.destino) return true;
-            if (e.destino.coleccion === 'comprobantes') {
-              const comp = comprobantes.find(c => c.id === e.destino!.id);
-              return !comp || comp.estado !== 'vinculado';
-            }
-            if (e.destino.coleccion === 'resumenesTarjeta') {
-              const res = resumenes.find(r => r.id === e.destino!.id);
-              return !res || res.estado !== 'confirmado';
-            }
-            return true;
-          });
+          // F9.152 §4 — `!== 'terminado'` conserva exactamente el comportamiento anterior: sin
+          // evidencia del destino el entrante se muestra igual (ver estadoDelDestino).
+          const bandejaEntrantes = entrantes.filter(e => estadoDelDestino(e, comprobantes, resumenes) !== 'terminado');
           if (bandejaEntrantes.length === 0) return null;
           return (
             <div>
@@ -1233,7 +1282,7 @@ export default function Comprobantes() {
               <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border-card)', borderRadius: 12, overflow: 'hidden' }}>
                 {bandejaEntrantes.map((e, i) => (
                   <div key={e.hash} style={{ borderBottom: i < bandejaEntrantes.length - 1 ? undefined : 'none' }}>
-                    <EntranteCard e={e} esAdmin={esAdmin} />
+                    <EntranteCard e={e} esAdmin={esAdmin} destino={estadoDelDestino(e, comprobantes, resumenes)} />
                   </div>
                 ))}
               </div>

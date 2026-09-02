@@ -1,5 +1,5 @@
 import {
-  doc, getDoc, setDoc, serverTimestamp, writeBatch,
+  doc, getDoc, setDoc, updateDoc, serverTimestamp, writeBatch,
   collection, query, orderBy, where, limit, getDocs, type DocumentData,
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
@@ -263,6 +263,22 @@ export async function confirmarSueltoDesdeComprobante(
       actualizadoEn: serverTimestamp(),
     });
     await batch.commit();
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+// ── Reintento (F9.152 §2) ─────────────────────────────────────────────────────
+// Espejo de `reintentarResumen` (src/datos/resumenesTarjeta.ts:484-494). `error → subido` dispara
+// la CF `reintentarComprobante`. Admin-only por reglas (firestore.rules:99, update solo admin).
+export async function reintentarComprobante(comprobanteId: string): Promise<Resultado<void>> {
+  try {
+    await updateDoc(doc(db, 'comprobantes', comprobanteId), {
+      estado:          'subido',
+      errorExtraccion: null,
+      actualizadoEn:   serverTimestamp(),
+    });
     return { ok: true, data: undefined };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
