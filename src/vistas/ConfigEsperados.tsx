@@ -148,6 +148,12 @@ function FormItemEsperado({
   const [diaVenc,        setDiaVenc]        = useState(item?.diaVencimiento?.toString() ?? '');
   const [periodicidad,   setPeriodicidad]   = useState<string>(item?.periodicidad ?? 'mensual');
   const [pagoAuto,       setPagoAuto]       = useState(item?.pagoAutomatico ?? false);
+  // F9.154 §3 — día de corte de imputación. Solo se ofrece para Ingresos; vacío = null = el
+  // comportamiento de siempre.
+  const [diaCorte,       setDiaCorte]       = useState(item?.diaCorteImputacion?.toString() ?? '');
+  // F9.154 §2 — números de suministro/cliente propios de este ítem, separados por coma. Varios
+  // porque el mismo suministro llega con formatos distintos según el documento.
+  const [claves,         setClaves]         = useState((item?.clavesDesambiguacion ?? []).join(', '));
   const [incluye,        setIncluye]        = useState<string[]>(item?.matchTexto?.incluye ?? []);
   const [excluye,        setExcluye]        = useState<string[]>(item?.matchTexto?.excluye ?? []);
   const [incluyeInput,   setIncluyeInput]   = useState('');
@@ -207,6 +213,18 @@ function FormItemEsperado({
       setErrorMsg('El día de vencimiento debe ser entre 1 y 31.');
       return;
     }
+    // F9.154 §2 — lista limpia: sin vacíos ni duplicados, en el orden en que los escribió.
+    const clavesLista = Array.from(new Set(
+      claves.split(',').map(c => c.trim()).filter(Boolean),
+    ));
+
+    // F9.154 §3 — el corte solo aplica a Ingresos; si el usuario cambia el tipo a Gasto con un
+    // valor cargado, se descarta en vez de guardarse mudo.
+    const corteNum = tipoF === 'Ingreso' && diaCorte ? parseInt(diaCorte) : null;
+    if (tipoF === 'Ingreso' && diaCorte && (corteNum === null || isNaN(corteNum) || corteNum < 1 || corteNum > 31)) {
+      setErrorMsg('El día de corte de imputación debe ser entre 1 y 31.');
+      return;
+    }
 
     if (!item) {
       const dup = items.find(i =>
@@ -242,6 +260,8 @@ function FormItemEsperado({
       matchTexto: (incluye.length > 0 || excluye.length > 0) ? { incluye, excluye } : null,
       periodicidad:   periodicidad as NuevoItemEsperado['periodicidad'],
       pagoAutomatico: pagoAuto,
+      diaCorteImputacion: corteNum,
+      clavesDesambiguacion: clavesLista.length > 0 ? clavesLista : null,
     };
 
     setGuardando(true);
@@ -359,6 +379,49 @@ function FormItemEsperado({
               />
             </div>
           </div>
+
+          {/* F9.154 §2 — desambiguación: cuál de los dos suministros del mismo emisor es este ítem.
+              Sin esto, dos ítems que comparten destino (las dos boletas de AySA) se pisan, porque el
+              doc de `destinos` tiene un solo itemEsperadoId. */}
+          <div className="cfg-form-fila">
+            <div className="cfg-campo">
+              <label>Nº de cliente / suministro (opcional)</label>
+              <input
+                type="text"
+                value={claves}
+                onChange={e => setClaves(e.target.value)}
+                placeholder="ej. 2651943, 000000002651943"
+              />
+              <span className="cfg-ayuda">
+                Solo hace falta si otro ítem comparte emisor con este (las dos boletas de AySA, por
+                ejemplo). Podés poner varios separados por coma: el mismo suministro aparece con
+                formatos distintos según el documento.
+              </span>
+            </div>
+          </div>
+
+          {/* F9.154 §3 — corte de imputación. Solo Ingresos: el sueldo entra entre el 28 y el 3 y
+              sin corte la misma quincena caía un mes distinto cada vez. Vacío = sin corte. */}
+          {tipoF === 'Ingreso' && (
+            <div className="cfg-form-fila">
+              <div className="cfg-campo">
+                <label>Día de corte de imputación (opcional)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={diaCorte}
+                  onChange={e => setDiaCorte(e.target.value)}
+                  placeholder="ej. 25"
+                />
+                <span className="cfg-ayuda">
+                  {diaCorte && Number(diaCorte) >= 1 && Number(diaCorte) <= 31
+                    ? `Lo que entre del ${diaCorte} en adelante cuenta en el mes de la fecha; lo que entre antes del ${diaCorte}, en el mes anterior.`
+                    : 'Vacío: el movimiento cuenta en el mes de su fecha, como siempre.'}
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* periodicidad + toggles */}
           <div className="cfg-form-fila">

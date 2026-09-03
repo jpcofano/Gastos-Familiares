@@ -339,3 +339,13 @@
   cursor: pointer;
 }
 .cfg-btn-pri:hover:not(:disabled) { background: var(--color-primary-dark); }
+
+/* F9.154 §3/§2 — texto de ayuda debajo de un campo del formulario. */
+.cfg-ayuda {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #6b7280;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}

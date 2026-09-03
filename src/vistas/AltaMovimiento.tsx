@@ -49,6 +49,9 @@ interface Preload {
   vencimientos?: Array<{ fecha: string | null; monto: number | null }> | null;
   // F6.x descartar — stamp de procedencia
   origenComprobanteId?: string;
+  // F9.154 §3 — mes de imputación ya resuelto (por el `diaCorteImputacion` del ítem esperado).
+  // Si viene, gana sobre el mes de la fecha y queda fijado: editar la fecha no lo recalcula.
+  mes?: string;
 }
 
 function generarNumeroManual(fecha: string, texto: string): string {
@@ -109,8 +112,11 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
     () => (preload?.fecha ?? hoyISO()) > hoyISO()
   );
   // F9.118 — mes de imputación: sigue a la fecha hasta que alguien lo fije a mano.
-  const [mesImputacion, setMesImputacion] = useState(() => (preload?.fecha ?? hoyISO()).slice(0, 7));
-  const [mesTocado,     setMesTocado]     = useState(false);
+  // F9.154 §3 — `preload.mes` es ese "alguien": el server ya resolvió el mes con el día de corte
+  // del ítem esperado (el sueldo que entra el 1 de septiembre cuenta en agosto). Llega ya fijado,
+  // así que el efecto de abajo no lo pisa cuando cambia la fecha.
+  const [mesImputacion, setMesImputacion] = useState(() => preload?.mes ?? (preload?.fecha ?? hoyISO()).slice(0, 7));
+  const [mesTocado,     setMesTocado]     = useState(!!preload?.mes);
   const mesDeFecha = fecha.slice(0, 7);
 
   // F9.118 — sin pin, el mes de imputación sigue a la fecha.

@@ -12,6 +12,7 @@ import {
   normalizarDestino,
   reconciliarPorPayee,
   reconciliarPorNombre,
+  mesImputado,
   type DatosExtractosMin,
   type MovimientoMin,
   type ItemEsperadoMin,
@@ -21,6 +22,8 @@ import { normalizar, type NormRule } from './normalizador';
 // F9.152 §1 — el media_type sale de los bytes, no del string que declaró el cliente. Ver el
 // encabezado de tipoArchivo.ts para el porqué (dos 400 en producción, 2026-08-31 y 2026-09-02).
 import { detectarTipoReal, motivoFormatoNoSoportado } from './tipoArchivo';
+// F9.154 §1.b — piso determinístico para el año de los vencimientos. Ver el encabezado del módulo.
+import { corregirAnioVencimientos, type Vencimiento } from './fechasVencimiento';
 import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
 import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 import { backfillTc } from './tcBackfill';
@@ -70,13 +73,21 @@ REGLAS DURAS:
 - numeroOperacion: el número de operación / transacción / comprobante / factura. NO es el CUIT. NO es el monto. NO es la fecha.
 - Si el comprobante NO tiene número de operación real, generá un pseudo-número con formato YYYY-MM-<slug>. YYYY-MM: usá periodoFacturado si existe y es claro, sino la fecha de emisión. <slug>: comercio en minúsculas, sin espacios ni acentos. Ej: "2026-06-edesur".
 - moneda: "ARS" o "USD". Inferí por símbolo ($ = ARS salvo que diga USD / U$S / dólares), contexto y emisor. Ante la duda, "ARS".
-- fecha: ISO "YYYY-MM-DD" con año de 4 dígitos SIEMPRE. Es la fecha de emisión.
-  Si el documento NO muestra el año explícitamente (ej. "13/jun"), asumí el año tal que la fecha sea
-  la ocurrencia MÁS RECIENTE de ese día/mes que NO sea futura respecto de hoy. Ejemplos (hoy = 2026-06-16):
-  "13/jun" → 2026-06-13; "20/dic" → 2025-12-20 (porque dic 2026 todavía no pasó).
+- fecha: ISO "YYYY-MM-DD" con año de 4 dígitos SIEMPRE. Es la fecha de EMISIÓN.
+  Si el documento NO muestra el año explícitamente (ej. "13/jun"), elegí el año tal que la fecha sea
+  la ocurrencia de ese día/mes MÁS CERCANA A HOY QUE NO SEA FUTURA. Un documento no se emite mañana.
+  Ejemplos (hoy = 2026-06-16): "13/jun" → 2026-06-13; "20/dic" → 2025-12-20 (dic 2026 no pasó todavía).
   NUNCA elijas un año pasado arbitrario ni dejes un año por defecto.
-- Aplicá el mismo criterio de año (ocurrencia más reciente no futura respecto de hoy) a las fechas de
-  vencimientos[] y al YYYY-MM del pseudo-número / periodoFacturado cuando el año no esté explícito.
+- vencimientos[].fecha: REGLA DISTINTA de la de emisión, no la confundas. Si el año no está explícito
+  (ej. "Vence el 08/09"), elegí el año tal que la fecha sea la ocurrencia de ese día/mes MÁS CERCANA
+  A HOY EN VALOR ABSOLUTO, hacia adelante o hacia atrás. Un vencimiento futuro es lo NORMAL: no lo
+  corras al año pasado por ser futuro.
+  Ejemplos (hoy = 2026-09-03): "08/09" → 2026-09-08 (faltan 5 días; 2025-09-08 estaría a 360).
+  "14/09" → 2026-09-14 (faltan 11 días). Ejemplos de fin de año (hoy = 2027-01-05): "20/dic" →
+  2026-12-20 (16 días atrás, contra 349 adelante). Y (hoy = 2026-12-28): "05/01" → 2027-01-05
+  (8 días adelante, contra 357 atrás).
+- Al YYYY-MM del pseudo-número y de periodoFacturado, cuando el año no esté explícito, aplicá el
+  criterio de la EMISIÓN (el más reciente no futuro).
 - montoTotal: el monto del PRIMER vencimiento (pronto pago / monto base). NUNCA el segundo vencimiento (que lleva recargo). Si no hay vencimientos, montoTotal = total del documento.
 - EXPENSAS/CONSORCIO: Si el documento es una liquidación de expensas o consorcio (lista múltiples rubros del edificio: sueldos, cargas sociales, etc.), NO extraigas el total del edificio. Buscá la fila o sección de la unidad funcional UF 043 del titular (COFANO, Del Signo 4042) y extraé el monto a pagar de ESA unidad como montoTotal. Una sola unidad → un solo monto. Ignorá otras UF y los totales del consorcio. Si la UF 043 no figura en el documento, montoTotal = null.
 - comercioRazonSocial: razón social o nombre de fantasía del emisor.
@@ -208,6 +219,24 @@ async function procesarComprobante(
 
       if (typeof parsed.fecha === 'string' && parsed.fecha > hoy) {
         console.warn(`[procesarComprobante] ${compId} → fecha futura sospechosa: ${parsed.fecha} (hoy=${hoy})`);
+      }
+
+      // F9.154 §1.b — el guard de arriba mira solo la EMISIÓN y solo hacia adelante. El caso de
+      // Edenor pasó mudo justamente por eso: `fecha` era null y el error estaba en `vencimientos[]`
+      // hacia atrás, un año entero. Este guard es determinístico (sin modelo) y deja rastro.
+      // La referencia es la fecha de subida del comprobante, no `hoy`: para un reintento de un
+      // archivo viejo el anclaje correcto es cuándo entró, no cuándo se reprocesa.
+      const subidoEn = (comp.subidoEn as Timestamp | undefined)?.toDate() ?? new Date();
+      if (Array.isArray(parsed.vencimientos)) {
+        const { vencimientos: corregidos, correcciones } =
+          corregirAnioVencimientos(parsed.vencimientos as Vencimiento[], subidoEn);
+        for (const c of correcciones) {
+          console.warn(
+            `[procesarComprobante] ${compId} → vencimientos[${c.indice}].fecha corregida: ` +
+            `${c.antes} (${c.diasAntes} d de la subida) → ${c.despues} (${c.diasDespues} d)`,
+          );
+        }
+        if (correcciones.length > 0) parsed.vencimientos = corregidos;
       }
 
       await ref.update({
@@ -394,6 +423,9 @@ export const matchComprobante = onDocumentUpdated(
         subcategoria:  (data.subcategoria as string | null) ?? null,
         notas:         (data.notas        as string | null) ?? null,
         montoEsperado: (data.montoEsperado as number | null) ?? null,
+        // F9.154 §2/§3 — ausentes en los docs viejos ⇒ null, sin cambio de comportamiento.
+        clavesDesambiguacion: Array.isArray(data.clavesDesambiguacion) ? (data.clavesDesambiguacion as string[]) : null,
+        diaCorteImputacion: (data.diaCorteImputacion as number | null) ?? null,
       };
     });
 
@@ -465,7 +497,7 @@ export const matchComprobante = onDocumentUpdated(
     }
 
     // Rama destino: match por CBU/alias/nombre aprendido (prioridad sobre texto)
-    const propuestaDestino = await matchPorDestino(datos, movs, mesComp);
+    const propuestaDestino = await matchPorDestino(datos, movs, mesComp, items);
 
     // F6.9.7 (P2) — un destino CON itemEsperadoId (rama 2, incluido adicional) gana directo.
     // F9.106 — rama 1 (impaga del mismo item+mesPago: esta factura ES esa obligación) también
@@ -531,10 +563,75 @@ function idDestinoNorm(norm: string): string {
   return createHash('sha256').update(norm).digest('hex').slice(0, 24);
 }
 
+// F9.154 §2 — Desambiguación de un destino compartido por más de un ítem esperado.
+//
+// El problema: `destinos` tiene doc id `sha256(norm)` y UN solo `itemEsperadoId`. Dos ítems que
+// comparten emisor no pueden convivir. Casos reales: las dos boletas de AySA (`Casa › Agua` es el
+// departamento, `Auto › Agua` la cochera) y las dos acreditaciones de Accenture (mismo nombre, una
+// en ARS y otra en USD). Medido en producción: los dos suministros de AySA cayeron los dos en
+// `Casa › Agua` en dos ocasiones, y en una tercera uno fue a `Auto › Agua`.
+//
+// La forma es aditiva: un destino sin `desambiguacion` se comporta exactamente como antes.
+type Desambiguacion = {
+  campo:   'numeroCliente' | 'moneda';
+  valores: Record<string, string>;   // valor del campo → itemEsperadoId
+};
+
+// La clave se compara normalizada, y no es un lujo: en producción el MISMO suministro de AySA
+// aparece como "2651943" en la factura y como "000000002651943" en el aviso de deuda. Sin quitar
+// los ceros a la izquierda serían dos claves distintas y el usuario tendría que cargar las dos.
+// (El comprobante de PAGO trae "11115526643", que es el número de factura y no el de cliente: ese
+// no lo unifica ninguna normalización, hay que cargarlo como una clave más.)
+function normalizarClaveDesambiguacion(v: unknown): string {
+  return String(v ?? '').trim().toUpperCase().replace(/^0+(?=.)/, '');
+}
+
+function resolverItemDeDestino(
+  d: FirebaseFirestore.DocumentData,
+  datos: DatosExtractosMin,
+  items: ItemEsperadoMin[],
+): string | undefined {
+  const base = d.itemEsperadoId as string | undefined;
+
+  // 1) Mapa explícito en el doc de destino. Es el que manda: permite corregir a mano un caso que
+  //    las claves del ítem no cubran.
+  const des = d.desambiguacion as Desambiguacion | undefined;
+  if (des && (des.campo === 'numeroCliente' || des.campo === 'moneda') && des.valores) {
+    const valor = normalizarClaveDesambiguacion(
+      des.campo === 'moneda' ? datos.moneda : datos.numeroCliente,
+    );
+    if (valor) {
+      for (const [clave, item] of Object.entries(des.valores)) {
+        if (normalizarClaveDesambiguacion(clave) === valor) return item;
+      }
+    }
+  }
+
+  // 2) Claves cargadas en el propio ítem (la UI mínima de §2: un campo de texto por ítem). Se usa
+  //    solo si UNA sola lo reclama: dos ítems reclamando el mismo número es un error de carga y
+  //    resolverlo a la suerte sería peor que caer en el comportamiento de siempre.
+  const numero = normalizarClaveDesambiguacion(datos.numeroCliente);
+  if (numero) {
+    const reclaman = items.filter(i =>
+      i.activo && (i.clavesDesambiguacion ?? []).some(c => normalizarClaveDesambiguacion(c) === numero),
+    );
+    if (reclaman.length === 1) return reclaman[0].id;
+    if (reclaman.length > 1) {
+      console.warn(`[matchPorDestino] numeroCliente "${String(datos.numeroCliente)}" reclamado por ${reclaman.length} ítems (${reclaman.map(i => i.id).join(', ')}) — se ignora la desambiguación`);
+    }
+  }
+
+  // 3) Sin nada que desambigüe: el ítem del destino, como siempre.
+  return base;
+}
+
 async function matchPorDestino(
   datos: DatosExtractosMin,
   movs: MovimientoMin[],
   mesComp: string,
+  // F9.154 §3 — para leer el `diaCorteImputacion` del ítem que resuelva el destino. Ya venían
+  // cargados en el caller (`itemsSnap`), así que no agrega una lectura.
+  items: ItemEsperadoMin[],
 ): Promise<Omit<PropuestaMatch, 'calculadoEn'> | null> {
   const raws = [datos.destinoCbu, datos.destinoCuit, datos.destinoAlias, datos.destinoNombre]
     .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
@@ -550,14 +647,23 @@ async function matchPorDestino(
     const confianza = (d.confianza as number) ?? 0;
     if (confianza < 0.7) continue;
 
-    const itemId = (d.itemEsperadoId as string | undefined);
+    const itemId = resolverItemDeDestino(d, datos, items);
     if (itemId) {
       // F9.106 — tri-rama por mes de PAGO (mesComp ya viene resuelto a mesDePago para
       // obligaciones): sin obligación de este item en mesComp → crear; con una impaga →
       // esta factura ES esa obligación, reconciliar (no duplicar); con todas pagas →
       // segundo cargo real del mismo mes.
       const requiereConfirmacion = confianza < UMBRAL_AUTO;
-      const obligacionesDelMes = movs.filter(m => m.itemEsperadoId === itemId && m.mes === mesComp);
+      // F9.154 §3 — el corte de imputación es POR ÍTEM, y `mesComp` (index.ts, arriba) se calcula
+      // antes de saber qué ítem matcheó. Acá ya lo sabemos, así que se recalcula solo para este
+      // ítem. `mesComp` sigue siendo el default de todo lo demás.
+      const itemDoc = items.find(i => i.id === itemId);
+      const mesImputacion = mesImputado(datos.fecha, itemDoc?.diaCorteImputacion);
+      const mesEfectivo = mesImputacion ?? mesComp;
+      // Solo viaja al cliente si de verdad cambia algo; si no, el cliente sigue con su cálculo.
+      const extraMes = mesImputacion && mesImputacion !== mesComp ? { mesImputacion } : {};
+
+      const obligacionesDelMes = movs.filter(m => m.itemEsperadoId === itemId && m.mes === mesEfectivo);
       const impaga = obligacionesDelMes.find(m => !m.confirmadoPago);
       if (impaga) {
         return {
@@ -566,12 +672,13 @@ async function matchPorDestino(
           itemEsperadoId: itemId,
           origenDestino: true,
           origenReconciliacion: true,
+          ...extraMes,
         };
       }
       if (obligacionesDelMes.length === 0) {
-        return { rama: 2, itemEsperadoId: itemId, origenDestino: true, requiereConfirmacion, confianza };
+        return { rama: 2, itemEsperadoId: itemId, origenDestino: true, requiereConfirmacion, confianza, ...extraMes };
       }
-      // Todas las obligaciones de este item en mesComp ya están pagas → movimiento adicional real
+      // Todas las obligaciones de este item en el mes ya están pagas → movimiento adicional real
       return {
         rama: 2,
         itemEsperadoId: itemId,
@@ -579,6 +686,7 @@ async function matchPorDestino(
         origenDestino:        true,
         requiereConfirmacion,
         confianza,
+        ...extraMes,
         categoriaPrellena:    (d.categoria    as string | null) ?? null,
         subcategoriaPrellena: (d.subcategoria as string | null) ?? null,
         etiquetaPrellena:     (d.etiqueta     as string | null) ?? null,
@@ -3135,6 +3243,99 @@ export const desvincularDestinoItem = onCall(
     }
     console.log(`[desvincularDestinoItem] item=${itemEsperadoId} → limpiados=[${limpiados.join(',')}] (por ${email})`);
     return { ok: true, limpiados };
+  },
+);
+
+// F9.154 §4.d — reasignar el ítem esperado del movimiento que nació de un comprobante, desde el
+// badge de la card. Edición EN SU LUGAR: toca `itemEsperadoId` (y la categoría/subcategoría, que si
+// no quedarían contradiciendo al ítem nuevo) y nada más. No toca monto, fecha, mes ni `pagado`, así
+// que el total del resumen no se mueve.
+//
+// Restricción dura: solo sobre el movimiento que ESTE comprobante creó (`origenComprobanteId`). Si
+// el comprobante es el pago de una factura, el ítem no es suyo —es de la obligación, que nació de
+// otro documento— y para eso ya está "Asignar a otro gasto" en la card.
+export const reasignarItemDeComprobante = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { compId, itemEsperadoId } = (request.data ?? {}) as { compId?: string; itemEsperadoId?: string };
+    if (!compId) throw new HttpsError('invalid-argument', 'compId requerido');
+    if (!itemEsperadoId || typeof itemEsperadoId !== 'string') {
+      throw new HttpsError('invalid-argument', 'itemEsperadoId requerido');
+    }
+
+    const itemSnap = await db.collection('itemsEsperados').doc(itemEsperadoId).get();
+    if (!itemSnap.exists) throw new HttpsError('not-found', 'Ítem esperado no encontrado');
+    const item = itemSnap.data()!;
+
+    // El movimiento tiene que haber nacido de ESTE comprobante.
+    const movsSnap = await db.collection('movimientos').where('origenComprobanteId', '==', compId).get();
+    if (movsSnap.empty) {
+      throw new HttpsError('failed-precondition', 'Este comprobante no creó ningún movimiento — no hay nada que reasignar');
+    }
+    if (movsSnap.size > 1) {
+      throw new HttpsError('failed-precondition', `El comprobante tiene ${movsSnap.size} movimientos; reasignalos desde Movimientos`);
+    }
+    const movRef = movsSnap.docs[0].ref;
+    const mov    = movsSnap.docs[0].data();
+    const itemAnterior = (mov.itemEsperadoId as string | undefined) ?? null;
+    if (itemAnterior === itemEsperadoId) return { ok: true, sinCambios: true };
+
+    await movRef.update({
+      itemEsperadoId,
+      categoria:     (item.categoria    as string | null) ?? mov.categoria    ?? null,
+      subcategoria:  (item.subcategoria as string | null) ?? mov.subcategoria ?? null,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+
+    // Aprendizaje: desaprender el destino del ítem viejo y apuntarlo al nuevo. Mismo criterio que
+    // F9.109 — corregir sin desaprender deja al sistema proponiendo lo mismo la próxima vez.
+    const raws = [mov.destinoCbu, mov.destinoCuit, mov.destinoAlias, mov.destinoNombre]
+      .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
+    const reapuntados: string[] = [];
+    for (const raw of raws) {
+      const parsed = normalizarDestino(raw);
+      if (!parsed) continue;
+      const ref  = db.collection('destinos').doc(idDestinoNorm(parsed.norm));
+      const snap = await ref.get();
+      if (!snap.exists) continue;
+      const d = snap.data()!;
+      // §2 — si el destino desambigua, la corrección va en el mapa, no en el itemEsperadoId: pisar
+      // el id rompería al OTRO ítem que comparte este destino.
+      const des = d.desambiguacion as { campo?: string; valores?: Record<string, string> } | undefined;
+      if (des?.campo && des.valores) {
+        const clave = des.campo === 'moneda'
+          ? String(mov.moneda ?? '')
+          : String((mov.numeroCliente as string | undefined) ?? '');
+        if (!clave) continue;
+        await ref.update({
+          [`desambiguacion.valores.${clave}`]: itemEsperadoId,
+          actualizadoEn: FieldValue.serverTimestamp(),
+        });
+        reapuntados.push(`${ref.id}[${clave}]`);
+        continue;
+      }
+      // Sin desambiguación: solo se reapunta si el destino apuntaba al ítem viejo. Si apuntaba a
+      // otro, no es nuestro para pisarlo.
+      if (itemAnterior && d.itemEsperadoId !== itemAnterior) continue;
+      await ref.update({
+        itemEsperadoId,
+        categoria:     (item.categoria    as string | null) ?? null,
+        subcategoria:  (item.subcategoria as string | null) ?? null,
+        actualizadoEn: FieldValue.serverTimestamp(),
+      });
+      reapuntados.push(ref.id);
+    }
+
+    console.log(`[reasignarItemDeComprobante] ${compId} mov=${movRef.id} ${String(itemAnterior)} → ${itemEsperadoId} | destinos reapuntados=[${reapuntados.join(',')}] (por ${email})`);
+    return { ok: true, movimientoId: movRef.id, itemAnterior, reapuntados };
   },
 );
 

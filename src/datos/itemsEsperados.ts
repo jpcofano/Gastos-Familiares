@@ -26,6 +26,10 @@ export function docAItemEsperado(id: string, data: DocumentData): ExpectedItem {
       : null,
     periodicidad:   data.periodicidad   || 'mensual',
     pagoAutomatico: data.pagoAutomatico ?? false,
+    // F9.154 §2 — ausente en los docs viejos ⇒ null; el ítem no desambigua nada.
+    clavesDesambiguacion: Array.isArray(data.clavesDesambiguacion) ? data.clavesDesambiguacion : null,
+    // F9.154 §3 — null (o ausente en los docs viejos) = comportamiento de siempre.
+    diaCorteImputacion: data.diaCorteImputacion ?? null,
   };
 }
 
@@ -68,6 +72,10 @@ export interface NuevoItemEsperado {
   matchTexto: { incluye: string[]; excluye: string[] } | null;
   periodicidad: 'mensual' | 'bimestral' | 'trimestral' | 'anual' | 'unico';
   pagoAutomatico: boolean;
+  // F9.154 §2 — identificadores del ítem dentro de un emisor compartido.
+  clavesDesambiguacion: string[] | null;
+  // F9.154 §3 — solo tiene sentido en Ingresos; null = comportamiento de siempre.
+  diaCorteImputacion: number | null;
 }
 
 export async function crearItemEsperado(data: NuevoItemEsperado): Promise<Resultado<string>> {

@@ -13,6 +13,8 @@ export interface DatosExtractosMin {
   fecha: string | null;           // ISO YYYY-MM-DD
   comercioRazonSocial: string | null;
   vencimientos?: Array<{ fecha: string | null; monto: number | null }>;
+  // F9.154 §2 — campo de desambiguación de destinos compartidos (dos suministros del mismo emisor).
+  numeroCliente?: string | null;
   // F6.8
   destinoCbu?: string | null;
   destinoCuit?: string | null;
@@ -50,6 +52,10 @@ export interface ItemEsperadoMin {
   subcategoria: string | null;
   notas: string | null;
   montoEsperado: number | null;
+  // F9.154 §2 — identificadores propios del ítem dentro de un emisor compartido.
+  clavesDesambiguacion: string[] | null;
+  // F9.154 §3 — día de corte de imputación (solo Ingresos). null = comportamiento actual.
+  diaCorteImputacion: number | null;
 }
 
 export interface PropuestaMatch {
@@ -73,6 +79,9 @@ export interface PropuestaMatch {
   subcategoriaPrellena?: string | null;
   etiquetaPrellena?: string | null;
   dedupInfo?: { movId: string; mes: string | null; monto: number | null; item?: string | null };
+  // F9.154 §3 — mes al que se imputa, ya resuelto con el `diaCorteImputacion` del ítem que matcheó.
+  // Solo viaja cuando difiere del mes que el cliente calcularía solo; ver matchPorDestino.
+  mesImputacion?: string;
   // F6.9 — la rama 1 del flujo de comprobantes es siempre reconciliación por payee
   origenReconciliacion?: boolean;
   // F9.82 — pase débil por nombre: rama 1 candidatos, nunca auto-confirma
@@ -110,6 +119,21 @@ export function normalizarDestino(raw: string): { tipo: 'cbu' | 'cuit' | 'alias'
     .replace(/\s+/g, ' ');
   if (nombre.length >= 3) return { tipo: 'nombre', norm: nombre };
   return null;
+}
+
+// F9.154 §3 — mes al que se imputa un movimiento, dado el día de corte del ítem esperado.
+// Existe por el sueldo: entra entre el 28 y el 3, y sin corte la misma quincena caía un año en
+// agosto y otro en septiembre. Con corte N: día >= N → el mes de la fecha; día < N → el anterior.
+// `null` en cualquiera de los dos argumentos ⇒ null, y el caller usa el mes de siempre.
+export function mesImputado(fechaIso: string | null | undefined, diaCorte: number | null | undefined): string | null {
+  if (!fechaIso || diaCorte == null) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fechaIso);
+  if (!m) return null;
+  const [, anio, mes, dia] = m;
+  if (Number(dia) >= diaCorte) return `${anio}-${mes}`;
+  const d = new Date(Date.UTC(Number(anio), Number(mes) - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 const TOLERANCIA_MONTO = 0.05;

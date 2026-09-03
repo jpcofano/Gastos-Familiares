@@ -137,6 +137,15 @@ export interface ExpectedItem {
   matchTexto: MatchTexto | null;
   periodicidad: 'mensual' | 'bimestral' | 'trimestral' | 'anual' | 'unico';
   pagoAutomatico: boolean;
+  // F9.154 §2 — identificadores propios de ESTE ítem dentro de un emisor compartido (el número de
+  // suministro de AySA, por ejemplo). Sirven para desambiguar cuando dos ítems comparten destino.
+  // Se guardan varios porque el mismo suministro llega con formatos distintos según el documento:
+  // medido en producción, "2651943" en la factura y "000000002651943" en el aviso de deuda.
+  clavesDesambiguacion: string[] | null;
+  // F9.154 §3 — día de corte para imputar el movimiento a un mes. `null` = comportamiento de
+  // siempre (el mes sale de la fecha). Con corte N: día >= N → mes de la fecha; día < N → mes
+  // anterior. Existe por el sueldo, que entra entre el 28 y el 3 y caía un mes distinto cada vez.
+  diaCorteImputacion: number | null;
 }
 
 export interface DatosExtraidos {
@@ -158,10 +167,19 @@ export interface DatosExtraidos {
   destinoNombre?: string | null;     // nombre/razón social del destinatario
 }
 
+// F9.154 §2 — un destino compartido por dos ítems esperados (los dos suministros de AySA, las dos
+// acreditaciones de Accenture) se resuelve mirando un campo del comprobante. Sin este objeto el
+// destino se comporta como siempre: `itemEsperadoId` y listo.
+export interface DesambiguacionDestino {
+  campo:   'numeroCliente' | 'moneda';
+  valores: Record<string, string>;   // valor del campo → itemEsperadoId
+}
+
 export interface Destino {
   destinoNorm: string;
   tipo: 'cbu' | 'cuit' | 'alias' | 'nombre';
   itemEsperadoId?: string;
+  desambiguacion?: DesambiguacionDestino;
   categoria?: string;
   subcategoria?: string;
   etiqueta?: string;
@@ -191,6 +209,8 @@ export interface PropuestaMatch {
   subcategoriaPrellena?: string | null;
   etiquetaPrellena?: string | null;
   dedupInfo?: { movId: string; mes: string | null; monto: number | null; item?: string | null };
+  // F9.154 §3 — mes de imputación ya resuelto por el server con el corte del ítem que matcheó.
+  mesImputacion?: string;
   // F6.9 — la rama 1 del flujo de comprobantes es siempre reconciliación por payee
   origenReconciliacion?: boolean;
   // F9.82 — pase débil por nombre: rama 1 candidatos, nunca auto-confirma

@@ -284,3 +284,19 @@ export async function reintentarComprobante(comprobanteId: string): Promise<Resu
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
 }
+
+// ── Reasignar ítem esperado (F9.154 §4.d) ────────────────────────────────────
+// Edición en su lugar del movimiento que ESTE comprobante creó. El callable rechaza si el
+// comprobante no lo creó (`origenComprobanteId`), que es la restricción del §4.d.
+export async function reasignarItemDeComprobante(
+  compId: string,
+  itemEsperadoId: string,
+): Promise<Resultado<void>> {
+  try {
+    const fn = httpsCallable(functions, 'reasignarItemDeComprobante');
+    await fn({ compId, itemEsperadoId });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}

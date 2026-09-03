@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, type ObligacionAbierta } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, reasignarItemDeComprobante, type ObligacionAbierta } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -78,31 +78,130 @@ function BadgeEntrante({ estado }: { estado: string }) {
 // F6.9.8 — etiqueta persistente de la razón del match en el card ya resuelto.
 // Lee propuestaMatch (sobrevive al estado vinculado: confirmarRama1/cargarMovimientoDesdeComprobante
 // solo tocan `estado`) para conservar el "por qué" después de resolver.
-function RazonVinculado({ pm, d, items }: { pm: Comprobante['propuestaMatch']; d?: DatosExtraidos; items: ExpectedItem[] }) {
+// F9.154 §4.d — ¿este comprobante CREÓ el movimiento? Es la condición para poder reasignarle el
+// ítem desde el badge. Espejo client-side de la guarda real del callable (`origenComprobanteId`);
+// si el proxy se equivoca, el server rechaza con failed-precondition y no rompe nada.
+// Rama 1 se colgó de una obligación preexistente y `origenSuelto` de un movimiento ya cargado: en
+// esos dos el ítem no es de este comprobante y ya existe "Asignar a otro gasto".
+function comprobanteCreoElMovimiento(pm: NonNullable<Comprobante['propuestaMatch']>): boolean {
+  if (pm.rama !== 2 && pm.rama !== 3) return false;
+  return !pm.origenSuelto && !pm.origenReconciliacion;
+}
+
+function RazonVinculado(
+  { pm, d, items, comp, esAdmin }:
+  { pm: Comprobante['propuestaMatch']; d?: DatosExtraidos; items: ExpectedItem[]; comp?: Comprobante; esAdmin?: boolean },
+) {
+  const [abierto,   setAbierto]   = useState(false);
+  const [sel,       setSel]       = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [errItem,   setErrItem]   = useState<string | null>(null);
   if (!pm) return null;
   let texto: string;
   let tone: 'info' | 'success' | 'neutral';
+
+  // F9.154 §4.b — ítem y mes SIEMPRE que se puedan decir, no solo en la rama automática. Antes la
+  // única salida informativa era aquella en la que el usuario no había participado: apenas
+  // confirmaba algo a mano, el badge se degradaba a "Cumplió un gasto esperado" y perdía todo.
+  const item    = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
+  const nombreItem = item
+    ? ([item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || item.id)
+    : (pm.itemEsperadoId ?? null);
+  // F9.154 §3 — el mes que decidió el server con el corte del ítem le gana al de la fecha.
+  const mesPago = pm.mesImputacion ?? (d ? (d.vencimientos?.[0]?.fecha ?? d.fecha)?.slice(0, 7) ?? null : null);
+  const sufijo  = [nombreItem, mesPago ? formatMesCorto(mesPago) : null].filter(Boolean).join(' · ');
+  const con     = (base: string) => sufijo ? `${base} · ${sufijo}` : base;
+
   switch (pm.rama) {
     case 0: texto = 'Ya cargado'; tone = 'neutral'; break;
-    case 1: texto = pm.origenReconciliacion ? 'Pagó una factura' : 'Vinculado a un movimiento'; tone = 'info'; break;
+    // F9.154 §4.c — el mismo hecho tenía dos nombres: "Pagó una obligación" antes de confirmar y
+    // "Pagó una factura" después. Es uno solo.
+    case 1: texto = pm.origenReconciliacion ? con('Pagó una obligación') : 'Vinculado a un movimiento'; tone = 'info'; break;
     case 2: {
-      if (pm.origenSuelto) { texto = 'Saldó un gasto suelto'; tone = 'success'; break; }
-      if (pm.esAdicional)  { texto = 'Pago adicional';        tone = 'success'; break; }
-      // F9.106 — distingue la alta silenciosa (confianza ≥ UMBRAL_AUTO) de la confirmada a mano
-      const mesPago = d ? (d.vencimientos?.[0]?.fecha ?? d.fecha) : null;
-      if (pm.requiereConfirmacion === false && mesPago) {
-        const item = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
-        const label = item ? ([item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || item.id) : 'gasto esperado';
-        texto = `Asignado automáticamente a ${label} · ${formatMesCorto(mesPago.slice(0, 7))}`;
+      // F9.154 §4.a — este comprobante se colgó de un movimiento que YA existía. Es la diferencia
+      // que decide si descartarlo borra plata: `descartarEntrada` solo borra el movimiento cuando
+      // `origenComprobanteId` coincide. Antes decía lo mismo que la rama 3, que sí lo creó.
+      if (pm.origenSuelto) { texto = con('Se adjuntó a un gasto ya cargado'); tone = 'success'; break; }
+      if (pm.esAdicional)  { texto = con('Pago adicional');                   tone = 'success'; break; }
+      // F9.106 — distingue la alta silenciosa (confianza ≥ UMBRAL_AUTO) de la confirmada a mano.
+      if (pm.requiereConfirmacion === false && sufijo) {
+        texto = `Asignado automáticamente a ${sufijo}`;
         tone = 'success';
         break;
       }
-      texto = 'Cumplió un gasto esperado'; tone = 'success'; break;
+      // F9.154 §4.b — "Cumplió un gasto esperado" mentía: Edenor no cumplió nada, creó una
+      // obligación impaga. El verbo ahora dice lo que pasó.
+      texto = con('Creó la obligación'); tone = 'success'; break;
     }
-    case 3: texto = pm.origenSuelto ? 'Saldó un gasto suelto' : 'Cargado como nuevo'; tone = 'success'; break;
+    // F9.154 §4.a — rama 3 con `origenSuelto` sí saldó un movimiento preexistente; sin él, este
+    // comprobante creó el movimiento. Dos textos, porque son dos cosas.
+    case 3: texto = pm.origenSuelto ? con('Saldó un gasto ya cargado') : con('Cargado como movimiento nuevo'); tone = 'success'; break;
     default: return null;
   }
-  return <Badge tone={tone}>{texto}</Badge>;
+
+  // F9.154 §4.d — el badge ES el botón: un tap abre la reasignación, sin modo de edición ni estado
+  // escondido. Edición en su lugar (update de `itemEsperadoId`), no revertir y recrear.
+  const editable = !!comp && !!esAdmin && comprobanteCreoElMovimiento(pm);
+  if (!editable) return <Badge tone={tone}>{texto}</Badge>;
+
+  const candidatos = items
+    .filter(i => i.activo && i.id !== pm.itemEsperadoId)
+    .sort((a, b) => `${a.categoria} ${a.subcategoria}`.localeCompare(`${b.categoria} ${b.subcategoria}`));
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <button
+        type="button"
+        onClick={() => { setAbierto(o => !o); setErrItem(null); }}
+        title="Cambiar el gasto esperado de este movimiento"
+        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start' }}
+      >
+        <Badge tone={tone}>{texto}</Badge>
+        <Icon name={abierto ? 'chevron-up' : 'chevron-down'} size={13} color="var(--color-text-sec)" />
+      </button>
+
+      {abierto && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Mover a otro gasto esperado</span>
+          <select
+            value={sel}
+            onChange={e => setSel(e.target.value)}
+            style={{ fontSize: 13, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+          >
+            <option value="">Elegí un ítem…</option>
+            {candidatos.map(i => (
+              <option key={i.id} value={i.id}>
+                {[i.categoria, i.subcategoria].filter(Boolean).join(' › ') || i.notas || i.id}
+                {i.moneda !== 'ARS' ? ` (${i.moneda})` : ''}
+              </option>
+            ))}
+          </select>
+          <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>
+            Cambia el gasto esperado y la categoría. No toca el monto, la fecha ni el mes.
+          </span>
+          {errItem && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errItem}</span>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              variant="primary" size="sm"
+              disabled={!sel || guardando}
+              onClick={async () => {
+                if (!sel || !comp) return;
+                setGuardando(true);
+                setErrItem(null);
+                const res = await reasignarItemDeComprobante(comp.id, sel);
+                setGuardando(false);
+                if (!res.ok) setErrItem(res.error.message);
+                else { setAbierto(false); setSel(''); }
+              }}
+            >
+              {guardando ? 'Moviendo…' : 'Mover'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => { setAbierto(false); setSel(''); }}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Helpers de datos ──────────────────────────────────────────────────────────
@@ -296,7 +395,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
       const esDebil  = pm.reconciliacionDebil === true;
       return (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Badge tone={esDebil ? 'warning' : 'info'}>{esDebil ? 'Posible pago de factura' : 'Pagó una obligación'}</Badge>
+          <Badge tone={esDebil ? 'warning' : 'info'}>{esDebil ? 'Posible pago de una obligación' : 'Pagó una obligación'}</Badge>
           <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>{esDebil ? 'Coincidencia por nombre — confirmá si corresponde' : 'Este pago salda una obligación abierta — elegí cuál movimiento'}</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {movCands.map(c => (
@@ -338,7 +437,9 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
           <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errorLocal}</span>
         ) : pm.origenReconciliacion ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <Badge tone="info">Pagó una factura</Badge>
+            {/* F9.154 §4.c — decía "Pagó una factura" acá y "Pagó una obligación" antes de
+                confirmar. Mismo hecho, un solo nombre. */}
+            <Badge tone="info">Pagó una obligación</Badge>
             <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
               {confirmando ? 'Reconciliando con la obligación abierta…' : 'Saldó una obligación abierta — no se creó un movimiento nuevo'}
             </span>
@@ -359,7 +460,10 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
   // F9.106 — mes de pago default (1er vencimiento, fallback emisión) + override manual del
   // usuario en la banda de confirmación (0.7-0.9). fechaEfectiva mueve solo el mes, preserva el día.
   const fechaOriginal   = d.vencimientos?.[0]?.fecha ?? d.fecha ?? null;
-  const mesPagoDefault  = fechaOriginal ? fechaOriginal.slice(0, 7) : new Date().toISOString().slice(0, 7);
+  // F9.154 §3 — si el ítem que matcheó tiene día de corte, el server ya resolvió a qué mes va y lo
+  // manda en `mesImputacion`. Sin corte el campo no viaja y esto queda exactamente como antes.
+  const mesPagoDefault  = pm.mesImputacion
+    ?? (fechaOriginal ? fechaOriginal.slice(0, 7) : new Date().toISOString().slice(0, 7));
   const mesPagoEfectivo = mesElegido || mesPagoDefault;
   const fechaEfectiva   = fechaOriginal && mesPagoEfectivo !== mesPagoDefault
     ? ajustarFechaAlMes(fechaOriginal, mesPagoEfectivo)
@@ -368,6 +472,9 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
   const preloadBase = {
     tipo:                'Gasto' as const,
     fecha:               fechaEfectiva ?? undefined,
+    // F9.154 §3 — el mes que resolvió el server con el día de corte del ítem. Sin corte no viaja y
+    // AltaMovimiento sigue derivando el mes de la fecha, como siempre.
+    mes:                 pm.mesImputacion,
     descripcion:         descripcionFinal,
     descripcionOriginal: (descripcionCruda && descripcionFinal !== descripcionCruda) ? descripcionCruda : undefined,
     moneda:              d.moneda,
@@ -885,7 +992,7 @@ function ComprobanteCard({
       )}
       {comp.estado === 'vinculado' && comp.propuestaMatch && (
         <div style={{ marginTop: 8 }}>
-          <RazonVinculado pm={comp.propuestaMatch} d={comp.datosExtraidos} items={items} />
+          <RazonVinculado pm={comp.propuestaMatch} d={comp.datosExtraidos} items={items} comp={comp} esAdmin={esAdmin} />
         </div>
       )}
     </Card>
@@ -1010,7 +1117,8 @@ function construirBadgeFactura(pm: PropuestaMatch, items: ExpectedItem[]): Badge
     case 0:
       return { titulo: 'Ya cargado', sub: 'Este archivo ya había generado un movimiento', match: false };
     case 1:
-      return { titulo: 'Pagó una factura', sub: 'Se concilia con una obligación abierta', match: true };
+      // F9.154 §4.c — mismo nombre que el badge de la card y que RazonVinculado.
+      return { titulo: 'Pagó una obligación', sub: 'Se concilia con una obligación abierta', match: true };
     case 2: {
       const item = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
       const nombre = item
