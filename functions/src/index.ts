@@ -1357,7 +1357,8 @@ const MARCADORES_GENERICOS = [
 const MARCADORES_DECISIVOS = [
   'PAGO MINIMO', 'LIMITE DE COMPRA', 'LIMITE DE CREDITO',
 ];
-// PAN enmascarado tipo "4509 XX** **** 1234" o "XXXX XXXX XXXX 1234"
+// PAN enmascarado tipo "4509 XX** **** 1234" o "XXXX XXXX XXXX 1234".
+// F9.153 §2 — NO es decisivo: una factura pagada con tarjeta también lo muestra. Ver contarMarcadores.
 const RE_PAN_ENMASCARADO = /\d{4}[\s*X]{4,10}\d{4}/;
 
 function normalizarParaDeteccion(s: string): string {
@@ -1374,7 +1375,16 @@ function contarMarcadores(texto: string): { count: number; hits: string[]; tiene
   for (const m of MARCADORES_DECISIVOS) {
     if (norm.includes(m)) { hits.push(m); tieneDecisivo = true; }
   }
-  if (RE_PAN_ENMASCARADO.test(texto)) { hits.push('pan_enmascarado'); tieneDecisivo = true; }
+  // F9.153 §2 — `pan_enmascarado` era DECISIVO y por lo tanto podía rutear solo. En los 70 PDF de
+  // producción produjo 1 falso positivo (una factura del Colegio pagada con tarjeta, que muestra el
+  // PAN) y 0 aciertos únicos: nunca fue el único marcador de un resumen de verdad. Ahora suma a
+  // `hits` y a `count` como genérico, sin poder de decisión propio. Importa junto con el §1: leer 3
+  // páginas hace más probable encontrar un genérico en la 2, y con el PAN decisivo esa factura
+  // habría pasado de `ambiguo` visible a `resumen` en silencio.
+  // §3 — el test va sobre `norm`, como el resto de los marcadores; antes iba sobre `texto` crudo y
+  // el regex exige `X` mayúscula, así que un PAN con `x` minúscula no matcheaba. Medido antes de
+  // aplicarlo sobre los 70 PDF: 0 cambian de destino y 0 cambian sus marcadores detectados.
+  if (RE_PAN_ENMASCARADO.test(norm)) { hits.push('pan_enmascarado'); }
   return { count: hits.length, hits, tieneDecisivo };
 }
 
@@ -1502,22 +1512,28 @@ export const routearEntrante = onDocumentCreated(
         motivoDeteccion = 'imagen → comprobante directo';
       } else {
         const [fileBytes] = await storage.bucket().file(rutaStorage).download();
-        let textoPag1 = '';
+        // F9.153 §1 — eran 3 páginas, no 1. Con `{max:1}` un resumen de tarjeta cuya página 1 trae
+        // solo `PAGO MINIMO` quedaba en `ambiguo` y había que resolverlo a mano: `VENCIMIENTO`,
+        // `CIERRE` y `TOTAL A PAGAR` caen en las páginas 2+. Medido sobre los 70 PDF de producción:
+        // cambian de destino 3 (los 3 resúmenes que estaban varados en `ambiguo`), los otros 67 no
+        // se mueven, y ninguno de los que hoy va al fallback de visión deja de ir.
+        // El nombre `textoPag1` dejó de ser cierto y por eso cambia acá y en sus 3 usos.
+        let textoCabecera = '';
 
         try {
-          const pdfData = await pdfParse(fileBytes as Buffer, { max: 1 });
-          textoPag1 = pdfData.text;
+          const pdfData = await pdfParse(fileBytes as Buffer, { max: 3 });
+          textoCabecera = pdfData.text;
         } catch {
           // Sin texto extraíble → fallback visión
         }
 
-        if (textoPag1.trim().length < 50) {
+        if (textoCabecera.trim().length < 50) {
           const base64 = (fileBytes as Buffer).toString('base64');
           const client = new Anthropic({ apiKey: anthropicKey.value() });
           tipoDetectado   = await clasificarConVision(base64, client);
           motivoDeteccion = `sin_texto → vision → ${tipoDetectado}`;
         } else {
-          const { count, hits, tieneDecisivo } = contarMarcadores(textoPag1);
+          const { count, hits, tieneDecisivo } = contarMarcadores(textoCabecera);
           if (tieneDecisivo && count >= 2) {
             tipoDetectado   = 'resumen';
             motivoDeteccion = `${count} marcadores (decisivo): ${hits.join(', ')}`;
