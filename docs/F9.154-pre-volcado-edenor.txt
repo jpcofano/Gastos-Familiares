@@ -1,0 +1,322 @@
+=== (a) comprobantes de Edenor y Metrogas: 7 ===
+
+0c5d5e5a | vinculado | null | 283024.45 | ARS | recibo_servicio
+  hash completo       = 0c5d5e5ac2d9117dba3eb07155ff94a1fd87d88904a034deaf2843cde41e3533
+  nombreArchivo       = Screenshot_20260903_002126_Personal Pay.jpg
+  subidoEn            = 2026-09-03T03:22:13.000Z
+  comercioRazonSocial = Edenor
+  numeroCliente       = 007497140070
+  numeroOperacion     = 2025-09-edenor
+  periodoFacturado    = null
+  vencimientos        = [{"fecha":"2025-09-08","monto":283024.45}]
+  cuit                = null
+  destinoCuit         = null
+  destinoNombre       = Edenor
+  destinoCbu          = null
+  destinoAlias        = null
+  propuestaMatch      = {
+    "rama": 2,
+    "itemEsperadoId": "1d186f3b678a358a4af1",
+    "origenDestino": true,
+    "requiereConfirmacion": true,
+    "confianza": 0.8,
+    "calculadoEn": "2026-09-03T03:22:40.000Z"
+}
+
+9c77b6fc | vinculado | null | 5303.18 | ARS | recibo_servicio
+  hash completo       = 9c77b6fc720543d9c8aec69775e977f228cacb375ed4b585f80ffce3dd1ca157
+  nombreArchivo       = Screenshot_20260714_151533_Personal Pay.jpg
+  subidoEn            = 2026-07-14T18:16:04.000Z
+  comercioRazonSocial = Metrogas
+  numeroCliente       = 010372743000
+  numeroOperacion     = 2026-07-metrogas
+  periodoFacturado    = null
+  vencimientos        = [{"fecha":"2026-07-20","monto":5303.18}]
+  cuit                = null
+  destinoCuit         = null
+  destinoNombre       = Metrogas
+  destinoCbu          = null
+  destinoAlias        = null
+  propuestaMatch      = {
+    "rama": 2,
+    "itemEsperadoId": "eb8e59f225ed73b785b6",
+    "calculadoEn": "2026-07-14T18:16:27.000Z"
+}
+
+a650c026 | vinculado | null | 5291.83 | ARS | recibo_servicio
+  hash completo       = a650c026283b8a0d8a1a1acd16176eed38e8237a78790ae1b3ace567e29b23a0
+  nombreArchivo       = Screenshot_20260903_002947_Personal Pay.jpg
+  subidoEn            = 2026-09-03T03:30:11.000Z
+  comercioRazonSocial = Metrogas
+  numeroCliente       = 010372743000
+  numeroOperacion     = 2026-09-metrogas
+  periodoFacturado    = null
+  vencimientos        = [{"fecha":"2026-09-14","monto":5291.83}]
+  cuit                = null
+  destinoCuit         = null
+  destinoNombre       = Metrogas
+  destinoCbu          = null
+  destinoAlias        = null
+  propuestaMatch      = {
+    "rama": 2,
+    "itemEsperadoId": "eb8e59f225ed73b785b6",
+    "origenDestino": true,
+    "requiereConfirmacion": true,
+    "confianza": 0.8,
+    "calculadoEn": "2026-09-03T03:30:21.000Z"
+}
+
+811a6b00 | vinculado | 2026-06-24 | 269778.85 | ARS | recibo_servicio
+  hash completo       = 811a6b00c3a84a95ec1a2ad7293f4bab1f9fbf7b23f96f042630a9619ce1576b
+  nombreArchivo       = 7497140070_06-2026_factura_01_07_2026-19_30_01.pdf
+  subidoEn            = 2026-07-01T19:34:13.000Z
+  comercioRazonSocial = Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)
+  numeroCliente       = 7497140070
+  numeroOperacion     = 0027-40949520
+  periodoFacturado    = 2026-06
+  vencimientos        = [{"fecha":"2026-07-08","monto":269778.85},{"fecha":"2026-07-13","monto":270322.59}]
+  cuit                = null
+  destinoCuit         = null
+  destinoNombre       = Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)
+  destinoCbu          = null
+  destinoAlias        = null
+  propuestaMatch      = {
+    "rama": 2,
+    "itemEsperadoId": "1d186f3b678a358a4af1",
+    "calculadoEn": "2026-07-01T19:34:23.000Z"
+}
+
+d779a9de | vinculado | 2026-07-04 | 269778.85 | ARS | comprobante_pago
+  hash completo       = d779a9dedd6283c74da89513bda1524fe4f545b849b816f51ec2e3126a755c72
+  nombreArchivo       = ppay_operacion2712906238913809743.pdf
+  subidoEn            = 2026-07-04T17:07:07.000Z
+  comercioRazonSocial = Edenor
+  numeroCliente       = 007497140070
+  numeroOperacion     = 2818738011
+  periodoFacturado    = null
+  vencimientos        = []
+  cuit                = 30-57297583-1
+  destinoCuit         = null
+  destinoNombre       = Edenor
+  destinoCbu          = null
+  destinoAlias        = null
+  propuestaMatch      = {
+    "rama": 1,
+    "candidatos": [
+        {
+            "tipo": "movimiento",
+            "id": "03VbpjjxMOLaLizjMERv",
+            "score": 0,
+            "descripcion": "Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)",
+            "monto": 269778.85,
+            "moneda": "ARS",
+            "fecha": "2026-07-08"
+        }
+    ],
+    "origenReconciliacion": true,
+    "reconciliacionDebil": true,
+    "calculadoEn": "2026-07-04T17:07:25.000Z"
+}
+
+2472c965 | vinculado | 2026-07-21 | 5303.18 | ARS | comprobante_pago
+  hash completo       = 2472c9656501303b9d77b767040a4f5945d5303c4893f0e751e8e0f56c85ffbe
+  nombreArchivo       = ppay_operacion8634176015423763021.pdf
+  subidoEn            = 2026-07-21T05:11:59.000Z
+  comercioRazonSocial = Metrogas
+  numeroCliente       = 010372743000
+  numeroOperacion     = 2879294168
+  periodoFacturado    = null
+  vencimientos        = []
+  cuit                = 30-57297583-1
+  destinoCuit         = null
+  destinoNombre       = Metrogas
+  destinoCbu          = null
+  destinoAlias        = null
+  propuestaMatch      = {
+    "rama": 1,
+    "candidatos": [
+        {
+            "tipo": "movimiento",
+            "id": "bfREmHyiQhx0Y9zOCBdq",
+            "score": 0,
+            "descripcion": "Metrogas",
+            "monto": 5303.18,
+            "moneda": "ARS",
+            "fecha": "2026-07-20"
+        }
+    ],
+    "origenReconciliacion": true,
+    "reconciliacionDebil": true,
+    "calculadoEn": "2026-07-21T05:12:09.000Z"
+}
+
+3be2e9fd | vinculado | 2026-07-24 | 136533.05 | ARS | recibo_servicio
+  hash completo       = 3be2e9fd08fc2de6bda41c3a292bb67cb905f2d8a07a08f9ec354af213d3a112
+  nombreArchivo       = 7497140070_07-2026_factura_28_07_2026-13_33_12.pdf
+  subidoEn            = 2026-07-29T19:37:17.000Z
+  comercioRazonSocial = Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)
+  numeroCliente       = 7497140070
+  numeroOperacion     = 0027-46778665
+  periodoFacturado    = 2026-06
+  vencimientos        = [{"fecha":"2026-08-07","monto":136533.05},{"fecha":"2026-08-12","monto":137078.95}]
+  cuit                = 30-65511620-2
+  destinoCuit         = 30655116202
+  destinoNombre       = Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)
+  destinoCbu          = null
+  destinoAlias        = null
+  propuestaMatch      = {
+    "rama": 2,
+    "itemEsperadoId": "1d186f3b678a358a4af1",
+    "origenDestino": true,
+    "requiereConfirmacion": true,
+    "confianza": 0.8,
+    "calculadoEn": "2026-07-29T19:37:41.000Z"
+}
+
+=== (b) movimientos con hashPdf u origenComprobanteId de esos comprobantes ===
+
+0c5d5e5a (Edenor, null): 1 movimiento(s)
+  id=txR7p78rluNKrRaArkTc
+    mes=2025-09 | monto=283024.45 ARS | tipo=Gasto | descripcion=Edenor
+    itemEsperadoId=1d186f3b678a358a4af1 | confirmadoPago=false | pagado=false
+    origenComprobanteId=0c5d5e5ac2d9117dba3eb07155ff94a1fd87d88904a034deaf2843cde41e3533 | hashPdf=0c5d5e5ac2d9…
+    fecha=2025-09-08T15:00:00.000Z | categoria=Casa > Luz | vencimientos=[{"monto":283024.45,"fecha":"2025-09-08"}]
+
+9c77b6fc (Metrogas, null): 1 movimiento(s)
+  id=bfREmHyiQhx0Y9zOCBdq
+    mes=2026-07 | monto=5303.18 ARS | tipo=Gasto | descripcion=Metrogas
+    itemEsperadoId=eb8e59f225ed73b785b6 | confirmadoPago=true | pagado=true
+    origenComprobanteId=9c77b6fc720543d9c8aec69775e977f228cacb375ed4b585f80ffce3dd1ca157 | hashPdf=2472c9656501…
+    fecha=2026-07-20T15:00:00.000Z | categoria=Casa > Gas | vencimientos=[{"monto":5303.18,"fecha":"2026-07-20"}]
+
+a650c026 (Metrogas, null): 1 movimiento(s)
+  id=yR4NiHeWwX87trZMTVQw
+    mes=2026-09 | monto=5291.83 ARS | tipo=Gasto | descripcion=Metrogas
+    itemEsperadoId=eb8e59f225ed73b785b6 | confirmadoPago=false | pagado=false
+    origenComprobanteId=a650c026283b8a0d8a1a1acd16176eed38e8237a78790ae1b3ace567e29b23a0 | hashPdf=a650c026283b…
+    fecha=2026-09-14T15:00:00.000Z | categoria=Casa > Gas | vencimientos=[{"fecha":"2026-09-14","monto":5291.83}]
+
+811a6b00 (Empresa Distribuidora y Comercializadora Norte S.A. (Edenor), 2026-06-24): 1 movimiento(s)
+  id=03VbpjjxMOLaLizjMERv
+    mes=2026-07 | monto=269778.85 ARS | tipo=Gasto | descripcion=Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)
+    itemEsperadoId=1d186f3b678a358a4af1 | confirmadoPago=true | pagado=true
+    origenComprobanteId=811a6b00c3a84a95ec1a2ad7293f4bab1f9fbf7b23f96f042630a9619ce1576b | hashPdf=d779a9dedd62…
+    fecha=2026-07-08T15:00:00.000Z | categoria=Casa > Luz | vencimientos=[{"fecha":"2026-07-08","monto":269778.85},{"fecha":"2026-07-13","monto":270322.59}]
+
+d779a9de (Edenor, 2026-07-04): 1 movimiento(s)
+  id=03VbpjjxMOLaLizjMERv
+    mes=2026-07 | monto=269778.85 ARS | tipo=Gasto | descripcion=Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)
+    itemEsperadoId=1d186f3b678a358a4af1 | confirmadoPago=true | pagado=true
+    origenComprobanteId=811a6b00c3a84a95ec1a2ad7293f4bab1f9fbf7b23f96f042630a9619ce1576b | hashPdf=d779a9dedd62…
+    fecha=2026-07-08T15:00:00.000Z | categoria=Casa > Luz | vencimientos=[{"fecha":"2026-07-08","monto":269778.85},{"fecha":"2026-07-13","monto":270322.59}]
+
+2472c965 (Metrogas, 2026-07-21): 1 movimiento(s)
+  id=bfREmHyiQhx0Y9zOCBdq
+    mes=2026-07 | monto=5303.18 ARS | tipo=Gasto | descripcion=Metrogas
+    itemEsperadoId=eb8e59f225ed73b785b6 | confirmadoPago=true | pagado=true
+    origenComprobanteId=9c77b6fc720543d9c8aec69775e977f228cacb375ed4b585f80ffce3dd1ca157 | hashPdf=2472c9656501…
+    fecha=2026-07-20T15:00:00.000Z | categoria=Casa > Gas | vencimientos=[{"monto":5303.18,"fecha":"2026-07-20"}]
+
+3be2e9fd (Empresa Distribuidora y Comercializadora Norte S.A. (Edenor), 2026-07-24): 1 movimiento(s)
+  id=bMaWyVS8d5VqfDPH9WpQ
+    mes=2026-08 | monto=136533.05 ARS | tipo=Gasto | descripcion=Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)
+    itemEsperadoId=1d186f3b678a358a4af1 | confirmadoPago=true | pagado=true
+    origenComprobanteId=3be2e9fd08fc2de6bda41c3a292bb67cb905f2d8a07a08f9ec354af213d3a112 | hashPdf=3be2e9fd08fc…
+    fecha=2026-08-07T15:00:00.000Z | categoria=Casa > Luz | vencimientos=[{"monto":136533.05,"fecha":"2026-08-07"},{"monto":137078.95,"fecha":"2026-08-12"}]
+
+=== (c) itemsEsperados Casa › Luz y Casa › Gas (campos completos) ===
+
+1d186f3b678a358a4af1 — Casa > Luz
+{
+    "tipo": "Gasto",
+    "activo": true,
+    "categoria": "Casa",
+    "subcategoria": "Luz",
+    "etiqueta": "rutina-casa",
+    "persona": null,
+    "moneda": "ARS",
+    "banco": "BBVA",
+    "montoEsperado": null,
+    "diaVencimiento": null,
+    "autoCalendario": false,
+    "notas": null,
+    "tarjetaCodigo": null,
+    "periodicidad": "mensual",
+    "pagoAutomatico": false,
+    "matchTexto": {
+        "incluye": [
+            "edenor"
+        ],
+        "excluye": []
+    },
+    "actualizadoEn": "2026-07-01T18:31:04.000Z"
+}
+
+eb8e59f225ed73b785b6 — Casa > Gas
+{
+    "tipo": "Gasto",
+    "activo": true,
+    "categoria": "Casa",
+    "subcategoria": "Gas",
+    "etiqueta": "rutina-casa",
+    "persona": null,
+    "moneda": "ARS",
+    "banco": "Personal Pay",
+    "montoEsperado": null,
+    "diaVencimiento": null,
+    "autoCalendario": false,
+    "notas": null,
+    "tarjetaCodigo": null,
+    "periodicidad": "mensual",
+    "pagoAutomatico": false,
+    "matchTexto": {
+        "incluye": [
+            "metrogas"
+        ],
+        "excluye": []
+    },
+    "actualizadoEn": "2026-07-01T18:33:22.000Z"
+}
+
+=== (d) destinos con "edenor", "metrogas" o "distribuidora" en destinoNorm ===
+docId=5a4469f37c4da7ddbf529b07
+  destinoNorm=edenor | tipo=alias | confianza=0.8 | itemEsperadoId=1d186f3b678a358a4af1
+  → item: Casa > Luz
+  crudo: {"destinoNorm":"edenor","tipo":"alias","itemEsperadoId":"1d186f3b678a358a4af1","categoria":"Casa","subcategoria":"Luz","etiqueta":null,"confianza":0.8,"creadoPor":"Juan","actualizadoEn":"2026-09-03T03:24:18.000Z"}
+
+docId=9ed055dd9e3f82a395219bb3
+  destinoNorm=empresa distribuidora y comercializadora norte s.a. (edenor) | tipo=nombre | confianza=0.8 | itemEsperadoId=1d186f3b678a358a4af1
+  → item: Casa > Luz
+  crudo: {"destinoNorm":"empresa distribuidora y comercializadora norte s.a. (edenor)","tipo":"nombre","itemEsperadoId":"1d186f3b678a358a4af1","categoria":"Casa","subcategoria":"Luz","etiqueta":null,"confianza":0.8,"creadoPor":"Juan","actualizadoEn":"2026-07-01T19:40:41.000Z"}
+
+docId=c9351365ef3ee2dae7d4b589
+  destinoNorm=30655116202 | tipo=cuit | confianza=0.8 | itemEsperadoId=1d186f3b678a358a4af1
+  → item: Casa > Luz
+  crudo: {"destinoNorm":"30655116202","tipo":"cuit","itemEsperadoId":"1d186f3b678a358a4af1","categoria":"Casa","subcategoria":"Luz","etiqueta":null,"confianza":0.8,"creadoPor":"Juan","actualizadoEn":"2026-08-08T19:18:21.000Z"}
+
+docId=f7fd10321554a9c84be2c2ba
+  destinoNorm=metrogas | tipo=alias | confianza=0.8 | itemEsperadoId=eb8e59f225ed73b785b6
+  → item: Casa > Gas
+  crudo: {"destinoNorm":"metrogas","tipo":"alias","itemEsperadoId":"eb8e59f225ed73b785b6","categoria":"Casa","subcategoria":"Gas","etiqueta":null,"confianza":0.8,"creadoPor":"Juan","actualizadoEn":"2026-09-03T03:30:41.000Z"}
+
+
+=== (d bis) TODOS los destinos que apuntan a los ítems de Casa › Luz / Casa › Gas ===
+  5a4469f37c4da7ddbf529b07 | norm="edenor" | tipo=alias | conf=0.8 | → Casa > Luz
+  9ed055dd9e3f82a395219bb3 | norm="empresa distribuidora y comercializadora norte s.a. (edenor)" | tipo=nombre | conf=0.8 | → Casa > Luz
+  c9351365ef3ee2dae7d4b589 | norm="30655116202" | tipo=cuit | conf=0.8 | → Casa > Luz
+  f7fd10321554a9c84be2c2ba | norm="metrogas" | tipo=alias | conf=0.8 | → Casa > Gas
+
+=== (extra) TODOS los movimientos de los ítems Casa › Luz y Casa › Gas, últimos meses ===
+  2025-09 | Luz  |    283024.45 | pagado=false     confirmadoPago=false     | hashPdf=0c5d5e5a | Edenor
+  2026-01 | Gas  |     14245.36 | pagado=false     confirmadoPago=undefined | hashPdf=null | Metrogas
+  2026-01 | Luz  |    106876.54 | pagado=false     confirmadoPago=undefined | hashPdf=null | Edenor
+  2026-02 | Gas  |       9501.3 | pagado=false     confirmadoPago=undefined | hashPdf=null | Metrogas
+  2026-02 | Luz  |    165532.46 | pagado=false     confirmadoPago=undefined | hashPdf=null | Edenor
+  2026-03 | Gas  |      4501.74 | pagado=false     confirmadoPago=undefined | hashPdf=null | Metrogas
+  2026-03 | Luz  |     92842.18 | pagado=false     confirmadoPago=undefined | hashPdf=null | Edenor
+  2026-04 | Gas  |      9267.06 | pagado=false     confirmadoPago=undefined | hashPdf=null | Metrogas
+  2026-04 | Luz  |      90529.3 | pagado=false     confirmadoPago=undefined | hashPdf=null | Edenor
+  2026-07 | Luz  |    269778.85 | pagado=true      confirmadoPago=true      | hashPdf=d779a9de | Empresa Distribuidora y Comerciali
+  2026-07 | Gas  |      5303.18 | pagado=true      confirmadoPago=true      | hashPdf=2472c965 | Metrogas
+  2026-08 | Luz  |    136533.05 | pagado=true      confirmadoPago=true      | hashPdf=3be2e9fd | Empresa Distribuidora y Comerciali
+  2026-09 | Gas  |      5291.83 | pagado=false     confirmadoPago=false     | hashPdf=a650c026 | Metrogas
