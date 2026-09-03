@@ -216,6 +216,16 @@ function payeeDeDatos(d: DatosExtraidos): string | undefined {
     : (d.comercioRazonSocial ?? d.destinoNombre ?? undefined);
 }
 
+// F9.154b §7 — el banco del COMPROBANTE le gana al del ítem esperado: el ítem dice de qué cuenta se
+// suele pagar, el comprobante dice de dónde salió realmente. Hoy `datosExtraidos` no trae banco —los
+// 14 campos del esquema (functions/src/index.ts, buildSystemPrompt) no lo incluyen—, así que esto
+// devuelve siempre undefined. Queda escrito igual: el día que el extractor lo traiga, la precedencia
+// ya está en el orden correcto y no hay que acordarse de invertirla.
+function bancoDeDatos(d: DatosExtraidos): string | undefined {
+  const b = (d as { banco?: unknown }).banco;
+  return typeof b === 'string' && b.trim() ? b.trim() : undefined;
+}
+
 // ── Resumen de datosExtraidos ─────────────────────────────────────────────────
 
 function DatosResumen({ d }: { d: DatosExtraidos }) {
@@ -532,7 +542,11 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
     : esperadoForzado
     ? {
         ...preloadBase,
-        banco:          undefined,
+        // F9.154b §7 — era `undefined`: se descartaba el banco del ítem y había que completarlo a
+        // mano en cada carga. Precedencia: comprobante → ítem → vacío. No cae al medio por defecto
+        // de la config (eso es `preloadBase.banco`, para las ramas SIN ítem): si el ítem no dice
+        // nada, mejor vacío que un default de la casa que puede no ser el de este gasto.
+        banco:          bancoDeDatos(d) ?? itemForzado?.banco ?? undefined,
         itemEsperadoId: esperadoForzado,
         // F9.119 — el tipo lo manda el ítem elegido: asignar un comprobante a un cobro
         // esperado tiene que crear un Ingreso, no un Gasto.
@@ -545,7 +559,8 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
     : pm.rama === 2
     ? {
         ...preloadBase,
-        banco:          undefined,
+        // F9.154b §7 — ver el comentario de la rama de arriba: misma precedencia.
+        banco:          bancoDeDatos(d) ?? esperado?.banco ?? undefined,
         tipo:           esperado?.tipo         ?? preloadBase.tipo,
         categoria:      esperado?.categoria    ?? undefined,
         subcategoria:   esperado?.subcategoria ?? undefined,

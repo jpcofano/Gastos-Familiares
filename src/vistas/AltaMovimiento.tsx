@@ -108,9 +108,20 @@ export default function AltaMovimiento({ memberId, miembro, onGuardado, onCancel
   const [etiqueta,          setEtiqueta]          = useState(preload?.etiqueta ?? '');
   const [banco,             setBanco]             = useState(preload?.banco ?? '');
   const [persona,           setPersona]           = useState(preload?.persona ?? memberId);
-  const [incluirResumenMes, setIncluirResumenMes] = useState(
-    () => (preload?.fecha ?? hoyISO()) > hoyISO()
-  );
+  // F9.154b §8 — para un ítem esperado el criterio no es la fecha sino si la plata YA se movió.
+  // El default de fecha estrictamente futura dejaba fuera del resumen dos casos reales: un esperado
+  // que vence HOY (la comparación es estricta) y la boleta de Edenor con el año mal extraído, que
+  // por fecha pasada quedó fuera siendo un impago.
+  // `preload.confirmadoPago` es el booleano correcto y no `fecha <= hoy`: lo calcula Comprobantes
+  // con la misma fórmula que después aplica el server (`!esObligacionDoc(tipo) && fecha <= hoy`,
+  // functions/src/index.ts), así que una obligación con fecha pasada llega en `false`, que es
+  // justamente el caso que se perdía. `pagado` y `confirmadoPago` salen del mismo booleano al crear.
+  // Alcance deliberado: SOLO con `itemEsperadoId`. Un pago futuro suelto puede ser algo particular
+  // que no corresponde al flujo del mes, así que mantiene el default por fecha y el toggle manual.
+  const [incluirResumenMes, setIncluirResumenMes] = useState(() => {
+    if (preload?.itemEsperadoId && preload?.confirmadoPago === false) return true;
+    return (preload?.fecha ?? hoyISO()) > hoyISO();
+  });
   // F9.118 — mes de imputación: sigue a la fecha hasta que alguien lo fije a mano.
   // F9.154 §3 — `preload.mes` es ese "alguien": el server ya resolvió el mes con el día de corte
   // del ítem esperado (el sueldo que entra el 1 de septiembre cuenta en agosto). Llega ya fijado,
