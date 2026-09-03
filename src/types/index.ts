@@ -165,6 +165,12 @@ export interface DatosExtraidos {
   destinoCuit?: string | null;       // CUIT/CUIL del destinatario (11 dígitos, solo dígitos)
   destinoAlias?: string | null;      // alias CVU/CBU del destinatario
   destinoNombre?: string | null;     // nombre/razón social del destinatario
+  // F9.155 §1 — dirección y contraparte. `destino*` es siempre el PAYEE y por eso no puede describir
+  // un cobro: en una acreditación la otra parte es quien ordena el pago, no quien lo recibe.
+  direccion?: 'entrante' | 'saliente' | null;
+  contraparteNombre?: string | null;
+  contraparteCuit?: string | null;
+  contraparteCbu?: string | null;
 }
 
 // F9.154 §2 — un destino compartido por dos ítems esperados (los dos suministros de AySA, las dos

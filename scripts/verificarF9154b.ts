@@ -13,8 +13,8 @@ function aJs(codigoTs: string): string {
   }).outputText;
 }
 
-const comp = fs.readFileSync('src/vistas/Comprobantes.tsx', 'utf8');
-const alta = fs.readFileSync('src/vistas/AltaMovimiento.tsx', 'utf8');
+const comp = fs.readFileSync('src/vistas/Comprobantes.tsx', 'utf8').replace(/\r\n/g, '\n');
+const alta = fs.readFileSync('src/vistas/AltaMovimiento.tsx', 'utf8').replace(/\r\n/g, '\n');
 
 function bloque(src: string, desde: string, hasta: string, rotulo: string): string {
   const i = src.indexOf(desde);

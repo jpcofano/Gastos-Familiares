@@ -104,6 +104,8 @@ function RazonVinculado(
   // única salida informativa era aquella en la que el usuario no había participado: apenas
   // confirmaba algo a mano, el badge se degradaba a "Cumplió un gasto esperado" y perdía todo.
   const item    = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
+  // F9.155 §6 — el tipo sale del ítem si lo hay; si no, de la dirección del comprobante.
+  const tipoMov: TipoMov = item?.tipo ?? (d?.direccion === 'entrante' ? 'Ingreso' : d?.direccion === 'saliente' ? 'Gasto' : null);
   const nombreItem = item
     ? ([item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || item.id)
     : (pm.itemEsperadoId ?? null);
@@ -121,7 +123,7 @@ function RazonVinculado(
       // F9.154 §4.a — este comprobante se colgó de un movimiento que YA existía. Es la diferencia
       // que decide si descartarlo borra plata: `descartarEntrada` solo borra el movimiento cuando
       // `origenComprobanteId` coincide. Antes decía lo mismo que la rama 3, que sí lo creó.
-      if (pm.origenSuelto) { texto = con('Se adjuntó a un gasto ya cargado'); tone = 'success'; break; }
+      if (pm.origenSuelto) { texto = con(`Se adjuntó a un ${palabraMov(tipoMov)} ya cargado`); tone = 'success'; break; }
       if (pm.esAdicional)  { texto = con('Pago adicional');                   tone = 'success'; break; }
       // F9.106 — distingue la alta silenciosa (confianza ≥ UMBRAL_AUTO) de la confirmada a mano.
       if (pm.requiereConfirmacion === false && sufijo) {
@@ -135,7 +137,7 @@ function RazonVinculado(
     }
     // F9.154 §4.a — rama 3 con `origenSuelto` sí saldó un movimiento preexistente; sin él, este
     // comprobante creó el movimiento. Dos textos, porque son dos cosas.
-    case 3: texto = pm.origenSuelto ? con('Saldó un gasto ya cargado') : con('Cargado como movimiento nuevo'); tone = 'success'; break;
+    case 3: texto = pm.origenSuelto ? con(`Saldó un ${palabraMov(tipoMov)} ya cargado`) : con('Cargado como movimiento nuevo'); tone = 'success'; break;
     default: return null;
   }
 
@@ -153,7 +155,7 @@ function RazonVinculado(
       <button
         type="button"
         onClick={() => { setAbierto(o => !o); setErrItem(null); }}
-        title="Cambiar el gasto esperado de este movimiento"
+        title={`Cambiar el ${palabraEsperado(tipoMov)} de este movimiento`}
         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start' }}
       >
         <Badge tone={tone}>{texto}</Badge>
@@ -162,7 +164,7 @@ function RazonVinculado(
 
       {abierto && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Mover a otro gasto esperado</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Mover a otro {palabraEsperado(tipoMov)}</span>
           <select
             value={sel}
             onChange={e => setSel(e.target.value)}
@@ -177,7 +179,7 @@ function RazonVinculado(
             ))}
           </select>
           <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>
-            Cambia el gasto esperado y la categoría. No toca el monto, la fecha ni el mes.
+            Cambia el {palabraEsperado(tipoMov)} y la categoría. No toca el monto, la fecha ni el mes.
           </span>
           {errItem && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errItem}</span>}
           <div style={{ display: 'flex', gap: 8 }}>
@@ -215,6 +217,16 @@ function payeeDeDatos(d: DatosExtraidos): string | undefined {
     ? (d.destinoNombre ?? d.comercioRazonSocial ?? undefined)
     : (d.comercioRazonSocial ?? d.destinoNombre ?? undefined);
 }
+
+// F9.155 §6 — la copia se adapta al tipo en juego. Toda la pantalla decía "gasto", así que asignar
+// un comprobante a un cobro esperado se leía como si estuvieras cargando un gasto. `null` (sin ítem
+// ni dirección conocida) mantiene "gasto", que es el caso mayoritario y el texto de siempre.
+type TipoMov = 'Gasto' | 'Ingreso' | null;
+const esIngreso = (t: TipoMov) => t === 'Ingreso';
+const palabraMov     = (t: TipoMov) => esIngreso(t) ? 'cobro'   : 'gasto';
+const palabraMovPl   = (t: TipoMov) => esIngreso(t) ? 'cobros'  : 'gastos';
+const palabraEsperado   = (t: TipoMov) => esIngreso(t) ? 'cobro esperado'   : 'gasto esperado';
+const palabraEsperadoPl = (t: TipoMov) => esIngreso(t) ? 'cobros esperados' : 'gastos esperados';
 
 // F9.154b §7 — el banco del COMPROBANTE le gana al del ítem esperado: el ítem dice de qué cuenta se
 // suele pagar, el comprobante dice de dónde salió realmente. Hoy `datosExtraidos` no trae banco —los
@@ -480,7 +492,12 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
     : fechaOriginal;
 
   const preloadBase = {
-    tipo:                'Gasto' as const,
+    // F9.155 §4 — era `'Gasto' as const`, así que toda transferencia RECIBIDA sin ítem esperado que
+    // matcheara (rama 3, "movimiento nuevo") entraba como Gasto, con el signo invertido en el mes.
+    // Precedencia: ítem esperado → dirección del comprobante → 'Gasto'. Las ramas con ítem siguen
+    // sobrescribiendo esto más abajo (ya funcionaba); acá se cubre el caso sin ítem, que es el que
+    // el dueño no podía corregir. `direccion` null o ausente ⇒ el default de siempre.
+    tipo:                (d.direccion === 'entrante' ? 'Ingreso' : 'Gasto') as 'Gasto' | 'Ingreso',
     fecha:               fechaEfectiva ?? undefined,
     // F9.154 §3 — el mes que resolvió el server con el día de corte del ítem. Sin corte no viaja y
     // AltaMovimiento sigue derivando el mes de la fecha, como siempre.
@@ -532,11 +549,17 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
   // (inactivo/borrado) — nunca vacío.
   const labelEsperado = esperado
     ? ([esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ') || esperado.notas || esperado.id)
-    : (itemEsperadoEfectivo || 'gasto esperado');
+    : (itemEsperadoEfectivo || palabraEsperado(null));
+
 
   // F9.109 — `desvincular` ("Asignar como movimiento nuevo") tiene prioridad sobre todo lo
   // demás, incluido `esperadoForzado` de F9.108: es la corrección explícita del usuario.
   const itemForzado = esperadoForzado ? items.find(i => i.id === esperadoForzado) : undefined;
+
+  // F9.155 §6 — el tipo que gobierna la copia de esta card: el del ítem forzado o elegido si lo hay,
+  // si no el que dice la dirección del comprobante. null ⇒ la copia de siempre ("gasto").
+  const tipoCopia: TipoMov = (itemForzado ?? esperado)?.tipo
+    ?? (d.direccion === 'entrante' ? 'Ingreso' : d.direccion === 'saliente' ? 'Gasto' : null);
   const preload = desvincular
     ? { ...preloadBase, itemEsperadoId: undefined }
     : esperadoForzado
@@ -743,7 +766,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
       {pm.rama === 2 && pm.origenDestino && pm.requiereConfirmacion === true && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-strong)' }}>
-            Asignar a: {esperado ? ([esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ') || esperado.notas || esperado.id) : 'gasto esperado'} · Mes: {formatMesCorto(mesPagoEfectivo)}
+            Asignar a: {esperado ? ([esperado.categoria, esperado.subcategoria].filter(Boolean).join(' › ') || esperado.notas || esperado.id) : palabraEsperado(tipoCopia)} · Mes: {formatMesCorto(mesPagoEfectivo)}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <select
@@ -765,7 +788,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
           el camino feliz — con un único candidato esto no se renderiza). */}
       {pm.rama === 2 && necesitaElegirRama2 && !rama2Sel && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Coincide con varios gastos esperados — elegí cuál</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Coincide con varios {palabraEsperadoPl(tipoCopia)} — elegí cuál</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {rama2CandidatosTipoEsperado.map(c => (
               <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '5px 0', borderBottom: '1px solid var(--gf-gray-100)', cursor: 'pointer' }}>
@@ -785,7 +808,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
           agenda unificada del mes actual (esperados + sueltos), no solo plantillas. */}
       {esAdmin && !mostrarAlta && (!necesitaElegirRama2 || rama2Sel) && (
         <Button variant="ghost" size="sm" onClick={() => { setMostrarPicker(p => !p); setPickerSel(''); setErrorLocal(null); }}>
-          <Icon name="git-compare" size={13} /> {pm.rama === 2 ? 'Asignar a otro gasto' : 'Conciliar con gasto esperado'}
+          <Icon name="git-compare" size={13} /> {pm.rama === 2 ? `Asignar a otro ${palabraMov(tipoCopia)}` : `Conciliar con ${palabraEsperado(tipoCopia)}`}
         </Button>
       )}
       {/* F9.109 — tercera salida cuando la rama 2 propone un gasto esperado que NO corresponde:
@@ -797,7 +820,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
       )}
       {mostrarPicker && esAdmin && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Elegí qué gasto salda este comprobante</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>Elegí qué {palabraMov(tipoCopia)} salda este comprobante</span>
           <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
             {agenda.map((grupo, idx) => {
               const candidatos = candidatosDeGrupo(grupo.entradas, d.moneda);
@@ -1137,14 +1160,15 @@ function construirBadgeFactura(pm: PropuestaMatch, items: ExpectedItem[]): Badge
     case 2: {
       const item = pm.itemEsperadoId ? items.find(i => i.id === pm.itemEsperadoId) : undefined;
       const nombre = item
-        ? ([item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || 'gasto esperado')
-        : 'gasto esperado';
+        ? ([item.categoria, item.subcategoria].filter(Boolean).join(' › ') || item.notas || palabraEsperado(item.tipo))
+        : palabraEsperado(null);
       return pm.esAdicional
         ? { titulo: 'Pago adicional', sub: `Suma a ${nombre}`, match: true }
-        : { titulo: 'Gasto esperado', sub: `Coincide con ${nombre}`, match: true };
+        // F9.155 §6 — el título dice qué tipo de esperado es, no siempre "Gasto esperado".
+        : { titulo: item?.tipo === 'Ingreso' ? 'Cobro esperado' : 'Gasto esperado', sub: `Coincide con ${nombre}`, match: true };
     }
     default:
-      return { titulo: 'Movimiento nuevo', sub: 'Se agrega como gasto del mes', match: false };
+      return { titulo: 'Movimiento nuevo', sub: 'Se agrega al mes', match: false };
   }
 }
 

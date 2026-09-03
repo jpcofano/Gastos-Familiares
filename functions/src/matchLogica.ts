@@ -20,6 +20,11 @@ export interface DatosExtractosMin {
   destinoCuit?: string | null;
   destinoAlias?: string | null;
   destinoNombre?: string | null;
+  // F9.155 §1 — dirección del movimiento y contraparte real (el ordenante si es entrante).
+  direccion?: 'entrante' | 'saliente' | null;
+  contraparteNombre?: string | null;
+  contraparteCuit?: string | null;
+  contraparteCbu?: string | null;
 }
 
 export interface MovimientoMin {
@@ -212,6 +217,11 @@ export function matchConMovimientos(
 
   for (const m of movs) {
     if (m.moneda !== datos.moneda) continue;
+    // F9.155 §5 — auditado y NO tocado a propósito. Esta función solo la llama `calcularPropuesta`,
+    // y el flujo de comprobantes la invoca con `movs = []` (functions/src/index.ts: "sin movs:
+    // elimina el rama-1 por monto+mes (autovínculo silencioso)"). O sea que este filtro nunca ve un
+    // movimiento por esa vía: cambiarlo por simetría sería tocar código muerto y dar la falsa
+    // impresión de que la reconciliación de ingresos pasa por acá. Pasa por reconciliarPorPayee.
     if (m.tipo !== 'Gasto')        continue;  // comprobantes son gastos
 
     // Temporal: mismo mes OR fecha ±7d (unión, NO corte duro)
@@ -321,19 +331,31 @@ function montoSalda(m: MovimientoMin, montoTotal: number): boolean {
   );
 }
 
+// F9.155 §5 — qué tipo de movimiento puede saldar este comprobante. La guarda es lo que hace segura
+// la extensión a Ingreso: sin ella, un pago saliente podría saldar un cobro esperado del mismo monto,
+// que es peor que el bug que arregla. Sin `direccion` (documentos viejos o el modelo sin opinión) se
+// conserva el comportamiento histórico: solo Gasto.
+export function tipoConciliable(datos: DatosExtractosMin): 'Gasto' | 'Ingreso' {
+  return datos.direccion === 'entrante' ? 'Ingreso' : 'Gasto';
+}
+
 export function reconciliarPorPayee(
   datos: DatosExtractosMin,
   movs: MovimientoMin[],
 ): MovimientoMin[] {
   const soloDigitos = (s: string | null | undefined) => (s ? s.replace(/\D/g, '') : '');
-  const pCuit  = soloDigitos(datos.destinoCuit);
-  const pCbu   = soloDigitos(datos.destinoCbu);
+  // F9.155 §5 — en un comprobante entrante la otra parte NO está en destino* (que es siempre el
+  // payee) sino en contraparte*. Se prefiere contraparte* cuando está, y se cae a destino* para no
+  // romper los 86 de 92 comprobantes que ya reconcilian por ahí.
+  const pCuit  = soloDigitos(datos.contraparteCuit) || soloDigitos(datos.destinoCuit);
+  const pCbu   = soloDigitos(datos.contraparteCbu)  || soloDigitos(datos.destinoCbu);
   const pAlias = datos.destinoAlias?.trim().toLowerCase() ?? '';
   if (!pCuit && !pCbu && !pAlias) return [];
   if (datos.montoTotal == null)   return [];
 
+  const tipoOk = tipoConciliable(datos);
   return movs.filter(m => {
-    if (m.tipo !== 'Gasto')        return false;
+    if (m.tipo !== tipoOk)         return false;   // F9.155 §5
     if (m.moneda !== datos.moneda) return false;
     if (m.confirmadoPago)          return false;
     const mCuit  = soloDigitos(m.destinoCuit);
@@ -357,13 +379,15 @@ export function reconciliarPorNombre(
 ): MovimientoMin[] {
   const norm = (s: string | null | undefined) =>
     (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const pNombre = norm(datos.destinoNombre) || norm(datos.comercioRazonSocial);
+  // F9.155 §5 — misma precedencia que en reconciliarPorPayee: la contraparte primero.
+  const pNombre = norm(datos.contraparteNombre) || norm(datos.destinoNombre) || norm(datos.comercioRazonSocial);
   if (!pNombre || datos.montoTotal == null) return [];
 
   const itemAprendido = nombresDestinoAprendidos?.get(pNombre) ?? null;
 
+  const tipoOk = tipoConciliable(datos);
   return movs.filter(m => {
-    if (m.tipo !== 'Gasto')        return false;
+    if (m.tipo !== tipoOk)         return false;   // F9.155 §5
     if (m.moneda !== datos.moneda) return false;
     if (m.confirmadoPago)          return false;
     if (!montoSalda(m, datos.montoTotal as number)) return false;

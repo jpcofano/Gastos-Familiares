@@ -11,11 +11,16 @@ export type AgendaEntry = { kind: 'esperado'; ci: CheckItem } | { kind: 'suelto'
 
 export function inicioDia(d: Date): Date { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 
+// F9.155 §6 — se sacó el filtro `m.tipo === 'Gasto'`. Un cobro suelto pendiente (una devolución
+// esperada, una venta) nunca entraba en la agenda, y por lo tanto nunca aparecía en el picker de
+// conciliación: no había forma de asignarle un comprobante. Los esperados de Ingreso ya entraban
+// (calcularChecklist nunca filtró por tipo), así que los sueltos eran la única asimetría.
+// El monto sigue contándose solo para los gastos — ver pendienteDeEntrada.
 export function sueltosFuturosDelMes(movs: Movement[], checklist: CheckItem[], hoy: Date): Movement[] {
   const matchedIds = new Set(checklist.flatMap(ci => ci.matches.map(m => m.id)));
   const inicioHoy = inicioDia(hoy);
   return movs.filter(m =>
-    m.tipo === 'Gasto' && !m.pagado && !matchedIds.has(m.id) && inicioDia(m.fecha) >= inicioHoy
+    !m.pagado && !matchedIds.has(m.id) && inicioDia(m.fecha) >= inicioHoy
   );
 }
 
@@ -39,7 +44,16 @@ export function agendaCubierto(e: AgendaEntry): boolean {
 // puede tenerlo, y caía a `montoEsperado ?? 0`: el ítem vencido con un pago real cargado aportaba
 // CERO al banner "Revisar pendientes del mes". Se pregunta por match + cobertura, que es la
 // condición real y no depende de qué estados existan.
+// F9.155 §6 — "pendiente del mes" es plata que TIENE QUE SALIR. Desde que la agenda también trae
+// entradas de Ingreso (los sueltos por este cambio, los esperados desde siempre), sumarlas acá
+// inflaría el banner "Revisar pendientes del mes" de Resumen.tsx con plata que entra. El tipo se
+// pregunta sobre la entrada, no sobre la agenda, para que el picker las siga viendo.
+export function esEntradaDeGasto(e: AgendaEntry): boolean {
+  return e.kind === 'suelto' ? e.mov.tipo === 'Gasto' : e.ci.item.tipo === 'Gasto';
+}
+
 export function pendienteDeEntrada(e: AgendaEntry): number {
+  if (!esEntradaDeGasto(e)) return 0;
   if (e.kind === 'suelto') return Math.abs(e.mov.monto);
   const c = e.ci;
   const noConfirmado = c.matches.length > 0 && !cubierto(c.estado);

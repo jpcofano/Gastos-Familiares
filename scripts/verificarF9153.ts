@@ -19,7 +19,7 @@ if (getApps().length === 0) {
 }
 const db = getFirestore();
 
-const src = fs.readFileSync('functions/src/index.ts', 'utf8');
+const src = fs.readFileSync('functions/src/index.ts', 'utf8').replace(/\r\n/g, '\n');
 
 function bloque(desde: string, hasta: string): string {
   const i = src.indexOf(desde);

@@ -24,6 +24,9 @@ import { normalizar, type NormRule } from './normalizador';
 import { detectarTipoReal, motivoFormatoNoSoportado } from './tipoArchivo';
 // F9.154 §1.b — piso determinístico para el año de los vencimientos. Ver el encabezado del módulo.
 import { corregirAnioVencimientos, type Vencimiento } from './fechasVencimiento';
+// F9.155 §2 — el CUIT de la contraparte en una acreditación viene pelado y el modelo lo archivaba
+// en numeroOperacion. El dígito verificador permite rescatarlo sin depender de etiquetas.
+import { rescatarCuitContraparte } from './cuit';
 import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
 import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 import { backfillTc } from './tcBackfill';
@@ -101,6 +104,27 @@ REGLAS DURAS:
   null si no hay payee claro.
 - destinoAlias: alias CVU/CBU del destinatario exactamente como aparece en el documento pero en minúsculas (ej: "micooperativa.mp"). null si no aplica.
 - destinoNombre: nombre o razón social del PAYEE. Para transferencia/pago = el destinatario; para factura = el emisor (mismo que comercioRazonSocial). null si no aplica.
+- direccion: hacia dónde se movió (o se va a mover) la plata DESDE EL PUNTO DE VISTA DEL TITULAR.
+  · "entrante": la plata ENTRA a la cuenta del titular. Acreditación, crédito, cobro, haberes,
+    sueldo, devolución, transferencia recibida.
+  · "saliente": la plata SALE. Pago, transferencia enviada, débito, ticket de compra, y también
+    toda factura o boleta de servicio (es plata que va a salir).
+  · null solo si de verdad no se puede determinar.
+  Señales típicas: las palabras "Crédito"/"Débito", "Acreditación", "Recibiste" vs "Enviaste"/
+  "Pagaste", el signo del monto, y el tipo de movimiento del resumen bancario.
+- contraparteNombre / contraparteCuit / contraparteCbu: LA OTRA PARTE, sea quien sea, sin importar
+  la dirección. Es el campo que hay que llenar cuando el titular RECIBE: ahí la otra parte es quien
+  ORDENA el pago (el empleador, el cliente, quien te devolvió la plata), y ese dato no entra en
+  destino* porque destino* es siempre el payee.
+  · Si direccion = "saliente": la contraparte es la misma que destino* (repetí los valores).
+  · Si direccion = "entrante": la contraparte es el ORDENANTE. Ejemplo real: en una acreditación de
+    haberes que dice "SIST. NAC. DE PAGOS - HABERES / ACCENTURE SRL / 33610006189 / CITIBANK N.A.",
+    contraparteNombre = "ACCENTURE SRL" y contraparteCuit = "33610006189".
+  · contraparteCuit: 11 dígitos, SOLO DÍGITOS, sin guiones. IMPORTANTE: en los resúmenes y avisos de
+    acreditación el CUIT aparece PELADO, sin la palabra "CUIT" y sin guiones, en la línea siguiente
+    al nombre. Un número de 11 dígitos junto al nombre de la contraparte es su CUIT: ponelo acá y NO
+    en numeroOperacion.
+  · null si no hay contraparte identificable.
 
 Si un campo no se puede determinar con confianza, usá null (excepto numeroOperacion, que siempre lleva número real o pseudo-número).
 
@@ -119,7 +143,11 @@ Esquema de salida EXACTO:
   "destinoCbu": "..." | null,
   "destinoCuit": "XXXXXXXXXXX" | null,
   "destinoAlias": "..." | null,
-  "destinoNombre": "..." | null
+  "destinoNombre": "..." | null,
+  "direccion": "entrante" | "saliente" | null,
+  "contraparteNombre": "..." | null,
+  "contraparteCuit": "XXXXXXXXXXX" | null,
+  "contraparteCbu": "..." | null
 }`;
 }
 
@@ -237,6 +265,14 @@ async function procesarComprobante(
           );
         }
         if (correcciones.length > 0) parsed.vencimientos = corregidos;
+      }
+
+      // F9.155 §2 — red para el CUIT de la contraparte: solo en documentos entrantes y solo desde
+      // campos que el modelo ya pobló. Ver el encabezado de cuit.ts para por qué está acotado así.
+      const cuitRescatado = rescatarCuitContraparte(parsed);
+      if (cuitRescatado) {
+        console.warn(`[procesarComprobante] ${compId} → contraparteCuit rescatado por digito verificador: ${cuitRescatado}`);
+        parsed.contraparteCuit = cuitRescatado;
       }
 
       await ref.update({

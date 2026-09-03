@@ -30,7 +30,7 @@ function leerSecreto(): string | null {
 
 // El system prompt REAL, extraído del fuente: si alguien lo cambia, esto lo ve.
 function systemPromptReal(hoy: string): string {
-  const src = fs.readFileSync('functions/src/index.ts', 'utf8');
+  const src = fs.readFileSync('functions/src/index.ts', 'utf8').replace(/\r\n/g, '\n');
   const i = src.indexOf('function buildSystemPrompt');
   // El cuerpo es un template literal que contiene llaves y saltos de línea (el esquema JSON de
   // salida), así que buscar el primer "\n}" corta en el lugar equivocado. El cierre real es la
