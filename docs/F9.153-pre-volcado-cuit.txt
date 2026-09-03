@@ -1,0 +1,103 @@
+=== §1 — volcado crudo: 9 comprobantes (ACCENTURE en algún campo, o con movimiento de tipo Ingreso) ===
+
+32acfa99 | 2026-06-29 | USD |      1317.86 | transferencia
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = Accenture SRL
+  comercioRazonSocial = Accenture SRL
+  [mov] tipo=Ingreso mes=2026-07 item=a9c90518a036645ad50f desc=ACCENTURE SRL
+
+f44b697b | 2026-06-29 | ARS |   4727254.36 | comprobante_pago
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = null
+  comercioRazonSocial = ACCENTURE SRL
+  [mov] tipo=Ingreso mes=2026-07 item=ac352ee61791de9f1775 desc=ACCENTURE SRL
+
+74739e68 | 2026-07-01 | ARS |      1635908 | transferencia
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = DATANET / INTERPYME
+  comercioRazonSocial = DATANET / INTERPYME
+  [mov] tipo=Ingreso mes=2026-07 item=8d93896a9837280bc4c2 desc=DATANET / INTERPYME
+
+8896edcc | 2026-07-30 | ARS |   3055650.22 | transferencia
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = null
+  comercioRazonSocial = ACCENTURE SRL
+  [mov] tipo=Ingreso mes=2026-08 item=ac352ee61791de9f1775 desc=ACCENTURE SRL
+
+8acd1c73 | 2026-07-30 | USD |       866.86 | transferencia
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = ACCENTURE SRL
+  comercioRazonSocial = ACCENTURE SRL
+  [mov] tipo=Ingreso mes=2026-08 item=a9c90518a036645ad50f desc=ACCENTURE SRL
+
+16bd12ae | 2026-08-03 | ARS |        98154 | comprobante_pago
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = DATANET / INTERPYME
+  comercioRazonSocial = DATANET / INTERPYME
+  [mov] tipo=Ingreso mes=2026-08 item=8d93896a9837280bc4c2 desc=DATANET / INTERPYME
+
+d2f2b033 | 2026-08-03 | ARS |      1635908 | comprobante_pago
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = DATANET / INTERPYME
+  comercioRazonSocial = DATANET / INTERPYME
+  [mov] tipo=Ingreso mes=2026-08 item=8d93896a9837280bc4c2 desc=DATANET / INTERPYME
+
+0e59c80c | 2026-08-28 | ARS |   3056235.49 | transferencia
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = null
+  comercioRazonSocial = ACCENTURE SRL
+  [mov] tipo=Ingreso mes=2026-09 item=ac352ee61791de9f1775 desc=ACCENTURE SRL
+
+28cab4a0 | 2026-08-28 | USD |       866.42 | transferencia
+  cuit                = null
+  destinoCuit         = null
+  destinoCbu          = null
+  destinoAlias        = null
+  destinoNombre       = ACCENTURE SRL
+  comercioRazonSocial = ACCENTURE SRL
+  [mov] tipo=Ingreso mes=2026-09 item=a9c90518a036645ad50f desc=ACCENTURE SRL
+
+=== destinos que apuntan a un ítem esperado de tipo Ingreso ===
+(doc id = sha256(norm).slice(0,24); un solo itemEsperadoId por doc)
+
+docId=299efb1045b9c69d5d70b120
+  tipo=nombre | confianza=0.8 | itemEsperadoId=8d93896a9837280bc4c2
+  destinoNorm=datanet / interpyme
+  item: Ingresos > Sueldo | moneda=ARS | matchTexto={"incluye":["datanet"],"excluye":[]}
+  campos crudos del doc: {"destinoNorm":"datanet / interpyme","tipo":"nombre","itemEsperadoId":"8d93896a9837280bc4c2","categoria":"Ingresos","subcategoria":"Sueldo","etiqueta":null,"confianza":0.8,"creadoPor":"Juan","actualizadoEn":{"_seconds":1785815599,"_nanoseconds":27000000}}
+
+docId=a03048f4686c226f7371a97d
+  tipo=nombre | confianza=0.8 | itemEsperadoId=a9c90518a036645ad50f
+  destinoNorm=accenture srl
+  item: Ingresos > Sueldo | moneda=USD | matchTexto={"incluye":["accenture","cash"],"excluye":["haberes"]}
+  campos crudos del doc: {"destinoNorm":"accenture srl","tipo":"nombre","itemEsperadoId":"a9c90518a036645ad50f","categoria":"Ingresos","subcategoria":"Sueldo","etiqueta":null,"confianza":0.8,"creadoPor":"Juan","actualizadoEn":{"_seconds":1788300899,"_nanoseconds":925000000}}
+
+=== itemsEsperados tipo=Ingreso ===
+4902fe673fae7e9e69da | activo=false | moneda=USD | Ingresos > Sueldo | persona=Juan | matchTexto=null
+8d93896a9837280bc4c2 | activo=true | moneda=ARS | Ingresos > Sueldo | persona=Juan | matchTexto={"incluye":["datanet"],"excluye":[]}
+a9c90518a036645ad50f | activo=true | moneda=USD | Ingresos > Sueldo | persona=María | matchTexto={"incluye":["accenture","cash"],"excluye":["haberes"]}
+ac352ee61791de9f1775 | activo=true | moneda=ARS | Ingresos > Sueldo | persona=María | matchTexto={"incluye":["accenture","haberes"],"excluye":["cash"]}
