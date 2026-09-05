@@ -6,6 +6,7 @@ import {
   asignarTarjetaResumen,
   suscribirResumenesTarjeta,
   confirmarResumenTarjeta,
+  resumenYaGeneroMovimientos,
   agregarAjusteCuadreManual,
   calcularCuadre,
   reintentarResumen,
@@ -105,10 +106,36 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
     if (!res.ok) setErrorLocal(res.error.message);
   }
 
+  // F9.158 §1 — cuántos movimientos reemplazaría esta confirmación. Se lee al abrir el preview para
+  // que el botón diga la verdad ANTES de tocarlo, en vez de descubrirlo con un error.
+  const [yaGenero, setYaGenero] = useState<{ total: number; editados: number } | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    resumenYaGeneroMovimientos(resumen).then(r => { if (!cancelado) setYaGenero(r); });
+    return () => { cancelado = true; };
+  }, [resumen]);
+
   async function confirmar() {
+    // F9.158 §1 — re-confirmar reemplaza; el usuario tiene que verlo con el número delante. Sin
+    // esto, confirmar dos veces duplicaba todo en silencio (F9.156 §4: 8 movimientos duplicados).
+    const reemplazar = (yaGenero?.total ?? 0) > 0;
+    if (reemplazar) {
+      const perdidos = yaGenero!.editados > 0
+        ? `
+
+ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano después de importados (categoría, persona, etiqueta). Esas ediciones se pierden.`
+        : '';
+      const ok = confirm(
+        `Este resumen ya generó ${yaGenero!.total} movimientos. Re-confirmar los BORRA y los vuelve a crear ` +
+        `con las líneas de ahora.${perdidos}
+
+¿Continuar?`,
+      );
+      if (!ok) return;
+    }
     setGuardando(true);
     setErrorLocal(null);
-    const res = await confirmarResumenTarjeta(resumen, lineas, memberId, config);
+    const res = await confirmarResumenTarjeta(resumen, lineas, memberId, config, { reemplazar });
     setGuardando(false);
     if (!res.ok) { setErrorLocal(res.error.message); return; }
     onConfirmado();
@@ -280,6 +307,9 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
         >
           {guardando
             ? 'Confirmando…'
+            : (yaGenero?.total ?? 0) > 0
+            /* F9.158 §1 — el botón dice lo que va a pasar: reemplazar, no agregar. */
+            ? `Re-confirmar (reemplaza ${yaGenero!.total} movimiento${yaGenero!.total !== 1 ? 's' : ''})`
             : `Confirmar ${incluidas} línea${incluidas !== 1 ? 's' : ''} + 2 totales`}
         </button>
       </div>

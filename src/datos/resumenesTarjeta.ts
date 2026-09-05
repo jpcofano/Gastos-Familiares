@@ -230,11 +230,80 @@ function bancoCanonicoDeResumen(resumen: CardStatement, config: FamiliaConfig): 
   return medioPorDefecto(config.bancos)?.nombre ?? null;
 }
 
+
+// ── Idempotencia de la confirmación (F9.158 §1) ──────────────────────────────
+//
+// `confirmarResumenTarjeta` no tenía ninguna guarda de estado: hacía `batch.set` sobre refs nuevas
+// para cada línea y para los dos totales, así que confirmar un resumen ya confirmado no reemplazaba
+// nada — escribía todo de nuevo. Es la forma exacta de los 8 movimientos duplicados que encontró
+// F9.156 §4, y la UI ofrecía el botón igual sobre un resumen `confirmado`.
+//
+// Política elegida: REEMPLAZO EXPLÍCITO Y ATÓMICO.
+//   · Si el resumen ya tiene movimientos y no se pide `reemplazar`, la confirmación se rechaza con
+//     un mensaje que dice cuántos hay. Nunca puede haber dos totales de la misma moneda.
+//   · Con `reemplazar: true`, los movimientos viejos se borran EN EL MISMO BATCH que crea los
+//     nuevos, así que la operación es atómica y la re-confirmación refleja las ediciones de líneas.
+//
+// Por qué no un upsert silencioso con ids determinísticos, que sería más elegante: hay 58
+// movimientos de resumen editados a mano después de importados (categoría, persona, etiqueta —
+// medido en producción, ver scripts/auditF9158.ts). Reemplazar los pierde. Esto no lo evita, pero
+// obliga a que sea una decisión con el número delante en vez de un efecto secundario silencioso.
+
+// Un movimiento pertenece a este resumen por su doc id o por la clave legacy
+// `{tarjetaCodigo}_{nroResumen}`, que es la que usan los 17 resúmenes del seed (F9.156 §4).
+export function clavesDeResumen(resumen: CardStatement): string[] {
+  const claves = [resumen.id];
+  if (resumen.tarjetaCodigo && resumen.nroResumen) {
+    const legacy = `${resumen.tarjetaCodigo}_${resumen.nroResumen}`;
+    if (legacy !== resumen.id) claves.push(legacy);
+  }
+  return claves;
+}
+
+async function movimientosDeResumen(resumen: CardStatement) {
+  // Firestore no hace OR sobre el mismo campo, así que son dos queries y una unión por id.
+  const snaps = await Promise.all(clavesDeResumen(resumen).map(k =>
+    getDocs(query(collection(db, 'movimientos'), where('resumenTarjetaId', '==', k))),
+  ));
+  const vistos = new Set<string>();
+  const docs: Array<{ id: string; ref: import('firebase/firestore').DocumentReference; data: () => DocumentData }> = [];
+  for (const snap of snaps) {
+    for (const d of snap.docs) {
+      if (vistos.has(d.id)) continue;
+      vistos.add(d.id);
+      docs.push(d);
+    }
+  }
+  return docs;
+}
+
+// Para que la UI diga lo mismo que el código: cuántos movimientos se reemplazarían y cuántos de
+// ellos fueron tocados a mano después de importados (por si el usuario pierde ediciones).
+export async function resumenYaGeneroMovimientos(
+  resumen: CardStatement,
+): Promise<{ total: number; editados: number }> {
+  const docs = await movimientosDeResumen(resumen);
+  const TOLERANCIA_MS = 5000; // creadoEn y actualizadoEn salen del mismo serverTimestamp del batch
+  const editados = docs.filter(d => {
+    const y = d.data();
+    const c = (y.creadoEn as { toMillis?: () => number } | null)?.toMillis?.();
+    const a = (y.actualizadoEn as { toMillis?: () => number } | null)?.toMillis?.();
+    return c != null && a != null && a - c > TOLERANCIA_MS;
+  }).length;
+  return { total: docs.length, editados };
+}
+
+// Firestore admite 500 operaciones por batch. Pasarse obligaría a partirlo, y partirlo rompe la
+// atomicidad justo en la operación que borra y recrea. Se rechaza con un mensaje claro en vez de
+// dejar el resumen a medio reemplazar. Peor caso medido hoy: 287 operaciones.
+const MAX_OPS_BATCH = 450;
+
 export async function confirmarResumenTarjeta(
   resumen: CardStatement,
   lineasEditadas: MovimientoParseado[],
   memberId: string,
   config: FamiliaConfig,
+  opciones?: { reemplazar?: boolean },
 ): Promise<Resultado<void>> {
   try {
     // Se resuelve UNA vez antes del batch: los cinco usos de abajo tienen que dar el mismo banco.
@@ -269,10 +338,38 @@ export async function confirmarResumenTarjeta(
     const fechaRef = resumen.fechaVencimiento ?? resumen.fechaCierre ?? new Date();
     const mesRef   = `${fechaRef.getFullYear()}-${String(fechaRef.getMonth() + 1).padStart(2, '0')}`;
 
+    // ── F9.158 §1 — idempotencia ─────────────────────────────────────────────
+    const existentes = await movimientosDeResumen(resumen);
+    if (existentes.length > 0 && !opciones?.reemplazar) {
+      return {
+        ok: false,
+        error: new Error(
+          `Este resumen ya generó ${existentes.length} movimiento${existentes.length !== 1 ? 's' : ''}. ` +
+          'Confirmar de nuevo los reemplaza: usá "Re-confirmar".',
+        ),
+      };
+    }
+
+    const lineasAImportar = lineasEditadas.filter(l => l.incluir && l.monto > 0);
+
+    // deletes + líneas nuevas + 2 totales + 2 updates de ítem + 1 update del resumen
+    const opsEstimadas = existentes.length + lineasAImportar.length + 5;
+    if (opsEstimadas > MAX_OPS_BATCH) {
+      return {
+        ok: false,
+        error: new Error(
+          `La operación necesita ${opsEstimadas} escrituras y el máximo atómico es ${MAX_OPS_BATCH}. ` +
+          'Partir el batch dejaría el resumen a medio reemplazar; hay que hacerlo a mano.',
+        ),
+      };
+    }
+
     const batch = writeBatch(db);
 
+    // Los viejos se borran en el MISMO batch que crea los nuevos: o pasa todo, o no pasa nada.
+    for (const d of existentes) batch.delete(d.ref);
+
     // ── N movimientos de consumo ──────────────────────────────────────────────
-    const lineasAImportar = lineasEditadas.filter(l => l.incluir && l.monto > 0);
     for (const linea of lineasAImportar) {
       const fechaConsumo = linea.fechaConsumo ? new Date(linea.fechaConsumo) : fechaRef;
       const mesConsumo   = `${fechaConsumo.getFullYear()}-${String(fechaConsumo.getMonth() + 1).padStart(2, '0')}`;
