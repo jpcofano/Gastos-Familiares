@@ -319,8 +319,22 @@ export async function confirmarResumenTarjeta(
       });
     }
 
+    // F9.156 §1 — el movimiento-total se crea SIEMPRE, con el monto clampeado a cero.
+    //
+    // Antes iba dentro de `if (total > 0)`, y eso descartaba dos casos distintos con la misma
+    // condición: el mes sin consumo en esa moneda (total 0) y el mes con saldo a favor (total
+    // negativo). Sin movimiento, el ítem esperado queda `pendiente` para siempre — medido en
+    // producción: 4 resúmenes en dos meses, 2 con cero y 2 con saldo a favor (−14,99 y −14,69),
+    // y dos altas manuales de U$S 1 para destaparlo a mano (F9.156-pre).
+    //
+    // El saldo a favor NO se refleja como movimiento negativo, a propósito: el resumen del mes
+    // siguiente ya viene neteado, así que un negativo lo contaría dos veces. El dato no se pierde,
+    // queda en `resumenesTarjeta.totalUSD`/`totalARS`.
+    const totalARSMov = Math.max(resumen.totalARS, 0);
+    const totalUSDMov = Math.max(resumen.totalUSD, 0);
+
     // ── Total ARS ─────────────────────────────────────────────────────────────
-    if (resumen.totalARS > 0) {
+    {
       const movTotalARS = doc(collection(db, 'movimientos'));
       batch.set(movTotalARS, {
         fecha:               Timestamp.fromDate(fechaRef),
@@ -330,7 +344,7 @@ export async function confirmarResumenTarjeta(
         origen:              'Tarjeta',
         descripcion:         `Resumen ${resumen.tarjeta} ${resumen.periodo}`,
         descripcionOriginal: null,
-        monto:               resumen.totalARS,
+        monto:               totalARSMov,
         moneda:              'ARS',
         tcUsdArs:            null,
         categoria:           'Tarjetas',
@@ -358,7 +372,7 @@ export async function confirmarResumenTarjeta(
     }
 
     // ── Total USD ─────────────────────────────────────────────────────────────
-    if (resumen.totalUSD > 0) {
+    {
       const movTotalUSD = doc(collection(db, 'movimientos'));
       batch.set(movTotalUSD, {
         fecha:               Timestamp.fromDate(fechaRef),
@@ -368,7 +382,7 @@ export async function confirmarResumenTarjeta(
         origen:              'Tarjeta',
         descripcion:         `Resumen ${resumen.tarjeta} ${resumen.periodo} (USD)`,
         descripcionOriginal: null,
-        monto:               resumen.totalUSD,
+        monto:               totalUSDMov,
         moneda:              'USD',
         tcUsdArs:            null,
         categoria:           'Tarjetas',
@@ -396,15 +410,19 @@ export async function confirmarResumenTarjeta(
     }
 
     // ── Setear montoEsperado en los items de la tarjeta ──────────────────────
-    if (itemARS && resumen.totalARS > 0) {
+    // F9.156 §1 — sin la guarda de `> 0`: los ítems USD de las dos Galicia tenían
+    // `montoEsperado: null` y `actualizadoEn` ausente, o sea que esta línea nunca había corrido
+    // para ellos. Se guarda el mismo monto clampeado que el movimiento, para que el checklist
+    // compare peras con peras (estadoItem: montoConf < montoEsperado * 0.99).
+    if (itemARS) {
       batch.update(doc(db, 'itemsEsperados', itemARS.id), {
-        montoEsperado: resumen.totalARS,
+        montoEsperado: totalARSMov,
         actualizadoEn: serverTimestamp(),
       });
     }
-    if (itemUSD && resumen.totalUSD > 0) {
+    if (itemUSD) {
       batch.update(doc(db, 'itemsEsperados', itemUSD.id), {
-        montoEsperado: resumen.totalUSD,
+        montoEsperado: totalUSDMov,
         actualizadoEn: serverTimestamp(),
       });
     }

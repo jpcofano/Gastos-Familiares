@@ -1,0 +1,388 @@
+=== (a) resumenesTarjeta: 30 docs, ordenados por periodo ===
+
+por estado: {"confirmado":30}
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2025-05 | cierre=2025-04-30 | venc=2025-05-09
+         totalARS=  1439062.19 | totalUSD=     -6.88 | pagoMinARS=      79430 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-20 | movimientosParseados=48
+
+BBVA-VIS | confirmado       | BBVA                   | Visa Signature     | 2025-12 | cierre=2025-11-27 | venc=2025-12-09
+         totalARS=  3737693.68 | totalUSD=   4672.77 | pagoMinARS=    2481130 | tarjetaCodigo=BBVA-VISA-SIG
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-20 | movimientosParseados=99
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2025-12 | cierre=2025-11-27 | venc=2025-12-05
+         totalARS=   560402.36 | totalUSD=    158.54 | pagoMinARS=     124560 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-20 | movimientosParseados=64
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2026-01 | cierre=2025-12-31 | venc=2026-01-09
+         totalARS=  1068362.15 | totalUSD=     14.99 | pagoMinARS=      94590 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-20 | movimientosParseados=80
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2026-02 | cierre=2026-01-29 | venc=2026-02-06
+         totalARS=   673904.26 | totalUSD=     14.99 | pagoMinARS=      58690 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-20 | movimientosParseados=28
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2026-03 | cierre=2026-02-26 | venc=2026-03-06
+         totalARS=   965433.19 | totalUSD=    906.54 | pagoMinARS=     498110 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-20 | movimientosParseados=52
+
+BBVA-MAS | confirmado       | BBVA                   | Mastercard Black   | 2026-04 | cierre=2026-03-26 | venc=2026-04-09
+         totalARS=   609948.08 | totalUSD=     20.97 | pagoMinARS=      57204 | tarjetaCodigo=BBVA-MASTER-BLK
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-23 | movimientosParseados=25
+
+BBVA-VIS | confirmado       | BBVA                   | Visa Signature     | 2026-04 | cierre=2026-03-26 | venc=2026-04-09
+         totalARS=  2076697.11 | totalUSD=     19.76 | pagoMinARS=     135710 | tarjetaCodigo=BBVA-VISA-SIG
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-25 | movimientosParseados=58
+
+GAL-MAST | confirmado       | Galicia                | Mastercard Black   | 2026-04 | cierre=2026-03-26 | venc=2026-04-06
+         totalARS=   424627.92 | totalUSD=      0.94 | pagoMinARS=      62720 | tarjetaCodigo=GAL-MASTER-BLK
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-19 | movimientosParseados=38
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2026-04 | cierre=2026-03-26 | venc=2026-04-06
+         totalARS=  2454132.24 | totalUSD=     14.99 | pagoMinARS=     156690 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-04-20 | movimientosParseados=139
+
+68c7a1ea | confirmado       | BBVA                   | Visa Signature     | 2026-05 | cierre=2026-05-28 | venc=2026-06-05
+         totalARS=  1720234.78 | totalUSD=     19.79 | pagoMinARS=     107420 | tarjetaCodigo=BBVA-VISA-SIG
+         numeroCuenta=0916360348 | ultimos4=null | confirmadoEn=2026-06-29 | movimientosParseados=117
+
+BBVA-MAS | confirmado       | BBVA                   | Mastercard Black   | 2026-05 | cierre=2026-04-30 | venc=2026-05-08
+         totalARS=   427274.27 | totalUSD=     22.99 | pagoMinARS=      36322 | tarjetaCodigo=BBVA-MASTER-BLK
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-05-05 | movimientosParseados=25
+
+BBVA-VIS | confirmado       | BBVA                   | Visa Signature     | 2026-05 | cierre=2026-04-30 | venc=2026-05-08
+         totalARS=  2018435.94 | totalUSD=     34.68 | pagoMinARS=     139570 | tarjetaCodigo=BBVA-VISA-SIG
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-05-04 | movimientosParseados=78
+
+GAL-MAST | confirmado       | Galicia                | Mastercard Black   | 2026-05 | cierre=2026-04-30 | venc=2026-05-08
+         totalARS=   1084566.8 | totalUSD=      4.96 | pagoMinARS=      98830 | tarjetaCodigo=GAL-MASTER-BLK
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-05-04 | movimientosParseados=22
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2026-05 | cierre=2026-04-30 | venc=2026-05-08
+         totalARS=  1403704.23 | totalUSD=     49.99 | pagoMinARS=     125650 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-05-04 | movimientosParseados=53
+
+BBVA-MAS | confirmado       | BBVA                   | Mastercard Black   | 2026-06 | cierre=2026-05-28 | venc=2026-06-05
+         totalARS=  1160758.61 | totalUSD=     77.96 | pagoMinARS=     108629 | tarjetaCodigo=BBVA-MASTER-BLK
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-06-04 | movimientosParseados=42
+
+GAL-MAST | confirmado       | Galicia                | Mastercard Black   | 2026-06 | cierre=2026-05-28 | venc=2026-06-05
+         totalARS=   802989.99 | totalUSD=        20 | pagoMinARS=      90400 | tarjetaCodigo=GAL-MASTER-BLK
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-06-05 | movimientosParseados=10
+
+GAL-VISA | confirmado       | Galicia                | Visa               | 2026-06 | cierre=2026-05-28 | venc=2026-06-05
+         totalARS=  1094786.88 | totalUSD=     14.99 | pagoMinARS=     160230 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=(ausente) | ultimos4=(ausente) | confirmadoEn=2026-06-01 | movimientosParseados=148
+
+17e51e81 | confirmado       | Galicia                | Mastercard Black   | 2026-07 | cierre=2026-07-30 | venc=2026-08-07
+         totalARS=   228208.53 | totalUSD=         0 | pagoMinARS=      51870 | tarjetaCodigo=GAL-MASTER-BLK
+         numeroCuenta=2380140-0-6 | ultimos4=null | confirmadoEn=2026-08-04 | movimientosParseados=4
+
+1a5eaf81 | confirmado       | Galicia                | Mastercard Black   | 2026-07 | cierre=2026-07-02 | venc=2026-07-13
+         totalARS=   531490.81 | totalUSD=        20 | pagoMinARS=      85190 | tarjetaCodigo=GAL-MASTER-BLK
+         numeroCuenta=2380140-0-6 | ultimos4=null | confirmadoEn=2026-07-06 | movimientosParseados=12
+
+5d948f9a | confirmado       | BBVA Argentina         | Mastercard Black   | 2026-07 | cierre=2026-07-30 | venc=2026-08-07
+         totalARS=  1567446.41 | totalUSD=    530.95 | pagoMinARS=     372810 | tarjetaCodigo=BBVA-MASTER-BLK
+         numeroCuenta=1262521647 | ultimos4=null | confirmadoEn=2026-08-04 | movimientosParseados=75
+
+b553ddf1 | confirmado       | BBVA Argentina         | Visa Signature     | 2026-07 | cierre=2026-07-02 | venc=2026-07-13
+         totalARS=  2751363.32 | totalUSD=     18.99 | pagoMinARS=     180630 | tarjetaCodigo=BBVA-VISA-SIG
+         numeroCuenta=0916360348 | ultimos4=null | confirmadoEn=2026-07-06 | movimientosParseados=139
+
+c7222865 | confirmado       | BBVA                   | Mastercard Black   | 2026-07 | cierre=2026-07-02 | venc=2026-07-13
+         totalARS=   761861.97 | totalUSD=    124.74 | pagoMinARS=     127972 | tarjetaCodigo=BBVA-MASTER-BLK
+         numeroCuenta=1262521647 | ultimos4=null | confirmadoEn=2026-07-06 | movimientosParseados=53
+
+f3e9e4f3 | confirmado       | BBVA Argentina         | Visa Signature     | 2026-07 | cierre=2026-07-30 | venc=2026-08-07
+         totalARS=  4313337.28 | totalUSD=   1983.64 | pagoMinARS=    1240960 | tarjetaCodigo=BBVA-VISA-SIG
+         numeroCuenta=0916360348 | ultimos4=null | confirmadoEn=2026-08-04 | movimientosParseados=89
+
+f9dcc286 | confirmado       | Galicia                | Visa               | 2026-07 | cierre=2026-07-02 | venc=2026-07-13
+         totalARS=   1118426.8 | totalUSD=     15.04 | pagoMinARS=     123510 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=1235391051 | ultimos4=null | confirmadoEn=2026-07-06 | movimientosParseados=57
+
+fc31ca48 | confirmado       | Galicia                | Visa               | 2026-07 | cierre=2026-07-30 | venc=2026-08-07
+         totalARS=   965344.91 | totalUSD=    -14.99 | pagoMinARS=      37020 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=1235391051 | ultimos4=null | confirmadoEn=2026-08-04 | movimientosParseados=50
+
+08a697e0 | confirmado       | BBVA Argentina         | Visa Signature     | 2026-08 | cierre=2026-08-27 | venc=2026-09-07
+         totalARS=   1403821.1 | totalUSD=     73.55 | pagoMinARS=          0 | tarjetaCodigo=BBVA-VISA-SIG
+         numeroCuenta=0916360348 | ultimos4=null | confirmadoEn=2026-09-01 | movimientosParseados=90
+
+879eb89a | confirmado       | Galicia                | Mastercard Black   | 2026-08 | cierre=2026-08-27 | venc=2026-09-04
+         totalARS=   264292.38 | totalUSD=         0 | pagoMinARS=      53670 | tarjetaCodigo=GAL-MASTER-BLK
+         numeroCuenta=2380140-0-6 | ultimos4=null | confirmadoEn=2026-09-01 | movimientosParseados=3
+
+cba1d7be | confirmado       | BBVA Argentina         | Mastercard Black   | 2026-08 | cierre=2026-08-27 | venc=2026-09-07
+         totalARS=   534471.55 | totalUSD=     91.44 | pagoMinARS=          0 | tarjetaCodigo=BBVA-MASTER-BLK
+         numeroCuenta=1262521647 | ultimos4=null | confirmadoEn=2026-09-01 | movimientosParseados=45
+
+f9d9b308 | confirmado       | Galicia                | Visa               | 2026-08 | cierre=2026-08-27 | venc=2026-09-04
+         totalARS=  1328762.43 | totalUSD=    -14.69 | pagoMinARS=      77240 | tarjetaCodigo=GAL-VISA
+         numeroCuenta=1235391051 | ultimos4=null | confirmadoEn=2026-09-01 | movimientosParseados=67
+
+=== (b) movimientos generados por cada resumen (por resumenTarjetaId) ===
+
+GAL-VISA | 2025-05 | confirmado       | totalARS=  1439062.19 totalUSD=    -6.88 | movs-total=2 [ARS+USD] | renglones=48
+    HIS_d5b7b05a_2025-05-09 | USD        -6.88 | mes=2025-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+    HIS_eba0313c_2025-05-09 | ARS   1439062.19 | mes=2025-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+
+BBVA-VIS | 2025-12 | confirmado       | totalARS=  3737693.68 totalUSD=  4672.77 | movs-total=2 [ARS+USD] | renglones=99
+    HIS_73cf3f3e_2025-12-09 | ARS   3737693.68 | mes=2025-12 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Signature BBVA ARS
+    HIS_84c51e94_2025-12-09 | USD      4672.77 | mes=2025-12 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Signature BBVA USD
+
+GAL-VISA | 2025-12 | confirmado       | totalARS=   560402.36 totalUSD=   158.54 | movs-total=4 [ARS+ARS+USD+USD] | renglones=64
+    HIS_3c0abdc1_2025-12-05 | ARS    560402.36 | mes=2025-12 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+    HIS_71706296_2025-12-05 | USD       158.54 | mes=2025-12 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+    HIS_84ec84ca_2025-12-05 | USD       158.54 | mes=2025-12 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+    HIS_d6a50690_2025-12-05 | ARS    560402.36 | mes=2025-12 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+
+GAL-VISA | 2026-01 | confirmado       | totalARS=  1068362.15 totalUSD=    14.99 | movs-total=4 [ARS+ARS+USD+USD] | renglones=80
+    HIS_430d1c31_2026-01-09 | ARS   1068362.15 | mes=2026-01 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+    HIS_4a35b0d9_2026-01-09 | ARS   1068362.15 | mes=2026-01 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+    HIS_d3754294_2026-01-09 | USD        14.99 | mes=2026-01 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+    HIS_f0177231_2026-01-09 | USD        14.99 | mes=2026-01 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+
+GAL-VISA | 2026-02 | confirmado       | totalARS=   673904.26 totalUSD=    14.99 | movs-total=2 [ARS+USD] | renglones=28
+    HIS_4d49fbbf_2026-02-06 | ARS    673904.26 | mes=2026-02 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+    HIS_76963634_2026-02-06 | USD        14.99 | mes=2026-02 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+
+GAL-VISA | 2026-03 | confirmado       | totalARS=   965433.19 totalUSD=   906.54 | movs-total=2 [ARS+USD] | renglones=52
+    HIS_0c928db8_2026-03-06 | ARS    965433.19 | mes=2026-03 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+    HIS_e3a0e155_2026-03-06 | USD       906.54 | mes=2026-03 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+
+BBVA-MAS | 2026-04 | confirmado       | totalARS=   609948.08 totalUSD=    20.97 | movs-total=2 [ARS+USD] | renglones=25
+    HIS_048257c0_2026-04-09 | USD        20.97 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black BBVA USD
+    HIS_49272f18_2026-04-09 | ARS    609948.08 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black BBVA ARS
+
+BBVA-VIS | 2026-04 | confirmado       | totalARS=  2076697.11 totalUSD=    19.76 | movs-total=2 [ARS+USD] | renglones=58
+    HIS_5dec5959_2026-04-09 | ARS   2076697.11 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Signature BBVA ARS
+    HIS_a6aaa839_2026-04-09 | USD        19.76 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Signature BBVA USD
+
+GAL-MAST | 2026-04 | confirmado       | totalARS=   424627.92 totalUSD=     0.94 | movs-total=4 [ARS+ARS+USD+USD] | renglones=28
+    HIS_2245f29f_2026-04-06 | USD         0.94 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia USD
+    HIS_496f71c6_2026-04-06 | ARS 424239.45999999996 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia ARS
+    HIS_949dc815_2026-04-06 | ARS    424627.92 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia ARS
+    HIS_e0702281_2026-04-06 | USD         0.94 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia USD
+
+GAL-VISA | 2026-04 | confirmado       | totalARS=  2454132.24 totalUSD=    14.99 | movs-total=4 [ARS+ARS+USD+USD] | renglones=139
+    HIS_99df8f66_2026-04-06 | USD        14.99 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+    HIS_bec6906d_2026-04-06 | ARS   2454132.24 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+    HIS_d5e4c3dc_2026-04-06 | USD        14.99 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+    HIS_d6d3ce24_2026-04-06 | ARS   2454132.24 | mes=2026-04 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+
+68c7a1ea | 2026-05 | confirmado       | totalARS=  1720234.78 totalUSD=    19.79 | movs-total=2 [ARS+USD] | renglones=117
+    EVrgrlYNa6sJP2RpfcR8 | ARS   1720234.78 | mes=2026-06 | pagado=true confirmadoPago=true | item=1a8c199f07fd90851266
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-05
+    QF7Qjrsr3tpcec3dNbSb | USD        19.79 | mes=2026-06 | pagado=true confirmadoPago=true | item=20f02d6d96e6db6f8a25
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-05 (USD)
+
+BBVA-MAS | 2026-05 | confirmado       | totalARS=   427274.27 totalUSD=    22.99 | movs-total=2 [ARS+USD] | renglones=25
+    HIS_6452dfe6_2026-05-08 | USD        22.99 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black BBVA USD
+    HIS_a845b53f_2026-05-08 | ARS    427274.27 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black BBVA ARS
+
+BBVA-VIS | 2026-05 | confirmado       | totalARS=  2018435.94 totalUSD=    34.68 | movs-total=2 [ARS+USD] | renglones=78
+    HIS_0abea1b5_2026-05-08 | ARS   2018435.94 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Signature BBVA ARS
+    HIS_626ef927_2026-05-08 | USD        34.68 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Signature BBVA USD
+
+GAL-MAST | 2026-05 | confirmado       | totalARS=   1084566.8 totalUSD=     4.96 | movs-total=2 [ARS+USD] | renglones=22
+    HIS_0756c717_2026-05-08 | USD         4.96 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia USD
+    HIS_702c8168_2026-05-08 | ARS   1082496.25 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia ARS
+
+GAL-VISA | 2026-05 | confirmado       | totalARS=  1403704.23 totalUSD=    49.99 | movs-total=2 [ARS+USD] | renglones=53
+    HIS_4c11144d_2026-05-08 | ARS   1382835.91 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+    HIS_5fd14dd6_2026-05-08 | USD        49.99 | mes=2026-05 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+
+BBVA-MAS | 2026-06 | confirmado       | totalARS=  1160758.61 totalUSD=    77.96 | movs-total=2 [ARS+USD] | renglones=42
+    HIS_4d01b214_2026-06-05 | ARS   1160758.61 | mes=2026-06 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black BBVA ARS
+    HIS_8955d33a_2026-06-05 | USD        77.96 | mes=2026-06 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black BBVA USD
+
+GAL-MAST | 2026-06 | confirmado       | totalARS=   802989.99 totalUSD=       20 | movs-total=2 [ARS+USD] | renglones=10
+    HIS_94605585_2026-06-05 | USD           20 | mes=2026-06 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia USD
+    HIS_b633105d_2026-06-05 | ARS    794514.99 | mes=2026-06 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Mastercard Black Galicia ARS
+
+GAL-VISA | 2026-06 | confirmado       | totalARS=  1094786.88 totalUSD=    14.99 | movs-total=2 [ARS+USD] | renglones=37
+    HIS_0550eaca_2026-06-05 | USD        14.99 | mes=2026-06 | pagado=true confirmadoPago=true | item=10ef6a27ca48459d59cb
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia USD
+    HIS_abfec785_2026-06-05 | ARS   1094786.88 | mes=2026-06 | pagado=false confirmadoPago=(ausente) | item=null
+      incluirResumenMes=true excluirDash=true | Pago Visa Galicia ARS
+
+17e51e81 | 2026-07 | confirmado       | totalARS=   228208.53 totalUSD=        0 | movs-total=1 [ARS] | renglones=4
+    TN5U4ntismBYOhyn5Eqj | ARS    228208.53 | mes=2026-08 | pagado=true confirmadoPago=true | item=db9cbf89bcaec1468df7
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-07
+
+1a5eaf81 | 2026-07 | confirmado       | totalARS=   531490.81 totalUSD=       20 | movs-total=2 [ARS+USD] | renglones=12
+    LIyCIySmmfbEZIMWMlmO | ARS    531490.81 | mes=2026-07 | pagado=true confirmadoPago=true | item=db9cbf89bcaec1468df7
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-07
+    pds1dLTQvmqx37O0CrUg | USD           20 | mes=2026-07 | pagado=true confirmadoPago=true | item=acc1caba30299fac7b67
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-07 (USD)
+
+5d948f9a | 2026-07 | confirmado       | totalARS=  1567446.41 totalUSD=   530.95 | movs-total=2 [ARS+USD] | renglones=74
+    IwCBhRxCy1kr5cSzwbq3 | ARS   1567446.41 | mes=2026-08 | pagado=true confirmadoPago=true | item=8b2a1e714a21efcbea18
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-07
+    lSAndyXdY7gR3iiw938S | USD       530.95 | mes=2026-08 | pagado=true confirmadoPago=true | item=292256d38d011ccc07f0
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-07 (USD)
+
+b553ddf1 | 2026-07 | confirmado       | totalARS=  2751363.32 totalUSD=    18.99 | movs-total=2 [ARS+USD] | renglones=138
+    0KGl80d6l8bcbsdllOam | ARS   2751363.32 | mes=2026-07 | pagado=true confirmadoPago=true | item=1a8c199f07fd90851266
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-07
+    Uzhjm5Rz5C5z9EuI9hC6 | USD        18.99 | mes=2026-07 | pagado=true confirmadoPago=true | item=20f02d6d96e6db6f8a25
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-07 (USD)
+
+c7222865 | 2026-07 | confirmado       | totalARS=   761861.97 totalUSD=   124.74 | movs-total=2 [ARS+USD] | renglones=53
+    4BH8ac3GzIiZqtJWxHWB | USD       124.74 | mes=2026-07 | pagado=true confirmadoPago=true | item=292256d38d011ccc07f0
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-07 (USD)
+    THmRpBnQae6kgSV7L4d6 | ARS    761861.97 | mes=2026-07 | pagado=true confirmadoPago=true | item=8b2a1e714a21efcbea18
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-07
+
+f3e9e4f3 | 2026-07 | confirmado       | totalARS=  4313337.28 totalUSD=  1983.64 | movs-total=2 [ARS+USD] | renglones=87
+    qBEU8cNH93r2ZTgfIL9k | USD      1983.64 | mes=2026-08 | pagado=true confirmadoPago=true | item=20f02d6d96e6db6f8a25
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-07 (USD)
+    yEGWZOvh6yCct4NzWFTc | ARS   4313337.28 | mes=2026-08 | pagado=true confirmadoPago=true | item=1a8c199f07fd90851266
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-07
+
+f9dcc286 | 2026-07 | confirmado       | totalARS=   1118426.8 totalUSD=    15.04 | movs-total=2 [ARS+USD] | renglones=57
+    OCj0gxupdxSr5ulsDDYy | USD        15.04 | mes=2026-07 | pagado=true confirmadoPago=true | item=10ef6a27ca48459d59cb
+      incluirResumenMes=true excluirDash=true | Resumen Visa 2026-07 (USD)
+    jQwsrdZ1FPAD3eYmRB1T | ARS    1118426.8 | mes=2026-07 | pagado=true confirmadoPago=true | item=7c02a5b70030db37004f
+      incluirResumenMes=true excluirDash=true | Resumen Visa 2026-07
+
+fc31ca48 | 2026-07 | confirmado       | totalARS=   965344.91 totalUSD=   -14.99 | movs-total=1 [ARS] | renglones=49   <<< SIN MOVIMIENTO USD
+    vC9vMizuM4mLXSSKOhot | ARS    965344.91 | mes=2026-08 | pagado=true confirmadoPago=true | item=7c02a5b70030db37004f
+      incluirResumenMes=true excluirDash=true | Resumen Visa 2026-07
+
+08a697e0 | 2026-08 | confirmado       | totalARS=   1403821.1 totalUSD=    73.55 | movs-total=2 [ARS+USD] | renglones=90
+    JmckFMK9zO9BJ5gdslF3 | USD        73.55 | mes=2026-09 | pagado=true confirmadoPago=false | item=20f02d6d96e6db6f8a25
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-08 (USD)
+    U22RAdV8ZKo6boMUsRi9 | ARS    1403821.1 | mes=2026-09 | pagado=true confirmadoPago=false | item=1a8c199f07fd90851266
+      incluirResumenMes=true excluirDash=true | Resumen Visa Signature 2026-08
+
+879eb89a | 2026-08 | confirmado       | totalARS=   264292.38 totalUSD=        0 | movs-total=1 [ARS] | renglones=3
+    quIBLk8MiPBOefAgDVLz | ARS    264292.38 | mes=2026-09 | pagado=true confirmadoPago=false | item=db9cbf89bcaec1468df7
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-08
+
+cba1d7be | 2026-08 | confirmado       | totalARS=   534471.55 totalUSD=    91.44 | movs-total=2 [ARS+USD] | renglones=45
+    uQfkM52zQKt0iap6k1gt | USD        91.44 | mes=2026-09 | pagado=true confirmadoPago=false | item=292256d38d011ccc07f0
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-08 (USD)
+    vnPKOLyMvesRggBrkSpD | ARS    534471.55 | mes=2026-09 | pagado=true confirmadoPago=false | item=8b2a1e714a21efcbea18
+      incluirResumenMes=true excluirDash=true | Resumen Mastercard Black 2026-08
+
+f9d9b308 | 2026-08 | confirmado       | totalARS=  1328762.43 totalUSD=   -14.69 | movs-total=1 [ARS] | renglones=67   <<< SIN MOVIMIENTO USD
+    sYvL2ROx69yzon8wTIFf | ARS   1328762.43 | mes=2026-09 | pagado=true confirmadoPago=false | item=7c02a5b70030db37004f
+      incluirResumenMes=true excluirDash=true | Resumen Visa 2026-08
+
+resúmenes con 2+ movimientos (ARS+USD): 26 | con 1 solo: 4 | con ninguno: 0
+
+=== (c) itemsEsperados de tarjeta (tarjetaCodigo poblado o categoria "Tarjetas") ===
+
+10ef6a27ca48459d59cb | Gasto | Tarjetas > Pago Tarjeta | moneda=USD | montoEsperado=        null | tarjetaCodigo=GAL-VISA
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=(ausente)
+1a8c199f07fd90851266 | Gasto | Tarjetas > Pago Tarjeta | moneda=ARS | montoEsperado=   1403821.1 | tarjetaCodigo=BBVA-VISA-SIG
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=2026-09-01
+20f02d6d96e6db6f8a25 | Gasto | Tarjetas > Pago Tarjeta | moneda=USD | montoEsperado=       73.55 | tarjetaCodigo=BBVA-VISA-SIG
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=2026-09-01
+292256d38d011ccc07f0 | Gasto | Tarjetas > Pago Tarjeta | moneda=USD | montoEsperado=       91.44 | tarjetaCodigo=BBVA-MASTER-BLK
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=2026-09-01
+7c02a5b70030db37004f | Gasto | Tarjetas > Pago Tarjeta | moneda=ARS | montoEsperado=  1328762.43 | tarjetaCodigo=GAL-VISA
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=2026-09-01
+8b2a1e714a21efcbea18 | Gasto | Tarjetas > Pago Tarjeta | moneda=ARS | montoEsperado=   534471.55 | tarjetaCodigo=BBVA-MASTER-BLK
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=2026-09-01
+acc1caba30299fac7b67 | Gasto | Tarjetas > Pago Tarjeta | moneda=USD | montoEsperado=        null | tarjetaCodigo=GAL-MASTER-BLK
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=(ausente)
+db9cbf89bcaec1468df7 | Gasto | Tarjetas > Pago Tarjeta | moneda=ARS | montoEsperado=   264292.38 | tarjetaCodigo=GAL-MASTER-BLK
+         activo=true | periodicidad=mensual | diaVencimiento=null | actualizadoEn=2026-09-01
+
+--- cruce (c) x (b): en qué meses cada ítem de tarjeta tuvo movimiento ---
+  USD Pago Tarjeta   10ef6a27ca48459d59cb | movimientos: 7 → 2026-01(USD 14.99), 2026-02(USD 14.99), 2026-03(USD 906.54), 2026-04(USD 14.99), 2026-06(USD 14.99), 2026-07(USD 15.04), 2026-08(USD 1)
+  ARS Pago Tarjeta   1a8c199f07fd90851266 | movimientos: 8 → 2026-01(ARS 2512790.84), 2026-02(ARS 1623645.38), 2026-03(ARS 1716337.24), 2026-04(ARS 2076697.11), 2026-06(ARS 1720234.78), 2026-07(ARS 2751363.32), 2026-08(ARS 4313337.28), 2026-09(ARS 1403821.1)
+  USD Pago Tarjeta   20f02d6d96e6db6f8a25 | movimientos: 8 → 2026-01(USD 559.94), 2026-02(USD 19.31), 2026-03(USD 383.86), 2026-04(USD 19.79), 2026-06(USD 19.79), 2026-07(USD 18.99), 2026-08(USD 1983.64), 2026-09(USD 73.55)
+  USD Pago Tarjeta   292256d38d011ccc07f0 | movimientos: 7 → 2026-01(USD 116.7), 2026-02(USD 140.63), 2026-03(USD 622.96), 2026-04(USD 20.97), 2026-07(USD 124.74), 2026-08(USD 530.95), 2026-09(USD 91.44)
+  ARS Pago Tarjeta   7c02a5b70030db37004f | movimientos: 7 → 2026-01(ARS 1068362.15), 2026-02(ARS 673904.26), 2026-03(ARS 584958.3599999999), 2026-04(ARS 2454132.24), 2026-07(ARS 1118426.8), 2026-08(ARS 965344.91), 2026-09(ARS 1328762.43)
+  ARS Pago Tarjeta   8b2a1e714a21efcbea18 | movimientos: 7 → 2026-01(ARS 1162671.0599999998), 2026-02(ARS 947949.17), 2026-03(ARS 429293.56999999995), 2026-04(ARS 609948.48), 2026-07(ARS 761861.97), 2026-08(ARS 1567446.41), 2026-09(ARS 534471.55)
+  USD Pago Tarjeta   acc1caba30299fac7b67 | movimientos: 6 → 2026-01(USD 154.41), 2026-02(USD 0.92), 2026-03(USD 547.33), 2026-04(USD 0.94), 2026-07(USD 20), 2026-08(USD 1)
+  ARS Pago Tarjeta   db9cbf89bcaec1468df7 | movimientos: 7 → 2026-01(ARS 1256077.71), 2026-02(ARS 877314.41), 2026-03(ARS 666323.2), 2026-04(ARS 424627.92), 2026-07(ARS 531490.81), 2026-08(ARS 228208.53), 2026-09(ARS 264292.38)
+
+=== (d) estado de checklist REAL (calcularChecklist importado, no replicado) ===
+
+mes actual = 2026-09 | meses evaluados: 2026-07, 2026-08, 2026-09
+
+--- 2026-07 ---
+  USD Pago Tarjeta   20f02d6d96e6db6f8a25 | estado=parcial        | matches=1 USD 18.99
+  ARS Pago Tarjeta   7c02a5b70030db37004f | estado=parcial        | matches=1 ARS 1118426.8
+  USD Pago Tarjeta   10ef6a27ca48459d59cb | estado=pagado         | matches=1 USD 15.04
+  ARS Pago Tarjeta   1a8c199f07fd90851266 | estado=pagado         | matches=1 ARS 2751363.32
+  USD Pago Tarjeta   292256d38d011ccc07f0 | estado=pagado         | matches=1 USD 124.74
+  ARS Pago Tarjeta   8b2a1e714a21efcbea18 | estado=pagado         | matches=1 ARS 761861.97
+  USD Pago Tarjeta   acc1caba30299fac7b67 | estado=pagado         | matches=1 USD 20
+  ARS Pago Tarjeta   db9cbf89bcaec1468df7 | estado=pagado         | matches=1 ARS 531490.81
+
+--- 2026-08 ---
+  ARS Pago Tarjeta   7c02a5b70030db37004f | estado=parcial        | matches=1 ARS 965344.91
+  ARS Pago Tarjeta   db9cbf89bcaec1468df7 | estado=parcial        | matches=1 ARS 228208.53
+  USD Pago Tarjeta   10ef6a27ca48459d59cb | estado=pagado         | matches=1 USD 1
+  ARS Pago Tarjeta   1a8c199f07fd90851266 | estado=pagado         | matches=1 ARS 4313337.28
+  USD Pago Tarjeta   20f02d6d96e6db6f8a25 | estado=pagado         | matches=1 USD 1983.64
+  USD Pago Tarjeta   292256d38d011ccc07f0 | estado=pagado         | matches=1 USD 530.95
+  ARS Pago Tarjeta   8b2a1e714a21efcbea18 | estado=pagado         | matches=1 ARS 1567446.41
+  USD Pago Tarjeta   acc1caba30299fac7b67 | estado=pagado         | matches=1 USD 1
+
+--- 2026-09 ---
+  USD Pago Tarjeta   10ef6a27ca48459d59cb | estado=pendiente      | matches=0    <<< PENDIENTE COLGADO
+  USD Pago Tarjeta   acc1caba30299fac7b67 | estado=pendiente      | matches=0    <<< PENDIENTE COLGADO
+  ARS Pago Tarjeta   1a8c199f07fd90851266 | estado=por_confirmar  | matches=1 ARS 1403821.1
+  USD Pago Tarjeta   20f02d6d96e6db6f8a25 | estado=por_confirmar  | matches=1 USD 73.55
+  USD Pago Tarjeta   292256d38d011ccc07f0 | estado=por_confirmar  | matches=1 USD 91.44
+  ARS Pago Tarjeta   7c02a5b70030db37004f | estado=por_confirmar  | matches=1 ARS 1328762.43
+  ARS Pago Tarjeta   8b2a1e714a21efcbea18 | estado=por_confirmar  | matches=1 ARS 534471.55
+  ARS Pago Tarjeta   db9cbf89bcaec1468df7 | estado=por_confirmar  | matches=1 ARS 264292.38
+
+>>> ítems-mes en USD en estado 'pendiente': 2
+    2026-09 | 10ef6a27ca48459d59cb | Pago Tarjeta | montoEsperado=null
+    2026-09 | acc1caba30299fac7b67 | Pago Tarjeta | montoEsperado=null
+
+=== §2.4 — ¿algún resumen con totalARS === 0 y totalUSD > 0? ===
+  (ninguno)
+
+  --- distribución de (totalARS, totalUSD) sobre los resúmenes confirmados ---
+  confirmados: 30 | ARS>0 y USD>0: 25 | solo ARS: 5 | solo USD: 0 | los dos en 0: 0
