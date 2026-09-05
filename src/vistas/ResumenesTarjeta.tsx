@@ -33,6 +33,18 @@ const TIPO_LABEL: Record<string, string> = {
   reintegro_percepcion: 'reintegro', bonificacion: 'bonif.', reverso: 'reverso',
 };
 
+// F9.157 §2 — los seis valores de `tipoLinea`, para el selector. El orden es el del tipo en
+// src/types/index.ts: primero los que son gasto, después los tres que `tipoDeLinea` mapea a Ingreso.
+const TIPOS_LINEA: MovimientoParseado['tipoLinea'][] = [
+  'consumo', 'cuota', 'impuesto', 'reintegro_percepcion', 'bonificacion', 'reverso',
+];
+
+// F9.157 §2 — el `esImpuesto` que fuerza la categoría. Sale de `tipoLinea`, así que al editarlo a
+// mano hay que volver a preguntarlo: si no, una línea que deja de ser impuesto se queda con
+// "Impuestos y finanzas" pegada de la clasificación inicial.
+const lineaEsImpuesto = (t: MovimientoParseado['tipoLinea']) =>
+  t === 'impuesto' || t === 'reintegro_percepcion';
+
 // ── Preview ───────────────────────────────────────────────────────────────────
 
 interface PreviewProps {
@@ -52,6 +64,21 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
   const [errorLocal,  setErrorLocal]  = useState<string | null>(null);
   const inicializadoRef = useRef(false);
 
+  // F9.157 §2 — extraída del useEffect de inicialización para poder reusarla cuando el usuario
+  // edita `tipoLinea`: la categoría es un DERIVADO de tipoLinea y antes solo se calculaba una vez.
+  const categoriaSugerida = useCallback((
+    tipoLinea: MovimientoParseado['tipoLinea'],
+    descripcionRaw: string | null | undefined,
+  ): { categoria: string | null; subcategoria: string | null } => {
+    if (lineaEsImpuesto(tipoLinea)) return { categoria: 'Impuestos y finanzas', subcategoria: null };
+    const cls = descripcionRaw
+      ? clasificar(descripcionRaw, { banco: resumen.banco || null, tarjeta: resumen.tarjetaCodigo || null })
+      : null;
+    return cls && cls.confianza >= CONFIANZA_UMBRAL
+      ? { categoria: cls.categoria, subcategoria: cls.subcategoria ?? null }
+      : { categoria: null, subcategoria: null };
+  }, [clasificar, resumen.banco, resumen.tarjetaCodigo]);
+
   useEffect(() => {
     if (inicializadoRef.current) return;
     inicializadoRef.current = true;
@@ -59,24 +86,7 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
       const personaId = linea.personaDetectada
         ? resolverNombreMiembro(linea.personaDetectada, config)
         : null;
-      const esImpuesto =
-        linea.tipoLinea === 'impuesto' || linea.tipoLinea === 'reintegro_percepcion';
-      let categoria: string | null = null;
-      let subcategoria: string | null = null;
-      if (esImpuesto) {
-        categoria = 'Impuestos y finanzas';
-      } else {
-        const cls = linea.descripcionRaw
-          ? clasificar(linea.descripcionRaw, {
-              banco:   resumen.banco   || null,
-              tarjeta: resumen.tarjetaCodigo || null,
-            })
-          : null;
-        if (cls && cls.confianza >= CONFIANZA_UMBRAL) {
-          categoria    = cls.categoria;
-          subcategoria = cls.subcategoria ?? null;
-        }
-      }
+      const { categoria, subcategoria } = categoriaSugerida(linea.tipoLinea, linea.descripcionRaw);
       return { ...linea, personaConfirmada: personaId, categoria, subcategoria };
     });
     setLineas(iniciales);
@@ -276,9 +286,30 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
                   </td>
                   <td className="rt-col-monto">{fmtMonto(linea.monto, linea.moneda as 'ARS' | 'USD')}</td>
                   <td>
-                    <span className={`rt-tipo rt-tipo--${linea.tipoLinea}`}>
-                      {TIPO_LABEL[linea.tipoLinea] ?? linea.tipoLinea}
-                    </span>
+                    {/* F9.157 §2 — antes era un <span> de solo lectura y la única forma de arreglar
+                        una línea mal clasificada era destildar `incluir`, que borraba el consumo
+                        entero. `tipoLinea` decide el SIGNO (tipoDeLinea → Gasto/Ingreso) y el signo
+                        del cuadre, así que una línea mal clasificada resta en vez de sumar.
+                        Medido: 4 de 6 apariciones del seguro del auto salieron como ingreso, y la
+                        misma descripción sale bien en otros resúmenes — es errático, no del prompt. */}
+                    <select
+                      className={`rt-tipo rt-tipo--${linea.tipoLinea}`}
+                      value={linea.tipoLinea}
+                      onChange={e => {
+                        const tipoLinea = e.target.value as MovimientoParseado['tipoLinea'];
+                        // La categoría es un derivado de `tipoLinea`: se recalcula SOLO cuando el
+                        // cambio cruza la frontera impuesto↔no-impuesto, que es cuando queda
+                        // inconsistente. Si no cruza, se respeta lo que el usuario haya elegido.
+                        const cruza = lineaEsImpuesto(linea.tipoLinea) !== lineaEsImpuesto(tipoLinea);
+                        actualizar(idx, cruza
+                          ? { tipoLinea, ...categoriaSugerida(tipoLinea, linea.descripcionRaw) }
+                          : { tipoLinea });
+                      }}
+                    >
+                      {TIPOS_LINEA.map(t => (
+                        <option key={t} value={t}>{TIPO_LABEL[t] ?? t}</option>
+                      ))}
+                    </select>
                   </td>
                   <td className="rt-col-incl">
                     <input

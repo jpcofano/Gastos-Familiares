@@ -205,6 +205,21 @@
   border-radius: 99px;
   white-space: nowrap;
 }
+/* F9.157 §2 — `tipoLinea` pasó de chip de solo lectura a <select>. Conserva el color por tipo (las
+   reglas de abajo siguen aplicando) y se ve editable, sin romper el ancho de la columna. */
+select.rt-tipo {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  font-family: var(--font-base);
+  appearance: none;
+  padding-right: 1.1rem;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 0.42rem center, right 0.27rem center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+select.rt-tipo:hover { border-color: rgba(0, 0, 0, 0.28); }
 .rt-tipo--consumo             { background: #dbeafe; color: #1e40af; }
 .rt-tipo--cuota               { background: #ede9fe; color: #5b21b6; }
 .rt-tipo--impuesto            { background: #fee2e2; color: #991b1b; }
