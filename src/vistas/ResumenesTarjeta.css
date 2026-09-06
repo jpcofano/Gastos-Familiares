@@ -283,3 +283,19 @@ select.rt-tipo:hover { border-color: rgba(0, 0, 0, 0.28); }
   border-radius: 5px;
   padding: 0.5rem 0.85rem;
 }
+
+/* F9.161 §4 — el aviso de que el objetivo del cuadre se movió. Va en tono de advertencia y no
+   en verde: un cuadre que da cero porque alguien bajó el objetivo no puede verse igual que uno
+   que da cero porque las cuentas dan. */
+.rt-cuadre-neto {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--gf-amber-400, #fbbf24);
+  background: var(--gf-amber-50, #fffbeb);
+  border-radius: 0 6px 6px 0;
+  font-size: var(--text-xs, 12px);
+  color: var(--color-text, #111827);
+}

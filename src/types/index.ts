@@ -63,6 +63,11 @@ export interface AjusteConsolidado {
   montoARS: number;
   montoUSD: number;
   origen?: 'pdf' | 'manual';  // undefined ⇒ 'pdf' (compat con docs existentes)
+  // F9.161 §4 — obligatorios para `origen: 'manual'` desde ahora; ausentes en los 10 ajustes
+  // anteriores, que por eso son indiagnosticables.
+  motivo?: string;
+  creadoPor?: string;
+  creadoEn?: string;          // ISO
 }
 
 export interface MovimientoParseado {
@@ -75,6 +80,13 @@ export interface MovimientoParseado {
   cuotaTotal: number;
   moneda: 'ARS' | 'USD';
   monto: number;                 // siempre positivo
+  // F9.161 §1 — el importe CON el signo del PDF. `monto` sigue siendo su valor absoluto y toda la
+  // lógica que depende de él no cambia. Opcional porque las líneas extraídas antes de F9.161 no lo
+  // tienen; `null` significa "no se sabe", y el guard del signo no actúa sin este dato.
+  montoFirmado?: number | null;
+  // F9.161 §1 — título del bloque del PDF donde apareció el renglón ("Consumos Maria Lascano",
+  // "Sus pagos y ajustes realizados", …). Es lo que le da contexto al signo.
+  seccion?: string | null;
   personaDetectada: string;      // nombre canónico ('María', 'Juan', etc.) o '' si no resuelve
   esBonificacion: boolean;
   esReverso: boolean;
@@ -84,6 +96,14 @@ export interface MovimientoParseado {
   categoria: string | null;
   subcategoria: string | null;
   incluir: boolean;
+  // F9.161 §4 — el banco NO cobra esta línea (caso real: la percepción `DB.RG 5617 30%` cuando los
+  // consumos en dólares se pagaron con dólares propios). Es INDEPENDIENTE de `incluir`:
+  //   incluir: false   → no se crea movimiento para la línea; el objetivo del cuadre NO se mueve.
+  //   noDebitado: true → el objetivo del cuadre BAJA por ese monto y el movimiento-total sale por
+  //                      el neto. Las dos puntas juntas.
+  // Conflacionarlos bajaría el objetivo por plata que el banco sí cobra (medido en F9.160 §3.5:
+  // de las 5 líneas con `incluir:false`, solo 2 son "no se debita").
+  noDebitado?: boolean;
 }
 
 export interface CardStatement {

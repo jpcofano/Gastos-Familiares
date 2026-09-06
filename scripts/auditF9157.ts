@@ -22,6 +22,7 @@ function bloque(desde: string, hasta: string): string {
 }
 const codigo = [
   bloque('function tipoDeLinea', '\n}'),
+  bloque('export function totalesNetos', '\n}').replace('export ', ''),
   bloque('export function calcularCuadre', '\n}').replace('export ', ''),
 ].join('\n');
 const js = ts.transpileModule(codigo, {

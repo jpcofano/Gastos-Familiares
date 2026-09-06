@@ -166,6 +166,37 @@ export interface CuadreResult {
   diffUSD: number;
   balanceARS: boolean;
   balanceUSD: boolean;
+  // F9.161 §4 — lo marcado como no debitado, y el objetivo neto contra el que se cuadra.
+  // Sin nada marcado: `noDebitado*` en 0 y `objetivo* === total*`, o sea idéntico a antes.
+  noDebitadoARS: number;
+  noDebitadoUSD: number;
+  objetivoARS: number;
+  objetivoUSD: number;
+}
+
+/**
+ * F9.161 §4 — el total que el banco realmente cobra: el del PDF menos lo marcado `noDebitado`.
+ * Única fuente de ese número: lo usan el cuadre, el movimiento-total y el banner de la UI, así que
+ * las tres puntas no pueden divergir.
+ */
+export function totalesNetos(
+  lineas: MovimientoParseado[],
+  totalARS: number,
+  totalUSD: number,
+): { noDebitadoARS: number; noDebitadoUSD: number; objetivoARS: number; objetivoUSD: number } {
+  let noDebitadoARS = 0;
+  let noDebitadoUSD = 0;
+  for (const l of lineas) {
+    if (!l.noDebitado || l.monto <= 0) continue;
+    const signo = tipoDeLinea(l) === 'Gasto' ? 1 : -1;
+    if (l.moneda === 'ARS') noDebitadoARS += signo * l.monto;
+    else noDebitadoUSD += signo * l.monto;
+  }
+  return {
+    noDebitadoARS, noDebitadoUSD,
+    objetivoARS: +(totalARS - noDebitadoARS).toFixed(2),
+    objetivoUSD: +(totalUSD - noDebitadoUSD).toFixed(2),
+  };
 }
 
 export function calcularCuadre(
@@ -174,10 +205,15 @@ export function calcularCuadre(
   totalUSD: number,
   ajustes: AjusteConsolidado[] = [],
 ): CuadreResult {
+  // F9.161 §4 — las dos puntas se mueven juntas: la línea no debitada sale de la suma Y baja el
+  // objetivo. Mover una sola dejaría una diferencia igual al monto marcado.
+  const netos = totalesNetos(lineas, totalARS, totalUSD);
+  totalARS = netos.objetivoARS;
+  totalUSD = netos.objetivoUSD;
   let sumaARS = 0;
   let sumaUSD = 0;
   for (const l of lineas) {
-    if (!l.incluir || l.monto <= 0) continue;
+    if (!l.incluir || l.noDebitado || l.monto <= 0) continue;
     const signo = tipoDeLinea(l) === 'Gasto' ? 1 : -1;
     if (l.moneda === 'ARS') sumaARS += signo * l.monto;
     else sumaUSD += signo * l.monto;
@@ -198,6 +234,7 @@ export function calcularCuadre(
     sumaARS, sumaUSD, diffARS, diffUSD,
     balanceARS: totalARS === 0 || diffARS <= umbralARS,
     balanceUSD: totalUSD === 0 || diffUSD <= 1,
+    ...netos,
   };
 }
 
@@ -350,7 +387,9 @@ export async function confirmarResumenTarjeta(
       };
     }
 
-    const lineasAImportar = lineasEditadas.filter(l => l.incluir && l.monto > 0);
+    // F9.161 §4 — `noDebitado` también saca la línea de los movimientos: el banco no la cobra,
+    // así que un movimiento por ella contaría plata que nunca sale.
+    const lineasAImportar = lineasEditadas.filter(l => l.incluir && !l.noDebitado && l.monto > 0);
 
     // deletes + líneas nuevas + 2 totales + 2 updates de ítem + 1 update del resumen
     const opsEstimadas = existentes.length + lineasAImportar.length + 5;
@@ -427,8 +466,13 @@ export async function confirmarResumenTarjeta(
     // El saldo a favor NO se refleja como movimiento negativo, a propósito: el resumen del mes
     // siguiente ya viene neteado, así que un negativo lo contaría dos veces. El dato no se pierde,
     // queda en `resumenesTarjeta.totalUSD`/`totalARS`.
-    const totalARSMov = Math.max(resumen.totalARS, 0);
-    const totalUSDMov = Math.max(resumen.totalUSD, 0);
+    //
+    // F9.161 §4 — y sale por el NETO: el total del PDF menos lo marcado como no debitado. Es la
+    // otra punta del cuadre; si solo se moviera el objetivo, la pantalla cuadraría en verde
+    // mientras el movimiento sigue cargando plata que no se paga.
+    const netos = totalesNetos(lineasEditadas, resumen.totalARS, resumen.totalUSD);
+    const totalARSMov = Math.max(netos.objetivoARS, 0);
+    const totalUSDMov = Math.max(netos.objetivoUSD, 0);
 
     // ── Total ARS ─────────────────────────────────────────────────────────────
     {
@@ -566,12 +610,34 @@ export async function asignarTarjetaResumen(
 
 // ── Ajuste manual de cuadre ───────────────────────────────────────────────────
 
+/**
+ * F9.161 §4 — el `motivo` es OBLIGATORIO y va al `concepto`.
+ *
+ * Los 10 ajustes que había en producción decían todos "Diferencia no identificada", así que cada
+ * uso enterraba un bug distinto sin dejar rastro de cuál: cuatro de los treinta resúmenes tenían un
+ * descuadre real tapado por este botón, de 33.035,55 a 2.878.033,12, y ninguno se podía diagnosticar
+ * después. El escape sigue existiendo —bloquearlo dejaría resúmenes imposibles de confirmar— pero
+ * ahora enterrar cuesta más que diagnosticar, que era el arreglo de fondo.
+ */
+export const MOTIVO_AJUSTE_MIN = 15;
+
 export async function agregarAjusteCuadreManual(
   resumen: CardStatement,
   lineas: MovimientoParseado[],
   memberId: string,
+  motivo: string,
 ): Promise<Resultado<void>> {
   try {
+    const motivoLimpio = motivo.trim();
+    if (motivoLimpio.length < MOTIVO_AJUSTE_MIN) {
+      return {
+        ok: false,
+        error: new Error(
+          `Hay que decir qué se está tapando (mínimo ${MOTIVO_AJUSTE_MIN} caracteres). ` +
+          'Un ajuste sin motivo entierra el bug y no se puede diagnosticar después.',
+        ),
+      };
+    }
     const cuadre = calcularCuadre(lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado);
     const residuoARS = +(resumen.totalARS - cuadre.sumaARS).toFixed(2);
     const residuoUSD = +(resumen.totalUSD - cuadre.sumaUSD).toFixed(2);
@@ -579,10 +645,13 @@ export async function agregarAjusteCuadreManual(
       return { ok: false, error: new Error('No hay diferencia para ajustar') };
     }
     const entrada: AjusteConsolidado = {
-      concepto:  'Diferencia no identificada (ajuste manual)',
+      concepto:  `Ajuste manual: ${motivoLimpio}`,
       montoARS:  residuoARS,
       montoUSD:  residuoUSD,
       origen:    'manual',
+      motivo:    motivoLimpio,
+      creadoPor: memberId,
+      creadoEn:  new Date().toISOString(),
     };
     await updateDoc(doc(db, 'resumenesTarjeta', resumen.id), {
       ajustesConsolidado: [...resumen.ajustesConsolidado, entrada],

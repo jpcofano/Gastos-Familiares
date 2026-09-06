@@ -8,6 +8,7 @@ import {
   confirmarResumenTarjeta,
   resumenYaGeneroMovimientos,
   agregarAjusteCuadreManual,
+  MOTIVO_AJUSTE_MIN,
   calcularCuadre,
   reintentarResumen,
   type CuadreResult,
@@ -98,20 +99,34 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
     setLineas(prev => prev.map((l, i) => i === idx ? { ...l, ...cambios } : l));
   }, []);
 
+  // F9.161 §4 — el motivo pasa a ser obligatorio.
+  //
+  // Auditado: los 10 ajustes que había en producción decían todos "Diferencia no identificada", así
+  // que cada uso enterraba un bug distinto sin dejar rastro. Cuatro de los treinta resúmenes tenían
+  // un descuadre real tapado acá (de 33.035,55 a 2.878.033,12) y ninguno se podía diagnosticar
+  // después: el `window.confirm` que ya existía advertía y no frenaba nada.
+  //
+  // De las tres opciones —advertencia, motivo obligatorio, sacarlo de la vista— va la del medio.
+  // Sacarlo dejaría resúmenes imposibles de confirmar (el escape hace falta de verdad); una
+  // advertencia más es lo que ya falló cuatro veces. Escribir el motivo cuesta más que mirar qué
+  // sección no cierra, que es exactamente el incentivo que faltaba.
   async function cerrarDiferencia() {
     const umbralARS = Math.min(5000, resumen.totalARS * 0.02);
     const esGrande  = cuadre.diffARS > umbralARS || cuadre.diffUSD > 2;
-    if (esGrande) {
-      const ok = window.confirm(
-        `Diferencia grande (${cuadre.diffARS > 0 ? fmtMonto(cuadre.diffARS, 'ARS') : ''}` +
-        `${cuadre.diffUSD > 0 ? ` U$S ${cuadre.diffUSD.toFixed(2)}` : ''}) — puede ser una ` +
-        `línea real no leída, no un error de redondeo. ¿Absorber igual?`,
-      );
-      if (!ok) return;
-    }
+    const motivo = window.prompt(
+      `Diferencia de ${cuadre.diffARS > 0 ? fmtMonto(cuadre.diffARS, 'ARS') : ''}` +
+      `${cuadre.diffUSD > 0 ? ` U$S ${cuadre.diffUSD.toFixed(2)}` : ''}.\n\n` +
+      (esGrande
+        ? 'Es GRANDE: casi seguro es una línea real no leída, no un redondeo.\n\n'
+        : '') +
+      '¿Qué estás tapando? Escribilo para poder diagnosticarlo después ' +
+      `(mínimo ${MOTIVO_AJUSTE_MIN} caracteres).`,
+      '',
+    );
+    if (motivo === null) return;                       // cancelar no escribe nada
     setAjustando(true);
     setErrorLocal(null);
-    const res = await agregarAjusteCuadreManual(resumen, lineas, memberId);
+    const res = await agregarAjusteCuadreManual(resumen, lineas, memberId, motivo);
     setAjustando(false);
     if (!res.ok) setErrorLocal(res.error.message);
   }
@@ -186,17 +201,40 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
         <div className="rt-cuadre-lineas">
           {resumen.totalARS > 0 && (
             <span className="rt-cuadre-item">
-              ARS: {fmtMonto(cuadre.sumaARS, 'ARS')} calculado · {fmtMonto(resumen.totalARS, 'ARS')} PDF
+              ARS: {fmtMonto(cuadre.sumaARS, 'ARS')} calculado · {fmtMonto(cuadre.objetivoARS, 'ARS')}{' '}
+              {cuadre.noDebitadoARS !== 0 ? 'neto' : 'PDF'}
               {cuadre.balanceARS ? ' ✓' : ` ⚠ dif ${fmtMonto(cuadre.diffARS, 'ARS')}`}
             </span>
           )}
           {resumen.totalUSD > 0 && (
             <span className="rt-cuadre-item">
-              USD: {fmtMonto(cuadre.sumaUSD, 'USD')} calculado · {fmtMonto(resumen.totalUSD, 'USD')} PDF
+              USD: {fmtMonto(cuadre.sumaUSD, 'USD')} calculado · {fmtMonto(cuadre.objetivoUSD, 'USD')}{' '}
+              {cuadre.noDebitadoUSD !== 0 ? 'neto' : 'PDF'}
               {cuadre.balanceUSD ? ' ✓' : ` ⚠ dif ${fmtMonto(cuadre.diffUSD, 'USD')}`}
             </span>
           )}
         </div>
+        {(cuadre.noDebitadoARS !== 0 || cuadre.noDebitadoUSD !== 0) && (
+          /* F9.161 §4 — con el objetivo movido hay que mostrar las TRES cifras. Un cuadre en verde
+             porque alguien bajó el objetivo no puede verse igual que uno en verde porque las
+             cuentas dan: es la lección de "cerrar diferencia". */
+          <div className="rt-cuadre-neto">
+            <strong>Se cuadra contra el neto, no contra el total del PDF.</strong>
+            {cuadre.noDebitadoARS !== 0 && (
+              <span className="rt-cuadre-item">
+                ARS: {fmtMonto(resumen.totalARS, 'ARS')} PDF − {fmtMonto(cuadre.noDebitadoARS, 'ARS')} no
+                debitado = {fmtMonto(cuadre.objetivoARS, 'ARS')} neto
+              </span>
+            )}
+            {cuadre.noDebitadoUSD !== 0 && (
+              <span className="rt-cuadre-item">
+                USD: {fmtMonto(resumen.totalUSD, 'USD')} PDF − {fmtMonto(cuadre.noDebitadoUSD, 'USD')} no
+                debitado = {fmtMonto(cuadre.objetivoUSD, 'USD')} neto
+              </span>
+            )}
+            <span className="rt-cuadre-item">El movimiento de pago de la tarjeta sale por el neto.</span>
+          </div>
+        )}
         {resumen.ajustesConsolidado.length > 0 && (
           <div className="rt-cuadre-ajustes">
             Ajustes consolidado:{' '}
@@ -215,7 +253,7 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
               onClick={cerrarDiferencia}
               disabled={ajustando || guardando}
             >
-              {ajustando ? 'Ajustando…' : 'Cerrar diferencia manualmente'}
+              {ajustando ? 'Ajustando…' : 'Cerrar diferencia (pide motivo)'}
             </button>
           </div>
         )}
@@ -234,6 +272,7 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
               <th>Monto</th>
               <th>Tipo</th>
               <th>Incl.</th>
+              <th title="El banco no cobra esta línea: baja el total a pagar">No deb.</th>
             </tr>
           </thead>
           <tbody>
@@ -316,6 +355,19 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
                       type="checkbox"
                       checked={linea.incluir}
                       onChange={e => actualizar(idx, { incluir: e.target.checked })}
+                    />
+                  </td>
+                  <td className="rt-col-incl">
+                    {/* F9.161 §4 — INDEPENDIENTE de "Incl.". Destildar "Incl." solo evita crear el
+                        movimiento; marcar acá dice que el banco NO cobra la línea, así que baja el
+                        objetivo del cuadre Y el monto del movimiento-total. Conflacionarlos bajaría
+                        el objetivo por plata que el banco sí cobra (F9.160 §3.5: de las 5 líneas
+                        con `incluir:false`, solo 2 eran "no se debita"). */}
+                    <input
+                      type="checkbox"
+                      checked={linea.noDebitado === true}
+                      title="El banco no cobra esta línea (ej: percepción del régimen pagada con dólares propios)"
+                      onChange={e => actualizar(idx, { noDebitado: e.target.checked })}
                     />
                   </td>
                 </tr>

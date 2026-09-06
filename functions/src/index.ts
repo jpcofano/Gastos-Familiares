@@ -24,6 +24,7 @@ import { normalizar, type NormRule } from './normalizador';
 import { detectarTipoReal, motivoFormatoNoSoportado } from './tipoArchivo';
 // F9.154 §1.b — piso determinístico para el año de los vencimientos. Ver el encabezado del módulo.
 import { corregirAnioVencimientos, type Vencimiento } from './fechasVencimiento';
+import { corregirSignoConsumos } from './signoLineas';
 // F9.155 §2 — el CUIT de la contraparte en una acreditación viene pelado y el modelo lo archivaba
 // en numeroOperacion. El dígito verificador permite rescatarlo sin depender de etiquetas.
 import { rescatarCuitContraparte } from './cuit';
@@ -1082,6 +1083,23 @@ monto (number): monto en la moneda indicada. SIEMPRE positivo.
   (para bonificaciones y reversos el monto también es positivo;
    el carácter negativo lo indica tipoLinea/esBonificacion/esReverso)
   CONVERSIÓN: los números argentinos usan punto como miles y coma como decimal.
+
+montoFirmado (number): EL MISMO IMPORTE, PERO CON EL SIGNO TAL CUAL FIGURA EN EL PDF.
+  ═══ ESTE CAMPO ES LA EXCEPCIÓN: acá el signo NO se normaliza ═══
+  Todas las instrucciones de "monto positivo", "ignorar el signo negativo" y "valor absoluto"
+  que aparecen más abajo valen SOLO para \`monto\`. \`montoFirmado\` conserva el signo del papel.
+  • el renglón imprime  168.542,00  → monto = 168542.00   montoFirmado =  168542.00
+  • el renglón imprime   −8.870,44  → monto =   8870.44   montoFirmado =   −8870.44
+  • el renglón imprime  (8.870,44)  → los paréntesis son negativo: montoFirmado = −8870.44
+  Si el importe no lleva signo visible, es positivo. Los dos campos van SIEMPRE, en todas las
+  líneas, y \`monto\` es siempre \`Math.abs(montoFirmado)\`.
+
+seccion (string|null): el TÍTULO DEL BLOQUE del PDF donde aparece el renglón, transcripto tal
+  cual, sin normalizar ni traducir. Es el mismo encabezado que usás para \`personaDetectada\`.
+  Ejemplos reales: "Consumos Maria Lascano" · "Sus pagos y ajustes realizados" ·
+  "Impuestos, cargos e intereses" · "DETALLE DEL CONSUMO" · "CONSOLIDADO"
+  null solo si el renglón no cae bajo ningún encabezado identificable. No lo adivines: es
+  preferible null a una sección inventada.
   "1.447,94" → 1447.94   "301.393,73" → 301393.73   "9,99" → 9.99
 
 personaDetectada (string): nombre canónico (ver mapeos arriba). Vacío si no se puede determinar.
@@ -1131,18 +1149,19 @@ CASOS ESPECIALES IMPORTANTES
 ═══════════════════════════════════════════════════════════
 
 CR.RG 5617 en BBVA (sección "Sus pagos y ajustes realizados"):
-  → tipoLinea="reintegro_percepcion", monto positivo (ignorar signo negativo)
+  → tipoLinea="reintegro_percepcion", monto positivo (ignorar signo negativo EN monto;
+    montoFirmado conserva el negativo del papel)
   → fechaConsumo = fecha de la línea, personaDetectada = ""
 
 DEV.IMP. RG 5617 en Galicia Visa (sección CONSOLIDADO):
-  → tipoLinea="reintegro_percepcion", monto positivo
+  → tipoLinea="reintegro_percepcion", monto positivo (montoFirmado con el signo del papel)
 
 DEV PER RG 4815 en Galicia Master:
   → Si aparece en el CONSOLIDADO (entre SU PAGO y SALDO PENDIENTE)
     con monto NEGATIVO: es del período anterior. EXCLUIR (igual que SU PAGO).
   → Si aparece en el DETALLE DEL CONSUMO o como percepción del mes
     con monto POSITIVO: es un reintegro del mes actual.
-    tipoLinea="reintegro_percepcion", monto positivo.
+    tipoLinea="reintegro_percepcion", monto positivo (montoFirmado con el signo del papel).
 
 PERCEPCIONES EN GALICIA MASTER (aparecen en el CONSOLIDADO, no en el detalle):
   "PERCEPCION IVA DTO 354/18", "PERCEP.AFIP RG 4815 30%", "PERC IIBB SERV DIG CABA"
@@ -1157,9 +1176,11 @@ CAJA SEG-PROMO en BBVA (aparece en la sección de consumos con monto POSITIVO):
 
 4F SOLUCIONES y similares (monto negativo en consumos, cancela una compra previa):
   → tipoLinea="reverso", esReverso=true, monto positivo (valor absoluto)
+  → montoFirmado NEGATIVO: es el dato que distingue este caso de un cargo con nombre parecido.
 
 BONIF. CONSUMO CABIFY y similares:
   → tipoLinea="bonificacion", esBonificacion=true, monto positivo (valor absoluto)
+  → montoFirmado NEGATIVO, por lo mismo.
 
 ═══════════════════════════════════════════════════════════
 FORMATO DE RESPUESTA REQUERIDO
@@ -1198,6 +1219,8 @@ No incluyas texto antes ni después del bloque.
       "cuotaTotal": 1,
       "moneda": "ARS",
       "monto": 0.00,
+      "montoFirmado": 0.00,
+      "seccion": "Consumos Maria Lascano",
       "personaDetectada": "",
       "esBonificacion": false,
       "esReverso": false,
@@ -1219,6 +1242,8 @@ type MovimientoRaw = {
   cuotaTotal?: number;
   moneda?: string;
   monto?: number;
+  montoFirmado?: number;
+  seccion?: string | null;
   personaDetectada?: string;
   esBonificacion?: boolean;
   esReverso?: boolean;
@@ -1362,7 +1387,7 @@ async function procesarResumenTarjeta(
 
     const estadoFinal = tarjetaCodigoResuelto ? 'parseado' : 'requiere_tarjeta';
 
-    const movimientosParseados = movsBrutos.map((m, i) => ({
+    const movimientosCrudos = movsBrutos.map((m, i) => ({
       seq:               typeof m.seq === 'number' ? m.seq : i + 1,
       tipoLinea:         TIPOLINEA_VALIDOS.has(m.tipoLinea ?? '') ? m.tipoLinea : 'consumo',
       fechaConsumo:      m.fechaConsumo  ?? null,
@@ -1372,6 +1397,12 @@ async function procesarResumenTarjeta(
       cuotaTotal:        m.cuotaTotal    ?? 1,
       moneda:            m.moneda === 'USD' ? 'USD' : 'ARS',
       monto:             Math.abs(m.monto ?? 0),
+      // F9.161 §1 — el signo del papel, sin normalizar. `null` cuando el modelo no lo emitió:
+      // defaultear a `monto` (positivo) convertiría un crédito no emitido en un cargo silencioso,
+      // y el guard de §2 no actúa sin este dato, que es la conducta correcta ante la duda.
+      montoFirmado:      typeof m.montoFirmado === 'number' ? m.montoFirmado : null,
+      seccion:           m.seccion ?? null,
+      noDebitado:        false,
       personaDetectada:  m.personaDetectada ?? '',
       esBonificacion:    m.esBonificacion   ?? false,
       esReverso:         m.esReverso         ?? false,
@@ -1381,6 +1412,15 @@ async function procesarResumenTarjeta(
       subcategoria:      null,
       incluir:           true,
     }));
+
+    // F9.161 §2 — guard del signo. El prompt mejora la probabilidad; esto garantiza el resultado.
+    const { lineas: movimientosParseados, correcciones } = corregirSignoConsumos(movimientosCrudos);
+    for (const c of correcciones) {
+      console.warn(
+        `[signo] ${snapId} seq=${c.seq} "${c.descripcionRaw}" (${c.seccion}) ` +
+        `montoFirmado=${c.montoFirmado} positivo pero venia como ${c.tipoLineaAntes} → corregido a consumo`,
+      );
+    }
 
     const fechaCierreStr = resumen.fechaCierre as string | null;
     const periodo = fechaCierreStr ? fechaCierreStr.slice(0, 7) : (data.periodo as string) || '';

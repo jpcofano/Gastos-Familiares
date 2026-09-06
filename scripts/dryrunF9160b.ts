@@ -14,7 +14,7 @@ const s = (v: unknown) => v === null ? 'null' : v === undefined ? '(ausente)' : 
 const n = (v: number) => v.toFixed(2).padStart(13);
 const src = fs.readFileSync('src/datos/resumenesTarjeta.ts', 'utf8').replace(/\r\n/g, '\n');
 const bl = (d: string, h: string) => { const i = src.indexOf(d); return src.slice(i, src.indexOf(h, i) + h.length); };
-const js = ts.transpileModule([bl('function tipoDeLinea', '\n}'), bl('export function calcularCuadre', '\n}').replace('export ', '')].join('\n'),
+const js = ts.transpileModule([bl('function tipoDeLinea', '\n}'), bl('export function totalesNetos', '\n}').replace('export ', ''), bl('export function calcularCuadre', '\n}').replace('export ', '')].join('\n'),
   { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
 const motor = new Function(`${js}\nreturn { calcularCuadre };`)() as any;
 type L = { tipoLinea?: string; descripcionRaw?: string; monto?: number };
