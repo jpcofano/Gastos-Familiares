@@ -317,3 +317,28 @@ select.rt-tipo:hover { border-color: rgba(0, 0, 0, 0.28); }
   color: var(--color-text, #111827);
 }
 .rt-preview-yaconf svg { flex-shrink: 0; margin-top: 1px; color: var(--gf-gray-400, #9ca3af); }
+
+/* F9.167 §2 — lista de los movimientos que generó el resumen, para llegar a editarlos. */
+.rt-movs { margin-top: 14px; border-top: 1px solid var(--color-border, #e5e7eb); padding-top: 12px; }
+.rt-movs-titulo {
+  display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px;
+  font-size: var(--text-sm, 13px); font-weight: 700; color: var(--color-text, #111827);
+}
+.rt-movs-ayuda { font-size: var(--text-2xs, 11px); font-weight: 500; color: var(--color-text-sec, #6b7280); }
+.rt-movs-lista { display: flex; flex-direction: column; gap: 2px; max-height: 340px; overflow-y: auto; }
+.rt-mov {
+  display: grid; grid-template-columns: 42px minmax(0, 1fr) minmax(0, 1fr) auto auto 14px;
+  align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 7px 8px; border: none; border-radius: 8px; background: none; cursor: pointer;
+  font-family: var(--font-base); font-size: var(--text-xs, 12px); color: var(--color-text, #111827);
+}
+.rt-mov:hover { background: var(--gf-gray-100, #f3f4f6); }
+.rt-mov-fecha { color: var(--color-text-sec, #6b7280); font-variant-numeric: tabular-nums; }
+.rt-mov-desc, .rt-mov-cat { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-mov-cat { color: var(--color-text-sec, #6b7280); }
+.rt-mov-monto { font-variant-numeric: tabular-nums; font-weight: 700; }
+.rt-mov-flag {
+  font-size: var(--text-2xs, 11px); padding: 1px 6px; border-radius: 999px;
+  background: var(--gf-gray-100, #f3f4f6); color: var(--color-text-sec, #6b7280); white-space: nowrap;
+}
+.rt-mov-flag--on { background: var(--gf-emerald-50, #ecfdf5); color: var(--gf-emerald, #065f46); }

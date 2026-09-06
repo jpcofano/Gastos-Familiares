@@ -7,6 +7,7 @@ import {
   suscribirResumenesTarjeta,
   confirmarResumenTarjeta,
   resumenYaGeneroMovimientos,
+  listarMovimientosDeResumen,
   agregarAjusteCuadreManual,
   MOTIVO_AJUSTE_MIN,
   calcularCuadre,
@@ -15,7 +16,8 @@ import {
 } from '../datos/resumenesTarjeta';
 import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig, resolverNombreMiembro } from '../familia';
-import type { CardStatement, MovimientoParseado, FamiliaConfig } from '../types';
+import type { CardStatement, MovimientoParseado, FamiliaConfig, Movement } from '../types';
+import EditarMovimiento from './EditarMovimiento';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import { Icon } from '../design-system/Icon';
 import { TarjetaFace, CaraTarjeta, BadgeEstadoResumen, calcularSplitCuotas, fmtMonto as fmtMontoFace } from './TarjetaFace';
@@ -153,34 +155,40 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
 
   // F9.158 §1 — cuántos movimientos reemplazaría esta confirmación. Se lee al abrir el preview para
   // que el botón diga la verdad ANTES de tocarlo, en vez de descubrirlo con un error.
-  const [yaGenero, setYaGenero] = useState<{ total: number; editados: number } | null>(null);
+  const [yaGenero, setYaGenero] = useState<{ total: number } | null>(null);
   useEffect(() => {
     let cancelado = false;
     resumenYaGeneroMovimientos(resumen).then(r => { if (!cancelado) setYaGenero(r); });
     return () => { cancelado = true; };
   }, [resumen]);
 
+  // F9.167 §2 — los movimientos que este resumen generó, para poder editarlos desde acá.
+  const [movsResumen, setMovsResumen] = useState<Movement[] | null>(null);
+  const [editando, setEditando] = useState<Movement | null>(null);
+  const recargarMovs = useCallback(() => {
+    listarMovimientosDeResumen(resumen).then(r => setMovsResumen(r.ok ? r.data : []));
+  }, [resumen]);
+  useEffect(() => { recargarMovs(); }, [recargarMovs]);
+
   async function confirmar() {
-    // F9.158 §1 — re-confirmar reemplaza; el usuario tiene que verlo con el número delante. Sin
-    // esto, confirmar dos veces duplicaba todo en silencio (F9.156 §4: 8 movimientos duplicados).
-    const reemplazar = (yaGenero?.total ?? 0) > 0;
-    if (reemplazar) {
-      const perdidos = yaGenero!.editados > 0
-        ? `
-
-ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano después de importados (categoría, persona, etiqueta). Esas ediciones se pierden.`
-        : '';
-      const ok = confirm(
-        `Este resumen ya generó ${yaGenero!.total} movimientos. Re-confirmar los BORRA y los vuelve a crear ` +
-        `con las líneas de ahora.${perdidos}
-
-¿Continuar?`,
+    // F9.167 §1 — el camino de RE-CONFIRMAR se sacó de la UI porque no puede funcionar nunca:
+    // `firestore.rules:74` tiene `allow delete: if false` en `movimientos`, y el reemplazo borra y
+    // recrea en el mismo batch, así que Firestore rechaza el batch entero con "Missing or
+    // insufficient permissions". F9.158 §1 lo verificó contra la lógica y contra los datos, nunca
+    // contra las reglas.
+    //
+    // El guard queda aunque el botón ya no se muestre: sin él, el día que alguien reintroduzca el
+    // botón el error vuelve a salir en la cara del usuario en vez de acá.
+    if ((yaGenero?.total ?? 0) > 0) {
+      setErrorLocal(
+        'Este resumen ya generó movimientos. Re-confirmar no está disponible: las reglas de ' +
+        'Firestore no permiten borrar movimientos. Para corregir uno, tocalo en la lista de abajo.',
       );
-      if (!ok) return;
+      return;
     }
     setGuardando(true);
     setErrorLocal(null);
-    const res = await confirmarResumenTarjeta(resumen, lineas, memberId, config, { reemplazar });
+    const res = await confirmarResumenTarjeta(resumen, lineas, memberId, config);
     setGuardando(false);
     if (!res.ok) { setErrorLocal(res.error.message); return; }
     onConfirmado();
@@ -437,22 +445,61 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
 
       {errorLocal && <p className="rt-error">{errorLocal}</p>}
 
+      {/* F9.167 §2 — los movimientos que este resumen generó. Es el camino que SÍ funciona para
+          corregir: editar el movimiento es un update puro, que las reglas permiten (a diferencia
+          del reemplazo, que necesita borrar). No se aparea línea con movimiento a propósito — ver
+          `listarMovimientosDeResumen`. */}
+      {(movsResumen?.length ?? 0) > 0 && (
+        <div className="rt-movs">
+          <div className="rt-movs-titulo">
+            Movimientos que generó este resumen ({movsResumen!.length})
+            <span className="rt-movs-ayuda">Tocá uno para cambiarle la categoría o sacarlo del resumen del mes.</span>
+          </div>
+          <div className="rt-movs-lista">
+            {movsResumen!.map(mv => (
+              <button key={mv.id} className="rt-mov" onClick={() => setEditando(mv)}>
+                <span className="rt-mov-fecha">{mv.fecha.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })}</span>
+                <span className="rt-mov-desc" title={mv.descripcion}>{mv.descripcion}</span>
+                <span className="rt-mov-cat">{mv.categoria ?? '—'}{mv.subcategoria ? ` › ${mv.subcategoria}` : ''}</span>
+                <span className="rt-mov-monto">{fmtMonto(Math.abs(mv.monto), mv.moneda)}</span>
+                <span className={`rt-mov-flag${mv.incluirResumenMes ? ' rt-mov-flag--on' : ''}`}
+                      title={mv.incluirResumenMes ? 'Entra en el resumen del mes' : 'No entra en el resumen del mes'}>
+                  {mv.incluirResumenMes ? 'en el mes' : 'fuera'}
+                </span>
+                <Icon name="chevron-right" size={14} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {editando && (
+        <EditarMovimiento
+          movimiento={editando}
+          onGuardado={() => { setEditando(null); recargarMovs(); }}
+          onEliminado={() => { setEditando(null); recargarMovs(); }}
+          onCancelar={() => setEditando(null)}
+        />
+      )}
+
       <div className="rt-preview-footer">
         <button className="rt-btn" onClick={onCerrar} disabled={guardando}>
           Cancelar
         </button>
-        <button
-          className="rt-btn rt-btn--primary"
-          onClick={confirmar}
-          disabled={guardando || lineas.length === 0 || !cuadreOk}
-        >
-          {guardando
-            ? 'Confirmando…'
-            : (yaGenero?.total ?? 0) > 0
-            /* F9.158 §1 — el botón dice lo que va a pasar: reemplazar, no agregar. */
-            ? `Re-confirmar (reemplaza ${yaGenero!.total} movimiento${yaGenero!.total !== 1 ? 's' : ''})`
-            : `Confirmar ${incluidas} línea${incluidas !== 1 ? 's' : ''} + 2 totales`}
-        </button>
+        {/* F9.167 §1 — un resumen que ya generó movimientos NO ofrece confirmar: el reemplazo es
+            imposible contra las reglas de Firestore (allow delete: if false). Se muestra en su
+            lugar el camino que sí funciona, que es editar el movimiento suelto (§2). */}
+        {(yaGenero?.total ?? 0) === 0 && (
+          <button
+            className="rt-btn rt-btn--primary"
+            onClick={confirmar}
+            disabled={guardando || lineas.length === 0 || !cuadreOk}
+          >
+            {guardando
+              ? 'Confirmando…'
+              : `Confirmar ${incluidas} línea${incluidas !== 1 ? 's' : ''} + 2 totales`}
+          </button>
+        )}
       </div>
     </div>
   );

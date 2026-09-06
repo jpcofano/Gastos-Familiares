@@ -5,7 +5,8 @@ import {
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { sha256Archivo } from './hashArchivo';
-import type { CardStatement, MovimientoParseado, AjusteConsolidado, FamiliaConfig } from '../types';
+import type { CardStatement, MovimientoParseado, AjusteConsolidado, FamiliaConfig, Movement } from '../types';
+import { docAMovimiento } from './movimientos';
 import { resolverNombreMiembro } from '../familia';
 import { medioPorDefecto, ALIAS_NOMBRE_MEDIO } from './medios';
 import { ajustesComputables, type ConsolidadoResumen, type DecisionAjustes } from './ajusteConsolidado';
@@ -331,22 +332,84 @@ async function movimientosDeResumen(resumen: CardStatement) {
   return docs;
 }
 
-// Para que la UI diga lo mismo que el código: cuántos movimientos se reemplazarían y cuántos de
-// ellos fueron tocados a mano después de importados (por si el usuario pierde ediciones).
-export async function resumenYaGeneroMovimientos(
+/**
+ * F9.167 §2 — los movimientos que ESTE resumen generó, para poder editarlos desde el preview.
+ *
+ * Es lo que el dueño necesita y lo único que faltaba: `EditarMovimiento` ya sabe cambiar
+ * categoría/subcategoría y el toggle "entra en el resumen del mes", y son updates puros que las
+ * reglas permiten. Lo que no había era cómo LLEGAR — había que buscar el movimiento a mano entre
+ * los ~90 del mes.
+ *
+ * Usa `clavesDeResumen`, así que contempla la clave legacy `{tarjetaCodigo}_{nroResumen}` y los 17
+ * del seed no aparecen vacíos.
+ *
+ * NO se aparea línea con movimiento, a propósito: el movimiento no guarda de qué renglón salió (el
+ * id es autogenerado y el `seq` no se persiste), y reconstruir el match por fecha + descripción +
+ * monto falla justo donde importaría — si el monto se editó no matchea, y hay descripciones
+ * repetidas el mismo día. Listar todos y poder tocar cualquiera resuelve el caso sin inventar un
+ * apareo que mentiría.
+ */
+export async function listarMovimientosDeResumen(
   resumen: CardStatement,
-): Promise<{ total: number; editados: number }> {
-  const docs = await movimientosDeResumen(resumen);
-  const TOLERANCIA_MS = 5000; // creadoEn y actualizadoEn salen del mismo serverTimestamp del batch
-  const editados = docs.filter(d => {
-    const y = d.data();
-    const c = (y.creadoEn as { toMillis?: () => number } | null)?.toMillis?.();
-    const a = (y.actualizadoEn as { toMillis?: () => number } | null)?.toMillis?.();
-    return c != null && a != null && a - c > TOLERANCIA_MS;
-  }).length;
-  return { total: docs.length, editados };
+): Promise<Resultado<Movement[]>> {
+  try {
+    const docs = await movimientosDeResumen(resumen);
+    const movs = docs.map(d => docAMovimiento(d.id, d.data()));
+    movs.sort((a, b) => a.fecha.getTime() - b.fecha.getTime()
+      || a.descripcion.localeCompare(b.descripcion));
+    return { ok: true, data: movs };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
 }
 
+/**
+ * Cuántos movimientos generó este resumen. Lo usa el banner de "ya está confirmado" (F9.166 §1.a) y
+ * el guard de `confirmar()`.
+ *
+ * F9.167 §5 — ANTES devolvía también `editados`, contando como "editado a mano" todo movimiento con
+ * `actualizadoEn − creadoEn > 5000 ms`. Se sacó, no se mejoró, y el motivo es doble:
+ *
+ *   1. Era un FALSO POSITIVO medido. En los cuatro resúmenes de F9.166 daba 2 cada uno, y los 2 son
+ *      siempre los movimientos-total: `categoria: "Tarjetas"` y `persona: null` —los defaults, nadie
+ *      los tocó— bumpeados por el `confirmadoPago`/`pagadoEn` de la confirmación de pago. El
+ *      timestamp no puede distinguir quién escribió ni qué campo cambió.
+ *   2. Se quedó sin lector. Su único consumidor era el `confirm()` de re-confirmar, que F9.167 §1
+ *      sacó porque las reglas de Firestore lo hacen imposible.
+ *
+ * Si algún día hace falta, la forma correcta es un campo propio (`editadoManualmenteEn`) escrito por
+ * el camino de edición manual, no inferido de timestamps. No se construye hasta que haya quien lo
+ * lea.
+ */
+export async function resumenYaGeneroMovimientos(
+  resumen: CardStatement,
+): Promise<{ total: number }> {
+  const docs = await movimientosDeResumen(resumen);
+  return { total: docs.length };
+}
+
+/**
+ * F9.167 §1 — LA RAMA `reemplazar` DE ESTA FUNCIÓN ES INALCANZABLE DESDE EL CLIENTE.
+ *
+ * `firestore.rules:74` tiene `allow delete: if false` en `movimientos`: nadie borra un movimiento,
+ * ni siquiera admin. El reemplazo borra y recrea en el MISMO batch, así que Firestore rechaza el
+ * batch entero — "Missing or insufficient permissions". F9.158 §1 verificó la lógica contra los
+ * datos y nunca contra las reglas, y por eso el bug sobrevivió a su propia verificación.
+ *
+ * Hay una segunda barrera detrás, por si la primera se levanta: `firestore.rules:62` exige
+ * `monto > 0` en el create, y los movimientos-total en cero que F9.156 introdujo para las tarjetas
+ * sin consumo en dólares no pasan esa validación desde el cliente. Los cuatro que existen entraron
+ * por Admin SDK, que se saltea las reglas.
+ *
+ * NO SE BORRA porque la lógica de reemplazo es correcta y el día que se decida habilitarla se
+ * reusa. Para habilitarla harían falta las dos cosas:
+ *   1. permitir el delete acotado — por ejemplo solo para admin y solo si
+ *      `resource.data.resumenTarjetaId == request.resource.data.resumenTarjetaId`;
+ *   2. contemplar el monto cero en el create, o dejar de crear los totales en cero.
+ *
+ * Mientras tanto el camino que sí funciona es editar el movimiento suelto (F9.167 §2): son updates
+ * puros, que `firestore.rules:70` sí permite para admin.
+ */
 // Firestore admite 500 operaciones por batch. Pasarse obligaría a partirlo, y partirlo rompe la
 // atomicidad justo en la operación que borra y recrea. Se rechaza con un mensaje claro en vez de
 // dejar el resumen a medio reemplazar. Peor caso medido hoy: 287 operaciones.
