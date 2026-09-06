@@ -46,6 +46,26 @@ const TIPOS_LINEA: MovimientoParseado['tipoLinea'][] = [
 const lineaEsImpuesto = (t: MovimientoParseado['tipoLinea']) =>
   t === 'impuesto' || t === 'reintegro_percepcion';
 
+/**
+ * F9.166 — qué estados pueden abrir el preview. Los seis, decididos uno por uno en vez de dejar
+ * que caigan al `else` por descarte:
+ *   subido            NO — todavía se está extrayendo, no hay líneas que mostrar.
+ *   parseado          SÍ — el caso de siempre: revisar y confirmar.
+ *   confirmado        SÍ — para mirar lo importado y, si hace falta, re-confirmar (F9.158 §1).
+ *   error             NO — la extracción falló, no hay líneas.
+ *   requiere_tarjeta  NO — sin `tarjetaCodigo`, `confirmarResumenTarjeta` no puede correr; la
+ *                          card ofrece el asignador inline, que es el camino correcto.
+ *   duplicado         NO — es copia de otro resumen; confirmarlo duplicaría movimientos.
+ *
+ * El bug que cerró F9.166: el gate del preview aceptaba solo `parseado` pero el botón
+ * "Ver N consumos" se ofrecía para cualquier estado con consumos, así que en `confirmado` el
+ * botón no hacía nada y el "Re-confirmar" de F9.158 era inalcanzable. Ahora el botón y el gate
+ * preguntan lo MISMO, que es la única forma de que no se vuelvan a separar.
+ */
+export function puedeVerPreview(estado: CardStatement['estado']): boolean {
+  return estado === 'parseado' || estado === 'confirmado';
+}
+
 // ── Preview ───────────────────────────────────────────────────────────────────
 
 interface PreviewProps {
@@ -176,8 +196,24 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
     lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado, resumen);
   const cuadreOk = cuadre.balanceARS && cuadre.balanceUSD;
 
+  // F9.166 §1.a — un preview de resumen YA CONFIRMADO no puede parecer una carga pendiente.
+  // Quien lo abre para mirar no tiene que re-confirmar por inercia creyendo que está completando
+  // algo: re-confirmar BORRA los movimientos existentes y los vuelve a crear.
+  const yaConfirmado = resumen.estado === 'confirmado';
+
   return (
-    <div className="rt-preview">
+    <div className={`rt-preview${yaConfirmado ? ' rt-preview--confirmado' : ''}`}>
+      {yaConfirmado && (
+        <div className="rt-preview-yaconf">
+          <Icon name="check-check" size={15} />
+          <span>
+            <strong>Este resumen ya está confirmado</strong>
+            {resumen.confirmadoEn && ` desde el ${resumen.confirmadoEn.toLocaleDateString('es-AR')}`}
+            {yaGenero && yaGenero.total > 0 && ` — generó ${yaGenero.total} movimiento${yaGenero.total !== 1 ? 's' : ''}`}
+            . Estás mirándolo, no cargándolo.
+          </span>
+        </div>
+      )}
       <div className="rt-preview-header">
         <div className="rt-preview-titulo">
           <strong>{resumen.tarjeta}</strong> — {resumen.banco}
@@ -628,7 +664,7 @@ function ResumenFila({ resumen, config, onVerPreview }: {
               {!split.deudaFutura.ARS && !split.deudaFutura.USD && <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>—</div>}
             </div>
           </div>
-          {split.nConsumos > 0 && (
+          {split.nConsumos > 0 && puedeVerPreview(resumen.estado) && (
             <button
               onClick={onVerPreview}
               style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 8, padding: '9px 12px', cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 13, fontWeight: 700, color: 'var(--color-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
@@ -687,7 +723,7 @@ export function SeccionTarjetas({ abrirPreview, onPreviewAbierto }: SeccionTarje
 
   const previewResumen = previewId ? resumenes.find(r => r.id === previewId) : null;
 
-  if (previewResumen?.estado === 'parseado' && config) {
+  if (previewResumen && puedeVerPreview(previewResumen.estado) && config) {
     return (
       <div className="rt rt--wide">
         <PreviewResumen

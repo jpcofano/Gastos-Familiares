@@ -299,3 +299,21 @@ select.rt-tipo:hover { border-color: rgba(0, 0, 0, 0.28); }
   font-size: var(--text-xs, 12px);
   color: var(--color-text, #111827);
 }
+
+/* F9.166 §1.a — el aviso de "ya confirmado" arriba del preview. Va en tono informativo y no de
+   acción: el punto es que quien abre a mirar NO re-confirme por inercia. Re-confirmar borra los
+   movimientos existentes y los vuelve a crear. */
+.rt-preview-yaconf {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: var(--gf-gray-100, #f3f4f6);
+  border-left: 3px solid var(--gf-gray-400, #9ca3af);
+  font-size: var(--text-xs, 12px);
+  line-height: 1.45;
+  color: var(--color-text, #111827);
+}
+.rt-preview-yaconf svg { flex-shrink: 0; margin-top: 1px; color: var(--gf-gray-400, #9ca3af); }
