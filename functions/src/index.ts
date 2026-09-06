@@ -1626,7 +1626,15 @@ const MARCADORES_DECISIVOS = [
 ];
 // PAN enmascarado tipo "4509 XX** **** 1234" o "XXXX XXXX XXXX 1234".
 // F9.153 §2 — NO es decisivo: una factura pagada con tarjeta también lo muestra. Ver contarMarcadores.
-const RE_PAN_ENMASCARADO = /\d{4}[\s*X]{4,10}\d{4}/;
+// F9.165 §5 — el rango era {4,10} y NO matcheaba el primero de esos dos ejemplos: un PAN en cuatro
+// grupos separados por espacios tiene ONCE caracteres en el medio ("4509|_XX**_****_|1234"), así que
+// solo entraban las máscaras sin separadores. Eso explica el "0 aciertos únicos" de F9.153 mejor que
+// cualquier hipótesis sobre los datos. {4,14} cubre los cuatro grupos sin dejar entrar un PAN
+// completo sin enmascarar ("1234 5678 9012 3456" no matchea: los dígitos del medio no están en la
+// clase). LÍMITE CONOCIDO: el segundo ejemplo del comentario, "XXXX XXXX XXXX 1234", sigue sin
+// matchear, y no es por el rango — el regex exige `\d{4}` al principio y ahí el primer grupo está
+// enmascarado. Se deja como está: ampliar el arranque es otra decisión, no la de esta fase.
+const RE_PAN_ENMASCARADO = /\d{4}[\s*X]{4,14}\d{4}/;
 
 function normalizarParaDeteccion(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
