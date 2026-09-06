@@ -1002,7 +1002,7 @@ PARTE 2 — ARRAY "movimientos" (uno por línea de consumo)
 ── QUÉ INCLUIR ──
 ✓ Todos los consumos y cuotas del "DETALLE DEL CONSUMO"
 ✓ Percepciones e impuestos (IIBB, IVA RG, DB.RG, PERCEPCION)
-✓ Devoluciones de percepciones (DEV.IMP, CR.RG, DEV PER, CAJA SEG-PROMO)
+✓ Devoluciones de percepciones (DEV.IMP, CR.RG, DEV PER)
 ✓ Bonificaciones (BONIF. CONSUMO) y reversos (montos negativos en la sección de consumos)
 
 ── QUÉ EXCLUIR ──
@@ -1025,9 +1025,25 @@ tipoLinea (string): uno de estos valores:
   "consumo"              → gasto en un solo pago (cuotaTotal=1)
   "cuota"                → cuota de compra en cuotas (cuotaTotal>1)
   "impuesto"             → percepción o impuesto (IIBB, IVA RG, DB.RG, PERCEPCION)
-  "reintegro_percepcion" → devolución de percepción (DEV.IMP, CR.RG, DEV PER, CAJA SEG-PROMO)
+  "reintegro_percepcion" → devolución de percepción (DEV.IMP, CR.RG, DEV PER)
   "bonificacion"         → descuento explícito (BONIF. CONSUMO ...)
   "reverso"              → anulación de consumo previo (monto negativo en sección de consumos)
+
+  ═══ EL SIGNO DECIDE, NO EL NOMBRE ═══
+  Los tres últimos valores ("reintegro_percepcion", "bonificacion", "reverso") significan que la
+  plata VUELVE, y el resumen los descuenta del total. Un renglón que en el PDF figura con importe
+  POSITIVO dentro de una sección "Consumos de [Nombre]" es un CARGO: va como "consumo" o "cuota",
+  aunque el nombre del comercio hable de promoción, bonificación, descuento, seguro o reintegro.
+  Solo los renglones que el PDF imprime con signo NEGATIVO (o en una sección de ajustes/devoluciones)
+  llevan uno de los tres tipos de la familia de ingresos.
+
+  EJEMPLO NEGATIVO REAL, y es el que motivó esta regla:
+    "CAJA SEG-PROMO BB031082144 -0"  168.542,00  (positivo, dentro de "Consumos de MARIA LASCANO")
+      → tipoLinea = "consumo".  NO es un reintegro: la palabra "PROMO" en el nombre del comercio no
+        lo convierte en devolución. Clasificarlo como reintegro hacía que el subtotal de la sección
+        diera 999.813,92 en vez de los 1.336.897,92 que imprime el PDF.
+    "COTO DIGITAL SUC 056 CRED"       −8.870,44  (NEGATIVO, misma sección)
+      → tipoLinea = "reverso".  Ese sí es un crédito, y se reconoce por el signo, no por el "CRED".
 
 fechaConsumo (string|null): fecha en formato YYYY-MM-DD.
   - Para percepciones sin fecha propia, usar la fechaCierre del resumen.
@@ -1133,8 +1149,11 @@ PERCEPCIONES EN GALICIA MASTER (aparecen en el CONSOLIDADO, no en el detalle):
   → tipoLinea="impuesto", esImpuesto=true
   → fechaConsumo = fechaCierre del resumen
 
-CAJA SEG-PROMO en BBVA (aparece en la sección de consumos con monto positivo):
-  → tipoLinea="reintegro_percepcion", monto positivo
+CAJA SEG-PROMO en BBVA (aparece en la sección de consumos con monto POSITIVO):
+  → tipoLinea="consumo". Es el cargo del seguro, NO una devolución.
+  Esta regla decía "reintegro_percepcion" y era el error: reconocía que el importe es positivo y
+  aun así lo mandaba a la familia de ingresos, así que el subtotal de la sección quedaba corto por
+  el doble del monto. El signo manda sobre el nombre — ver "EL SIGNO DECIDE, NO EL NOMBRE" arriba.
 
 4F SOLUCIONES y similares (monto negativo en consumos, cancela una compra previa):
   → tipoLinea="reverso", esReverso=true, monto positivo (valor absoluto)
