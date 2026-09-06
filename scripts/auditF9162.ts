@@ -24,6 +24,7 @@ const bl = (d: string, h: string) => { const i = srcDatos.indexOf(d); return src
 const motor = new Function(`${ts.transpileModule([
   bl('function tipoDeLinea', '\n}'),
   bl('export function totalesNetos', '\n}').replace('export ', ''),
+  (() => { const _r = require('node:fs').readFileSync('src/datos/ajusteConsolidado.ts','utf8').replace(/\\r\\n/g,'\\n'); return _r.replace(/^import .*$/gm,'').replace(/export /g,''); })(),
   bl('export function calcularCuadre', '\n}').replace('export ', ''),
 ].join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText}
 return { calcularCuadre };`)() as {

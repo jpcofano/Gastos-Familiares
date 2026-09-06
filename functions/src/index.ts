@@ -987,6 +987,28 @@ Extraé los siguientes campos:
 - ultimos4: últimos 4 dígitos del PAN de la tarjeta tal como aparece en el encabezado
   (buscar el número enmascarado tipo "4509 XX** **** 1234" o "XXXX XXXX XXXX 5678" → devolver "1234" o "5678")
   Si no hay PAN enmascarado en el encabezado, null.
+- saldoAnteriorARS / saldoAnteriorUSD: el importe del renglón "SALDO ANTERIOR" del bloque
+  consolidado, CON SU SIGNO tal cual figura (normalmente positivo: es lo que se debía).
+  OJO con el layout de BBVA, que pega los dos importes al rótulo y entre sí:
+      "SALDO ANTERIOR4.313.337,281.983,64"  → saldoAnteriorARS=4313337.28  saldoAnteriorUSD=1983.64
+  Si no aparece el renglón, null (los dos).
+
+- pagosDelPeriodoARS / pagosDelPeriodoUSD: la SUMA de TODOS los renglones de pago del bloque
+  consolidado, CON SU SIGNO (normalmente negativos: descuentan del saldo anterior).
+  ═══ SON VARIOS RENGLONES, NO UNO ═══
+  Hay resúmenes con cuatro pagos en el mes. Sumalos todos, por moneda. Las tres formas que
+  aparecen en estos PDFs:
+    BBVA            "SU PAGO EN PESOS"  /  "SU PAGO EN USD"   (el importe puede estar en otro renglón)
+    Galicia Visa    "07-08-26 SU PAGO EN PESOS -965.344,91"
+    Galicia Master  "05-Jun-26SU PAGO -108.915,32-108.915,32"  ← la fecha va pegada al rótulo y el
+                    importe puede venir repetido dos veces en el mismo renglón: es UN solo pago.
+  Ejemplo real de suma (Galicia Master, cuatro pagos en el mes):
+      -108.915,32 + -200.000,00 + -271.998,00 + -222.076,67 = -802.990,00 (ARS)
+  ═══ EL BLOQUE SE CUENTA UNA SOLA VEZ ═══
+  BBVA imprime el bloque consolidado DOS VECES (en la carátula y otra vez antes del detalle). Son
+  los MISMOS pagos repetidos, no pagos distintos: sumalos UNA sola vez.
+  Si no hay ningún renglón de pago, 0. Si no se puede determinar, null.
+
 - ajustesConsolidado: array de ajustes de período ANTERIOR que aparecen en el CONSOLIDADO entre
   "SU PAGO" y "SALDO PENDIENTE". Típicamente son devoluciones de percepción del período anterior
   (ej: "DEV PER RG 4815 30% -67.399,98"). Estos NO van en movimientos (no son gasto del mes actual)
@@ -1200,6 +1222,10 @@ No incluyas texto antes ni después del bloque.
     "fechaVencimiento": "YYYY-MM-DD",
     "totalARS": 0.00,
     "totalUSD": 0.00,
+    "saldoAnteriorARS": 0.00,
+    "saldoAnteriorUSD": 0.00,
+    "pagosDelPeriodoARS": 0.00,
+    "pagosDelPeriodoUSD": 0.00,
     "pagoMinimoARS": 0.00,
     "cuentaDebito": "...",
     "numeroCuenta": "...",
@@ -1267,6 +1293,11 @@ function sanitizarJson(raw: string): string {
   return out;
 }
 
+
+/** F9.163 — `0` es un valor legítimo (un mes sin pagos), así que no sirve `?? 0` ni `|| null`. */
+function numeroONull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
 
 const TIPOLINEA_VALIDOS = new Set([
   'consumo', 'cuota', 'impuesto', 'reintegro_percepcion', 'bonificacion', 'reverso',
@@ -1480,6 +1511,13 @@ async function procesarResumenTarjeta(
       fechaVencimiento:    resumen.fechaVencimiento    ?? null,
       totalARS:            Number(resumen.totalARS     ?? 0),
       totalUSD:            Number(resumen.totalUSD     ?? 0),
+      // F9.163 §1 — el bloque consolidado, para que la identidad del §2 se pueda evaluar sin
+      // volver a abrir el PDF. `null` cuando el modelo no lo emite: sin el dato la regla se
+      // ABSTIENE y el cuadre queda como hoy, que es el modo de falla seguro.
+      saldoAnteriorARS:    numeroONull(resumen.saldoAnteriorARS),
+      saldoAnteriorUSD:    numeroONull(resumen.saldoAnteriorUSD),
+      pagosDelPeriodoARS:  numeroONull(resumen.pagosDelPeriodoARS),
+      pagosDelPeriodoUSD:  numeroONull(resumen.pagosDelPeriodoUSD),
       pagoMinimoARS:       Number(resumen.pagoMinimoARS ?? 0),
       cuentaDebito:        resumen.cuentaDebito        ?? null,
       numeroCuenta:        numeroCuentaExtraido,

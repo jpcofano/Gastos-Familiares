@@ -117,7 +117,8 @@ async function main() {
   const iB = srcDatos.indexOf('export function calcularCuadre');
   const motor = new Function(`${aJs([
     srcDatos.slice(iA, srcDatos.indexOf('\n}', iA) + 2),
-    srcDatos.slice(iB, srcDatos.indexOf('\n}', iB) + 2).replace('export ', ''),
+  (() => { const _r = require('node:fs').readFileSync('src/datos/ajusteConsolidado.ts','utf8').replace(/\\r\\n/g,'\\n'); return _r.replace(/^import .*$/gm,'').replace(/export /g,''); })(),
+  srcDatos.slice(iB, srcDatos.indexOf('\n}', iB) + 2).replace('export ', ''),
   ].join('\n'))}\nreturn { tipoDeLinea, calcularCuadre };`)() as {
     calcularCuadre: (l: unknown[], a: number, u: number, aj?: unknown[]) => {
       sumaARS: number; diffARS: number; balanceARS: boolean; sumaUSD: number; diffUSD: number; balanceUSD: boolean };

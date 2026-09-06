@@ -172,7 +172,8 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
   const sinPersona = lineas.some(
     l => l.incluir && l.tipoLinea === 'consumo' && !l.personaConfirmada,
   );
-  const cuadre: CuadreResult = calcularCuadre(lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado);
+  const cuadre: CuadreResult = calcularCuadre(
+    lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado, resumen);
   const cuadreOk = cuadre.balanceARS && cuadre.balanceUSD;
 
   return (
@@ -233,6 +234,27 @@ ATENCIÓN: ${yaGenero!.editados} de esos movimientos fueron editados a mano desp
               </span>
             )}
             <span className="rt-cuadre-item">El movimiento de pago de la tarjeta sale por el neto.</span>
+          </div>
+        )}
+        {cuadre.decisionAjustes.decision === 'ignora' && (
+          /* F9.163 §2 — el ajuste del consolidado quedó FUERA del cuadre porque el banco lo usó
+             para terminar de saldar el mes anterior. Se dice en pantalla con la aritmética a la
+             vista: una decisión automática que no se ve es la misma clase de problema que
+             "cerrar diferencia". */
+          <div className="rt-cuadre-neto">
+            <strong>El ajuste del consolidado no entra: es del período anterior.</strong>
+            <span className="rt-cuadre-item">
+              saldo anterior {fmtMonto(resumen.saldoAnteriorARS ?? 0, 'ARS')} + pagos{' '}
+              {fmtMonto(resumen.pagosDelPeriodoARS ?? 0, 'ARS')} ={' '}
+              {fmtMonto(cuadre.decisionAjustes.a, 'ARS')} — el crédito completó ese pago.
+            </span>
+          </div>
+        )}
+        {cuadre.decisionAjustes.decision === 'sin_decidir' && resumen.ajustesConsolidado.some(a => a.origen !== 'manual') && (
+          /* Abstención: se computa como siempre y se avisa. No adivinamos. */
+          <div className="rt-cuadre-neto">
+            <strong>Ajuste del consolidado sin verificar.</strong>
+            <span className="rt-cuadre-item">{cuadre.decisionAjustes.motivo}. Entra al cuadre como siempre.</span>
           </div>
         )}
         {resumen.ajustesConsolidado.length > 0 && (

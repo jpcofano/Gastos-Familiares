@@ -122,6 +122,14 @@ export interface CardStatement {
   fechaVencimiento: Date | null;
   totalARS: number;
   totalUSD: number;
+  // F9.163 §1 — el bloque consolidado del encabezado, que es lo que dice si un ajuste pertenece al
+  // período anterior o a éste. Opcionales: los resúmenes anteriores a F9.163 no los tienen y sin
+  // ellos la regla se ABSTIENE (el cuadre queda exactamente como hoy). `null` ≠ `0`: cero es un mes
+  // sin pagos, null es "no se sabe".
+  saldoAnteriorARS?: number | null;
+  saldoAnteriorUSD?: number | null;
+  pagosDelPeriodoARS?: number | null;
+  pagosDelPeriodoUSD?: number | null;
   pagoMinimoARS: number;
   cuentaDebito: string | null;
   hashPdf: string | null;

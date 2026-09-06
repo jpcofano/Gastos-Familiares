@@ -22,6 +22,7 @@ function bloque(fuente: string, desde: string, hasta: string): string {
 const js = ts.transpileModule([
   bloque(srcDatos, 'function tipoDeLinea', '\n}'),
   bloque(srcDatos, 'export function totalesNetos', '\n}').replace('export ', ''),
+  (() => { const _r = require('node:fs').readFileSync('src/datos/ajusteConsolidado.ts','utf8').replace(/\\r\\n/g,'\\n'); return _r.replace(/^import .*$/gm,'').replace(/export /g,''); })(),
   bloque(srcDatos, 'export function calcularCuadre', '\n}').replace('export ', ''),
 ].join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None } }).outputText;
 const motor = new Function(`${js}\nreturn { tipoDeLinea, calcularCuadre };`)() as {

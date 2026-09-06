@@ -72,6 +72,7 @@ const trozo = (d: string, h: string) => {
 const motor = new Function(`${aJs([
   trozo('function tipoDeLinea', '\n}'),
   trozo('export function totalesNetos', '\n}').replace('export ', ''),
+  (() => { const _r = require('node:fs').readFileSync('src/datos/ajusteConsolidado.ts','utf8').replace(/\\r\\n/g,'\\n'); return _r.replace(/^import .*$/gm,'').replace(/export /g,''); })(),
   trozo('export function calcularCuadre', '\n}').replace('export ', ''),
 ].join('\n'))}\nreturn { calcularCuadre, totalesNetos };`)() as {
   calcularCuadre: (l: unknown[], a: number, u: number, aj?: unknown[]) => {

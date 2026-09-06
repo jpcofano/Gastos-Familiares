@@ -8,6 +8,7 @@ import { sha256Archivo } from './hashArchivo';
 import type { CardStatement, MovimientoParseado, AjusteConsolidado, FamiliaConfig } from '../types';
 import { resolverNombreMiembro } from '../familia';
 import { medioPorDefecto, ALIAS_NOMBRE_MEDIO } from './medios';
+import { ajustesComputables, type ConsolidadoResumen, type DecisionAjustes } from './ajusteConsolidado';
 
 type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
 
@@ -40,6 +41,12 @@ export function docACardStatement(id: string, data: DocumentData): CardStatement
     fechaVencimiento:    toDateSafe(data.fechaVencimiento),
     totalARS:            data.totalARS             ?? 0,
     totalUSD:            data.totalUSD             ?? 0,
+    // F9.163 §1 — `?? null` y no `?? 0`: cero es un mes sin pagos, null es "no se sabe", y la
+    // regla del §2 se abstiene solo ante null.
+    saldoAnteriorARS:    data.saldoAnteriorARS      ?? null,
+    saldoAnteriorUSD:    data.saldoAnteriorUSD      ?? null,
+    pagosDelPeriodoARS:  data.pagosDelPeriodoARS    ?? null,
+    pagosDelPeriodoUSD:  data.pagosDelPeriodoUSD    ?? null,
     pagoMinimoARS:       data.pagoMinimoARS         ?? 0,
     cuentaDebito:        data.cuentaDebito          ?? null,
     hashPdf:             data.hashPdf               ?? null,
@@ -172,6 +179,9 @@ export interface CuadreResult {
   noDebitadoUSD: number;
   objetivoARS: number;
   objetivoUSD: number;
+  // F9.163 §2 — qué se decidió con los ajustes del consolidado y por qué. Sin el bloque
+  // consolidado en el resumen la decisión es `sin_decidir` y el cuadre queda igual que antes.
+  decisionAjustes: DecisionAjustes;
 }
 
 /**
@@ -204,7 +214,13 @@ export function calcularCuadre(
   totalARS: number,
   totalUSD: number,
   ajustes: AjusteConsolidado[] = [],
+  consolidado?: ConsolidadoResumen | null,
 ): CuadreResult {
+  // F9.163 §2 — un ajuste del consolidado que el banco usó para terminar de saldar el mes ANTERIOR
+  // ya está contado y no va en el cuadre de éste. Sin `consolidado` la regla se abstiene y los
+  // ajustes entran como siempre: el parámetro es opcional justamente para que nada cambie sin él.
+  const { ajustes: ajustesUsados, decision: decisionAjustes } = ajustesComputables(ajustes, consolidado);
+  ajustes = ajustesUsados;
   // F9.161 §4 — las dos puntas se mueven juntas: la línea no debitada sale de la suma Y baja el
   // objetivo. Mover una sola dejaría una diferencia igual al monto marcado.
   const netos = totalesNetos(lineas, totalARS, totalUSD);
@@ -235,6 +251,7 @@ export function calcularCuadre(
     balanceARS: totalARS === 0 || diffARS <= umbralARS,
     balanceUSD: totalUSD === 0 || diffUSD <= 1,
     ...netos,
+    decisionAjustes,
   };
 }
 
@@ -346,7 +363,7 @@ export async function confirmarResumenTarjeta(
     // Se resuelve UNA vez antes del batch: los cinco usos de abajo tienen que dar el mismo banco.
     const bancoCanonico = bancoCanonicoDeResumen(resumen, config);
     // ── Cuadre check ──────────────────────────────────────────────────────────
-    const cuadre = calcularCuadre(lineasEditadas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado);
+    const cuadre = calcularCuadre(lineasEditadas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado, resumen);
     if (!cuadre.balanceARS || !cuadre.balanceUSD) {
       const parts = [
         !cuadre.balanceARS ? `ARS dif $${cuadre.diffARS.toFixed(2)}` : null,
@@ -638,7 +655,7 @@ export async function agregarAjusteCuadreManual(
         ),
       };
     }
-    const cuadre = calcularCuadre(lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado);
+    const cuadre = calcularCuadre(lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado, resumen);
     const residuoARS = +(resumen.totalARS - cuadre.sumaARS).toFixed(2);
     const residuoUSD = +(resumen.totalUSD - cuadre.sumaUSD).toFixed(2);
     if (Math.abs(residuoARS) <= 1 && Math.abs(residuoUSD) <= 1) {

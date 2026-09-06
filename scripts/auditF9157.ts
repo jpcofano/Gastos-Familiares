@@ -23,6 +23,7 @@ function bloque(desde: string, hasta: string): string {
 const codigo = [
   bloque('function tipoDeLinea', '\n}'),
   bloque('export function totalesNetos', '\n}').replace('export ', ''),
+  (() => { const _r = require('node:fs').readFileSync('src/datos/ajusteConsolidado.ts','utf8').replace(/\\r\\n/g,'\\n'); return _r.replace(/^import .*$/gm,'').replace(/export /g,''); })(),
   bloque('export function calcularCuadre', '\n}').replace('export ', ''),
 ].join('\n');
 const js = ts.transpileModule(codigo, {
