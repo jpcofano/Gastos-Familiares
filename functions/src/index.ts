@@ -1186,19 +1186,29 @@ Consumos en USD (ej PARAMOUNT+): aparecen UNA SOLA VEZ. El PDF puede mostrar
 CASOS ESPECIALES IMPORTANTES
 ═══════════════════════════════════════════════════════════
 
-CR.RG 5617 en BBVA (sección "Sus pagos y ajustes realizados"):
-  → tipoLinea="reintegro_percepcion", monto positivo (ignorar signo negativo EN monto;
-    montoFirmado conserva el negativo del papel)
-  → fechaConsumo = fecha de la línea, personaDetectada = ""
+═══ ESTOS CUATRO CONCEPTOS NO SON LÍNEAS, NUNCA ═══
+La lista es CERRADA y son exactamente estos cuatro, por su nombre:
+    CR.RG 5617        DEV.IMP. RG 5617        DEV PER RG 4815        CANJE PUNTOS
+Van SOLO en ajustesConsolidado. NO los emitas como movimiento, ni siquiera cuando el mismo renglón
+vuelva a aparecer más abajo en "Sus pagos y ajustes realizados": es la MISMA plata impresa dos
+veces en el mismo PDF, y emitirla de las dos formas la cuenta dos veces.
 
-DEV.IMP. RG 5617 en Galicia Visa (sección CONSOLIDADO):
-  → tipoLinea="reintegro_percepcion", monto positivo (montoFirmado con el signo del papel)
+  ═══ Y NADA MÁS QUE ESOS CUATRO ═══
+  Todo el resto sigue siendo LÍNEA, como siempre. En particular, la sección
+  "Impuestos, cargos e intereses" NO va a ajustesConsolidado: sus renglones —DB.RG 5617,
+  DB IVA, IVA RG 4240, IIBB PERCEP-CABA, INTERESES FINANCIACION, PERCEPCION IVA, PERCEP.AFIP—
+  son movimientos del mes con tipoLinea="impuesto", igual que antes. Mandarlos a
+  ajustesConsolidado descuadra el resumen por el total de esa sección.
+Dos razones, y la segunda pesa más que el cuadre:
+  1. ajustesConsolidado ya los contempla, y del otro lado hay una regla contable que decide si se
+     computan o se ignoran según el bloque consolidado cierre o no.
+  2. una línea de la familia de ingresos se convierte en movimiento tipo INGRESO al confirmar. En un
+     resumen real eso serían 890.257,63 de ingreso fantasma: plata que nunca entró a ninguna cuenta,
+     que era solo un descuento en la tarjeta.
 
-DEV PER RG 4815 en Galicia Master:
-  → Si aparece en el CONSOLIDADO (entre SU PAGO y SALDO PENDIENTE)
-    con monto NEGATIVO: es del período anterior. EXCLUIR (igual que SU PAGO).
-  → Si aparece en el DETALLE DEL CONSUMO o como percepción del mes
-    con monto POSITIVO: es un reintegro del mes actual.
+DEV PER RG 4815 en Galicia Master, FUERA del consolidado:
+  → Si aparece en el DETALLE DEL CONSUMO o como percepción del mes con monto POSITIVO, ahí sí es un
+    reintegro del mes actual y va como línea:
     tipoLinea="reintegro_percepcion", monto positivo (montoFirmado con el signo del papel).
 
 PERCEPCIONES EN GALICIA MASTER (aparecen en el CONSOLIDADO, no en el detalle):
