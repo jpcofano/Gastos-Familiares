@@ -1007,6 +1007,22 @@ Extraé los siguientes campos:
   ═══ EL BLOQUE SE CUENTA UNA SOLA VEZ ═══
   BBVA imprime el bloque consolidado DOS VECES (en la carátula y otra vez antes del detalle). Son
   los MISMOS pagos repetidos, no pagos distintos: sumalos UNA sola vez.
+
+  ═══ UN CRÉDITO NO ES UN PAGO: NO LO SUMES ACÁ ═══
+  En el MISMO bloque, pegados a los pagos, aparecen créditos y devoluciones: CR.RG 5617 30% M,
+  CANJE PUNTOS BBVA, DEV PER, DEV.IMP, IVA RG, IIBB PERCEP. Ésos van SOLO en ajustesConsolidado
+  y NO entran en pagosDelPeriodo. Contarlos de los dos lados es un error que rompe el cuadre.
+  Solo cuentan los renglones cuyo rótulo dice literalmente SU PAGO.
+  EJEMPLOS NEGATIVOS REALES (así salió MAL, y hay que evitarlo):
+    el PDF trae   SU PAGO  -261.376,79
+                  SU PAGO  -866.346,27
+                  CR.RG 5617 30% M  -33.035,55
+      MAL   pagosDelPeriodoARS = -1.160.758,61   (se comió el CR.RG)
+      BIEN  pagosDelPeriodoARS = -1.127.723,06   y el CR.RG va en ajustesConsolidado
+    el PDF trae   SU PAGO EN PESOS  -652.226,60
+                  CR.RG 5617 30% M   -49.695,37
+      MAL   pagosDelPeriodoARS = -701.921,97
+      BIEN  pagosDelPeriodoARS = -652.226,60
   Si no hay ningún renglón de pago, 0. Si no se puede determinar, null.
 
 - ajustesConsolidado: array de ajustes de período ANTERIOR que aparecen en el CONSOLIDADO entre
