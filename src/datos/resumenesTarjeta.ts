@@ -408,7 +408,9 @@ export async function confirmarResumenTarjeta(
     // así que un movimiento por ella contaría plata que nunca sale.
     const lineasAImportar = lineasEditadas.filter(l => l.incluir && !l.noDebitado && l.monto > 0);
 
-    // deletes + líneas nuevas + 2 totales + 2 updates de ítem + 1 update del resumen
+    // deletes + líneas nuevas + 2 totales + 1 update del resumen = 3.
+    // F9.165 §3 sacó los 2 updates de ítem, pero el margen se deja en 5: sobreestimar el batch
+    // solo puede hacer que se rechace algo que entraba, nunca que se parta uno que no entra.
     const opsEstimadas = existentes.length + lineasAImportar.length + 5;
     if (opsEstimadas > MAX_OPS_BATCH) {
       return {
@@ -567,23 +569,26 @@ export async function confirmarResumenTarjeta(
       });
     }
 
-    // ── Setear montoEsperado en los items de la tarjeta ──────────────────────
-    // F9.156 §1 — sin la guarda de `> 0`: los ítems USD de las dos Galicia tenían
-    // `montoEsperado: null` y `actualizadoEn` ausente, o sea que esta línea nunca había corrido
-    // para ellos. Se guarda el mismo monto clampeado que el movimiento, para que el checklist
-    // compare peras con peras (estadoItem: montoConf < montoEsperado * 0.99).
-    if (itemARS) {
-      batch.update(doc(db, 'itemsEsperados', itemARS.id), {
-        montoEsperado: totalARSMov,
-        actualizadoEn: serverTimestamp(),
-      });
-    }
-    if (itemUSD) {
-      batch.update(doc(db, 'itemsEsperados', itemUSD.id), {
-        montoEsperado: totalUSDMov,
-        actualizadoEn: serverTimestamp(),
-      });
-    }
+    // ── F9.165 §3 — la confirmación YA NO escribe `montoEsperado` ─────────────
+    //
+    // Acá había un `batch.update` por ítem que le pisaba `montoEsperado` con el total de ESTE
+    // resumen. El resumen de un período se paga al mes siguiente, así que quedaba escrito el total
+    // de agosto mientras el match que el checklist evalúa para agosto es el pago del resumen de
+    // julio: `estadoItem` comparaba `montoConf` contra un esperado de otro período y devolvía
+    // `parcial`.
+    //
+    // La medición de F9.159-pre cerró el tradeoff que frenaba sacarlo — `montoEsperado` cumple dos
+    // funciones (pronóstico de la agenda y control de cobertura del checklist) y NO se superponen:
+    //   · los 8 ítems de tarjeta usaron el pronóstico 0 veces en 6 meses;
+    //   · los 14 no-tarjeta dispararon el control 0 veces, y 10 ya tienen `montoEsperado: null`;
+    //   · los 4 `parcial` del período son todos de tarjeta y todos el desfasaje, ninguno legítimo;
+    //   · con el campo en null el banner del mes en curso no cambia (Δ = 0,00).
+    // Para tarjetas ese control tampoco puede detectar nada real: `montoConf` y `montoEsperado`
+    // salen los dos del total del resumen, son el mismo número por construcción.
+    //
+    // El campo queda como lo que siempre debió ser: un valor que configura el usuario.
+    // El resto de F9.156 NO se toca: el movimiento-total se sigue creando siempre con
+    // `Math.max(total, 0)`, que es lo que destrabó los ítems USD y funciona.
 
     // ── Marcar resumen como confirmado ────────────────────────────────────────
     const resumenRef = doc(db, 'resumenesTarjeta', resumen.id);
