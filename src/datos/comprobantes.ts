@@ -301,3 +301,27 @@ export async function reasignarItemDeComprobante(
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
 }
+
+// ── Desvincular una obligación reconciliada (F9.169 §3) ──────────────────────
+//
+// El comprobante de rama 1 se colgó de una obligación que YA existía; hasta acá no había forma de
+// decir "ésta no era la obligación" desde ningún lado, así que un pago mal conciliado no tenía
+// salida por ninguna puerta.
+//
+// NO ES UN "DESHACER", y el nombre importa. La auditoría de `confirmarRama1` (F9.169 §3) midió que
+// sobrescribe `hashPdf`, `refStoragePdf`, `confirmadoPago`, `pagado`, `pagadoEn`, `itemEsperadoId`,
+// `seedImport`, `destinoCbu/Cuit/Alias/Nombre` y `vencimientos` — y NO GUARDA LOS VALORES PREVIOS
+// EN NINGÚN LADO (decisión del proyecto: "audit = solo timestamps, sin subcolección history").
+// Entonces esto no restaura: desvincula y vuelve a proponer. Lo que quedó pisado sigue pisado —
+// en el caso del agua, la obligación de $51.672,34 conserva los `vencimientos` de la otra factura.
+export async function desvincularObligacion(
+  compId: string,
+): Promise<Resultado<{ movimientoId: string; itemEsperadoId: string | null }>> {
+  try {
+    const fn = httpsCallable(functions, 'desvincularObligacion');
+    const res = await fn({ compId });
+    return { ok: true, data: res.data as { movimientoId: string; itemEsperadoId: string | null } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}

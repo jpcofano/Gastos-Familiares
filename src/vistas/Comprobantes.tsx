@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, reasignarItemDeComprobante, type ObligacionAbierta } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, reasignarItemDeComprobante, desvincularObligacion, type ObligacionAbierta } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
 import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -88,6 +88,16 @@ function comprobanteCreoElMovimiento(pm: NonNullable<Comprobante['propuestaMatch
   return !pm.origenSuelto && !pm.origenReconciliacion;
 }
 
+// F9.169 §3 — ¿este comprobante reconcilió una obligación que YA existía? Es el complemento exacto
+// del predicado de arriba, y la razón por la que hacía falta: en F9.154 §4 el botón se acotó a
+// "solo si el comprobante creó el movimiento", con el argumento —correcto— de que en un pago el
+// ítem es de la obligación y no del comprobante. La conclusión estaba mal: la obligación tampoco se
+// podía reasignar desde ningún lado, así que un pago mal conciliado no tenía salida por ninguna
+// puerta. Fue el caso de la luz.
+function comprobanteReconcilioObligacion(pm: NonNullable<Comprobante['propuestaMatch']>): boolean {
+  return pm.rama === 1 && pm.origenReconciliacion === true && !!pm.movimientoId;
+}
+
 function RazonVinculado(
   { pm, d, items, comp, esAdmin }:
   { pm: Comprobante['propuestaMatch']; d?: DatosExtraidos; items: ExpectedItem[]; comp?: Comprobante; esAdmin?: boolean },
@@ -143,6 +153,65 @@ function RazonVinculado(
 
   // F9.154 §4.d — el badge ES el botón: un tap abre la reasignación, sin modo de edición ni estado
   // escondido. Edición en su lugar (update de `itemEsperadoId`), no revertir y recrear.
+  // F9.169 §3 — la salida del comprobante de rama 1. Va antes que `editable` porque los dos
+  // predicados son excluyentes (rama 1 vs rama 2/3) y así se lee cuál cubre cada caso.
+  //
+  // EL BOTÓN NO SE LLAMA "DESHACER", y no es una elección de copy: `confirmarRama1` pisa
+  // `hashPdf`, `refStoragePdf`, `confirmadoPago`, `pagado`, `pagadoEn`, `itemEsperadoId`,
+  // `seedImport`, los `destino*` y los `vencimientos` de la obligación, y NO guarda los valores
+  // previos en ningún lado (el proyecto decidió "audit = solo timestamps, sin subcolección
+  // history"). Así que esto desvincula y vuelve a proponer; no restaura. Prometer lo primero
+  // cuando el código hace lo segundo sería mentirle al usuario justo cuando está corrigiendo.
+  const desvinculable = !!comp && !!esAdmin && comprobanteReconcilioObligacion(pm);
+  if (desvinculable) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button
+          type="button"
+          onClick={() => { setAbierto(o => !o); setErrItem(null); }}
+          title="Esta no era la obligación"
+          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start' }}
+        >
+          <Badge tone={tone}>{texto}</Badge>
+          <Icon name={abierto ? 'chevron-up' : 'chevron-down'} size={13} color="var(--color-text-sec)" />
+        </button>
+
+        {abierto && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)' }}>¿Esta no era la obligación?</span>
+            <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>
+              Se despega el comprobante del movimiento y vuelve a proponerse el match. El movimiento
+              no se borra y conserva su {palabraEsperado(tipoMov)}.
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--gf-gray-400)' }}>
+              No es un deshacer: lo que la conciliación pisó en el movimiento (vencimientos, datos
+              del destino) queda como está — no se guardaron los valores anteriores.
+            </span>
+            {errItem && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errItem}</span>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button
+                variant="primary" size="sm"
+                disabled={guardando}
+                onClick={async () => {
+                  if (!comp) return;
+                  setGuardando(true);
+                  setErrItem(null);
+                  const res = await desvincularObligacion(comp.id);
+                  setGuardando(false);
+                  if (!res.ok) setErrItem(res.error.message);
+                  else setAbierto(false);
+                }}
+              >
+                {guardando ? 'Desvinculando…' : 'Desvincular y volver a proponer'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setAbierto(false)}>Cancelar</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const editable = !!comp && !!esAdmin && comprobanteCreoElMovimiento(pm);
   if (!editable) return <Badge tone={tone}>{texto}</Badge>;
 
