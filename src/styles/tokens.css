@@ -7,6 +7,11 @@
 
 /* ─── tokens/colors.css ─── */
 :root {
+  /* F9.169 §1 — los controles nativos (select, checkbox, scrollbar, autofill)
+     no leen nuestros tokens: siguen a color-scheme. Sin esto, el preview de
+     resúmenes sale con 30+ <select> blancos sobre fondo oscuro. */
+  color-scheme: light;
+
   /* ── Brand: emerald + ink ──────────────────────────────── */
   --gf-emerald:      #065f46;  /* brand / confirm action        */
   --gf-emerald-deep: #054b38;  /* emerald pressed               */
@@ -45,6 +50,7 @@
 
   /* Ámbar — familia de "out"/warn, usada en avisos (íconos + texto sobre tinte ámbar) */
   --gf-amber-50:    #fffbeb;
+  --gf-amber-400:   #fbbf24;   /* borde de aviso (F9.169 §4)   */
   --gf-amber-600:   #d97706;
   --gf-amber-700:   #b45309;
 
@@ -100,6 +106,9 @@
   --color-primary:       var(--gf-emerald);
   --color-primary-dark:  var(--gf-emerald-deep);
   --color-primary-light: var(--gf-emerald-50);
+  /* Texto sobre --color-primary. En claro el esmeralda es profundo y aguanta
+     blanco; en oscuro se aclara (§3) y el blanco deja de contrastar. */
+  --color-on-primary:    #ffffff;
   --color-focus-ring:    rgba(6, 95, 70, 0.20);
   --color-ink-action:    var(--gf-ink);     /* neutral primary (dark) */
 
@@ -123,6 +132,31 @@
    alcanza con remapear los tokens acá. Activado seteando
    data-theme="dark" en <html> (ver datos/theme.ts). ─────────── */
 [data-theme="dark"] {
+  /* F9.169 §1 — controles nativos en oscuro (ver el :root de arriba) */
+  color-scheme: dark;
+
+  /* F9.169 §2 — la superficie ink deja de ser "lo oscuro" y pasa a ser "lo
+     elevado": un escalón POR ENCIMA de la card (#161b22), no por debajo.
+     Con #111827 el hero, el swatch de ResumenFila, el Fab y el avatar del
+     AppShell se hundían en el fondo. #fff sobre #232b36 da 13,4:1, así que
+     nada de lo que se pinta encima cambia. */
+  --gf-ink:      #232b36;
+  --gf-ink-soft: #2d3644;
+  --gf-ink-700:  #3a4553;
+
+  /* F9.169 §3 — colores plenos aclarados para superficie oscura (mismo hue,
+     ≥4.5:1). Los tintes -50 ya se habían remapeado en F9.19; estos no, y se
+     usan como color de texto de montos y como fondo de botón primario. */
+  --gf-emerald:      #10b981;
+  --gf-emerald-deep: #059669;
+  --gf-emerald-line: #34d399;
+  --gf-income:       #34d399;
+  --gf-income-700:   #6ee7b7;
+  --gf-expense:      #f87171;
+  --gf-expense-700:  #fca5a5;
+  --gf-out:          #fbbf24;
+  --gf-out-700:      #fcd34d;
+
   /* Rampa de grises invertida (mismo nombre, luminancia opuesta) */
   --gf-gray-900: #f3f4f6;  /* primary text                 */
   --gf-gray-800: #e8e8ea;
@@ -147,6 +181,7 @@
   --gf-blue-100:    #15294a;
 
   --gf-amber-50:    #2b1d0a;
+  --gf-amber-400:   #b45309;  /* borde, no texto: va oscuro (F9.169 §4) */
   --gf-amber-600:   #fbbf24;
   --gf-amber-700:   #fcd34d;
 
@@ -181,13 +216,16 @@
   --color-text-strong:   var(--gf-gray-700);
   --color-text-faint:    var(--gf-gray-400);
 
-  /* El hero ink ya es oscuro — en dark se nota por un hairline propio,
-     ver Dashboard/Resumen (boxShadow + ya no se confunde con el fondo). */
+  /* El hero ink es la superficie elevada del tema (ver --gf-ink en el §2 de
+     arriba): un escalón por encima de la card, no por debajo. */
   --color-brand:         var(--gf-ink);
   --color-brand-hover:   var(--gf-ink-soft);
 
   --color-primary-light: var(--gf-emerald-50);
-  --color-focus-ring:    rgba(10, 125, 94, 0.35);
+  --color-focus-ring:    rgba(16, 185, 129, 0.35);
+  /* #fff sobre el esmeralda aclarado del §3 da 2,5:1 — el botón primario
+     lleva texto oscuro en tema oscuro. */
+  --color-on-primary:    #04231a;
 
   --color-danger-light:  var(--gf-expense-50);
   --color-warn-bg:       var(--gf-warn-bg);

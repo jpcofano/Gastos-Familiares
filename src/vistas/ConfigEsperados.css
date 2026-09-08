@@ -15,7 +15,7 @@
   display: flex;
   gap: 0.5rem;
   margin-bottom: 1rem;
-  border-bottom: 2px solid #e5e7eb;
+  border-bottom: 2px solid var(--color-border);
 }
 .cfg-tab {
   background: none;
@@ -25,10 +25,10 @@
   padding: 0.5rem 1rem;
   font-size: 0.9rem;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--color-text-sec);
   cursor: pointer;
 }
-.cfg-tab:hover { color: #374151; }
+.cfg-tab:hover { color: var(--color-text-strong); }
 .cfg-tab--activo {
   color: var(--color-accent);
   border-bottom-color: var(--color-accent);
@@ -39,7 +39,7 @@
 .cfg-btn-nuevo {
   padding: 0.45rem 1rem;
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
   border: none;
   border-radius: 6px;
   font-size: 0.875rem;
@@ -49,8 +49,8 @@
 .cfg-btn-nuevo:hover { background: var(--color-primary-dark); }
 
 /* ── Estado / error ── */
-.cfg-estado { color: #6b7280; font-style: italic; padding: 0.5rem 0; }
-.cfg-error  { color: #dc2626; }
+.cfg-estado { color: var(--color-text-sec); font-style: italic; padding: 0.5rem 0; }
+.cfg-error  { color: var(--color-danger); }
 
 /* ── Encabezado sección inactivos ── */
 .cfg-seccion-sub {
@@ -58,7 +58,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #9ca3af;
+  color: var(--color-text-faint);
   margin: 1.5rem 0 0.5rem;
 }
 
@@ -78,9 +78,9 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.6rem 0.75rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--color-surface-muted);
   font-size: 0.875rem;
 }
 .cfg-item--inactivo { opacity: 0.5; }
@@ -96,7 +96,7 @@
 .cfg-item-cat  { font-weight: 500; }
 .cfg-item-monto {
   font-size: 0.8rem;
-  color: #374151;
+  color: var(--color-text-strong);
   font-weight: 500;
 }
 
@@ -112,10 +112,10 @@
   border-radius: 3px;
   white-space: nowrap;
 }
-.cfg-chip-persona { background: #e5e7eb; color: #374151; }
-.cfg-chip-moneda  { background: #dbeafe; color: #1d4ed8; }
-.cfg-chip-auto    { background: #d1fae5; color: #065f46; }
-.cfg-chip-tarj    { background: #fef3c7; color: #92400e; }
+.cfg-chip-persona { background: var(--gf-gray-100);              color: var(--color-text-strong); }
+.cfg-chip-moneda  { background: var(--st-automatico-badge-bg);   color: var(--st-automatico-badge-tx); }
+.cfg-chip-auto    { background: var(--st-pagado-badge-bg);       color: var(--st-pagado-badge-tx); }
+.cfg-chip-tarj    { background: var(--st-parcial-badge-bg);      color: var(--st-parcial-badge-tx); }
 
 /* ── Botones de ítem ── */
 .cfg-item-acciones {
@@ -127,18 +127,18 @@
   font-size: 0.72rem;
   font-weight: 600;
   padding: 0.2em 0.6em;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gf-gray-300);
   border-radius: 4px;
-  background: white;
-  color: #374151;
+  background: var(--color-surface);
+  color: var(--color-text-strong);
   cursor: pointer;
   white-space: nowrap;
 }
-.cfg-btn-sm:hover { background: #f3f4f6; }
-.cfg-btn-sm--warn   { border-color: #f59e0b; color: #b45309; }
-.cfg-btn-sm--warn:hover  { background: #fffbeb; }
-.cfg-btn-sm--danger { border-color: #f87171; color: #dc2626; }
-.cfg-btn-sm--danger:hover { background: #fff1f2; }
+.cfg-btn-sm:hover { background: var(--color-hover); }
+.cfg-btn-sm--warn   { border-color: var(--gf-out); color: var(--gf-out-700); }
+.cfg-btn-sm--warn:hover  { background: var(--gf-warn-bg); }
+.cfg-btn-sm--danger { border-color: var(--color-danger); color: var(--color-danger); }
+.cfg-btn-sm--danger:hover { background: var(--gf-err-bg); }
 
 /* ── Overlay modal ── */
 .cfg-overlay {
@@ -154,7 +154,7 @@
 }
 
 .cfg-panel {
-  background: white;
+  background: var(--color-surface);
   border-radius: 10px;
   width: 100%;
   max-width: 580px;
@@ -166,7 +166,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 1rem 1.25rem 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--color-border);
 }
 .cfg-panel-titulo {
   font-size: 1rem;
@@ -176,13 +176,13 @@
   background: none;
   border: none;
   font-size: 1.1rem;
-  color: #9ca3af;
+  color: var(--color-text-faint);
   cursor: pointer;
   padding: 0.1rem 0.35rem;
   line-height: 1;
   border-radius: 4px;
 }
-.cfg-panel-cerrar:hover { background: #f3f4f6; color: #374151; }
+.cfg-panel-cerrar:hover { background: var(--color-hover); color: var(--color-text-strong); }
 
 /* ── Formulario ── */
 .cfg-form {
@@ -206,7 +206,7 @@
 .cfg-campo label {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--color-text-sec);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
@@ -216,16 +216,16 @@
 .cfg-campo textarea {
   width: 100%;
   padding: 0.45rem 0.6rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gf-gray-300);
   border-radius: 5px;
   font-size: 0.875rem;
-  background: white;
+  background: var(--color-surface);
   box-sizing: border-box;
 }
 .cfg-campo input:focus,
 .cfg-campo select:focus,
 .cfg-campo textarea:focus {
-  outline: 2px solid #3b82f6;
+  outline: 2px solid var(--color-primary);
   outline-offset: 1px;
   border-color: transparent;
 }
@@ -246,14 +246,14 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gf-gray-300);
   border-radius: 5px;
   padding: 0.35rem 0.5rem;
   min-height: 2.2rem;
-  background: white;
+  background: var(--color-surface);
 }
 .cfg-chips-area:focus-within {
-  outline: 2px solid #3b82f6;
+  outline: 2px solid var(--color-primary);
   outline-offset: 1px;
   border-color: transparent;
 }
@@ -261,8 +261,8 @@
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  background: #e0f2fe;
-  color: #0369a1;
+  background: var(--st-por-confirmar-badge-bg);
+  color: var(--st-por-confirmar-badge-tx);
   font-size: 0.75rem;
   font-weight: 600;
   padding: 0.15em 0.5em;
@@ -274,10 +274,10 @@
   padding: 0;
   cursor: pointer;
   font-size: 0.85em;
-  color: #0369a1;
+  color: var(--st-por-confirmar-badge-tx);
   line-height: 1;
 }
-.cfg-chip-tag button:hover { color: #dc2626; }
+.cfg-chip-tag button:hover { color: var(--color-danger); }
 .cfg-chips-input {
   border: none;
   outline: none;
@@ -291,21 +291,21 @@
   font-size: 0.8rem;
   font-weight: 700;
   background: none;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--gf-gray-300);
   border-radius: 3px;
   padding: 0.1em 0.45em;
   cursor: pointer;
-  color: #374151;
+  color: var(--color-text-strong);
   line-height: 1.4;
 }
-.cfg-chips-add:hover { background: #f3f4f6; }
+.cfg-chips-add:hover { background: var(--color-hover); }
 
 /* ── Error inline + acciones form ── */
 .cfg-form-error {
   font-size: 0.82rem;
-  color: #dc2626;
-  background: #fff1f2;
-  border: 1px solid #fecaca;
+  color: var(--color-danger);
+  background: var(--gf-err-bg);
+  border: 1px solid var(--gf-err-line);
   border-radius: 4px;
   padding: 0.4rem 0.65rem;
 }
@@ -317,21 +317,21 @@
 }
 .cfg-btn-sec {
   padding: 0.45rem 1rem;
-  background: white;
-  border: 1px solid #d1d5db;
+  background: var(--color-surface);
+  border: 1px solid var(--gf-gray-300);
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  color: #374151;
+  color: var(--color-text-strong);
 }
-.cfg-btn-sec:hover { background: #f3f4f6; }
+.cfg-btn-sec:hover { background: var(--color-hover); }
 .cfg-btn-sec:disabled,
 .cfg-btn-pri:disabled { opacity: 0.6; cursor: default; }
 .cfg-btn-pri {
   padding: 0.45rem 1.1rem;
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
   border: none;
   border-radius: 6px;
   font-size: 0.875rem;
@@ -344,7 +344,7 @@
 .cfg-ayuda {
   font-size: 0.75rem;
   line-height: 1.35;
-  color: #6b7280;
+  color: var(--color-text-sec);
   text-transform: none;
   letter-spacing: normal;
   font-weight: 400;

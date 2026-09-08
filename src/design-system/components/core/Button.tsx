@@ -19,7 +19,7 @@ const SIZES: Record<Size, { padding: string; fontSize: string; radius: string; h
 };
 
 const VARIANTS: Record<Variant, { background: string; color: string; border: string }> = {
-  primary:   { background: 'var(--color-primary)', color: '#fff', border: '1px solid transparent' },
+  primary:   { background: 'var(--color-primary)', color: 'var(--color-on-primary)', border: '1px solid transparent' },
   brand:     { background: 'var(--color-brand)',   color: '#fff', border: '1px solid transparent' },
   green:     { background: 'var(--color-income)',  color: '#fff', border: '1px solid transparent' },
   danger:    { background: 'var(--color-danger)',  color: '#fff', border: '1px solid transparent' },
