@@ -444,6 +444,7 @@ export const matchComprobante = onDocumentUpdated(
         destinoNombre:  (data.destinoNombre  as string | null)  ?? null,
         vencimientos:   (data.vencimientos   as Array<{ monto?: number | null }> | null) ?? null,
         confirmadoPago: (data.confirmadoPago as boolean)        ?? false,
+        origenComprobanteId: (data.origenComprobanteId as string | null) ?? null,
       };
     });
 
@@ -701,7 +702,24 @@ async function matchPorDestino(
       const extraMes = mesImputacion && mesImputacion !== mesComp ? { mesImputacion } : {};
 
       const obligacionesDelMes = movs.filter(m => m.itemEsperadoId === itemId && m.mes === mesEfectivo);
-      const impaga = obligacionesDelMes.find(m => !m.confirmadoPago);
+
+      // F9.168 — rama 1 dice "esta factura ES esa obligación" y NO mira el monto. El supuesto de
+      // fondo es "una factura por ítem por mes", y es falso: agua y ABL traen dos boletas.
+      //
+      // Medido en producción sobre el caso que abrió F9.168: una boleta de $23.301,99 dio por
+      // pagada una obligación de $51.672,34 del mismo ítem y mes. Eso no es un match flojo, es
+      // plata mal dada por saldada.
+      //
+      // El corte: rama 1 existe para el caso legítimo —la obligación se pre-creó (del calendario,
+      // o como sea) y después llega la factura a saldarla—. Pero si la obligación impaga YA NACIÓ
+      // DE UNA FACTURA (`origenComprobanteId` poblado), una segunda factura del mismo ítem y mes
+      // no puede ser la misma: es otra. Ésa va a rama 2 `esAdicional`, que es el caso "segundo
+      // cargo real del mes" que el código ya contempla más abajo.
+      //
+      // NO se compara por monto a propósito: un pago parcial o un recargo cambian el importe sin
+      // cambiar de qué factura se trata, y F9.167 §4 midió que las diferencias no tienen una
+      // tolerancia segura. La procedencia sí es un dato duro.
+      const impaga = obligacionesDelMes.find(m => !m.confirmadoPago && !m.origenComprobanteId);
       if (impaga) {
         return {
           rama: 1,
@@ -715,7 +733,9 @@ async function matchPorDestino(
       if (obligacionesDelMes.length === 0) {
         return { rama: 2, itemEsperadoId: itemId, origenDestino: true, requiereConfirmacion, confianza, ...extraMes };
       }
-      // Todas las obligaciones de este item en el mes ya están pagas → movimiento adicional real
+      // Hay obligaciones del ítem en el mes pero ninguna elegible para rama 1 → cargo adicional.
+      // Son DOS casos y desde F9.168 los cubre el mismo return: o ya están todas pagas, o la
+      // impaga nació de otra factura y por lo tanto ésta es una segunda boleta distinta.
       return {
         rama: 2,
         itemEsperadoId: itemId,

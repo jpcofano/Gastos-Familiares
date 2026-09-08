@@ -43,6 +43,10 @@ export interface MovimientoMin {
   // F9.82 — para comparar contra 2º vencimiento
   vencimientos?:   Array<{ monto?: number | null }> | null;
   confirmadoPago?: boolean;
+  // F9.168 — de qué comprobante nació esta obligación. Lo usa el guard de rama 1 en
+  // `matchPorDestino`: una obligación que ya nació de una factura no puede ser saldada por
+  // una SEGUNDA factura del mismo ítem y mes — ésa es otra, y va a rama 2 `esAdicional`.
+  origenComprobanteId?: string | null;
 }
 
 export interface ItemEsperadoMin {
