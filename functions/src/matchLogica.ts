@@ -99,6 +99,10 @@ export interface PropuestaMatch {
   // (alta silenciosa) o cuando el match no viene de destino (sin cambios, siempre confirma).
   requiereConfirmacion?: boolean;
   confianza?: number;
+  // F9.168 §2 — la reasignación a mano lo escribió acá. Sirve para que la card no muestre el
+  // ítem que el sistema propuso cuando el usuario ya lo corrigió, y para poder distinguir
+  // después qué propuso el sistema de qué decidió una persona.
+  reasignadoAMano?: boolean;
 }
 
 // CBU/CVU argentino = 22 dígitos exactos

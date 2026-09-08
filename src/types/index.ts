@@ -247,6 +247,10 @@ export interface PropuestaMatch {
   mesImputacion?: string;
   // F6.9 — la rama 1 del flujo de comprobantes es siempre reconciliación por payee
   origenReconciliacion?: boolean;
+  // F9.168 §2 — la reasignación a mano lo escribió acá. Sirve para que la card no muestre el
+  // ítem que el sistema propuso cuando el usuario ya lo corrigió, y para poder distinguir
+  // después qué propuso el sistema de qué decidió una persona.
+  reasignadoAMano?: boolean;
   // F9.82 — pase débil por nombre: rama 1 candidatos, nunca auto-confirma
   reconciliacionDebil?: boolean;
   // F9.99.9 — el picker de agenda unificada saldó un suelto (movimiento sin plantilla)

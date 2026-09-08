@@ -3501,6 +3501,22 @@ export const reasignarItemDeComprobante = onCall(
       reapuntados.push(ref.id);
     }
 
+    // F9.168 §2 — el `propuestaMatch` del comprobante TAMBIÉN se actualiza.
+    //
+    // Antes no: el callable escribía el movimiento y reapuntaba el destino, pero dejaba la
+    // propuesta con el ítem viejo. Y la propuesta es JUSTO lo que la card muestra, así que el
+    // usuario reasignaba, la card seguía diciendo lo mismo, y concluía —razonablemente— que no
+    // había guardado. Medido sobre el caso real: el movimiento pasó a `Casa > Agua` a las 22:53:34
+    // y la card siguió mostrando `Auto > Agua`.
+    //
+    // Se escribe con notación de punto para no pisar el resto de la propuesta (`rama`,
+    // `origenDestino`, `movimientoId`, `calculadoEn`…), que sigue describiendo cómo se llegó ahí.
+    await db.collection('comprobantes').doc(compId).update({
+      'propuestaMatch.itemEsperadoId': itemEsperadoId,
+      'propuestaMatch.reasignadoAMano': true,
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+
     console.log(`[reasignarItemDeComprobante] ${compId} mov=${movRef.id} ${String(itemAnterior)} → ${itemEsperadoId} | destinos reapuntados=[${reapuntados.join(',')}] (por ${email})`);
     return { ok: true, movimientoId: movRef.id, itemAnterior, reapuntados };
   },

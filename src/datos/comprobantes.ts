@@ -33,6 +33,7 @@ export function docAComprobante(id: string, data: DocumentData): Comprobante {
       candidatos:          pm.candidatos          as PropuestaMatch['candidatos'],
       calculadoEn:         (pm.calculadoEn as { toDate?: () => Date } | null)?.toDate?.() ?? new Date(),
       origenDestino:       (pm.origenDestino      as boolean | undefined),
+      reasignadoAMano:     (pm.reasignadoAMano    as boolean | undefined),
       esAdicional:         (pm.esAdicional        as boolean | undefined),
       categoriaPrellena:   (pm.categoriaPrellena  as string | null | undefined),
       subcategoriaPrellena:(pm.subcategoriaPrellena as string | null | undefined),
