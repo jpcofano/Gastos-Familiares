@@ -13,6 +13,9 @@ import {
   reconciliarPorPayee,
   reconciliarPorNombre,
   mesImputado,
+  esCargoAdicional,
+  esObligacionDoc,
+  esObligacionFutura,
   type DatosExtractosMin,
   type MovimientoMin,
   type ItemEsperadoMin,
@@ -47,10 +50,6 @@ function hoyArgentinaISO(): string {
 // F9.75 — obligaciones (facturas / recibos de servicio): definen el gasto pero NO se pagan por el
 // mero vencimiento. El pago llega después y lo confirma la reconciliación por payee. Ticket/otro/
 // pagos siguen la regla de fecha. `resumen_tarjeta` tiene su propia lógica y no entra acá.
-function esObligacionDoc(tipo?: string | null): boolean {
-  return tipo === 'recibo_servicio'
-      || tipo === 'factura_a' || tipo === 'factura_b' || tipo === 'factura_c';
-}
 
 // F9.106 — mes de la obligación = mes del PRIMER vencimiento de pago (fallback: emisión).
 // "Lo que se paga en X entra en X en resumen mes" — no periodoFacturado (consumo), solo se usa
@@ -534,8 +533,17 @@ export const matchComprobante = onDocumentUpdated(
       }
     }
 
+    // F9.169 §2.5 — anclaje temporal de la regla de obligación futura: el día en que se SUBIÓ el
+    // comprobante, no el día en que corre el trigger. Es el mismo anclaje y el mismo fallback que
+    // usa `corregirAnioVencimientos` (F9.154, `index.ts` arriba); el fundamento está en
+    // `esObligacionFutura`. En el primer extracto los dos coinciden — el trigger de extracción es
+    // `onDocumentCreated`—; la diferencia sólo aparece al RE-EXTRAER, y ahí la fecha de subida es
+    // la correcta porque el documento no cambió.
+    const subidoISO = ((after.subidoEn as Timestamp | undefined)?.toDate() ?? new Date())
+      .toISOString().slice(0, 10);
+
     // Rama destino: match por CBU/alias/nombre aprendido (prioridad sobre texto)
-    const propuestaDestino = await matchPorDestino(datos, movs, mesComp, items);
+    const propuestaDestino = await matchPorDestino(datos, movs, mesComp, items, subidoISO);
 
     // F6.9.7 (P2) — un destino CON itemEsperadoId (rama 2, incluido adicional) gana directo.
     // F9.106 — rama 1 (impaga del mismo item+mesPago: esta factura ES esa obligación) también
@@ -670,6 +678,9 @@ async function matchPorDestino(
   // F9.154 §3 — para leer el `diaCorteImputacion` del ítem que resuelva el destino. Ya venían
   // cargados en el caller (`itemsSnap`), así que no agrega una lectura.
   items: ItemEsperadoMin[],
+  // F9.169 §2.5 — día de SUBIDA del comprobante (`YYYY-MM-DD`), el anclaje contra el que se decide
+  // si la obligación todavía no venció. Ver `esObligacionFutura` para por qué no es "hoy".
+  refISO: string,
 ): Promise<Omit<PropuestaMatch, 'calculadoEn'> | null> {
   const raws = [datos.destinoCbu, datos.destinoCuit, datos.destinoAlias, datos.destinoNombre]
     .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
@@ -702,6 +713,36 @@ async function matchPorDestino(
       const extraMes = mesImputacion && mesImputacion !== mesComp ? { mesImputacion } : {};
 
       const obligacionesDelMes = movs.filter(m => m.itemEsperadoId === itemId && m.mes === mesEfectivo);
+
+      // F9.169 §2.5 — REGLA DEL DUEÑO, y va ANTES que todo lo demás.
+      //
+      // Un documento de obligación cuyo primer vencimiento todavía no venció NO es un pago: nunca
+      // `esAdicional`, nunca rama 1. Lo único que puede hacer es crear la obligación o quedar
+      // asociado al gasto esperado que le corresponde, que es justamente esta rama 2.
+      //
+      // Esto explica el caso del agua mejor que el guard de F9.168: las dos boletas vencen el 24 y
+      // el 28 de septiembre, o sea que las dos son obligaciones futuras y ninguna podía salir
+      // adicional cayera en el ítem que cayera. F9.168 lo frenó por `origenComprobanteId` —
+      // funciona, pero por el motivo equivocado, y sólo mientras la primera boleta haya creado la
+      // obligación. El guard de F9.168 SE DEJA: cubre el caso de una obligación ya vencida que
+      // recibe una segunda factura, donde ésta ya no aplica.
+      //
+      // El anclaje es la fecha de SUBIDA, no hoy. El fundamento (y la medición que lo respalda)
+      // está en `esObligacionFutura`, en matchLogica.ts.
+      if (esObligacionFutura(datos, refISO)) {
+        return {
+          rama: 2,
+          itemEsperadoId:       itemId,
+          esAdicional:          false,
+          origenDestino:        true,
+          requiereConfirmacion,
+          confianza,
+          ...extraMes,
+          categoriaPrellena:    (d.categoria    as string | null) ?? null,
+          subcategoriaPrellena: (d.subcategoria as string | null) ?? null,
+          etiquetaPrellena:     (d.etiqueta     as string | null) ?? null,
+        };
+      }
 
       // F9.168 — rama 1 dice "esta factura ES esa obligación" y NO mira el monto. El supuesto de
       // fondo es "una factura por ítem por mes", y es falso: agua y ABL traen dos boletas.
@@ -736,10 +777,13 @@ async function matchPorDestino(
       // Hay obligaciones del ítem en el mes pero ninguna elegible para rama 1 → cargo adicional.
       // Son DOS casos y desde F9.168 los cubre el mismo return: o ya están todas pagas, o la
       // impaga nació de otra factura y por lo tanto ésta es una segunda boleta distinta.
+      // F9.169 §2 — la decisión sale de `esCargoAdicional`, la MISMA función que usa la
+      // reasignación. Acá siempre da true (llegamos con obligaciones y sin impaga elegible), pero
+      // se llama igual para que exista un solo dueño de la definición.
       return {
         rama: 2,
         itemEsperadoId: itemId,
-        esAdicional:          true,
+        esAdicional:          esCargoAdicional(obligacionesDelMes),
         origenDestino:        true,
         requiereConfirmacion,
         confianza,
@@ -3521,6 +3565,51 @@ export const reasignarItemDeComprobante = onCall(
       reapuntados.push(ref.id);
     }
 
+    // F9.169 §2 — `esAdicional` se RECALCULA contra el ítem destino.
+    //
+    // No es un control nuevo: es un cálculo que hasta ahora no se rehacía. `esAdicional` significa
+    // "ya hay una obligación de este ítem para este mes, así que esto es un segundo cargo", o sea
+    // que es una propiedad de la relación movimiento↔ítem, no del comprobante. Al mover el
+    // movimiento a otro ítem la respuesta puede cambiar, y hasta acá quedaba pegada: la segunda
+    // boleta de agua salió "PAGO ADICIONAL · Auto › Agua" y siguió diciéndolo después de moverla.
+    //
+    // Se usa `esCargoAdicional`, la MISMA función que decide en `matchPorDestino`, con el propio
+    // movimiento excluido del conjunto (si no se contaría a sí mismo como "la otra obligación").
+    const obligDestino = await db.collection('movimientos')
+      .where('itemEsperadoId', '==', itemEsperadoId)
+      .where('mes', '==', String(mov.mes ?? ''))
+      .get();
+
+    // F9.169 §2.5 — la regla de obligación futura gana también acá, y esto salió de revisar el
+    // código de §2 contra ella.
+    //
+    // `esAdicional` es una propiedad de la relación movimiento↔ítem, pero §2.5 es una propiedad del
+    // DOCUMENTO: una factura que todavía no venció no es un pago, y por lo tanto no es un segundo
+    // cargo, caiga en el ítem que caiga. Sin esto, mover la segunda boleta de agua a un ítem que sí
+    // tiene obligación del mes la marcaría `esAdicional: true` — la reasignación diría lo contrario
+    // que el matcher sobre el mismo comprobante, que es exactamente la divergencia que §2 vino a
+    // cerrar.
+    //
+    // El comprobante se LEE (antes esta función sólo le escribía): hacen falta `datosExtraidos`
+    // para el tipo y el vencimiento, y `subidoEn` para el anclaje.
+    const compSnap = await db.collection('comprobantes').doc(compId).get();
+    if (!compSnap.exists) throw new HttpsError('not-found', 'Comprobante no encontrado');
+    const compData  = compSnap.data()!;
+    const compDatos = (compData.datosExtraidos ?? {}) as DatosExtractosMin;
+    const compSubidoISO = ((compData.subidoEn as Timestamp | undefined)?.toDate() ?? new Date())
+      .toISOString().slice(0, 10);
+
+    const adicionalAhora = esObligacionFutura(compDatos, compSubidoISO)
+      ? false
+      : esCargoAdicional(
+          obligDestino.docs.map(x => ({
+            id: x.id,
+            confirmadoPago: (x.data().confirmadoPago as boolean | undefined) ?? false,
+            origenComprobanteId: (x.data().origenComprobanteId as string | null) ?? null,
+          })),
+          movRef.id,
+        );
+
     // F9.168 §2 — el `propuestaMatch` del comprobante TAMBIÉN se actualiza.
     //
     // Antes no: el callable escribía el movimiento y reapuntaba el destino, pero dejaba la
@@ -3534,11 +3623,92 @@ export const reasignarItemDeComprobante = onCall(
     await db.collection('comprobantes').doc(compId).update({
       'propuestaMatch.itemEsperadoId': itemEsperadoId,
       'propuestaMatch.reasignadoAMano': true,
+      'propuestaMatch.esAdicional': adicionalAhora,
       actualizadoEn: FieldValue.serverTimestamp(),
     });
 
-    console.log(`[reasignarItemDeComprobante] ${compId} mov=${movRef.id} ${String(itemAnterior)} → ${itemEsperadoId} | destinos reapuntados=[${reapuntados.join(',')}] (por ${email})`);
+    console.log(`[reasignarItemDeComprobante] ${compId} mov=${movRef.id} ${String(itemAnterior)} → ${itemEsperadoId} | destinos reapuntados=[${reapuntados.join(',')}] esAdicional=${adicionalAhora} (por ${email})`);
     return { ok: true, movimientoId: movRef.id, itemAnterior, reapuntados };
+  },
+);
+
+/**
+ * F9.169 §3 — "esta no era la obligación": desvincula un comprobante de rama 1.
+ *
+ * EL PROBLEMA QUE CIERRA. `reasignarItemDeComprobante` solo funciona si el comprobante CREÓ el
+ * movimiento. Un comprobante de pago que reconcilió una obligación preexistente (rama 1) no tiene
+ * cómo corregirse: ni el comprobante ni la obligación se pueden reasignar desde ningún lado. Un
+ * movimiento mal imputado se quedaba sin salida por ninguna puerta.
+ *
+ * NO SE LLAMA "DESHACER", Y ES A PROPÓSITO. `confirmarRama1` (src/datos/comprobantes.ts:150)
+ * sobrescribe sobre la obligación, sin guardar los valores previos EN NINGÚN LADO:
+ *   hashPdf · refStoragePdf · confirmadoPago (+pagado, pagadoEn) · itemEsperadoId ·
+ *   seedImport · destinoCbu/Cuit/Alias/Nombre (solo si el pago los trae) ·
+ *   vencimientos (solo si el pago los trae — es el que rompió el caso del agua) · actualizadoEn
+ * El proyecto decidió "audit = solo timestamps, sin subcolección history", así que no hay de dónde
+ * restaurar. Esto DESVINCULA y vuelve a proponer; lo pisado queda pisado, y la UI lo dice.
+ *
+ * QUÉ REVIERTE: `hashPdf`, `refStoragePdf` y `confirmadoPago`. Bajar la verificación sin tocar
+ * `pagado` es legítimo y está decidido en F9.138 §1 — quita la evidencia, no revierte que la plata
+ * haya salido. Es el mismo criterio de `descartarEntrada`.
+ *
+ * QUÉ **NO** HACE, y es la diferencia que importa: **no toca `itemEsperadoId`**. `descartarEntrada`
+ * sí lo borra, y eso produjo el movimiento fantasma que midió F9.169 §1 — al descartar el segundo
+ * comprobante de agua dejó al movimiento del PRIMERO sin ítem, contando $51.672,34 que después se
+ * duplicaron al recargar. El ítem de esa obligación es de quien la creó, no de quien la reconcilió.
+ */
+export const desvincularObligacion = onCall(
+  { region: 'southamerica-east1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+
+    const { compId } = (request.data ?? {}) as { compId?: string };
+    if (!compId) throw new HttpsError('invalid-argument', 'compId requerido');
+
+    const compRef  = db.collection('comprobantes').doc(compId);
+    const compSnap = await compRef.get();
+    if (!compSnap.exists) throw new HttpsError('not-found', 'Comprobante no encontrado');
+    const comp = compSnap.data()!;
+    const pm = comp.propuestaMatch as { rama?: number; movimientoId?: string } | undefined;
+
+    const movId = pm?.movimientoId;
+    if (!movId) throw new HttpsError('failed-precondition', 'Este comprobante no reconcilió ninguna obligación');
+    const movRef  = db.collection('movimientos').doc(movId);
+    const movSnap = await movRef.get();
+    if (!movSnap.exists) throw new HttpsError('not-found', 'El movimiento que reconcilió ya no existe');
+    const mov = movSnap.data()!;
+
+    // Si el movimiento nació de ESTE comprobante, lo que corresponde es reasignar, no desvincular:
+    // desvincular dejaría un movimiento sin dueño, que es justo el fantasma de §1.
+    if (mov.origenComprobanteId === compId) {
+      throw new HttpsError('failed-precondition',
+        'Este comprobante creó el movimiento: usá "Asignar a otro gasto" en vez de desvincular');
+    }
+
+    const batch = db.batch();
+    batch.update(movRef, {
+      hashPdf:        null,
+      refStoragePdf:  null,
+      confirmadoPago: false,      // baja la verificación; `pagado` NO se toca (F9.138 §1)
+      actualizadoEn:  FieldValue.serverTimestamp(),
+    });
+    // Vuelve a `extraido` para que `matchComprobante` re-proponga. El guard del trigger
+    // (`before.estado === 'extraido' || after.estado !== 'extraido'`) deja pasar vinculado→extraido.
+    batch.update(compRef, {
+      estado:        'extraido',
+      propuestaMatch: FieldValue.delete(),
+      actualizadoEn: FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+
+    console.log(`[desvincularObligacion] ${compId} ← mov ${movId} (item ${String(mov.itemEsperadoId)} intacto) (por ${email})`);
+    return { ok: true, movimientoId: movId, itemEsperadoId: (mov.itemEsperadoId as string | null) ?? null };
   },
 );
 

@@ -251,6 +251,99 @@ export function matchConMovimientos(
   return resultados.sort((a, b) => b.score - a.score);
 }
 
+/**
+ * F9.169 §2 — ¿este cargo es un SEGUNDO cargo del ítem en el mes?
+ *
+ * ÚNICA definición de `esAdicional`, compartida por los dos lugares que la necesitan:
+ *   · `matchPorDestino`, cuando decide la rama de un comprobante nuevo;
+ *   · `reasignarItemDeComprobante`, cuando el movimiento se mueve a OTRO ítem y hay que rehacer
+ *     el cálculo contra el ítem destino.
+ *
+ * Vive acá y no duplicada en los dos lados a propósito: si se separan, la próxima vez que cambie
+ * una vamos a estar debuggeando por qué el badge dice una cosa y el matcher otra.
+ *
+ * `esAdicional` es una propiedad de la relación entre el movimiento y SU ÍTEM, no del comprobante.
+ * Si el movimiento se mueve a un ítem donde no hay obligación de ese mes, deja de ser adicional
+ * por definición: pasa a ser la obligación de ese ítem.
+ *
+ * `excluirMovId` saca al propio movimiento del conjunto — en la reasignación el movimiento ya
+ * existe y se contaría a sí mismo como "la otra obligación".
+ */
+export function esCargoAdicional(
+  obligacionesDelMes: Array<Pick<MovimientoMin, 'id' | 'confirmadoPago' | 'origenComprobanteId'>>,
+  excluirMovId?: string,
+): boolean {
+  const otras = excluirMovId
+    ? obligacionesDelMes.filter(m => m.id !== excluirMovId)
+    : obligacionesDelMes;
+  if (otras.length === 0) return false;
+  // Si hay una impaga ELEGIBLE (misma condición del guard de F9.168: no nacida de otra factura),
+  // este comprobante la salda y no es un cargo adicional — es rama 1.
+  return !otras.some(m => !m.confirmadoPago && !m.origenComprobanteId);
+}
+
+/**
+ * Documentos que son una OBLIGACIÓN (algo a pagar) y no el comprobante de un pago ya hecho.
+ *
+ * PAR GEMELO DECLARADO con `esObligacionDoc` en `src/datos/comprobantes.ts` (cliente). Los dos
+ * paquetes no se importan cruzado; si se agrega un tipo, va en los dos.
+ *
+ * Vivía en `functions/src/index.ts`; se mudó acá en F9.169 §2.5 porque `esObligacionFutura` la
+ * necesita y este es el módulo puro que comparten el trigger y la reasignación.
+ */
+export function esObligacionDoc(tipo?: string | null): boolean {
+  return tipo === 'recibo_servicio'
+      || tipo === 'factura_a' || tipo === 'factura_b' || tipo === 'factura_c';
+}
+
+/**
+ * F9.169 §2.5 — un documento de obligación cuyo PRIMER VENCIMIENTO todavía no venció NO es un pago.
+ *
+ * REGLA DEL DUEÑO. Una factura o un recibo de servicio que todavía no venció es, por definición,
+ * algo que falta pagar: nunca `esAdicional` y nunca rama 1. Lo único que puede hacer es CREAR la
+ * obligación o quedar asociado al gasto esperado que le corresponde.
+ *
+ * Explica el caso del agua mejor que el guard de F9.168. Las dos boletas vencen el 24 y el 28 de
+ * septiembre: las dos son obligaciones futuras, así que ninguna podía salir "adicional" cayera en
+ * el ítem que cayera. F9.168 lo frenó por `origenComprobanteId`, que es un rodeo — funciona porque
+ * la primera boleta había creado la obligación, no porque ése fuera el motivo.
+ *
+ * EL ANCLAJE ES `subidoEn`, NO HOY. Decidido midiendo, no por analogía:
+ *
+ *   · Al PRIMER extracto los dos anclajes coinciden — `extraerComprobante` es `onDocumentCreated`,
+ *     así que corre el mismo día que la subida. La diferencia SOLO puede aparecer en una
+ *     RE-EXTRACCIÓN, que es una reparación (arreglar un parseo malo), no un hecho nuevo. El
+ *     documento no cambió: reclasificarlo como si hubiera llegado hoy sería inventar historia.
+ *   · Medido sobre producción (`scripts/auditF9169c.ts`, 2026-09-08): de 22 documentos de
+ *     obligación, 17 clasifican DISTINTO según el anclaje. No es un caso de borde.
+ *   · Y la dirección del error importa: con anclaje HOY, re-extraer una boleta de julio la
+ *     convierte en "ya vencida", la regla deja de protegerla y vuelve a quedar expuesta a rama 1 /
+ *     `esAdicional` — exactamente el bug que esto cierra. Con `subidoEn` la clasificación es
+ *     estable: la misma que tuvo el día que la boleta llegó.
+ *   · Mismo anclaje y mismo fundamento que F9.154 en `corregirAnioVencimientos`: la fecha de subida
+ *     es el único dato temporal confiable (el documento puede no traer emisión — 6 de 132
+ *     comprobantes tienen `fecha: null`).
+ *
+ * Medición que cierra la pregunta de si el anclaje deja casos afuera: los 22 documentos de
+ * obligación de producción se subieron ANTES de su primer vencimiento, sin una sola excepción. El
+ * dueño carga la boleta cuando le llega, no cuando la paga.
+ *
+ * `referenciaISO` es un día calendario `YYYY-MM-DD`. La comparación es `>` estricto: la boleta que
+ * vence EL MISMO DÍA ya es exigible, así que no es futura.
+ */
+export function esObligacionFutura(
+  datos: Pick<DatosExtractosMin, 'tipoDocumento' | 'vencimientos'>,
+  referenciaISO: string,
+): boolean {
+  if (!esObligacionDoc(datos.tipoDocumento)) return false;
+  const v0 = datos.vencimientos?.[0]?.fecha;
+  // Sin primer vencimiento no hay nada que comparar: la regla no aplica y decide el camino de
+  // siempre. Afirmar "es futura" sin fecha sería frenar rama 1 a ciegas.
+  if (typeof v0 !== 'string' || v0.length < 10) return false;
+  if (!referenciaISO) return false;
+  return v0.slice(0, 10) > referenciaISO.slice(0, 10);
+}
+
 export function matchConEsperados(
   datos: DatosExtractosMin,
   items: ItemEsperadoMin[],
