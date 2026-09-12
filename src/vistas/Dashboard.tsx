@@ -242,7 +242,7 @@ function DashboardMensual({ d, mes, cur, movsMes, esAdmin, onEditar, paleta }: {
       <div style={{ background: 'linear-gradient(135deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)', borderRadius: 'var(--radius-card)', padding: '22px 18px', textAlign: 'center', color: '#fff', boxShadow: 'var(--shadow-soft)' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,.6)' }}>Balance del período</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: d.balancePositivo ? 'var(--gf-emerald-100)' : 'var(--gf-on-ink-neg)' }}>{d.balancePositivo ? '↑ positivo' : '↓ negativo'}</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: d.balancePositivo ? 'var(--gf-on-ink-pos)' : 'var(--gf-on-ink-neg)' }}>{d.balancePositivo ? '↑ positivo' : '↓ negativo'}</span>
         </div>
         <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{curBig(d.balanceUsd, cur, tc, priv)}</div>
         <div style={{ fontSize: 14, color: 'var(--gf-gray-400)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{curEq(d.balanceUsd, cur, tc, priv)}</div>

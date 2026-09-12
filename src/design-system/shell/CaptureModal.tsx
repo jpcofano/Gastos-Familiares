@@ -39,7 +39,7 @@ export function Hero({ eyebrow, amount, desc, badge, tags = [] }: HeroProps) {
       background: 'linear-gradient(180deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
     }}>
-      {eyebrow && <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'var(--gf-emerald-100)', marginBottom: 12 }}>{eyebrow}</div>}
+      {eyebrow && <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'var(--gf-on-ink-pos)', marginBottom: 12 }}>{eyebrow}</div>}
       <div style={{ fontSize: 40, fontWeight: 800, letterSpacing: '-1px', lineHeight: 1, marginBottom: 8, fontVariantNumeric: 'tabular-nums' }}>{amount}</div>
       {desc && <div style={{ fontSize: 16, color: 'var(--gf-gray-400)', marginBottom: badge ? 12 : 14 }}>{desc}</div>}
       {badge && <div style={{ marginBottom: 14 }}>{badge}</div>}

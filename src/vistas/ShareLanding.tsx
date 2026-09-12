@@ -115,7 +115,7 @@ function LandingDoc({ scanning, listo, esResumen }: { scanning: boolean; listo: 
 function LandingInd({ icon, label, tone }: { icon: string; label: string; tone: 'amber' | 'green' | 'neutral' }) {
   const S = {
     amber:   { bg: 'rgba(245,158,11,.16)', border: '1px solid rgba(245,158,11,.30)', color: '#fbbf24' },
-    green:   { bg: 'rgba(12,143,98,.16)',  border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-emerald-100)' },
+    green:   { bg: 'rgba(12,143,98,.16)',  border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-on-ink-pos)' },
     neutral: { bg: 'rgba(255,255,255,.08)', border: '1px solid transparent', color: '#9ca3af' },
   }[tone];
   return (
@@ -169,7 +169,7 @@ export default function ShareLanding({
     }}>
       {/* Top bar */}
       <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px 4px' }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--gf-emerald-100)' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: 'var(--gf-on-ink-pos)' }}>
           <span style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--color-accent)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800 }}>GF</span>
           Gastos Familiares
         </span>
@@ -204,11 +204,11 @@ export default function ShareLanding({
               <>
                 <div style={{ height: 26, display: 'flex', alignItems: 'center' }}>
                   {clasificado ? (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-emerald-100)', borderRadius: 999, padding: '5px 13px', fontSize: 11.5, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', animation: 'gfRiseIn .4s ease both' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-on-ink-pos)', borderRadius: 999, padding: '5px 13px', fontSize: 11.5, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', animation: 'gfRiseIn .4s ease both' }}>
                       <Icon name="receipt" size={13} />Comprobante
                     </span>
                   ) : (
-                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--gf-emerald-100)' }}>Compartido a Gastos</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--gf-on-ink-pos)' }}>Compartido a Gastos</span>
                   )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
@@ -260,11 +260,11 @@ export default function ShareLanding({
               <>
                 <div style={{ height: 26, display: 'flex', alignItems: 'center' }}>
                   {clasificado ? (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-emerald-100)', borderRadius: 999, padding: '5px 13px', fontSize: 11.5, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', animation: 'gfRiseIn .4s ease both' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-on-ink-pos)', borderRadius: 999, padding: '5px 13px', fontSize: 11.5, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', animation: 'gfRiseIn .4s ease both' }}>
                       <Icon name="credit-card" size={13} />Resumen de tarjeta
                     </span>
                   ) : (
-                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--gf-emerald-100)' }}>Compartido a Gastos</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--gf-on-ink-pos)' }}>Compartido a Gastos</span>
                   )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22 }}>
@@ -278,11 +278,11 @@ export default function ShareLanding({
                   {extrayendo && resumen && (
                     <>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                        <Icon name="list" size={14} color="var(--gf-emerald-100)" />{resumen.consumos} consumos
+                        <Icon name="list" size={14} color="var(--gf-on-ink-pos)" />{resumen.consumos} consumos
                       </span>
                       {resumen.enCuotas > 0 && (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                          <Icon name="layers" size={14} color="var(--gf-emerald-100)" />{resumen.enCuotas} en cuotas
+                          <Icon name="layers" size={14} color="var(--gf-on-ink-pos)" />{resumen.enCuotas} en cuotas
                         </span>
                       )}
                     </>
@@ -304,11 +304,11 @@ export default function ShareLanding({
                 </div>
                 <div style={{ display: 'flex', gap: 9, justifyContent: 'center', flexWrap: 'wrap' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                    <Icon name="list" size={14} color="var(--gf-emerald-100)" />{resumen.consumos} consumos
+                    <Icon name="list" size={14} color="var(--gf-on-ink-pos)" />{resumen.consumos} consumos
                   </span>
                   {resumen.enCuotas > 0 && (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                      <Icon name="layers" size={14} color="var(--gf-emerald-100)" />{resumen.enCuotas} en cuotas
+                      <Icon name="layers" size={14} color="var(--gf-on-ink-pos)" />{resumen.enCuotas} en cuotas
                     </span>
                   )}
                 </div>
@@ -326,7 +326,7 @@ export default function ShareLanding({
                     ))}
                     {resumen.deudaFutura.map((r, i) => (
                       <div key={`deudaFutura-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 11, borderRadius: 13, padding: '12px 15px', background: 'rgba(255,255,255,.06)', border: '1px solid transparent' }}>
-                        <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.1)', color: 'var(--gf-emerald-100)' }}>
+                        <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,.1)', color: 'var(--gf-on-ink-pos)' }}>
                           <Icon name="clock" size={15} />
                         </span>
                         <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500, color: '#fff' }}>Deuda futura (cuotas){resumen.deudaFutura.length > 1 ? ` (${r.moneda})` : ''}</span>
@@ -348,7 +348,7 @@ export default function ShareLanding({
             <div style={{ height: '100%', width: (((fase + 1) / 5) * 100) + '%', background: 'var(--color-accent)', borderRadius: 999, transition: 'width .5s ease' }} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, fontSize: 13, color: '#9ca3af' }}>
-            {!listo && <span style={{ width: 13, height: 13, border: '2px solid rgba(255,255,255,.25)', borderTopColor: 'var(--gf-emerald-100)', borderRadius: '50%', animation: 'gfSpin .7s linear infinite' }} />}
+            {!listo && <span style={{ width: 13, height: 13, border: '2px solid rgba(255,255,255,.25)', borderTopColor: 'var(--gf-on-ink-pos)', borderRadius: '50%', animation: 'gfSpin .7s linear infinite' }} />}
             {listo
               ? (esResumen ? 'Listo — revisá y conciliá el resumen' : 'Listo — abriendo para confirmar')
               : FOOTER_TEXTO[fase] ?? FOOTER_TEXTO[FOOTER_TEXTO.length - 1]}

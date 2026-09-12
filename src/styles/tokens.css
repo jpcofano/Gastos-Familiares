@@ -57,8 +57,15 @@
   /* Serie "no-pico" de los gráficos de barras (Dashboard: diaria/anual) */
   --gf-chart-serie: #9cb3e8;
 
-  /* Texto negativo (balance) sobre superficie ink oscura — mismo valor light/dark */
+  /* Texto sobre superficie ink oscura — MISMO valor en los dos temas, a proposito.
+     La superficie ink no cambia de tema (es oscura siempre), asi que lo que se pinta
+     encima no puede usar un token que el tema remapea: --gf-emerald-100 pasa de
+     #d1fae5 a #123a2e en oscuro y el numero positivo del hero desaparecia (medido:
+     1,14:1 contra --gf-ink y 1,03:1 contra --gf-ink-soft, o sea invisible en el
+     extremo del gradiente). El negativo nunca tuvo el bug porque ya era fijo;
+     faltaba su contraparte positiva. F9.171 §6. */
   --gf-on-ink-neg:  #fca5a5;
+  --gf-on-ink-pos:  #6ee7b7;   /* 9,4:1 sobre --gf-ink, 8,0:1 sobre --gf-ink-soft */
 
   /* ── Neutrals (gray ramp) ──────────────────────────────── */
   --gf-gray-900:    #111827;   /* primary text                 */

@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { useItemsEsperados } from '../contexto/ItemsEsperadosContext';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
+import { useMovimientosRango } from '../hooks/useMovimientosRango';
 import { useFamiliaConfig } from '../hooks/useFamiliaConfig';
 import { confirmarPagoEsperado, desmarcarPago, registrarPagoChecklist, marcarPagadoSuelto, desmarcarPagadoSuelto } from '../datos/movimientos';
 import { actualizarItemEsperado } from '../datos/itemsEsperados';
@@ -233,7 +234,7 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
   const ingSmall = enArs ? c.ingUsdEq  : c.ingArsEq;
   const gasBig   = enArs ? c.gasArsEq  : c.gasUsdEq;
   const gasSmall = enArs ? c.gasUsdEq  : c.gasArsEq;
-  const netColor = netBig >= 0 ? 'var(--gf-emerald-100)' : 'var(--gf-on-ink-neg)';
+  const netColor = netBig >= 0 ? 'var(--gf-on-ink-pos)' : 'var(--gf-on-ink-neg)';
   // faltanteArs: gastos totales ArsEq − pesos disponibles (ingresos ARS del mes)
   const faltanteArs = c.gasArsEq - c.pesosDisp;
   const cubierto = faltanteArs <= 0;
@@ -255,15 +256,28 @@ function KpiCards({ c, cur }: { c: Kpis; cur: Moneda }) {
           ))}
         </div>
       </div>
+      {/* F9.171 §1 — tres cards. El valor baja de --text-lg a 15px y cada card lleva
+          minWidth:0: con tres en una fila, `U$S 1.234.567` desbordaba el tercio de ancho.
+          La ex "Cobertura del mes" es esta misma cuenta con otro nombre: `faltanteArs / tc`
+          no cambió, sí el rótulo — ahora dice la unidad en la que está el número. */}
       <div style={{ display: 'flex', gap: 10 }}>
-        <Card eyebrow="Pesos disponibles" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{privado ? fmtPct(c.pesosDisp, base) : fmtArs(c.pesosDisp)}</span>
+        <Card eyebrow="Pesos disponibles" style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{privado ? fmtPct(c.pesosDisp, base) : fmtArs(c.pesosDisp)}</span>
         </Card>
-        <Card eyebrow="Cobertura del mes" style={{ flex: 1 }}>
-          <span style={{ fontSize: 'var(--text-lg)', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cubierto ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
+        <Card eyebrow="USD para cubrir mes" style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: cubierto ? 'var(--gf-income)' : 'var(--gf-expense)' }}>
             {cubierto
               ? 'Cubierto'
-              : `Sin cubrir · −${privado ? fmtPct(faltanteArs, base) : fmtUsdEq(faltanteArs / c.tcEfectivo)}`}
+              : (privado ? fmtPct(faltanteArs, base) : fmtUsdEq(faltanteArs / c.tcEfectivo))}
+          </span>
+        </Card>
+        {/* Con privacidad va el neto en ARS-eq y no el USD: es el que comparte base con el
+            denominador, misma regla que `enArs` arriba. */}
+        <Card eyebrow="USD faltantes" style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: c.netUsdEq < 0 ? 'var(--gf-expense)' : 'var(--gf-income)' }}>
+            {privado
+              ? fmtPct(c.netArsEq, base)
+              : `${c.netUsdEq >= 0 ? '+' : '−'}${fmtUsdEq(Math.abs(c.netUsdEq))}`}
           </span>
         </Card>
       </div>
@@ -372,9 +386,58 @@ const fmtDiaCorto = (d: Date) => `${d.getDate()}/${d.getMonth() + 1}`;
 // por consumidor: son tres lugares y tienen que decir lo mismo. "No sé cuánto" no es "cero".
 const SIN_MONTO = '—';
 
+// F9.171 §2 — barra de ritmo. "Gastos por día" es una lista de hasta 31 filas sin noción de
+// velocidad: dice cuánto, nunca si vas rápido o lento. El Dashboard tiene evolución diaria pero
+// es la vista devengada; la caja no tenía lectura de ritmo propia.
+//
+// La base es el PROMEDIO DE LOS 6 MESES CERRADOS ANTERIORES y no lo que entró este mes
+// (decisión del dueño): el mes se compara contra cómo gasta la familia. Contra el ingreso ya
+// hay dos lecturas arriba — "USD para cubrir mes" y el neto del hero— y una tercera no agrega.
+//
+// El único juicio que emite es el color: verde mientras el % gastado va por debajo del % de mes
+// transcurrido, rojo cuando lo pasó. Sin histórico (promedio 0) no se renderiza — una barra
+// contra una base inventada miente con más autoridad que no tenerla.
+function BarraRitmo({ gastado, promedio, mes, esMesActual, privado }: {
+  gastado: number;
+  promedio: number;
+  mes: string;
+  esMesActual: boolean;
+  privado: boolean;
+}) {
+  if (!(promedio > 0)) return null;
+  const [y, m] = mes.split('-').map(Number);
+  const diasMes = new Date(y, m, 0).getDate();
+  // Un mes cerrado está completo: la marca va al 100%, nunca en el día de HOY, que es de otro mes.
+  const diaHoy  = esMesActual ? new Date().getDate() : diasMes;
+  const pctGast = (gastado / promedio) * 100;
+  const pctMes  = (diaHoy / diasMes) * 100;
+  const pasado  = pctGast > pctMes;
+  const color   = pasado ? 'var(--gf-expense)' : 'var(--gf-emerald)';
+  return (
+    <div style={{ margin: '0 4px 10px' }}>
+      <div style={{ position: 'relative', height: 7, borderRadius: 999, background: 'var(--gf-gray-100)', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, width: `${Math.min(pctGast, 100)}%`, background: color, borderRadius: 999 }} />
+      </div>
+      {/* La marca va FUERA del contenedor con overflow:hidden — adentro se recorta junto con
+          el relleno y desaparece justo cuando el mes se pasa, que es cuando hace falta. */}
+      <div style={{ position: 'relative', height: 0 }}>
+        <span style={{ position: 'absolute', left: `${Math.min(pctMes, 100)}%`, top: -11, width: 2, height: 15, marginLeft: -1, background: 'var(--color-text-sec)', borderRadius: 1 }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 6, fontSize: 10.5, color: 'var(--gf-gray-400)' }}>
+        <span style={{ fontWeight: 700, color }}>{Math.round(pctGast)}% del promedio de 6 meses</span>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+          día {diaHoy} de {diasMes} · {Math.round(pctMes)}%
+          {/* El promedio es un monto en pesos: con privacidad activa no se imprime. */}
+          {!privado && ` · prom. ${fmtArs(promedio)}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, mapaTc, tcEfectivo, avisoTc, onIrAGastos }: {
+function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, mapaTc, tcEfectivo, avisoTc, onIrAGastos, promedioGasto6m }: {
   movs: Movement[];
   porRevisar: number;
   onIrAGastos: () => void;
@@ -389,6 +452,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   mapaTc: Record<string, number>;
   tcEfectivo: number;
   avisoTc: string | null;
+  promedioGasto6m: number;
 }) {
   const { privado } = usePrivacidad();
   const hoy = new Date();
@@ -433,7 +497,11 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   const fmtChipReal = (r: MontoReal) => fmtReal(r);
   const [diasExpandidos, setDiasExpandidos] = useState<Set<number>>(new Set());
   const [hoyExpandido, setHoyExpandido] = useState(true);
-  const [gastadoExpandido, setGastadoExpandido] = useState(true);
+  // F9.171 §3 — la card de vencidos arranca COLAPSADA: es contexto de dias que ya pasaron,
+  // no la tarea de hoy. La de hoy conserva su default abierto.
+  const [vencidosExpandido, setVencidosExpandido] = useState(false);
+  // F9.171 §5 — el pasado del mes, plegado por defecto.
+  const [pasadoAbierto, setPasadoAbierto] = useState(false);
   const inicioHoy = inicioDia(hoy);
 
   // F9.132.2 cambio 1 — acá vivía la construcción de `hoyItems` (F9.99.8): la unión de esperados
@@ -443,71 +511,51 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // 20, y desde F9.132.1 (`banks={[]}`) la mitad de esos cálculos ya no llegaba a la pantalla.
   // Las dos cards se construyen ahora directamente sobre `cajaMov`, abajo.
 
-  // ── F9.132.1 — CARD 2: lo que YA se gastó hoy ───────────────────────────────
-  // MISMA fuente que la fila HOY de "Gastos por día": `cajaMov` filtrado al día. No es preferencia
-  // estética, es la corrección del bug: `hoyItems` tenía dos rejillas que dejaban caer movimientos
-  // en el medio. Un gasto de hoy que matcheó un esperado quedaba fuera de `realesHoy` (por
-  // `matchedIds`) y TAMBIÉN fuera de `hoyEsperados` cuando el ítem tenía `diaVencimiento: null` —
-  // que es el caso de los 7 resúmenes de tarjeta del 7/8/2026. Resultado medido: "Nada que pagar
-  // hoy" con cuatro bancos y $ 11.085.000 en la fila de al lado. Compartiendo fuente con `porDia`
-  // eso no puede volver a pasar por construcción.
-  // F9.132.2 cambio 2 — filtro `pagado === true`. Sin él, en cuanto la Card 1 dejó de mirar
-  // `diaVencimiento` los dos impagos del día (AYSA y Empresa Distribuidora) aparecían en las
-  // DOS cards y sumaban en los dos totales. Las cards son excluyentes por construcción: misma
-  // fuente, mismo filtro de día, y `pagado` como único discriminante.
-  const gastadoHoy = cajaMov
-    .filter(m => m.tipo === 'Gasto' && inicioDia(m.fecha).getTime() === inicioHoy.getTime() && m.pagado === true)
-    .sort((a, b) => arsEq(b, tcDeMov) - arsEq(a, tcDeMov));
-  const gastadoHoyTotal = totalReal(gastadoHoy);
-  const gastadoPorBanco = [...agruparReal(gastadoHoy, m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos)).entries()]
-    .sort((a, b) => b[1].ars - a[1].ars);
-
-  // ── F9.132.2 — CARD 1: lo que TODAVÍA hay que pagar hoy ─────────────────────
-  // F9.132.2 cambio 1 — se corta la dependencia de `hoyItems`, que arrastraba el filtro por
-  // `diaVencimiento`: ese campo está poblado en 1 de 22 ítems activos, así que la card estaba
-  // vacía todos los días salvo el 20. Ahora comparte fuente con `porDia` y con la Card 2
-  // —`cajaMov` filtrado al día— y el único filtro que la separa de la Card 2 es `pagado`.
-  //   Criterio de "a pagar": NO estar cubierto, en las dos direcciones. F9.140 §1 — antes era
-  // `pagado !== true` a secas, que es media definición:
-  //   · `pagado: true` sin confirmar NO entra (seguía siendo cierto y se mantiene): esa plata ya
-  //     salió y lo que falta es confirmarla, que es otro problema; meterlo acá haría que el total
-  //     volviera a significar dos cosas.
-  //   · `confirmadoPago: true` con `pagado: false` TAMPOCO entra, y eso es lo que se agrega. Ese
-  //     par no debería existir (ver invariante en docs/CLAUDE.md), pero cuando existió —ITPA SA,
-  //     11/8/2026— esta card lo pintaba vencido en rojo mientras Gastos Fijos lo daba por pagado.
-  // `movimientoCubierto` es la MISMA función que usa el checklist: dos definiciones de "cubierto"
-  // en dos pantallas fue el defecto, no un detalle de estilo.
-  //   La partición se hace por `m.fecha` (no por fecha efectiva) para que Card 1 + Card 2 dé
-  // exacto el total de la fila HOY: cualquier otro criterio abre un hueco entre las dos.
+  // ── F9.171 §3 — UNA card HOY ────────────────────────────────────────────────
+  // F9.132.1 habia partido el dia en dos cards ("a pagar" / "gastado") porque el total
+  // alternaba de significado. La particion resolvia eso pero cobraba dos cards del lugar mas
+  // caro de la pantalla para decir lo mismo dos veces, y los vencidos —que no son de hoy—
+  // vivian dentro de la card de hoy. Ahora hay UNA card del dia, con el total del dia y las
+  // dos condiciones etiquetadas fila por fila, y los vencidos se mudan a card propia.
+  //
+  // `delDia` sigue partiendo de `cajaMov` filtrado por `m.fecha` (no por fecha efectiva): es
+  // lo que garantiza que el total de esta card sea EXACTO el de la fila HOY de "Gastos por
+  // dia". Cualquier otro criterio vuelve a abrir el hueco que cerro F9.132.2.
   const delDia = cajaMov.filter(m => m.tipo === 'Gasto' && inicioDia(m.fecha).getTime() === inicioHoy.getTime());
+  // `movimientoCubierto` es la MISMA funcion que usa el checklist: dos definiciones de
+  // "cubierto" en dos pantallas fue el defecto original (F9.140 §1), no un detalle de estilo.
   const aPagarHoy = delDia
     .filter(m => !movimientoCubierto(m))
     .sort((a, b) => arsEq(b, tcDeMov) - arsEq(a, tcDeMov));
   const aPagarTotal: MontoReal = totalReal(aPagarHoy);
-  // Vencidos: impagos de días ANTERIORES. Sección propia y subtotal propio — no se suman al
-  // total del encabezado, que es el de hoy. Son dos plata distintas, dos números.
-  // Acá sí manda la fecha efectiva: un gasto cargado el 4 que vence el 10 no está vencido.
-  // Solo en el mes actual: bajo el rótulo HOY, "vencido" tiene que medirse contra hoy. Mirando
-  // julio en septiembre, todo julio está vencido y la sección no diría nada.
-  // F9.140 §1 — mismo predicado que `aPagarHoy`: ésta era la línea que pintaba de rojo la factura
-  // de ITPA SA ya confirmada, porque `fechaEfectivaMov` la daba vencida y `pagado !== true` no
-  // veía el `confirmadoPago`.
+  // Impagos primero; dentro de cada grupo, por monto. El orden ES la jerarquia de la card:
+  // lo que falta pagar se lee antes que lo que ya salio.
+  const delDiaOrdenado = [
+    ...aPagarHoy,
+    ...delDia.filter(m => movimientoCubierto(m)).sort((a, b) => arsEq(b, tcDeMov) - arsEq(a, tcDeMov)),
+  ];
+  const delDiaTotal: MontoReal = totalReal(delDia);
+  // Chips = TODO el dia, pagos incluidos: el encabezado ahora totaliza el dia, asi que los
+  // chips tienen que cubrir el mismo conjunto. Que la card se contradiga con sus propios
+  // chips fue el bug de F9.136 §2.
+  const delDiaPorBanco = [...agruparReal(delDia, m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos)).entries()]
+    .sort((a, b) => b[1].ars - a[1].ars);
+
+  // ── F9.171 §3 — VENCIDOS: card propia ───────────────────────────────────────
+  // Impagos de dias ANTERIORES. Aca manda la fecha efectiva: un gasto cargado el 4 que vence
+  // el 10 no esta vencido. Solo en el mes actual — mirando julio en septiembre todo julio
+  // estaria "vencido" y la card no diria nada.
   const aPagarVencidos = !esMesActual ? [] : cajaMov
     .filter(m => m.tipo === 'Gasto' && !movimientoCubierto(m) && fechaEfectivaMov(m).getTime() < inicioHoy.getTime())
     .sort((a, b) => fechaEfectivaMov(a).getTime() - fechaEfectivaMov(b).getTime());
   const aPagarVencidosTotal: MontoReal = totalReal(aPagarVencidos);
+  const vencidosPorBanco = [...agruparReal(aPagarVencidos, m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos)).entries()]
+    .sort((a, b) => b[1].ars - a[1].ars);
 
-  // F9.132.2 cambio 3 — se revierte `banks={[]}`: hay movimiento detrás de cada fila, y el banco
-  // del movimiento es de dónde sale la plata.
-  // F9.136 §2 — los chips agrupaban SOLO `aPagarHoy`, así que con nada de hoy la fila colapsada
-  // no mostraba ningún banco mientras abajo había $ 316.492 en tres. La card se contradecía a sí
-  // misma. Cubren hoy + vencidos: los bancos son de la plata que la card dice que hay que pagar,
-  // y esa incluye los vencidos. El chip no distingue cuál es cuál —el desglose está adentro— y
-  // un chip de menos es peor que un chip sin matiz.
-  const aPagarPorBanco = [...agruparReal(
-    [...aPagarHoy, ...aPagarVencidos],
-    m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos),
-  ).entries()].sort((a, b) => b[1].ars - a[1].ars);
+  // ── F9.171 §4 — cierre de un mes cerrado ────────────────────────────────────
+  // Un mes pasado no tiene "hoy": tiene un cierre. Un solo dato, pedido explicitamente.
+  const pagadoDelMes: MontoReal = totalReal(cajaMov.filter(m => m.tipo === 'Gasto' && movimientoCubierto(m)));
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -602,158 +650,103 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
         </div>
       )}
 
-      {/* F9.132.1 cambio A — la card vuelve ARRIBA, a la posicion previa a F9.132. Se probo
-          abajo y no sirve: lo del dia es lo primero que se busca al abrir la app. No volver a
-          moverla sin pedido explicito. `hoyExpandido` conserva su default. */}
-      {/* F9.99.8.1 — Card Hoy usa la MISMA fila que "Gastos por día" (DiaRowShell): chips de
-          banco, total grande/chico, expandible.
-          F9.132.1 — CARD 1: solo lo que TODAVÍA hay que pagar. El total ya no alterna de
-          significado (era `hoyPendienteEq` o `hoyTotalEq` según el estado, sin decir cuál): acá
-          siempre es "a pagar", y lo gastado tiene su propia card abajo con su propio total.
-          F9.132.2 — las filas ahora son MOVIMIENTOS impagos, no entradas de agenda: el estado
-          (check/reloj/alerta) sobraba porque todas las filas comparten el mismo, `pagado: false`.
-          Y `banks` vuelve a estar poblado: hay movimiento detrás de cada fila, así que hay banco.
-          F9.132.1 cambio C — `fmtChip` usa montos REALES (pesos y dólares por moneda de origen),
-          revirtiendo el USD equivalente del cambio 2 de F9.132. */}
-      <DiaRowShell
-        dayBig={String(hoy.getDate())}
-        daySub="HOY"
-        banks={aPagarPorBanco}
-        totalNode={
-          <>
-            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: aPagarHoy.length > 0 ? 'var(--gf-expense)' : 'var(--color-text)' }}>
-              {fmtTotalReal(aPagarTotal)}
-            </div>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)' }}>a pagar</div>
-            {/* El subtotal de vencidos va AL LADO del de hoy y etiquetado, nunca sumado: son
-                dos plata distintas y el encabezado es el de hoy. */}
-            {aPagarVencidos.length > 0 && (
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
-                +{fmtReal(aPagarVencidosTotal)} vencido
-              </div>
-            )}
-          </>
-        }
-        highlight
-        expanded={hoyExpandido}
-        onToggle={() => setHoyExpandido(v => !v)}
-        config={config}
-        fmtChip={fmtChipReal}
-      >
-        {hoyExpandido && (
-          <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {/* F9.136 §3 — el empty state miraba solo `aPagarHoy`, así que decía "Nada que pagar
-                hoy." con cuatro filas rojas y $ 316.492 justo debajo. Es el MISMO bug que F9.132
-                vino a cerrar, reaparecido: un texto que afirma que no hay plata mientras la card
-                muestra plata. Con vencidos presentes el texto acota que lo que no hay es de HOY;
-                sin nada en ninguna de las dos secciones se mantiene el mensaje de siempre. */}
-            {aPagarHoy.length === 0 ? (
-              <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>
-                {!esMesActual
-                  ? 'Ver mes actual para pagos de hoy.'
-                  : aPagarVencidos.length > 0
-                  ? 'Nada que pagar hoy — pero hay vencido:'
-                  : 'Nada que pagar hoy.'}
-              </div>
-            ) : aPagarHoy.map((m, i) => (
-              <FilaAPagar
-                key={m.id}
-                m={m}
-                config={config}
-                conBorde={i < aPagarHoy.length - 1}
-                esAdmin={esAdmin}
-                onEditar={onEditarMovimiento}
-                monto={privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
-                pie="A pagar"
-              />
-            ))}
-
-            {/* Sección propia para los vencidos: su propio encabezado y su propio subtotal.
-                Mezclarlos con los de hoy haría que el total del encabezado significara dos
-                cosas otra vez, que es exactamente el bug que F9.132.1 vino a cerrar. */}
-            {aPagarVencidos.length > 0 && (
-              <>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginTop: 12, paddingTop: 8, borderTop: '1px solid var(--gf-gray-150)' }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--gf-expense)' }}>
-                    Vencido · {aPagarVencidos.length}
-                  </span>
-                  <span style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>
-                    {fmtReal(aPagarVencidosTotal)}
-                  </span>
+      {/* F9.171 §3/§4 — UNA card arriba: la del dia si el mes es el actual, la de cierre si
+          el mes ya cerro. F9.132.1 cambio A: va ARRIBA y no se mueve sin pedido explicito —
+          lo del dia es lo primero que se busca al abrir la app.
+          Muere aca la card "GASTADO" de F9.132.1 y con ella el empty state "Nada que pagar
+          hoy — pero hay vencido:" de F9.136 §3: ese texto existia porque los vencidos vivian
+          dentro de la card de hoy. Ahora tienen card propia y no hay nada que aclarar. */}
+      {esMesActual ? (
+        <DiaRowShell
+          dayBig={String(hoy.getDate())}
+          daySub="HOY"
+          banks={delDiaPorBanco}
+          totalNode={
+            <>
+              <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtTotalReal(delDiaTotal)}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)' }}>del día</div>
+              {/* Etiquetado y NUNCA sumado a otro total: el encabezado totaliza el dia entero
+                  y esto es el subconjunto que todavia no salio. */}
+              {aPagarHoy.length > 0 && (
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+                  {aPagarHoy.length} a pagar · {fmtReal(aPagarTotal)}
                 </div>
-                {aPagarVencidos.map((m, i) => (
-                  <FilaAPagar
-                    key={m.id}
-                    m={m}
-                    config={config}
-                    conBorde={i < aPagarVencidos.length - 1}
-                    esAdmin={esAdmin}
-                    onEditar={onEditarMovimiento}
-                    monto={privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
-                    pie={`Venció ${fmtDiaCorto(fechaEfectivaMov(m))}`}
-                    vencido
-                  />
-                ))}
-              </>
-            )}
-          </div>
-        )}
-      </DiaRowShell>
+              )}
+            </>
+          }
+          expanded={hoyExpandido}
+          onToggle={() => setHoyExpandido(v => !v)}
+          config={config}
+          fmtChip={fmtChipReal}
+        >
+          {hoyExpandido && (
+            <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {delDiaOrdenado.length === 0 ? (
+                <div style={{ fontSize: 13, color: 'var(--color-text-sec)' }}>Nada movido hoy.</div>
+              ) : delDiaOrdenado.map((m, i) => (
+                <FilaAPagar
+                  key={m.id}
+                  m={m}
+                  config={config}
+                  conBorde={i < delDiaOrdenado.length - 1}
+                  esAdmin={esAdmin}
+                  onEditar={onEditarMovimiento}
+                  monto={privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                  pie={movimientoCubierto(m) ? 'Pagado' : 'A pagar'}
+                />
+              ))}
+            </div>
+          )}
+        </DiaRowShell>
+      ) : (
+        /* F9.171 §4 — un mes cerrado se lee al cierre. Un solo numero, pedido explicitamente:
+           el total que efectivamente se pago. `fmtTotalReal` muestra las DOS monedas siempre
+           (F9.136 §4) — "$ 0" pelado se leeria como "no hubo nada" habiendo dolares. */
+        <Card variant="flat" padding="var(--space-3)" eyebrow={`Cierre de ${formatMes(mes)}`}>
+          <div style={{ fontSize: 19, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{fmtTotalReal(pagadoDelMes)}</div>
+          <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>pagado en el mes</div>
+        </Card>
+      )}
 
-      {/* F9.132.1 — CARD 2, propia y debajo de la Card 1. Son dos plata distintas y dos totales
-          distintos: una tiene que salir, la otra ya salió, y no se suman. El título de cada card lo
-          dice sin tener que abrirlas.
-          Fila propia y no la compartida de F9.99.8.1: ésa se organiza por ítem/banco/estado, y
-          forzarla a un uso por persona la deformaría — se rompen las dos. */}
-      <DiaRowShell
-        dayBig={String(hoy.getDate())}
-        daySub="GASTADO"
-        banks={gastadoPorBanco}
-        totalNode={
-          <>
-            <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtTotalReal(gastadoHoyTotal)}</div>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)' }}>gastado hoy</div>
-          </>
-        }
-        expanded={gastadoExpandido}
-        onToggle={() => setGastadoExpandido(v => !v)}
-        config={config}
-        fmtChip={fmtChipReal}
-      >
-        {gastadoExpandido && (gastadoHoy.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--color-text-sec)', marginTop: 10 }}>
-            {esMesActual ? 'Todavía no salió plata hoy.' : 'Ver mes actual para los gastos de hoy.'}
-          </div>
-        ) : (
-          <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6 }}>
-            {gastadoHoy.map(m => (
-              <button
-                key={m.id}
-                onClick={esAdmin ? () => onEditarMovimiento?.(m) : undefined}
-                disabled={!esAdmin}
-                style={{
-                  display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 0', width: '100%',
-                  background: 'none', border: 'none', borderBottom: '1px solid var(--gf-gray-100)',
-                  cursor: esAdmin ? 'pointer' : 'default', textAlign: 'left', fontFamily: 'var(--font-base)', fontSize: 12.5,
-                }}
-              >
-                <span style={{ fontWeight: 600, flexShrink: 0, color: m.excluirDash ? 'var(--gf-gray-400)' : undefined }}>
-                  {/* F9.133 §1 — "Agregado" para los estructurales, "Sin asignar" solo para el hueco
-                      real. Un gasto sin dueño es información y la fila se muestra igual; lo que no
-                      puede pasar es que un agregado del importador se lea como carga faltante. */}
-                  {etiquetaPersona(m, config)}
-                </span>
-                <span style={{ flex: 1, minWidth: 0, color: 'var(--color-text-sec)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {m.descripcion || '(sin descripción)'}
-                </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700, flexShrink: 0 }}>
-                  {fmtReal(sumarReal(REAL0, m.moneda, m.monto))}
-                </span>
-              </button>
-            ))}
-          </div>
-        ))}
-      </DiaRowShell>
+      {/* F9.171 §3 — los vencidos son de OTRO dia, asi que tienen card propia: no entran ni
+          en los chips, ni en el total, ni en una seccion interna de la card de hoy. Mismo
+          shell para que se lean como parientes. No se renderiza si no hay ninguno. */}
+      {aPagarVencidos.length > 0 && (
+        <DiaRowShell
+          dayBig={String(aPagarVencidos.length)}
+          daySub="VENCIDO"
+          banks={vencidosPorBanco}
+          totalNode={
+            <>
+              <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--gf-expense)' }}>{fmtTotalReal(aPagarVencidosTotal)}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--gf-gray-400)' }}>sin pagar</div>
+            </>
+          }
+          expanded={vencidosExpandido}
+          onToggle={() => setVencidosExpandido(v => !v)}
+          config={config}
+          fmtChip={fmtChipReal}
+        >
+          {vencidosExpandido && (
+            <div style={{ marginTop: 10, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {aPagarVencidos.map((m, i) => (
+                <FilaAPagar
+                  key={m.id}
+                  m={m}
+                  config={config}
+                  conBorde={i < aPagarVencidos.length - 1}
+                  esAdmin={esAdmin}
+                  onEditar={onEditarMovimiento}
+                  monto={privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                  pie={`Venció ${fmtDiaCorto(fechaEfectivaMov(m))}`}
+                  vencido
+                />
+              ))}
+            </div>
+          )}
+        </DiaRowShell>
+      )}
+
 
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '0 4px 8px' }}>
@@ -762,11 +755,21 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
           </span>
           <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>Total mes <strong style={{ color: 'var(--color-text)' }}>{fmtBig(totalMesEq)}</strong></span>
         </div>
+        {/* F9.171 §2 — el numerador es el MISMO `totalMesEq.ars` que imprime "Total mes" acá
+            arriba: la barra no puede decir un porcentaje de un total distinto del que se lee
+            a 20px de distancia. */}
+        <BarraRitmo gastado={totalMesEq.ars} promedio={promedioGasto6m} mes={mes} esMesActual={esMesActual} privado={privado} />
         {dias.length === 0 ? (
           <p style={{ fontSize: 13, color: 'var(--color-text-sec)', margin: '0 4px' }}>Sin gastos de caja este mes.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {dias.map(d => {
+            {(() => {
+              // F9.171 §5 — el render de un dia se extrae para poder invocarlo desde los dos
+              // lados del pliegue (el bloque "Ya pasó" y la cola del mes) sin duplicarlo.
+              const renderDia = (d: DiaAgregado) => {
+                // F9.171 §3 — `isHoy` ya no pinta la fila (se fue `highlight`): el fondo verde
+                // competia con la card HOY de arriba y pintaba de "todo bien" un dia que puede
+                // tener impagos. Queda solo el rotulo.
               const isHoy   = d.date.toDateString() === hoy.toDateString();
               const banks   = Object.entries(d.banks).sort((a, b) => b[1].ars - a[1].ars);
               const expanded = diasExpandidos.has(d.day);
@@ -784,7 +787,6 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                   daySub={DIA_ES[d.date.getDay()]}
                   banks={banks}
                   totalNode={totalNode}
-                  highlight={isHoy}
                   expanded={expanded}
                   onToggle={() => setDiasExpandidos(prev => { const s = new Set(prev); s.has(d.day) ? s.delete(d.day) : s.add(d.day); return s; })}
                   config={config}
@@ -809,7 +811,13 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.descripcion}</div>
                             <div style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>
-                              {m.banco ? medioCanonico(m.banco, config?.bancos) : ''}
+                              {/* F9.171 §3 — el estado por movimiento. Sin esto el detalle de un
+                                  dia no distingue lo pagado de lo que falta pagar, que es la
+                                  unica pregunta que se le hace a esta lista. */}
+                              <span style={{ fontWeight: 700, color: movimientoCubierto(m) ? 'var(--color-text-sec)' : 'var(--gf-expense)' }}>
+                                {movimientoCubierto(m) ? 'Pagado' : 'A pagar'}
+                              </span>
+                              {m.banco ? ` · ${medioCanonico(m.banco, config?.bancos)}` : ''}
                               {m.subcategoria ? ` · ${m.subcategoria}` : ''}
                             </div>
                           </div>
@@ -843,7 +851,74 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                   )}
                 </DiaRowShell>
               );
-            })}
+              };
+
+              // F9.171 §5 — la pantalla es de planificacion: lo que viene tiene que estar
+              // arriba, y hoy los 30 dias planos dejaban la cola del mes al fondo.
+              // Solo en el mes actual: en un mes cerrado "anterior a hoy" es el mes entero y
+              // no quedaria nada desplegado, que es justo lo contrario de lo que se busca.
+              // `d.date` es la fecha del primer movimiento del dia y arrastra la hora, asi que
+              // la comparacion va normalizada — si no, un gasto de hoy a las 14:00 cae en el
+              // pasado y el dia de hoy se pliega.
+              const esPasado = (d: DiaAgregado) => inicioDia(d.date).getTime() < inicioHoy.getTime();
+              const pasados = esMesActual ? dias.filter(esPasado) : [];
+              const cola    = esMesActual ? dias.filter(d => !esPasado(d)) : dias;
+              // El rotulo de impagos usa `m.fecha` y no la fecha efectiva, a diferencia de la
+              // card de vencidos: tiene que describir los dias que estan DENTRO del pliegue, y
+              // el pliegue esta agrupado por `m.fecha` (es como agrupa `porDia`). Las dos
+              // cuentas pueden diferir para una factura cargada antes de su vencimiento, y esta
+              // bien que asi sea: contestan preguntas distintas.
+              const impagosPasados = !esMesActual ? [] : cajaMov.filter(m =>
+                m.tipo === 'Gasto' && inicioDia(m.fecha).getTime() < inicioHoy.getTime() && !movimientoCubierto(m));
+              const diasConImpago = new Set(impagosPasados.map(m => inicioDia(m.fecha).getTime()));
+              // Abierto: con impagos atras muestra SOLO esos dias (la pregunta que se estaba
+              // haciendo); sin impagos, todos — que es el caso frecuente y no cambia.
+              const pasadosVisibles = impagosPasados.length > 0
+                ? pasados.filter(d => diasConImpago.has(inicioDia(d.date).getTime()))
+                : pasados;
+              const totalPasado = pasados.reduce((s, d) => sumaEq(s, d.eq), EQ0);
+
+              return (
+                <>
+                  {pasados.length > 0 && (
+                    <>
+                      <button
+                        onClick={() => setPasadoAbierto(v => !v)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '10px 12px',
+                          background: 'var(--gf-gray-50)', border: '1px dashed var(--gf-gray-300)',
+                          borderRadius: 'var(--radius-card)', cursor: 'pointer', fontFamily: 'var(--font-base)',
+                        }}
+                      >
+                        <Icon name="clock" size={15} color="var(--gf-gray-400)" />
+                        <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--color-text-sec)' }}>
+                            Ya pasó · {pasados.length} día{pasados.length > 1 ? 's' : ''}
+                          </div>
+                          {/* Con esto "¿me quedó algo sin pagar?" se contesta sin abrir nada. */}
+                          {impagosPasados.length > 0 && (
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums' }}>
+                              {impagosPasados.length} impago{impagosPasados.length > 1 ? 's' : ''} · {fmtReal(totalReal(impagosPasados))}
+                            </div>
+                          )}
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtBig(totalPasado)}</span>
+                        <Icon name={pasadoAbierto ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />
+                      </button>
+                      {pasadoAbierto && pasadosVisibles.map(renderDia)}
+                      {cola.length > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 4px' }}>
+                          <span style={{ flex: 1, height: 1, background: 'var(--gf-gray-200)' }} />
+                          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--gf-gray-400)' }}>Hasta acá el mes</span>
+                          <span style={{ flex: 1, height: 1, background: 'var(--gf-gray-200)' }} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {cola.map(renderDia)}
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -1256,6 +1331,28 @@ function ResumenVisual() {
   const esAdmin = miembro.rol === 'admin';
   const { config } = useFamiliaConfig();
   const { movimientos, cargando, error } = useMovimientosDelMes(mes);
+  // F9.171 §2 — los 6 meses cerrados anteriores, para la base de la barra de ritmo. Un rango
+  // acotado y no el hook anual: ver el comentario de useMovimientosRango.
+  const { movimientos: movsHist } = useMovimientosRango(desplazarMes(mes, -6), desplazarMes(mes, -1));
+  // Promedio de gasto de caja de esos meses, en ARS-eq y con el MISMO criterio de valuación que
+  // los KPIs. `eqDe` toma el snapshot propio del movimiento (`m.tcUsdArs`) para USD→ARS, que es
+  // per-movimiento y está guardado: no hace falta el mapa de TC de cada mes viejo. Solo los USD
+  // sin snapshot caen al TC de hoy — los mismos que la pantalla ya declara como "TC estimado".
+  //   Se promedia sobre los meses CON DATOS, no sobre 6 fijos: una familia con 3 meses de
+  // historia tendría el promedio partido por dos y la barra diría que gasta el doble.
+  const promedioGasto6m = (() => {
+    const tcDeMov = crearTcDeMovimiento(mapaTc, tcEfectivo, false);
+    const porMes = new Map<string, number>();
+    for (const m of movsHist) {
+      if (!m.incluirResumenMes) continue;
+      // El mes es el de IMPUTACIÓN (`m.mes`), que es por el que consulta el hook y por el que
+      // cuenta el movimiento — no el de `m.fecha`, que puede caer en otro (F9.118).
+      if (!porMes.has(m.mes)) porMes.set(m.mes, 0);
+      if (m.tipo === 'Gasto') porMes.set(m.mes, porMes.get(m.mes)! + arsEq(m, tcDeMov));
+    }
+    if (porMes.size === 0) return 0;
+    return [...porMes.values()].reduce((a, b) => a + b, 0) / porMes.size;
+  })();
   const { items } = useItemsEsperados();
   const checklist = calcularChecklist(items, movimientos, mes);
   // F9.62 — "revisar" cuenta solo lo SIN CARGAR (sin movimiento asociado). por_confirmar
@@ -1374,7 +1471,7 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} agenda={agenda} mes={mes} mapaTc={mapaTc} tcEfectivo={tcEfectivo} avisoTc={avisoTc} onIrAGastos={() => setSec('fijos')} />
+        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} agenda={agenda} mes={mes} mapaTc={mapaTc} tcEfectivo={tcEfectivo} avisoTc={avisoTc} onIrAGastos={() => setSec('fijos')} promedioGasto6m={promedioGasto6m} />
       ) : (
         <GastosFijosSeccion
           agenda={agenda}
