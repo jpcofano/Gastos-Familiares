@@ -502,6 +502,9 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   const [vencidosExpandido, setVencidosExpandido] = useState(false);
   // F9.171 §5 — el pasado del mes, plegado por defecto.
   const [pasadoAbierto, setPasadoAbierto] = useState(false);
+  // F9.172 §5.2 — abierto y con impagos atras, el bloque muestra SOLO los dias con impago:
+  // en pantalla se lee como que faltan dias. Este flag es el escape para ver todos.
+  const [pasadoTodos, setPasadoTodos] = useState(false);
   const inicioHoy = inicioDia(hoy);
 
   // F9.132.2 cambio 1 — acá vivía la construcción de `hoyItems` (F9.99.8): la unión de esperados
@@ -873,9 +876,11 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
               const diasConImpago = new Set(impagosPasados.map(m => inicioDia(m.fecha).getTime()));
               // Abierto: con impagos atras muestra SOLO esos dias (la pregunta que se estaba
               // haciendo); sin impagos, todos — que es el caso frecuente y no cambia.
-              const pasadosVisibles = impagosPasados.length > 0
+              const filtrandoPorImpago = impagosPasados.length > 0 && !pasadoTodos;
+              const pasadosVisibles = filtrandoPorImpago
                 ? pasados.filter(d => diasConImpago.has(inicioDia(d.date).getTime()))
                 : pasados;
+              const diasOcultos = pasados.length - pasadosVisibles.length;
               const totalPasado = pasados.reduce((s, d) => sumaEq(s, d.eq), EQ0);
 
               return (
@@ -896,8 +901,12 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                             Ya pasó · {pasados.length} día{pasados.length > 1 ? 's' : ''}
                           </div>
                           {/* Con esto "¿me quedó algo sin pagar?" se contesta sin abrir nada. */}
+                          {/* F9.172 §4 — `--gf-expense` (#d33b43) sobre el panel punteado
+                              `--gf-gray-50` da 4,48:1, apenas debajo del piso, y es justo el
+                              rotulo que justifico este diseno de bloque plegado. La variante
+                              -700 lo resuelve y en oscuro ya es clara. */}
                           {impagosPasados.length > 0 && (
-                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-expense)', fontVariantNumeric: 'tabular-nums' }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-expense-700)', fontVariantNumeric: 'tabular-nums' }}>
                               {impagosPasados.length} impago{impagosPasados.length > 1 ? 's' : ''} · {fmtReal(totalReal(impagosPasados))}
                             </div>
                           )}
@@ -906,6 +915,20 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                         <Icon name={pasadoAbierto ? 'chevron-down' : 'chevron-right'} size={14} color="var(--gf-gray-300)" />
                       </button>
                       {pasadoAbierto && pasadosVisibles.map(renderDia)}
+                      {/* F9.172 §5.2 — filtrar en silencio se lee como que faltan dias. El pie
+                          dice cuantos quedaron afuera y los trae. */}
+                      {pasadoAbierto && filtrandoPorImpago && diasOcultos > 0 && (
+                        <button
+                          onClick={() => setPasadoTodos(true)}
+                          style={{
+                            width: '100%', padding: '7px 0', background: 'none', border: 'none',
+                            cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 11.5,
+                            fontWeight: 600, color: 'var(--color-text-sec)', textAlign: 'center',
+                          }}
+                        >
+                          + {diasOcultos} día{diasOcultos > 1 ? 's' : ''} sin nada pendiente
+                        </button>
+                      )}
                       {cola.length > 0 && (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 4px' }}>
                           <span style={{ flex: 1, height: 1, background: 'var(--gf-gray-200)' }} />

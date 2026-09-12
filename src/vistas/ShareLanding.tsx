@@ -51,7 +51,8 @@ interface ShareLandingProps {
 
 function fmtMonto(n: number, moneda: 'ARS' | 'USD'): string {
   const v = Math.round(n).toLocaleString('es-AR');
-  return moneda === 'USD' ? `U$S ${v}` : `$ ${v}`;
+  // F9.172 §3 — espacio duro: el monto no se parte entre signo y numero.
+  return moneda === 'USD' ? `U$S ${v}` : `$ ${v}`;
 }
 
 const FOOTER_TEXTO = [

@@ -71,8 +71,14 @@
   --gf-gray-900:    #111827;   /* primary text                 */
   --gf-gray-800:    #1a1a1a;
   --gf-gray-700:    #374151;   /* strong secondary text        */
-  --gf-gray-500:    #6b7280;   /* muted text                   */
-  --gf-gray-400:    #9ca3af;   /* placeholder / faint          */
+  /* F9.172 §2 — estos dos se usan como color de los eyebrows en mayúscula de 10–11px de
+     toda la app, no como "placeholder". Medido contra el fondo REAL de cada elemento (no
+     contra blanco): #9ca3af daba 2,58:1 sobre la card. El piso NO se calibra sobre blanco
+     puro — #6b7280 da 4,8:1 sobre #fff pero 4,43:1 sobre el fondo de app y 3,90:1 sobre las
+     pills --gf-gray-200 (toggles %/USD, solapa inactiva). #5c6574 deja el peor caso en
+     ~4,6:1. Es un gris: subirle contraste no rompe ningún uso gráfico. */
+  --gf-gray-500:    #5c6574;   /* muted text                   */
+  --gf-gray-400:    #5c6574;   /* eyebrows / faint             */
   --gf-gray-300:    #d1d5db;   /* input border                 */
   --gf-gray-200:    #e5e7eb;   /* default border               */
   --gf-gray-150:    #e0e0e0;   /* card border                  */
@@ -144,8 +150,16 @@
    equivalentes oscuros. Los componentes no cambian: todos ya
    consumen --color-* / --gf-gray-* / --gf-*-50 / --st-*, así que
    alcanza con remapear los tokens acá. Activado seteando
-   data-theme="dark" en <html> (ver datos/theme.ts). ─────────── */
-[data-theme="dark"] {
+   data-theme="dark" en <html> (ver datos/theme.ts).
+
+   F9.172 §1 — el selector lleva `html` a propósito. `[data-theme="dark"]` tiene la MISMA
+   especificidad que `:root` (0-1-0), así que quién gana lo decide el orden de carga: basta
+   con que otra hoja declare la paleta y se cargue después de ésta para que el remapeo
+   oscuro entero quede pisado, sin que nada falle a la vista —los tokens siguen resolviendo,
+   solo que al valor claro. `html[data-theme="dark"]` es 0-1-1 y gana siempre.
+   Hoy este repo no tiene una segunda copia en el bundle (src/design-system/dist/ existe en
+   el árbol pero nadie lo importa); esto es para que siga siendo cierto. ─────────── */
+html[data-theme="dark"] {
   /* F9.169 §1 — controles nativos en oscuro (ver el :root de arriba) */
   color-scheme: dark;
 
@@ -176,7 +190,11 @@
   --gf-gray-800: #e8e8ea;
   --gf-gray-700: #cbd5e1;  /* strong secondary text        */
   --gf-gray-500: #94a3b8;  /* muted text                   */
-  --gf-gray-400: #6b7280;  /* placeholder / faint          */
+  /* F9.172 §2 — el spec proponia #8792a3, pero medido contra el fondo REAL (que es lo que
+     el mismo spec pide) daba 4,17:1 sobre las pills --gf-gray-200: no llega al piso que
+     el spec fija. #909cae deja el peor caso en 4,72:1 y sigue siendo mas oscuro que
+     --gf-gray-500 (#94a3b8), asi que la rampa no se invierte. Antes: #6b7280 = 3,58:1. */
+  --gf-gray-400: #909cae;  /* eyebrows / faint             */
   --gf-gray-300: #3a4350;  /* input border                 */
   --gf-gray-200: #2a313b;  /* default border                */
   --gf-gray-150: #262c34;  /* card border                  */

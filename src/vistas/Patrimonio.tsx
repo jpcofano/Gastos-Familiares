@@ -116,7 +116,8 @@ const TIPO_LABEL: Record<string, string> = {
 
 // ── Formateo ──────────────────────────────────────────────────────────────────
 function fmtUsd(n: number): string { return `U$S ${Math.round(n).toLocaleString('es-AR')}`; }
-function fmtArs(n: number, tc: number): string { return `$ ${Math.round(n * tc).toLocaleString('es-AR')}`; }
+// F9.172 §3 — espacio duro: el monto no se parte entre signo y numero.
+function fmtArs(n: number, tc: number): string { return `$ ${Math.round(n * tc).toLocaleString('es-AR')}`; }
 
 // F9.121 — modo privacidad en pantalla. Patrimonio no tiene un componente `Money` único (son
 // 4.300 líneas y 12 componentes con estilos propios), así que el modo se implementa acá: un

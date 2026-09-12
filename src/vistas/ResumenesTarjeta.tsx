@@ -27,8 +27,9 @@ import './ResumenesTarjeta.css';
 
 function fmtMonto(n: number, moneda: 'ARS' | 'USD'): string {
   return moneda === 'USD'
-    ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // F9.172 §3 — espacio duro: el monto no se parte entre signo y numero.
+    ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const TIPO_LABEL: Record<string, string> = {

@@ -17,5 +17,8 @@ export function fmtMoney(monto: number, opts: { from: Moneda; to: Moneda; tc?: n
     ? monto
     : opts.from === 'USD' ? monto * tc : monto / tc;
   const symbol = opts.to === 'USD' ? 'U$S' : '$';
-  return `${symbol} ${Math.round(valor).toLocaleString('es-AR')}`;
+  // F9.172 §3 — espacio DURO entre signo y numero. Con espacio normal el banner de
+  // pendientes cortaba de linea justo despues del `$` y dejaba el simbolo huerfano al
+  // final de la linea. Un monto no se parte.
+  return `${symbol} ${Math.round(valor).toLocaleString('es-AR')}`;
 }

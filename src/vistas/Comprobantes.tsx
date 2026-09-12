@@ -35,8 +35,9 @@ import './Comprobantes.css';
 function fmtMonto(n: number | null | undefined, moneda: string): string {
   if (n == null) return '—';
   return moneda === 'USD'
-    ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    // F9.172 §3 — espacio duro: el monto no se parte entre signo y numero.
+    ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // F9.99.7 Parte 2 — picker: cada obligación futura se muestra con su mes inequívoco.

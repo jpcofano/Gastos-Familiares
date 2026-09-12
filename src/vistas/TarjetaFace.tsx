@@ -9,8 +9,9 @@ import './TarjetaFace.css';
 
 export function fmtMonto(n: number, moneda: 'ARS' | 'USD'): string {
   return moneda === 'USD'
-    ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
-    : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    // F9.172 §3 — espacio duro: el monto no se parte entre signo y numero.
+    ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+    : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 function fmtFecha(d: Date | null): string {
