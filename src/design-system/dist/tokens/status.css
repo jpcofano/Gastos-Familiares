@@ -1,0 +1,21 @@
+/* ============================================================
+   GENERADO desde src/styles/tokens.css (F9.174 §4). Es una COPIA:
+   la fuente de verdad del repo es src/styles/tokens.css y esto solo
+   existe para que el kit de ui_kits/ renderice con los mismos valores.
+   Si editás uno, sincronizá el otro — divergieron una vez y el kit
+   quedó sin bloque de tema oscuro durante toda la serie F9.169–172.
+   ============================================================ */
+
+/* ─── tokens/status.css ─── */
+:root {
+  /* state            row tint        left accent     badge bg / badge text */
+  --st-pagado-bg:        #f0fdf4;  --st-pagado-line:        #16a34a;  --st-pagado-badge-bg:        #dcfce7;  --st-pagado-badge-tx:        #15803d;
+  --st-por-confirmar-bg: #f0f9ff;  --st-por-confirmar-line: #0284c7;  --st-por-confirmar-badge-bg: #e0f2fe;  --st-por-confirmar-badge-tx: #0369a1;
+  --st-parcial-bg:       #fffbeb;  --st-parcial-line:       #d97706;  --st-parcial-badge-bg:       #fef3c7;  --st-parcial-badge-tx:       #b45309;
+  --st-automatico-bg:    #eff6ff;  --st-automatico-line:    #3b82f6;  --st-automatico-badge-bg:    #dbeafe;  --st-automatico-badge-tx:    #1d4ed8;
+  --st-pendiente-bg:     #fafafa;  --st-pendiente-line:     #d1d5db;  --st-pendiente-badge-bg:     #f3f4f6;  --st-pendiente-badge-tx:     #6b7280;
+  --st-vencido-bg:       #fff7ed;  --st-vencido-line:       #ea580c;  --st-vencido-badge-bg:       #fed7aa;  --st-vencido-badge-tx:       #c2410c;
+  --st-programado-bg:    #f8fafc;  --st-programado-line:    #cbd5e1;  --st-programado-badge-bg:    #f1f5f9;  --st-programado-badge-tx:    #64748b;
+  --st-no-registrado-bg: #fff1f2;  --st-no-registrado-line: #f43f5e;  --st-no-registrado-badge-bg: #ffe4e6;  --st-no-registrado-badge-tx: #be123c;
+}
+

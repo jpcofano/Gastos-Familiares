@@ -1,0 +1,9 @@
+/* ============================================================
+   Gastos Familiares — global stylesheet entry point.
+   Consumers link THIS one file. Keep it as @import lines only.
+   ============================================================ */
+
+@import "tokens/colors.css";
+@import "tokens/typography.css";
+@import "tokens/spacing.css";
+@import "tokens/status.css";

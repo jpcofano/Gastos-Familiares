@@ -1,5 +1,13 @@
 node_modules/
 dist/
+# F9.174 — `dist/` es un patron sin ancla: agarra CUALQUIER carpeta llamada dist, asi que
+# tambien escondia los tokens del design system, que no son build output sino la copia que
+# hace renderizar a ui_kits/ (esos SI estan versionados). Quedaron fuera de git toda la
+# serie F9.169-172 y por eso el kit se desincronizo sin que se notara.
+!src/design-system/dist/
+# El bundle vendorizado (172K, generado) sigue afuera. Si se quiere que el kit renderice
+# desde un clone limpio, borrar esta linea.
+src/design-system/dist/_ds_bundle.js
 .env
 .env.*
 secrets/*.json

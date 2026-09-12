@@ -5,7 +5,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Gastos Familiares — móvil</title>
-<link rel="stylesheet" href="../../styles.css" />
+<!-- F9.174 — el entry real es dist/styles.css; `../../styles.css` no existe en este repo
+     y el kit se abria SIN un solo token (ver §4 del prompt). -->
+<link rel="stylesheet" href="../../dist/styles.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" />
@@ -41,7 +43,8 @@
      copiá tu Client ID y pegalo acá. Sin esto, los medios usan el monograma. */
   window.BRANDFETCH_CLIENT_ID = '1idDEHYBi7zAzQv9-MQ';
 </script>
-<script src="../../_ds_bundle.js"></script>
+<!-- F9.174 — mismo caso que la hoja de estilos: el bundle quedo en dist/. -->
+<script src="../../dist/_ds_bundle.js"></script>
 
 <script type="text/babel" src="data.jsx"></script>
 <script type="text/babel" src="money.jsx"></script>
@@ -190,7 +193,7 @@
   }/*EDITMODE-END*/;
 
   const PALETTES = [
-    { name: 'Marca', inc: '#0c8f62', out: '#f97316', note: 'La actual. Esmeralda del brand + naranja. Coherente con todo el sistema.' },
+    { name: 'Marca', inc: '#047857', out: '#d97706', note: 'La actual. Esmeralda del brand + naranja. Coherente con todo el sistema.' },
     { name: 'Menta', inc: '#10b981', out: '#f97316', note: 'Verde menta más brillante. Fresca y moderna, pero menos "marca".' },
     { name: 'Neón', inc: '#06b6d4', out: '#ec4899', note: 'Cian + magenta. Tech y vibrante; el cian se aleja del verde-finanzas.' },
     { name: 'Clásica', inc: '#22c55e', out: '#ef4444', note: 'Verde + rojo, la convención universal ingreso/gasto. Directa, sin matices.' },
@@ -229,13 +232,24 @@
     { name: 'Daltónico-safe', colors: ['#0072b2','#009e73','#d55e00','#e6c200','#cc79a7','#56b4e9','#e69f00','#555555'], note: 'Okabe–Ito, distinguible con daltonismo.' },
   ];
 
+  // F9.174 §3 — las preferencias que pisan tokens del TEMA no pueden ir inline: lo inline
+  // esta fuera de la cascada y le gana a `html[data-theme="dark"]`, asi que en oscuro los
+  // siete tokens de acento quedaban clavados en su valor CLARO (el rotulo `Hoy` a 3,15:1, el
+  // label activo del nav a 2,25:1) con todo resolviendo bien y nada fallando a la vista.
+  // No alcanza con "no escribir el default": con cualquier opcion elegida el problema vuelve.
+  // Van a una hoja acotada a claro, y en oscuro manda el tema.
+  const cssVar = (id, decls) => {
+    let el = document.getElementById(id);
+    if (!decls) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('style'); el.id = id; document.head.appendChild(el); }
+    el.textContent = `html:not([data-theme="dark"]){${decls}}`;
+  };
+
   function Root() {
     const { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakToggle, TweakButton } = window;    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
     React.useEffect(() => {
       const [inc, out] = t.palette || TWEAK_DEFAULTS.palette;
-      const r = document.documentElement.style;
-      r.setProperty('--gf-income', inc);
-      r.setProperty('--gf-out', out);
+      cssVar('tw-palette', `--gf-income:${inc};--gf-out:${out}`);
     }, [t.palette]);
     React.useEffect(() => {
       const f = FONTS.find((x) => x.name === t.font) || FONTS[0];
@@ -244,14 +258,15 @@
     }, [t.font]);
     React.useEffect(() => {
       const a = ACCENTS.find((x) => x.name === t.accent) || ACCENTS[0];
-      const r = document.documentElement.style;
-      r.setProperty('--color-accent', a.base);
-      r.setProperty('--color-primary', a.base);
-      r.setProperty('--gf-emerald', a.base);
-      r.setProperty('--color-primary-dark', a.deep);
-      r.setProperty('--gf-emerald-deep', a.deep);
-      r.setProperty('--color-focus-ring', a.ring);
-      r.setProperty('--gf-emerald-50', a.tint);
+      cssVar('tw-accent', [
+        `--color-accent:${a.base}`,
+        `--color-primary:${a.base}`,
+        `--gf-emerald:${a.base}`,
+        `--color-primary-dark:${a.deep}`,
+        `--gf-emerald-deep:${a.deep}`,
+        `--color-focus-ring:${a.ring}`,
+        `--gf-emerald-50:${a.tint}`,
+      ].join(';'));
     }, [t.accent]);
     React.useEffect(() => {
       const p = CHART_PALETTES.find((x) => x.name === t.chartPalette) || CHART_PALETTES[0];

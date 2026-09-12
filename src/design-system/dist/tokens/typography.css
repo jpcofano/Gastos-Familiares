@@ -1,0 +1,48 @@
+/* ============================================================
+   GENERADO desde src/styles/tokens.css (F9.174 §4). Es una COPIA:
+   la fuente de verdad del repo es src/styles/tokens.css y esto solo
+   existe para que el kit de ui_kits/ renderice con los mismos valores.
+   Si editás uno, sincronizá el otro — divergieron una vez y el kit
+   quedó sin bloque de tema oscuro durante toda la serie F9.169–172.
+   ============================================================ */
+
+/* ─── tokens/typography.css ─── */
+:root {
+  /* ── Families ──────────────────────────────────────────── */
+  /* System UI stack only — no webfonts. -apple-system / BlinkMacSystemFont
+     resolve to SF Pro on Apple platforms, Segoe UI on Windows, Roboto on
+     Android. The OS native UI face gives the app a fast, native feel. */
+  --font-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+               Roboto, Arial, sans-serif;
+  --font-num:  var(--font-base);   /* numbers use the base face + tabular-nums */
+
+  /* ── Sizes (rem-based, 16px root) ──────────────────────── */
+  --text-2xs:  0.6875rem;  /* 11px — labels, badges            */
+  --text-xs:   0.75rem;    /* 12px — captions, sub             */
+  --text-sm:   0.8125rem;  /* 13px — card sub, hints           */
+  --text-base: 0.875rem;   /* 14px — body / tables             */
+  --text-md:   0.9375rem;  /* 15px — form values               */
+  --text-lg:   1.0625rem;  /* 17px — section / panel titles    */
+  --text-xl:   1.25rem;    /* 20px — page h1                   */
+  --text-2xl:  1.75rem;    /* 28px — sign-in / hero            */
+  --text-3xl:  2.5rem;     /* 40px — hero amount               */
+
+  /* ── Weights ───────────────────────────────────────────── */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-heavy:    800;
+  --weight-black:    900;   /* hero amounts only                */
+
+  /* ── Line heights ──────────────────────────────────────── */
+  --leading-tight:  1.1;
+  --leading-snug:   1.3;
+  --leading-normal: 1.45;
+  --leading-relaxed:1.6;
+
+  /* ── Letter spacing (uppercase eyebrows / labels) ──────── */
+  --tracking-label: 0.04em;
+  --tracking-wide:  0.08em;
+}
+

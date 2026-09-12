@@ -1,0 +1,51 @@
+/* ============================================================
+   GENERADO desde src/styles/tokens.css (F9.174 §4). Es una COPIA:
+   la fuente de verdad del repo es src/styles/tokens.css y esto solo
+   existe para que el kit de ui_kits/ renderice con los mismos valores.
+   Si editás uno, sincronizá el otro — divergieron una vez y el kit
+   quedó sin bloque de tema oscuro durante toda la serie F9.169–172.
+   ============================================================ */
+
+/* ─── tokens/spacing.css ─── */
+:root {
+  /* ── Spacing scale (4px base) ──────────────────────────── */
+  --space-1:  0.25rem;   /*  4px */
+  --space-2:  0.5rem;    /*  8px */
+  --space-3:  0.75rem;   /* 12px */
+  --space-4:  1rem;      /* 16px */
+  --space-5:  1.25rem;   /* 20px */
+  --space-6:  1.5rem;    /* 24px */
+  --space-8:  2rem;      /* 32px */
+  --space-10: 2.5rem;    /* 40px */
+
+  /* ── Radius ────────────────────────────────────────────── */
+  --radius-xs:   4px;    /* badges                            */
+  --radius-sm:   8px;    /* buttons, inputs                   */
+  --radius-md:   12px;   /* chips, small cards                */
+  --radius-lg:   16px;   /* panels                            */
+  --radius-card: 18px;   /* the standard card                 */
+  --radius-xl:   22px;   /* bottom-sheet / modal              */
+  --radius-2xl:  24px;   /* drop zones                        */
+  --radius-pill: 999px;  /* kickers, tags                     */
+
+  /* ── Borders ───────────────────────────────────────────── */
+  --border-hairline: 1px solid var(--color-border);
+  --border-card:     1px solid var(--color-border-card);
+  --border-accent:   3px;   /* checklist left-accent width    */
+
+  /* ── Shadows (soft, low-contrast) ──────────────────────── */
+  --shadow-sm:    0 1px 3px rgba(17, 24, 39, 0.06);
+  --shadow-soft:  0 1px 2px rgba(17, 24, 39, 0.04), 0 6px 20px rgba(17, 24, 39, 0.06);
+  --shadow-pop:   0 2px 4px rgba(17, 24, 39, 0.05), 0 12px 32px rgba(17, 24, 39, 0.10);
+  --shadow-card:  0 6px 18px rgba(17, 24, 39, 0.12);
+  --shadow-sheet: 0 -4px 24px rgba(0, 0, 0, 0.18);
+  --shadow-modal: 0 40px 100px rgba(0, 0, 0, 0.6);
+  --focus-ring:   0 0 0 3px var(--color-focus-ring);
+
+  /* ── Layout ────────────────────────────────────────────── */
+  --app-max:      900px;   /* desktop content column           */
+  --sheet-max:    480px;   /* mobile drawer / modal width       */
+  --header-h:     3.5rem;  /* app header height                 */
+  --transition:   0.15s ease;   /* @kind other */
+}
+

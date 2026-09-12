@@ -7,7 +7,8 @@ const { Money: RMny, StatusBadge: RSB, Badge: RBadge, Button: RBtn, Card: RCard,
 // ── helpers ───────────────────────────────────────────────────────────────
 function rEqArs(x) { return x.moneda === 'ARS' ? x.monto : x.monto * (x.tcUsdArs || window.M_TC); }
 const DIA_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-function fmtArs(n) { return '$ ' + Math.round(n).toLocaleString('es-AR'); }
+// F9.172 §3 — espacio duro: el monto no se parte entre signo y numero.
+function fmtArs(n) { return '$ ' + Math.round(n).toLocaleString('es-AR'); }
 
 function bankColor(nombre) {
   const b = (window.M_BANCOS || []).find((x) => x.nombre === nombre);
@@ -170,7 +171,9 @@ function KpiCards({ c, cur }) {
           {M.otherFromARS(Math.abs(c.netArsEq), cur)}
         </div>
         <div style={{ display: 'flex', marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,.15)' }}>
-          {[{ label: 'Ingresos', v: c.ingArsEq, col: 'var(--gf-emerald-100)' }, { label: 'Gastos', v: c.gasArsEq, col: '#fca5a5' }].map((x, i) => (
+          {/* F9.174 §4 — par --gf-on-ink-*: el hero es ink en los dos temas, asi que lo que se
+              pinta encima no puede usar un token que el tema remapea (F9.171 §6). */}
+          {[{ label: 'Ingresos', v: c.ingArsEq, col: 'var(--gf-on-ink-pos)' }, { label: 'Gastos', v: c.gasArsEq, col: 'var(--gf-on-ink-neg)' }].map((x, i) => (
             <div key={x.label} style={{ flex: 1, borderLeft: i > 0 ? '1px solid rgba(255,255,255,.12)' : 'none' }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'rgba(255,255,255,.5)' }}>{x.label}</div>
               <div style={{ fontSize: 19, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: x.col, marginTop: 3 }}>{M.fromARS(x.v, cur)}</div>
