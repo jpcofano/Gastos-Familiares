@@ -115,6 +115,13 @@
   --color-accent:        var(--gf-emerald);
   --color-info:          var(--gf-blue-600);
 
+  /* F9.170 §1 — tono `successDeep` de Badge: "cerró una deuda que YA existía",
+     un escalón más profundo que el --st-pagado-* de "creó un movimiento nuevo
+     ya saldado". Mismo hue, distinta profundidad: los dos verdes tienen que
+     poder convivir en la misma lista sin confundirse. */
+  --tone-success-deep-bg: var(--gf-emerald-50);
+  --tone-success-deep-tx: var(--gf-emerald-deep);
+
   --color-income:        var(--gf-income);
   --color-expense:       var(--gf-expense);
 
@@ -223,6 +230,15 @@
 
   --color-primary-light: var(--gf-emerald-50);
   --color-focus-ring:    rgba(16, 185, 129, 0.35);
+
+  /* F9.170 §3 — en oscuro --gf-emerald-deep (#059669) sobre el tinte
+     --gf-emerald-50 (#0d2620) da 4,2:1: no llega al piso de 4,5:1.
+     --gf-emerald (#10b981) da 6,3:1 Y además se separa mejor del otro verde,
+     que es el punto del tono: contra el #6ee7b7 de --st-pagado-badge-tx queda
+     en 1,66 de luminancia, mientras que --gf-emerald-line (#34d399) —más
+     contrastado contra el fondo, 8,3:1— se le pega en 1,26. El más legible
+     de los dos no era el que mejor resolvía el problema. El fondo no cambia. */
+  --tone-success-deep-tx: var(--gf-emerald);
   /* #fff sobre el esmeralda aclarado del §3 da 2,5:1 — el botón primario
      lleva texto oscuro en tema oscuro. */
   --color-on-primary:    #04231a;

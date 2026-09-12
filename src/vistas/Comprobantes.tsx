@@ -62,11 +62,14 @@ function ajustarFechaAlMes(fechaISO: string, mesDestino: string): string {
   return `${mesDestino}-${String(diaClamp).padStart(2, '0')}`;
 }
 
-const ESTADO_COMP_TONE = { subido: 'info', extraido: 'warning', vinculado: 'success', error: 'danger' } as const;
+// F9.170 §2 — `vinculado` baja de verde a gris. Había dos verdes distintos compitiendo en la
+// misma tarjeta: el estado del archivo y el resultado del match. El estado es contexto, el
+// resultado es la noticia. Los otros tres no se tocan.
+const ESTADO_COMP_TONE = { subido: 'info', extraido: 'warning', vinculado: 'neutral', error: 'danger' } as const;
 const ESTADO_ENTR_TONE = { pendiente: 'neutral', ruteado: 'success', ambiguo: 'warning', error: 'danger' } as const;
 
 function BadgeEstado({ estado }: { estado: string }) {
-  const tone = (ESTADO_COMP_TONE as Record<string, 'info' | 'warning' | 'success' | 'danger'>)[estado] ?? 'neutral';
+  const tone = (ESTADO_COMP_TONE as Record<string, 'info' | 'warning' | 'neutral' | 'danger'>)[estado] ?? 'neutral';
   return <Badge tone={tone}>{estado}</Badge>;
 }
 
@@ -108,7 +111,13 @@ function RazonVinculado(
   const [errItem,   setErrItem]   = useState<string | null>(null);
   if (!pm) return null;
   let texto: string;
-  let tone: 'info' | 'success' | 'neutral';
+  // F9.170 §1 — el eje del color es QUÉ HIZO EL SISTEMA CON EL ARCHIVO, no la rama. Antes ocho
+  // resultados se repartían cuatro tonos y el verde se comía seis, con lo cual "Creó la
+  // obligación" (deja plata por pagar) y "Cargado como movimiento nuevo" (ya saldado) —que son
+  // opuestos— salían idénticos.
+  let tone: 'info' | 'sky' | 'success' | 'successDeep' | 'warning' | 'neutral';
+  // Marca de "lo hizo solo": chispas dentro de la pill, sin gastar un color en decirlo.
+  let auto = false;
 
   // F9.154 §4.b — ítem y mes SIEMPRE que se puedan decir, no solo en la rama automática. Antes la
   // única salida informativa era aquella en la que el usuario no había participado: apenas
@@ -121,35 +130,72 @@ function RazonVinculado(
     : (pm.itemEsperadoId ?? null);
   // F9.154 §3 — el mes que decidió el server con el corte del ítem le gana al de la fecha.
   const mesPago = pm.mesImputacion ?? (d ? (d.vencimientos?.[0]?.fecha ?? d.fecha)?.slice(0, 7) ?? null : null);
+  // F9.170 §4 — el sufijo ya NO se concatena al verbo. `Badge` es white-space:nowrap, así que
+  // "CREÓ LA OBLIGACIÓN · IMPUESTOS Y FINANZAS › MONOTRIBUTO · SEPTIEMBRE 2026" se iba del borde de
+  // la tarjeta sin elipsis. No es un problema de truncado: la categoría y el mes no tenían por
+  // qué estar adentro de la pill. Bajan a una línea propia y los ocho chips miden lo mismo.
   const sufijo  = [nombreItem, mesPago ? formatMesCorto(mesPago) : null].filter(Boolean).join(' · ');
-  const con     = (base: string) => sufijo ? `${base} · ${sufijo}` : base;
 
   switch (pm.rama) {
+    // Dedup: no pasó nada.
     case 0: texto = 'Ya cargado'; tone = 'neutral'; break;
     // F9.154 §4.c — el mismo hecho tenía dos nombres: "Pagó una obligación" antes de confirmar y
     // "Pagó una factura" después. Es uno solo.
-    case 1: texto = pm.origenReconciliacion ? con('Pagó una obligación') : 'Vinculado a un movimiento'; tone = 'info'; break;
+    // F9.170 §1 — los dos casos de la rama 1 dejaron de compartir tono: uno cerró una deuda
+    // (verde profundo) y el otro solo emparejó sin plata nueva (azul, el único informativo puro).
+    case 1:
+      if (pm.origenReconciliacion) { texto = 'Pagó una obligación';      tone = 'successDeep'; }
+      else                         { texto = 'Vinculado a un movimiento'; tone = 'info'; }
+      break;
     case 2: {
       // F9.154 §4.a — este comprobante se colgó de un movimiento que YA existía. Es la diferencia
       // que decide si descartarlo borra plata: `descartarEntrada` solo borra el movimiento cuando
       // `origenComprobanteId` coincide. Antes decía lo mismo que la rama 3, que sí lo creó.
-      if (pm.origenSuelto) { texto = con(`Se adjuntó a un ${palabraMov(tipoMov)} ya cargado`); tone = 'success'; break; }
-      if (pm.esAdicional)  { texto = con('Pago adicional');                   tone = 'success'; break; }
+      // F9.170 §1 — celeste: el archivo se posó sobre algo preexistente, no creó nada.
+      if (pm.origenSuelto) { texto = `Se adjuntó a un ${palabraMov(tipoMov)} ya cargado`; tone = 'sky'; break; }
+      if (pm.esAdicional)  { texto = 'Pago adicional';                                  tone = 'success'; break; }
       // F9.106 — distingue la alta silenciosa (confianza ≥ UMBRAL_AUTO) de la confirmada a mano.
+      //
+      // F9.170 §1 — el tono sale POR RESULTADO, no por "fue automático". Este es el mismo caso
+      // que "Creó la obligación" de abajo, nada más que sin preguntar: si el documento es una
+      // obligación (factura o recibo de servicio), el alta silenciosa creó una obligación IMPAGA
+      // y va ámbar. Pintarla verde sería reintroducir el bug exacto que este cambio arregla — un
+      // chip verde sobre plata que falta pagar. Lo automático lo dicen las chispas, no el color.
       if (pm.requiereConfirmacion === false && sufijo) {
-        texto = `Asignado automáticamente a ${sufijo}`;
-        tone = 'success';
+        texto = 'Asignado automáticamente';
+        tone  = esObligacionDoc(d?.tipoDocumento) ? 'warning' : 'success';
+        auto  = true;
         break;
       }
       // F9.154 §4.b — "Cumplió un gasto esperado" mentía: Edenor no cumplió nada, creó una
       // obligación impaga. El verbo ahora dice lo que pasó.
-      texto = con('Creó la obligación'); tone = 'success'; break;
+      // F9.170 §1 — y el color también: es el único resultado que deja algo por pagar.
+      texto = 'Creó la obligación'; tone = 'warning'; break;
     }
     // F9.154 §4.a — rama 3 con `origenSuelto` sí saldó un movimiento preexistente; sin él, este
-    // comprobante creó el movimiento. Dos textos, porque son dos cosas.
-    case 3: texto = pm.origenSuelto ? con(`Saldó un ${palabraMov(tipoMov)} ya cargado`) : con('Cargado como movimiento nuevo'); tone = 'success'; break;
+    // comprobante creó el movimiento. Dos textos, porque son dos cosas — y dos tonos.
+    case 3:
+      texto = pm.origenSuelto ? `Saldó un ${palabraMov(tipoMov)} ya cargado` : 'Cargado como movimiento nuevo';
+      tone  = pm.origenSuelto ? 'sky' : 'success';
+      break;
     default: return null;
   }
+
+  // F9.170 §4 — la pill se queda con el verbo; categoría y mes bajan a texto plano. Se omite
+  // entera cuando no hay sufijo (rama 0, y el "Vinculado a un movimiento" sin ítem): una línea
+  // vacía empujaría el layout de las tarjetas que no tienen nada que decir ahí.
+  const pill = (
+    <Badge tone={tone}>
+      {auto
+        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <Icon name="sparkles" size={11} />{texto}
+          </span>
+        : texto}
+    </Badge>
+  );
+  const detalle = sufijo
+    ? <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>{sufijo}</span>
+    : null;
 
   // F9.154 §4.d — el badge ES el botón: un tap abre la reasignación, sin modo de edición ni estado
   // escondido. Edición en su lugar (update de `itemEsperadoId`), no revertir y recrear.
@@ -172,9 +218,10 @@ function RazonVinculado(
           title="Esta no era la obligación"
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start' }}
         >
-          <Badge tone={tone}>{texto}</Badge>
+          {pill}
           <Icon name={abierto ? 'chevron-up' : 'chevron-down'} size={13} color="var(--color-text-sec)" />
         </button>
+        {detalle}
 
         {abierto && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
@@ -213,7 +260,11 @@ function RazonVinculado(
   }
 
   const editable = !!comp && !!esAdmin && comprobanteCreoElMovimiento(pm);
-  if (!editable) return <Badge tone={tone}>{texto}</Badge>;
+  if (!editable) {
+    return detalle
+      ? <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>{pill}{detalle}</div>
+      : pill;
+  }
 
   const candidatos = items
     .filter(i => i.activo && i.id !== pm.itemEsperadoId)
@@ -227,9 +278,10 @@ function RazonVinculado(
         title={`Cambiar el ${palabraEsperado(tipoMov)} de este movimiento`}
         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, alignSelf: 'flex-start' }}
       >
-        <Badge tone={tone}>{texto}</Badge>
+        {pill}
         <Icon name={abierto ? 'chevron-up' : 'chevron-down'} size={13} color="var(--color-text-sec)" />
       </button>
+      {detalle}
 
       {abierto && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: 'var(--gf-gray-50)', borderRadius: 10, border: '1px solid var(--gf-gray-100)' }}>
@@ -1565,7 +1617,11 @@ export default function Comprobantes() {
           />
         )}
 
-        <div style={{ height: 4 }} />
+        {/* F9.170 §5 — el FAB (64px) flota sobre el final del scroll y tapaba la última tarjeta.
+            Va acá y no en la lista del historial: el último bloque de la columna es
+            SeccionTarjetas, así que un padding en el historial habría abierto un hueco en el
+            medio sin destapar nada. */}
+        <div style={{ height: 88 }} />
       </div>
 
       {/* ── Alta manual (overlay; se abre con el FAB +) ─────────────────── */}
