@@ -2,6 +2,8 @@
 //
 // Corre con la reconstrucción completa de §4 (fina + destinos en su estado de T). "antes" es el guard
 // de F9.168 como estaba en ffc7309; "después" son `obligacionSaldable`/`esCargoAdicional` REALES.
+// La tolerancia de monto se fija en la de ffc7309 (`montoViejo`) para aislar §1 de §2: con §2 los
+// pagos de expensas ya saldan por payee y nunca llegan al guard (eso lo verifica verificarF9175s2).
 import { cargar, simular, contexto, etiquetaGuardada, destinosEnT, iso } from './simMatchF9175';
 import { obligacionSaldable, esCargoAdicional } from '../functions/src/matchLogica';
 import { Timestamp } from 'firebase-admin/firestore';
@@ -16,7 +18,7 @@ async function main() {
   const E = await cargar();
   const comp = (p: string) => E.comps.find(c => c.id.startsWith(p))!;
   const sim = (c: FirebaseFirestore.QueryDocumentSnapshot, acotado: boolean, refISO?: string) =>
-    simular(E, c, { guardAcotado: acotado, fina: true, destinoEnT: destinosEnT(E, c), refISO });
+    simular(E, c, { guardAcotado: acotado, fina: true, destinoEnT: destinosEnT(E, c), refISO, montoViejo: true });
 
   console.log('=== 1. los casos nombrados ===');
   for (const [p, mov] of [['4c8a6dbe', '7HTNXS5cwTNCdf3scIF8'], ['d37f6034', 'C7ZY6a2iPhaxaGnCF9PG']] as const) {
@@ -48,8 +50,8 @@ async function main() {
     const fijo = { ...c.data(), propuestaMatch: { ...c.data().propuestaMatch, calculadoEn: Timestamp.fromMillis(Tdipi + 1) } };
     const c2 = { id: c.id, data: () => fijo } as unknown as FirebaseFirestore.QueryDocumentSnapshot;
     const ov = { aysa: { itemEsperadoId: '94c07e7c61d119db6fb5', existia: true } };
-    const a = simular(E, c2, { guardAcotado: false, fina: true, destinoEnT: ov, refISO: '2026-12-31' });
-    const d = simular(E, c2, { guardAcotado: true, fina: true, destinoEnT: ov, refISO: '2026-12-31' });
+    const a = simular(E, c2, { guardAcotado: false, fina: true, destinoEnT: ov, refISO: '2026-12-31', montoViejo: true });
+    const d = simular(E, c2, { guardAcotado: true, fina: true, destinoEnT: ov, refISO: '2026-12-31', montoViejo: true });
     console.log(`  F9.168 real: boleta 97e781db ($23.301,99) contra Casa›Agua con dIPI ($51.672,34) viva: antes=${a.rama} | después=${d.rama}`);
     for (const t of d.traza.filter(x => x.includes('obligaciones'))) console.log('     ' + t.trim());
     chk('la segunda boleta de agua NO da por pagada la obligación de la primera (bug F9.168)', d.rama === '2+adic destino' && !d.mov);

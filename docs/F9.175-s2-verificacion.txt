@@ -1,0 +1,36 @@
+=== 1. los dos pagos de expensas (0,43 de diferencia) ===
+  4c8a6dbe pago=266469 → reconciliarPorPayee=[7HTNXS5cwTNCdf3scIF8 $266469.43]
+  OK   4c8a6dbe salda 7HTNXS5cwTNCdf3scIF8 por payee
+  OK   4c8a6dbe ahora entra por rama 1 payee (antes del destino) — 1 payee
+  d37f6034 pago=184245 → reconciliarPorPayee=[C7ZY6a2iPhaxaGnCF9PG $184245.43]
+  OK   d37f6034 salda C7ZY6a2iPhaxaGnCF9PG por payee
+  OK   d37f6034 ahora entra por rama 1 payee (antes del destino) — 1 payee
+
+=== 2. ITPA: 1.484.000 contra 2.017.000 NO salda ===
+  pago 1484000 vs obligación 2017000 (mismo payee forzado)
+  OK   ITPA 1.484.000 no salda la obligación de 2.017.000 por payee
+  OK   ni por nombre
+  OK   pago = obligación − 0,99 salda (truncamiento)
+  OK   pago = obligación − 1,00 NO salda
+  OK   pago = obligación + 0,005 salda (tolerancia de siempre)
+  OK   pago = obligación + 0,02 NO salda (hacia arriba no hay banda)
+  OK   en USD, pago = obligación − 0,43 NO salda (USD sin cambio)
+  OK   pago = obligación − 0,43 contra el VENCIMIENTO también salda
+
+=== 3. ningún pago que hoy salda deja de saldar, y qué se suma ===
+  pagos=142; lo que saldaba antes sigue saldando en 142/142
+  OK   ningún pago que hoy salda deja de hacerlo
+  candidatas que se suman con la banda nueva (3):
+  + 4c8a6dbe [payee] pago=266469 → 7HTNXS5cwTNCdf3scIF8 $266469.43 "Cons.Prop.Pje del Signo 4032/42" suya=SÍ
+  + 4c8a6dbe [débil] pago=266469 → 7HTNXS5cwTNCdf3scIF8 $266469.43 "Cons.Prop.Pje del Signo 4032/42" suya=SÍ
+  + d37f6034 [payee] pago=184245 → C7ZY6a2iPhaxaGnCF9PG $184245.43 "Cons.Prop.Pje del Signo 4032/42" suya=SÍ
+  OK   toda candidata nueva es la obligación que el dueño eligió
+
+=== 4. pipeline completo (§1 + §2) contra lo guardado ===
+  3a8d38d5 guardada=2 | sim(ffc7309)=3 | sim(§1+§2)=3 | dueño: 4jAxXvSNlKV5ycOg1doj
+  3b089c12 guardada=2 | sim(ffc7309)=3 | sim(§1+§2)=3 | dueño: Rf9ewtf3JvxbComk7Szh
+  4c8a6dbe guardada=2+adic destino | sim(ffc7309)=2+adic destino | sim(§1+§2)=1 payee 7HTNXS5cwTNCdf3scIF8 | dueño: 7HTNXS5cwTNCdf3scIF8
+  d37f6034 guardada=1 destino C7ZY6a2iPhaxaGnCF9PG | sim(ffc7309)=2+adic destino | sim(§1+§2)=1 payee C7ZY6a2iPhaxaGnCF9PG | dueño: C7ZY6a2iPhaxaGnCF9PG
+  pagos cuya propuesta simulada difiere de la guardada: 4
+
+TODO OK — 14 ok, 0 fail

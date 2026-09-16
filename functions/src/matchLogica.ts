@@ -458,11 +458,31 @@ export function calcularPropuesta(
   return { rama: 3, calculadoEn: ahora };
 }
 
+// F9.175 §2 — cuánto MENOS que la obligación puede ser un pago y todavía saldarla, por moneda.
+//
+// El modo de falla medido es TRUNCAMIENTO DE CENTAVOS: el comprobante del banco trae el importe sin
+// los centavos de la factura. Medido sobre producción (scripts/verificarF9175s3.ts, 2026-09-16), de
+// los 17 pagos que el dueño vinculó a una obligación preexistente: 13 exactos, 3 con diferencia
+// chica —todas con el pago MENOR y exactamente igual a la obligación sin centavos (−0,43, −0,43,
+// −0,11)— y 1 recargo de 263,76. Hueco limpio entre 0,43 y 263,76; ninguna diferencia chica hacia
+// arriba; ningún par de obligaciones del mismo payee y mes separadas por menos de un peso.
+//
+// Por eso es ABSOLUTA (no porcentaje: con un 1% una obligación de $266.000 aceptaría $2.600 de
+// diferencia) y ASIMÉTRICA (sólo hacia abajo). Hacia arriba sigue la tolerancia de siempre.
+// USD queda como estaba: no hay un solo caso medido que justifique moverla.
+const TRUNCAMIENTO_MAX: Record<'ARS' | 'USD', number> = { ARS: 1, USD: 0.01 };
+
+function importeSalda(obligacion: number, pago: number, moneda: 'ARS' | 'USD'): boolean {
+  const faltante = obligacion - pago;           // > 0: el pago es menor que la obligación
+  if (Math.abs(faltante) < 0.01) return true;   // lo de siempre, en las dos direcciones
+  return faltante > 0 && faltante < (TRUNCAMIENTO_MAX[moneda] ?? 0.01);
+}
+
 // F9.82 — un pago puede saldar el monto cabecera O cualquier vencimiento (1º/2º venc)
-function montoSalda(m: MovimientoMin, montoTotal: number): boolean {
-  if (Math.abs(m.monto - montoTotal) < 0.01) return true;
+function montoSalda(m: MovimientoMin, montoTotal: number, moneda: 'ARS' | 'USD'): boolean {
+  if (importeSalda(m.monto, montoTotal, moneda)) return true;
   return (m.vencimientos ?? []).some(
-    v => typeof v?.monto === 'number' && Math.abs(v.monto - montoTotal) < 0.01,
+    v => typeof v?.monto === 'number' && importeSalda(v.monto, montoTotal, moneda),
   );
 }
 
@@ -501,7 +521,7 @@ export function reconciliarPorPayee(
       (!!pCbu   && mCbu   === pCbu)   ||
       (!!pAlias && mAlias === pAlias);
     if (!mismoPayee) return false;
-    return montoSalda(m, datos.montoTotal as number);
+    return montoSalda(m, datos.montoTotal as number, datos.moneda);
   });
 }
 
@@ -525,7 +545,7 @@ export function reconciliarPorNombre(
     if (m.tipo !== tipoOk)         return false;   // F9.155 §5
     if (m.moneda !== datos.moneda) return false;
     if (m.confirmadoPago)          return false;
-    if (!montoSalda(m, datos.montoTotal as number)) return false;
+    if (!montoSalda(m, datos.montoTotal as number, datos.moneda)) return false;
     const mNombre = norm(m.destinoNombre);
     const nombreCoincide = !!mNombre &&
       (mNombre === pNombre || mNombre.includes(pNombre) || pNombre.includes(mNombre));

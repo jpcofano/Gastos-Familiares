@@ -36,7 +36,15 @@ export type Opciones = {
   // Fecha de referencia de `esObligacionFutura` (default: día de subida). Sirve para probar una
   // boleta real como si ya estuviera vencida.
   refISO?: string;
+  // true = los pases de reconciliación con la tolerancia de monto de ffc7309 (±0,01). Se obtiene
+  // filtrando la salida real, válido porque la tolerancia de F9.175 §2 la contiene
+  // (verificado en verificarF9175s2.ts §3). Sirve para aislar §1 de §2.
+  montoViejo?: boolean;
 };
+
+const saldaViejo = (m: MovimientoMin, total: number | null) =>
+  total != null && (Math.abs(m.monto - total) < 0.01 ||
+  (m.vencimientos ?? []).some(v => typeof v?.monto === 'number' && Math.abs(v.monto - total) < 0.01));
 
 export type Resultado = { rama: string; mov?: string; item?: string; traza: string[] };
 
@@ -150,11 +158,8 @@ function cargoAdicional(obl: MovimientoMin[], tipoDoc: string, acotado: boolean)
   return !obl.some(m => !m.confirmadoPago && !m.origenComprobanteId);
 }
 
-export function simular(E: Estado, c: FirebaseFirestore.QueryDocumentSnapshot, o: Opciones): Resultado {
-  const ctx = contexto(E, c, !!o.fina);
-  const { datos, T, mesComp, movs } = ctx;
-  const refISO = o.refISO ?? ctx.refISO;
-  const traza: string[] = [];
+/** Réplica de `cargarNombresDestinoAprendidos` con el estado de destinos en T. */
+export function nombresEnT(E: Estado, T: number, o: Pick<Opciones, 'fina' | 'destinoEnT'>): Map<string, string> {
   const nombres = new Map<string, string>();
   for (const [id, x0] of E.destinos) {
     const ov = o.destinoEnT?.[x0.destinoNorm];
@@ -163,14 +168,23 @@ export function simular(E: Estado, c: FirebaseFirestore.QueryDocumentSnapshot, o
     if (o.fina && !ov?.existia && (E.nacimiento.get(id) ?? -Infinity) > T) continue;
     if (x.tipo === 'nombre' && (x.confianza ?? 0) >= 0.7 && x.destinoNorm && x.itemEsperadoId) nombres.set(x.destinoNorm, x.itemEsperadoId);
   }
+  return nombres;
+}
+
+export function simular(E: Estado, c: FirebaseFirestore.QueryDocumentSnapshot, o: Opciones): Resultado {
+  const ctx = contexto(E, c, !!o.fina);
+  const { datos, T, mesComp, movs } = ctx;
+  const refISO = o.refISO ?? ctx.refISO;
+  const traza: string[] = [];
+  const nombres = nombresEnT(E, T, o);
 
   const esPago = datos.tipoDocumento === 'transferencia' || datos.tipoDocumento === 'comprobante_pago';
   if (esPago) {
-    const r = ML.reconciliarPorPayee(datos, movs);
+    const r = ML.reconciliarPorPayee(datos, movs).filter(m => !o.montoViejo || saldaViejo(m, datos.montoTotal));
     traza.push(`payee → [${r.map(m => m.id).join(',')}]`);
     if (r.length === 1) return { rama: '1 payee', mov: r[0].id, traza };
     if (r.length > 1) return { rama: `1 payee cands(${r.length})`, traza };
-    const w = ML.reconciliarPorNombre(datos, movs, nombres);
+    const w = ML.reconciliarPorNombre(datos, movs, nombres).filter(m => !o.montoViejo || saldaViejo(m, datos.montoTotal));
     traza.push(`débil → [${w.map(m => m.id).join(',')}]`);
     if (w.length > 0) return { rama: `1 débil(${w.length})`, traza };
   }

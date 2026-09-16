@@ -1,0 +1,95 @@
+F9.175 §3 — tolerancia de montoSalda. SOLO LECTURA.
+
+── 1) Distribución: la candidata MÁS CERCANA de cada pago, por pase (|pago − obligación|)
+
+  pase payee: 9 pagos con al menos una candidata
+           0.00  signo=exacto    02a2f764 2026-09-11 pago=770901 ARS vs monto 770901 (2nnnWCKX "Colegio Guadalupe") suya=no cands=1 | sin movimiento vinculado
+           0.00  signo=exacto    34f4cd38 2026-07-16 pago=735412 ARS vs monto 735412 (yJfRrxoF "Colegio Guadalupe") suya=SÍ cands=1 | vinculado a yJfRrxoFLbhFehn6Csee
+           0.00  signo=exacto    3f3ba8e8 2026-08-11 pago=2003500 ARS vs monto 2003500 (PHWX7clk "ITPA SA") suya=SÍ cands=1 | vinculado a PHWX7clkikjA17bz4sst
+           0.00  signo=exacto    680852ca 2026-09-11 pago=770901 ARS vs monto 770901 (2nnnWCKX "Colegio Guadalupe") suya=SÍ cands=1 | vinculado a 2nnnWCKXSqONzh5VmrWf
+           0.00  signo=exacto    ab04a693 2026-09-10 pago=2017000 ARS vs monto 2017000 (KhYexvlI "ITPA SA") suya=SÍ cands=1 | vinculado a KhYexvlIEdaLZfvLMfZN
+           0.00  signo=exacto    ebba8e89 2026-07-16 pago=1484000 ARS vs monto 1484000 (9usg35je "ITPA SA") suya=SÍ cands=1 | vinculado a 9usg35je3UqByX5hr6Gj
+           0.43  signo=pago<obl  4c8a6dbe 2026-09-16 pago=266469 ARS vs monto 266469.43 (7HTNXS5c "Cons.Prop.Pje del Signo 4032/42") suya=SÍ cands=1 | vinculado a 7HTNXS5cwTNCdf3scIF8
+           0.43  signo=pago<obl  d37f6034 2026-08-14 pago=184245 ARS vs monto 184245.43 (C7ZY6a2i "Cons.Prop.Pje del Signo 4032/42") suya=SÍ cands=1 | vinculado a C7ZY6a2iPhaxaGnCF9PG
+      102605.87  signo=pago>obl  a07760b9 2026-09-07 pago=107897.7 ARS vs monto 5291.83 (yR4NiHeW "Metrogas") suya=no cands=1 | vinculado a CXLEFRQ5baQ8cjdX7DGS
+
+  pase débil: 13 pagos con al menos una candidata
+           0.00  signo=exacto    02a2f764 2026-09-11 pago=770901 ARS vs monto 770901 (2nnnWCKX "Colegio Guadalupe") suya=no cands=1 | sin movimiento vinculado
+           0.00  signo=exacto    2472c965 2026-07-21 pago=5303.18 ARS vs monto 5303.18 (bfREmHyi "Metrogas") suya=SÍ cands=1 | vinculado a bfREmHyiQhx0Y9zOCBdq
+           0.00  signo=exacto    249624a1 2026-07-03 pago=49247.78 ARS vs monto 49247.78 (lek97uWG "Agua y Saneamientos Argentinos S.A.") suya=SÍ cands=1 | vinculado a lek97uWGdQm7DUZd1XAN
+           0.00  signo=exacto    3f3ba8e8 2026-08-11 pago=2003500 ARS vs monto 2003500 (PHWX7clk "ITPA SA") suya=SÍ cands=1 | vinculado a PHWX7clkikjA17bz4sst
+           0.00  signo=exacto    680852ca 2026-09-11 pago=770901 ARS vs monto 770901 (2nnnWCKX "Colegio Guadalupe") suya=SÍ cands=1 | vinculado a 2nnnWCKXSqONzh5VmrWf
+           0.00  signo=exacto    a07760b9 2026-09-07 pago=107897.7 ARS vs monto 107897.7 (CXLEFRQ5 "Personal") suya=SÍ cands=1 | vinculado a CXLEFRQ5baQ8cjdX7DGS
+           0.00  signo=exacto    ab04a693 2026-09-10 pago=2017000 ARS vs monto 2017000 (KhYexvlI "ITPA SA") suya=SÍ cands=1 | vinculado a KhYexvlIEdaLZfvLMfZN
+           0.00  signo=exacto    c82eb6ab 2026-07-03 pago=22498.48 ARS vs venc 22498.48 (hMcb2Yix "Agua y Saneamientos Argentinos S.A.") suya=SÍ cands=1 | vinculado a hMcb2YixlaRujBttySnk
+           0.00  signo=exacto    d779a9de 2026-07-04 pago=269778.85 ARS vs monto 269778.85 (03Vbpjjx "Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)") suya=SÍ cands=1 | vinculado a 03VbpjjxMOLaLizjMERv
+           0.00  signo=exacto    e4b6b7a3 2026-09-08 pago=283024.45 ARS vs monto 283024.45 (rwfmBgh6 "Edenor") suya=SÍ cands=1 | vinculado a rwfmBgh6N6us7wsw26Ie
+           0.00  signo=exacto    ebba8e89 2026-07-16 pago=1484000 ARS vs monto 1484000 (9usg35je "ITPA SA") suya=SÍ cands=1 | vinculado a 9usg35je3UqByX5hr6Gj
+           0.43  signo=pago<obl  4c8a6dbe 2026-09-16 pago=266469 ARS vs monto 266469.43 (7HTNXS5c "Cons.Prop.Pje del Signo 4032/42") suya=SÍ cands=1 | vinculado a 7HTNXS5cwTNCdf3scIF8
+         263.76  signo=pago>obl  13c1b187 2026-09-15 pago=5555.59 ARS vs monto 5291.83 (yR4NiHeW "Metrogas") suya=SÍ cands=1 | vinculado a yR4NiHeWwX87trZMTVQw
+
+  pares pago↔candidata: 22. Con |dif| < 1: 20. Con |dif| < 0,01: 17.
+  diferencias distintas, ordenadas (primeras 25): 0 | 0.43 | 263.76 | 102605.87
+  HUECO: la mayor diferencia < 1 es 0.43; la menor ≥ 1 es 263.76.
+
+── 2) Signo de las diferencias chicas (0 < |dif| < 1)
+   4c8a6dbe [payee] pago=266469 vs monto 266469.43 dif=-0.43 → pago MENOR (truncamiento hacia abajo)  centavos obl=0.43 centavos pago=0.00 suya=SÍ
+   4c8a6dbe [débil] pago=266469 vs monto 266469.43 dif=-0.43 → pago MENOR (truncamiento hacia abajo)  centavos obl=0.43 centavos pago=0.00 suya=SÍ
+   d37f6034 [payee] pago=184245 vs monto 184245.43 dif=-0.43 → pago MENOR (truncamiento hacia abajo)  centavos obl=0.43 centavos pago=0.00 suya=SÍ
+
+── 3) Falsos positivos por tolerancia
+  actual ±0,01                       pagos con match=17  suya=15  una sola candidata AJENA=2  ambiguos=0
+     FP 02a2f764 [payee] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+     FP 02a2f764 [débil] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+  ±0,50                              pagos con match=20  suya=18  una sola candidata AJENA=2  ambiguos=0
+     FP 02a2f764 [payee] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+     FP 02a2f764 [débil] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+  ±1                                 pagos con match=20  suya=18  una sola candidata AJENA=2  ambiguos=0
+     FP 02a2f764 [payee] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+     FP 02a2f764 [débil] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+  asim. [−1, +0,01)                  pagos con match=20  suya=18  una sola candidata AJENA=2  ambiguos=0
+     FP 02a2f764 [payee] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+     FP 02a2f764 [débil] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+  truncamiento: pago = floor(obl)    pagos con match=20  suya=18  una sola candidata AJENA=2  ambiguos=0
+     FP 02a2f764 [payee] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+     FP 02a2f764 [débil] pago=770901 → 2nnnWCKX "Colegio Guadalupe" (monto 770901) | sin movimiento vinculado
+
+── 4) Obligaciones del mismo payee y mes cuyos montos difieren < 1 entre sí
+   20941749160|2026-08|ARS HeF0CdoH $9100 (Chino, conf=true) vs dYtDS0tz $9100 (Chino, conf=true) dif=0.00
+   20932459893|2026-09|ARS 2x2po8ha $30000 (Haedo Burgues Leonardo Hecto, conf=true) vs P27zDdTU $30000 (Haedo Burgues Leonardo Hecto, conf=true) dif=0.00
+   20465015986|2026-07|ARS DBQPKpqu $25000 (Ignacio Nalino Osinalde, conf=true) vs wL8xrA4S $25000 (Ignacio Nalino Osinalde, conf=true) dif=0.00
+   27355392568|2026-08|ARS Jtg0SAUB $50000 (Corina Janet Prado, conf=true) vs XQfC9drz $50000 (Corina Janet Prado, conf=true) dif=0.00
+   27355392568|2026-08|ARS LHvbOknv $53000 (Corina Janet Prado, conf=true) vs M8x2we60 $53000 (Corina Janet Prado, conf=true) dif=0.00
+   27488573778|2026-08|ARS RwH75cpH $50000 (Sofia Ines Cofano Lascano, conf=true) vs kzhs0KyQ $50000 (Sofia Cofano Lascano, conf=true) dif=0.00
+  pares: 6 (grupos payee+mes+moneda con más de una obligación: 20)
+   [nombre] mingming yu|2026-08|ARS HeF0CdoH $9100 vs dYtDS0tz $9100 dif=0.00
+   [nombre] haedo burgues leonardo hecto|2026-09|ARS 2x2po8ha $30000 vs P27zDdTU $30000 dif=0.00
+   [nombre] ignacio nalino osinalde|2026-07|ARS DBQPKpqu $25000 vs wL8xrA4S $25000 dif=0.00
+   [nombre] corina janet prado|2026-08|ARS Jtg0SAUB $50000 vs XQfC9drz $50000 dif=0.00
+   [nombre] corina janet prado|2026-08|ARS LHvbOknv $53000 vs M8x2we60 $53000 dif=0.00
+  pares por nombre: 5
+
+── 5) Pagos vinculados por el dueño a una obligación preexistente (cualquier camino)
+   dif=        0.00  059e7006 comprobante_pago pago=146739.5 vs 146739.5 (bVJuRsNC "TELECOM ARGENTINA S.A.") rama=2
+   dif=      263.76  13c1b187 comprobante_pago pago=5555.59 vs 5291.83 (yR4NiHeW "Metrogas") rama=2 destino
+   dif=        0.00  2472c965 comprobante_pago pago=5303.18 vs 5303.18 (bfREmHyi "Metrogas") rama=1
+   dif=        0.00  249624a1 comprobante_pago pago=49247.78 vs 49247.78 (lek97uWG "Agua y Saneamientos Argentinos S.A.") rama=1
+   dif=        0.00  34f4cd38 transferencia    pago=735412 vs 735412 (yJfRrxoF "Colegio Guadalupe") rama=1
+   dif=        0.00  3f3ba8e8 transferencia    pago=2003500 vs 2003500 (PHWX7clk "ITPA SA") rama=1
+   dif=       -0.43  4c8a6dbe transferencia    pago=266469 vs 266469.43 (7HTNXS5c "Cons.Prop.Pje del Signo 4032/42") rama=2 destino
+   dif=        0.00  680852ca transferencia    pago=770901 vs 770901 (2nnnWCKX "Colegio Guadalupe") rama=1
+   dif=        0.00  a07760b9 comprobante_pago pago=107897.7 vs 107897.7 (CXLEFRQ5 "Personal") rama=1
+   dif=        0.00  a9da4f68 comprobante_pago pago=72414.1 vs 72414.1 (BZ6VXwOm "AFIP - Monotributo") rama=3
+   dif=        0.00  ab04a693 transferencia    pago=2017000 vs 2017000 (KhYexvlI "ITPA SA") rama=1
+   dif=        0.00  c82eb6ab comprobante_pago pago=22498.48 vs 22498.48 (hMcb2Yix "Agua y Saneamientos Argentinos S.A.") rama=1
+   dif=       -0.43  d37f6034 transferencia    pago=184245 vs 184245.43 (C7ZY6a2i "Cons.Prop.Pje del Signo 4032/42") rama=1 destino
+   dif=        0.00  d779a9de comprobante_pago pago=269778.85 vs 269778.85 (03Vbpjjx "Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)") rama=1
+   dif=        0.00  e4b6b7a3 comprobante_pago pago=283024.45 vs 283024.45 (rwfmBgh6 "Edenor") rama=1
+   dif=        0.00  ebba8e89 transferencia    pago=1484000 vs 1484000 (9usg35je "ITPA SA") rama=1
+   dif=       -0.11  fd015e17 comprobante_pago pago=106037 vs 106037.11 (tEYCtFJh "TELECOM ARGENTINA S.A.") rama=1 destino
+  total=17  exactos=13  0,01≤|d|<1=3 (todos pago<obl: true)  |d|≥1=1
+
+  02a2f764 (el "FP" de 3): estado=vinculado pm={"rama":1,"movimientoId":"2nnnWCKXSqONzh5VmrWf","origenReconciliacion":true} archivo=Comprobante.pdf subidoEn=2026-09-11T21:41:36.558Z numeroOperacion=50407483022260911
+  680852ca (su gemelo):   estado=vinculado archivo=user-info-operations-historical-ar-document-title.pdf subidoEn=2026-09-15T19:57:03.343Z numeroOperacion=50407483022260911
+
+(T de referencia de cada pago: propuestaMatch.calculadoEn; generado 2026-09-16T22:24:07.849Z)

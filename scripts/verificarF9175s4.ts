@@ -52,14 +52,14 @@ async function main() {
     if (!c.data().datosExtraidos || !pm || pm.rama === 0) continue;
     n++;
     const g = etiquetaGuardada(pm);
-    const a = simular(E, c, { guardAcotado: false });
-    const f = simular(E, c, { guardAcotado: false, fina: true });
+    const a = simular(E, c, { guardAcotado: false, montoViejo: true });
+    const f = simular(E, c, { guardAcotado: false, fina: true, montoViejo: true });
     if (a.rama === g) ok++;
     if (f.rama === g) okF++;
     // Para rama 1 payee/débil sin movimientoId (candidatos), el comportamiento es la etiqueta.
     const cg = comportamientoGuardado(pm), cf = comportamiento(f);
     const igualC = cg === cf || (pm.rama === 1 && !pm.movimientoId && f.rama === g);
-    const r = simular(E, c, { guardAcotado: false, fina: true, destinoEnT: destinosEnT(E, c) });
+    const r = simular(E, c, { guardAcotado: false, fina: true, destinoEnT: destinosEnT(E, c), montoViejo: true });
     const cr = comportamiento(r);
     if (cr === cg || (pm.rama === 1 && !pm.movimientoId && r.rama === g)) okR++;
     else restoR.push([
