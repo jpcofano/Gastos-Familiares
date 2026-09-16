@@ -31,7 +31,8 @@ esbuild.buildSync({
 const ml = require(tmp) as {
   esObligacionFutura: (d: any, ref: string) => boolean;
   esObligacionDoc: (t?: string | null) => boolean;
-  esCargoAdicional: (o: any[], excl?: string) => boolean;
+  esCargoAdicional: (o: any[], excl: string | undefined, tipoDoc: string | null | undefined) => boolean;
+  obligacionSaldable: <M>(o: M[], tipoDoc: string | null | undefined) => M | undefined;
   mesImputado: (fecha: string | null, dia?: number | null) => string | null;
 };
 
@@ -51,10 +52,11 @@ type Obl = { id: string; confirmadoPago: boolean; origenComprobanteId: string | 
 /** La decisión de rama de `matchPorDestino`, con §2.5 opcional para poder diffear. */
 function decidir(dt: any, obl: Obl[], refISO: string, con25: boolean): string {
   if (con25 && ml.esObligacionFutura(dt, refISO)) return 'rama 2 (obligación futura)';
-  const impaga = obl.find(m => !m.confirmadoPago && !m.origenComprobanteId);
+  // F9.175 §1 — el guard depende del tipo que entra; se usa la definición real.
+  const impaga = ml.obligacionSaldable(obl, dt?.tipoDocumento);
   if (impaga) return 'rama 1';
   if (obl.length === 0) return 'rama 2';
-  return `rama 2 esAdicional=${ml.esCargoAdicional(obl)}`;
+  return `rama 2 esAdicional=${ml.esCargoAdicional(obl, undefined, dt?.tipoDocumento)}`;
 }
 
 async function main() {
@@ -211,6 +213,8 @@ async function main() {
   } else {
     console.log(`  testigo: mov ${String(movAgua.id).slice(0, 12)} | $${s(movAgua.monto)} | ${nombreItem(String(movAgua.itemEsperadoId))} | mes ${s(movAgua.mes)}`);
     const mesAgua = String(movAgua.mes ?? '');
+    // F9.175 §1 — el testigo es una BOLETA de agua: lo que se reasigna es un documento de obligación.
+    const TIPO_TESTIGO = 'recibo_servicio';
     const oblDe = (itemId: string): Obl[] => movs
       .filter(x => String(x.itemEsperadoId) === itemId && String(x.mes) === mesAgua)
       .map(x => ({ id: x.id, confirmadoPago: (x.confirmadoPago as boolean | undefined) ?? false,
@@ -221,24 +225,24 @@ async function main() {
     // Destino CON obligación de ese mes (distinta de este movimiento) → pasa a adicional.
     const conObl = [...items.keys()].find(id => {
       const o = oblDe(id).filter(x => x.id !== movAgua.id);
-      return o.length > 0 && !o.some(x => !x.confirmadoPago && !x.origenComprobanteId);
+      return o.length > 0 && !ml.obligacionSaldable(o, TIPO_TESTIGO);
     });
 
     if (sinObl) {
-      const r = ml.esCargoAdicional(oblDe(sinObl), movAgua.id);
+      const r = ml.esCargoAdicional(oblDe(sinObl), movAgua.id, TIPO_TESTIGO);
       console.log(`  destino SIN obligación del mes (${nombreItem(sinObl)}) → esAdicional=${r}`);
       chk('movida a un ítem sin obligación del mes, deja de ser adicional', r === false);
     } else { console.log('  (no hay ítem sin obligación del mes para probar)'); }
 
     if (conObl) {
-      const r = ml.esCargoAdicional(oblDe(conObl), movAgua.id);
+      const r = ml.esCargoAdicional(oblDe(conObl), movAgua.id, TIPO_TESTIGO);
       console.log(`  destino CON obligación del mes (${nombreItem(conObl)}) → esAdicional=${r}`);
       chk('movida a un ítem que sí tiene obligación del mes, pasa a adicional', r === true);
     } else { console.log('  (no hay ítem con obligación cubierta del mes para probar)'); }
 
     // No regresión: excluirse a sí mismo no puede hacer adicional a un movimiento solo.
     chk('un movimiento solo en su ítem+mes nunca es adicional (se excluye a sí mismo)',
-        ml.esCargoAdicional([{ id: movAgua.id, confirmadoPago: false, origenComprobanteId: null }], movAgua.id) === false);
+        ml.esCargoAdicional([{ id: movAgua.id, confirmadoPago: false, origenComprobanteId: null }], movAgua.id, TIPO_TESTIGO) === false);
   }
 
   // ── 6. §3 — el comprobante de rama 1 ofrece desvincular ────────────────────

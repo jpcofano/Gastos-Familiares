@@ -1,0 +1,46 @@
+=== 1. los casos nombrados ===
+  4c8a6dbe transferencia: guardada=2+adic destino | antes=2+adic destino | después=1 destino 7HTNXS5cwTNCdf3scIF8
+  OK   4c8a6dbe pasa a rama 1 contra 7HTNXS5cwTNCdf3scIF8
+  d37f6034 transferencia: guardada=1 destino | antes=2+adic destino | después=1 destino C7ZY6a2iPhaxaGnCF9PG
+  OK   d37f6034 pasa a rama 1 contra C7ZY6a2iPhaxaGnCF9PG
+
+  segunda factura de agua — con los datos reales de las dos boletas de septiembre
+  97e781db recibo_servicio $23301.99: real=2 destino | vencida antes=2 destino | vencida después=2 destino
+     obligaciones 1663f6a600ae1fc05e56/2026-09: (ninguna)
+  OK   97e781db sigue igual que antes con el guard acotado
+  a2c31b98 recibo_servicio $51672.34: real=2 destino | vencida antes=2 destino | vencida después=2 destino
+     obligaciones 94c07e7c61d119db6fb5/2026-09: (ninguna)
+  OK   a2c31b98 sigue igual que antes con el guard acotado
+  F9.168 real: boleta 97e781db ($23.301,99) contra Casa›Agua con dIPI ($51.672,34) viva: antes=2+adic destino | después=2+adic destino
+     obligaciones 94c07e7c61d119db6fb5/2026-09: dIPI1qQGvAhZUM8d8qef(conf=false,orig=a2c31b98)
+  OK   la segunda boleta de agua NO da por pagada la obligación de la primera (bug F9.168)
+  OK   y es exactamente lo que hacía antes
+  OK   segunda boleta (recibo_servicio) NO salda la obligación de la primera
+  OK   segunda boleta (recibo_servicio) es cargo adicional
+  OK   segunda factura_a NO salda la obligación de la primera
+  OK   segunda factura_b NO salda la obligación de la primera
+  OK   segunda factura_c NO salda la obligación de la primera
+  OK   una transferencia SÍ salda la obligación nacida de una factura
+  OK   un comprobante_pago SÍ la salda
+  OK   y para el pago no es cargo adicional
+  OK   una obligación YA pagada no la salda nadie (pago)
+  OK   con todo pago, un pago es cargo adicional (sin cambio)
+  OK   impaga sin origen: la salda una factura (sin cambio)
+  OK   impaga sin origen: la salda un pago (sin cambio)
+
+=== 2. diff de ramas sobre producción, con la reconstrucción de §4 ===
+  evaluados=166 cambian=3  MAL→BIEN=3  BIEN→MAL=0  DUDOSOS=0
+  4c8a6dbe transferencia 2026-09-16 $266469 "CONS PROP PJE DEL SIGNO 4032 AL 42" T=2026-09-16T16:07:50.553Z
+     guardada=2+adic destino | antes=2+adic destino | después=1 destino 7HTNXS5cwTNCdf3scIF8
+     desenlace: mov PREEXISTENTE 7HTNXS5cwTNCdf3scIF8  → MAL→BIEN
+  d37f6034 transferencia 2026-08-14 $184245 "CONS PROP PJE DEL SIGNO 4032 AL 42" T=2026-08-14T20:36:00.434Z
+     guardada=1 destino | antes=2+adic destino | después=1 destino C7ZY6a2iPhaxaGnCF9PG
+     desenlace: mov PREEXISTENTE C7ZY6a2iPhaxaGnCF9PG  → MAL→BIEN
+  fd015e17 comprobante_pago 2026-08-05 $106037 "Personal" T=2026-08-06T15:56:58.711Z
+     guardada=1 destino | antes=2+adic destino | después=1 destino tEYCtFJhlOPdy931an2h
+     desenlace: mov PREEXISTENTE tEYCtFJhlOPdy931an2h  → MAL→BIEN
+  OK   ningún comprobante que hoy está bien pasa a estar mal
+  OK   ningún cambio sin veredicto
+  OK   ningún documento de obligación cambia de rama
+
+TODO OK — 21 ok, 0 fail

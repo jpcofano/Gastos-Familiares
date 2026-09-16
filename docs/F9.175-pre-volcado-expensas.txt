@@ -1,0 +1,530 @@
+F9.175-pre pasada 1 — SOLO LECTURA
+
+comprobantes totales=166, candidatos=5
+
+── comprobante 45b9f1c386166d6314b53819d677e659e32c041176baee7b2b544020e7e2a169
+{
+  "hashPdf": "45b9f1c386166d6314b53819d677e659e32c041176baee7b2b544020e7e2a169",
+  "nombreArchivo": "Del Signo 4042 2026 07.pdf",
+  "contentType": "application/pdf",
+  "tamano": 162389,
+  "refStoragePdf": "entrantes/45b9f1c386166d6314b53819d677e659e32c041176baee7b2b544020e7e2a169",
+  "subidoPor": "Juan",
+  "subidoEn": "TS(2026-08-04T21:14:39.241Z)",
+  "datosExtraidos": {
+    "tipoDocumento": "recibo_servicio",
+    "fecha": "2026-07-01",
+    "montoTotal": 184245.43,
+    "moneda": "ARS",
+    "comercioRazonSocial": "Cons.Prop.Pje del Signo 4032/42",
+    "cuit": "30-63669628-1",
+    "numeroOperacion": "2026-07-delsigno4032",
+    "periodoFacturado": "2026-07",
+    "numeroCliente": "43",
+    "vencimientos": [
+      {
+        "fecha": "2026-08-15",
+        "monto": 184245.43
+      }
+    ],
+    "destinoCbu": "0070127920000005316566",
+    "destinoCuit": "30636696281",
+    "destinoAlias": null,
+    "destinoNombre": "Cons.Prop.Pje del Signo 4032/42"
+  },
+  "propuestaMatch": {
+    "rama": 2,
+    "itemEsperadoId": "7407642c379cc0c9cab7",
+    "origenDestino": true,
+    "requiereConfirmacion": false,
+    "confianza": 0.9,
+    "calculadoEn": "TS(2026-08-04T21:15:04.615Z)"
+  },
+  "estado": "vinculado",
+  "actualizadoEn": "TS(2026-08-04T21:16:09.727Z)"
+}
+
+── comprobante 4c8a6dbe661be038e0fd344d3d3f0c1d5dbbe503f47fb913356b25c349eb032a
+{
+  "hashPdf": "4c8a6dbe661be038e0fd344d3d3f0c1d5dbbe503f47fb913356b25c349eb032a",
+  "nombreArchivo": "Comprobante.pdf",
+  "contentType": "application/pdf",
+  "tamano": 21516,
+  "refStoragePdf": "entrantes/4c8a6dbe661be038e0fd344d3d3f0c1d5dbbe503f47fb913356b25c349eb032a",
+  "subidoPor": "Juan",
+  "subidoEn": "TS(2026-09-16T16:07:28.601Z)",
+  "datosExtraidos": {
+    "tipoDocumento": "transferencia",
+    "fecha": "2026-09-16",
+    "montoTotal": 266469,
+    "moneda": "ARS",
+    "comercioRazonSocial": "BBVA",
+    "cuit": null,
+    "numeroOperacion": "30179677017260916",
+    "periodoFacturado": null,
+    "numeroCliente": null,
+    "vencimientos": [],
+    "destinoCbu": "0070127920000005316566",
+    "destinoCuit": "30636696281",
+    "destinoAlias": null,
+    "destinoNombre": "CONS PROP PJE DEL SIGNO 4032 AL 42",
+    "direccion": "saliente",
+    "contraparteNombre": "CONS PROP PJE DEL SIGNO 4032 AL 42",
+    "contraparteCuit": "30636696281",
+    "contraparteCbu": "0070127920000005316566"
+  },
+  "propuestaMatch": {
+    "rama": 2,
+    "itemEsperadoId": "7407642c379cc0c9cab7",
+    "esAdicional": true,
+    "origenDestino": true,
+    "requiereConfirmacion": false,
+    "confianza": 0.9,
+    "categoriaPrellena": "Casa",
+    "subcategoriaPrellena": "Expensas",
+    "etiquetaPrellena": null,
+    "calculadoEn": "TS(2026-09-16T16:07:50.553Z)"
+  },
+  "estado": "vinculado",
+  "actualizadoEn": "TS(2026-09-16T16:30:54.515Z)"
+}
+
+── comprobante c8b5ca52c84ea960b53a326b76fc2c3a5fd1bf6c54179ae6b9b8de2627d36a62
+{
+  "hashPdf": "c8b5ca52c84ea960b53a326b76fc2c3a5fd1bf6c54179ae6b9b8de2627d36a62",
+  "nombreArchivo": "Del Signo 4042 2026 08.pdf",
+  "contentType": "application/pdf",
+  "tamano": 157408,
+  "refStoragePdf": "entrantes/c8b5ca52c84ea960b53a326b76fc2c3a5fd1bf6c54179ae6b9b8de2627d36a62",
+  "subidoPor": "Juan",
+  "subidoEn": "TS(2026-09-03T12:46:28.245Z)",
+  "datosExtraidos": {
+    "tipoDocumento": "recibo_servicio",
+    "fecha": "2026-08-01",
+    "montoTotal": 266469.43,
+    "moneda": "ARS",
+    "comercioRazonSocial": "Cons.Prop.Pje del Signo 4032/42",
+    "cuit": "30-63669628-1",
+    "numeroOperacion": "2026-08-conspropdelSigno4032",
+    "periodoFacturado": "2026-08",
+    "numeroCliente": "43",
+    "vencimientos": [
+      {
+        "fecha": "2026-09-15",
+        "monto": 266469.43
+      }
+    ],
+    "destinoCbu": "0070127920000005316566",
+    "destinoCuit": "30636696281",
+    "destinoAlias": null,
+    "destinoNombre": "Cons.Prop.Pje del Signo 4032/42"
+  },
+  "propuestaMatch": {
+    "rama": 2,
+    "itemEsperadoId": "7407642c379cc0c9cab7",
+    "origenDestino": true,
+    "requiereConfirmacion": false,
+    "confianza": 0.9,
+    "calculadoEn": "TS(2026-09-03T12:46:57.276Z)"
+  },
+  "estado": "vinculado",
+  "actualizadoEn": "TS(2026-09-03T12:47:25.266Z)"
+}
+
+── comprobante d37f6034be965ccd9bf31195e3317a0d18fbb4def6a73197bbe44d68f9adb7f9
+{
+  "hashPdf": "d37f6034be965ccd9bf31195e3317a0d18fbb4def6a73197bbe44d68f9adb7f9",
+  "nombreArchivo": "Comprobante.pdf",
+  "contentType": "application/pdf",
+  "tamano": 21535,
+  "refStoragePdf": "entrantes/d37f6034be965ccd9bf31195e3317a0d18fbb4def6a73197bbe44d68f9adb7f9",
+  "subidoPor": "Juan",
+  "subidoEn": "TS(2026-08-14T20:35:38.228Z)",
+  "datosExtraidos": {
+    "tipoDocumento": "transferencia",
+    "fecha": "2026-08-14",
+    "montoTotal": 184245,
+    "moneda": "ARS",
+    "comercioRazonSocial": "BBVA",
+    "cuit": null,
+    "numeroOperacion": "30306129013260814",
+    "periodoFacturado": null,
+    "numeroCliente": null,
+    "vencimientos": [],
+    "destinoCbu": "0070127920000005316566",
+    "destinoCuit": "30636696281",
+    "destinoAlias": null,
+    "destinoNombre": "CONS PROP PJE DEL SIGNO 4032 AL 42"
+  },
+  "propuestaMatch": {
+    "rama": 1,
+    "movimientoId": "C7ZY6a2iPhaxaGnCF9PG",
+    "itemEsperadoId": "7407642c379cc0c9cab7",
+    "origenDestino": true,
+    "origenReconciliacion": true,
+    "calculadoEn": "TS(2026-08-14T20:36:00.434Z)"
+  },
+  "estado": "vinculado",
+  "actualizadoEn": "TS(2026-08-14T20:36:01.267Z)"
+}
+
+── comprobante d895a5612e673507d95ff4442b9e7774ffdca67be3770ca2dac8fa05de8248ce
+{
+  "hashPdf": "d895a5612e673507d95ff4442b9e7774ffdca67be3770ca2dac8fa05de8248ce",
+  "nombreArchivo": "Del Signo 4042 2026 06.pdf",
+  "contentType": "application/pdf",
+  "tamano": 163763,
+  "refStoragePdf": "entrantes/d895a5612e673507d95ff4442b9e7774ffdca67be3770ca2dac8fa05de8248ce",
+  "subidoPor": "Juan",
+  "subidoEn": "TS(2026-07-03T09:53:58.446Z)",
+  "datosExtraidos": {
+    "tipoDocumento": "recibo_servicio",
+    "fecha": "2026-06-01",
+    "montoTotal": 660833.43,
+    "moneda": "ARS",
+    "comercioRazonSocial": "Administración Ugalde - Cons.Prop.Pje del Signo 4032/42",
+    "cuit": "30-63669628-1",
+    "numeroOperacion": "2026-06-delsigno4032",
+    "periodoFacturado": "2026-06",
+    "numeroCliente": "43",
+    "vencimientos": [
+      {
+        "fecha": "2026-07-15",
+        "monto": 660833.43
+      }
+    ],
+    "destinoCbu": "0070127920000005316566",
+    "destinoCuit": "30636696281",
+    "destinoAlias": null,
+    "destinoNombre": "Cons. Prop. Pje del Signo 4034/42"
+  },
+  "propuestaMatch": {
+    "rama": 2,
+    "itemEsperadoId": "7407642c379cc0c9cab7",
+    "calculadoEn": "TS(2026-07-03T09:54:23.282Z)"
+  },
+  "estado": "vinculado",
+  "actualizadoEn": "TS(2026-07-03T09:55:43.068Z)"
+}
+
+movimientos 2026-08..10 totales=262, candidatos=2
+
+── movimiento 7HTNXS5cwTNCdf3scIF8
+{
+  "fecha": "TS(2026-09-15T15:00:00.000Z)",
+  "mes": "2026-09",
+  "mesManual": false,
+  "tipo": "Gasto",
+  "descripcion": "Cons.Prop.Pje del Signo 4032/42",
+  "descripcionOriginal": null,
+  "monto": 266469.43,
+  "moneda": "ARS",
+  "tcUsdArs": null,
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "banco": "BBVA",
+  "persona": "Juan",
+  "creadoPor": "Juan",
+  "subtipo": "Manual",
+  "origen": "Manual",
+  "excluirDash": false,
+  "incluirResumenMes": true,
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "numeroComprobante": null,
+  "destinoCbu": "0070127920000005316566",
+  "destinoCuit": "30636696281",
+  "destinoAlias": null,
+  "vencimientos": [
+    {
+      "fecha": "2026-09-15",
+      "monto": 266469.43
+    }
+  ],
+  "origenComprobanteId": "c8b5ca52c84ea960b53a326b76fc2c3a5fd1bf6c54179ae6b9b8de2627d36a62",
+  "creadoEn": "TS(2026-09-03T12:47:25.266Z)",
+  "confirmadoPago": true,
+  "pagado": true,
+  "refStoragePdf": "entrantes/4c8a6dbe661be038e0fd344d3d3f0c1d5dbbe503f47fb913356b25c349eb032a",
+  "pagadoEn": "TS(2026-09-16T16:30:54.515Z)",
+  "hashPdf": "4c8a6dbe661be038e0fd344d3d3f0c1d5dbbe503f47fb913356b25c349eb032a",
+  "destinoNombre": "CONS PROP PJE DEL SIGNO 4032 AL 42",
+  "actualizadoEn": "TS(2026-09-16T16:30:54.515Z)",
+  "seedImport": false
+}
+
+── movimiento C7ZY6a2iPhaxaGnCF9PG
+{
+  "fecha": "TS(2026-08-15T15:00:00.000Z)",
+  "mes": "2026-08",
+  "mesManual": false,
+  "tipo": "Gasto",
+  "descripcion": "Cons.Prop.Pje del Signo 4032/42",
+  "descripcionOriginal": null,
+  "monto": 184245.43,
+  "moneda": "ARS",
+  "tcUsdArs": null,
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "banco": "BBVA",
+  "persona": "Juan",
+  "creadoPor": "Juan",
+  "subtipo": "Manual",
+  "origen": "Manual",
+  "excluirDash": false,
+  "incluirResumenMes": true,
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "numeroComprobante": null,
+  "destinoCbu": "0070127920000005316566",
+  "destinoCuit": "30636696281",
+  "destinoAlias": null,
+  "vencimientos": [
+    {
+      "fecha": "2026-08-15",
+      "monto": 184245.43
+    }
+  ],
+  "origenComprobanteId": "45b9f1c386166d6314b53819d677e659e32c041176baee7b2b544020e7e2a169",
+  "creadoEn": "TS(2026-08-04T21:16:09.727Z)",
+  "confirmadoPago": true,
+  "refStoragePdf": "entrantes/d37f6034be965ccd9bf31195e3317a0d18fbb4def6a73197bbe44d68f9adb7f9",
+  "pagadoEn": "TS(2026-08-14T20:36:01.267Z)",
+  "hashPdf": "d37f6034be965ccd9bf31195e3317a0d18fbb4def6a73197bbe44d68f9adb7f9",
+  "destinoNombre": "CONS PROP PJE DEL SIGNO 4032 AL 42",
+  "actualizadoEn": "TS(2026-08-14T20:36:01.267Z)",
+  "seedImport": false,
+  "pagado": true
+}
+
+── destinos por clave de payee
+  "0070127920000005316566" → cbu:"0070127920000005316566" id=9b8829a74786560e9db2c22b existe=true
+
+── destino 9b8829a74786560e9db2c22b
+{
+  "destinoNorm": "0070127920000005316566",
+  "tipo": "cbu",
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "creadoPor": "Juan",
+  "etiqueta": null,
+  "confianza": 0.9,
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "actualizadoEn": "TS(2026-09-16T16:31:00.797Z)"
+}
+  "30636696281" → cuit:"30636696281" id=109ea78e6489537b597bd3c7 existe=false
+  "Cons.Prop.Pje del Signo 4032/42" → nombre:"cons.prop.pje del signo 4032/42" id=8e89294392c9663fc11c6a7e existe=true
+
+── destino 8e89294392c9663fc11c6a7e
+{
+  "destinoNorm": "cons.prop.pje del signo 4032/42",
+  "tipo": "nombre",
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "confianza": 0.8,
+  "creadoPor": "Juan",
+  "actualizadoEn": "TS(2026-08-04T21:16:19.081Z)"
+}
+  "CONS PROP PJE DEL SIGNO 4032 AL 42" → nombre:"cons prop pje del signo 4032 al 42" id=17f20de67ce405fa08d3521f existe=true
+
+── destino 17f20de67ce405fa08d3521f
+{
+  "destinoNorm": "cons prop pje del signo 4032 al 42",
+  "tipo": "nombre",
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "confianza": 0.8,
+  "creadoPor": "Juan",
+  "actualizadoEn": "TS(2026-07-16T16:50:13.015Z)"
+}
+  "Cons. Prop. Pje del Signo 4034/42" → nombre:"cons. prop. pje del signo 4034/42" id=308f53eb26631b6c9ae1070e existe=true
+
+── destino 308f53eb26631b6c9ae1070e
+{
+  "destinoNorm": "cons. prop. pje del signo 4034/42",
+  "tipo": "nombre",
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "confianza": 0.8,
+  "creadoPor": "Juan",
+  "actualizadoEn": "TS(2026-07-16T16:52:40.918Z)"
+}
+
+destinos totales=147, que mencionan signo/consorcio=3
+
+── destino (búsqueda texto) 17f20de67ce405fa08d3521f
+{
+  "destinoNorm": "cons prop pje del signo 4032 al 42",
+  "tipo": "nombre",
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "confianza": 0.8,
+  "creadoPor": "Juan",
+  "actualizadoEn": "TS(2026-07-16T16:50:13.015Z)"
+}
+
+── destino (búsqueda texto) 308f53eb26631b6c9ae1070e
+{
+  "destinoNorm": "cons. prop. pje del signo 4034/42",
+  "tipo": "nombre",
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "confianza": 0.8,
+  "creadoPor": "Juan",
+  "actualizadoEn": "TS(2026-07-16T16:52:40.918Z)"
+}
+
+── destino (búsqueda texto) 8e89294392c9663fc11c6a7e
+{
+  "destinoNorm": "cons.prop.pje del signo 4032/42",
+  "tipo": "nombre",
+  "itemEsperadoId": "7407642c379cc0c9cab7",
+  "categoria": "Casa",
+  "subcategoria": "Expensas",
+  "etiqueta": null,
+  "confianza": 0.8,
+  "creadoPor": "Juan",
+  "actualizadoEn": "TS(2026-08-04T21:16:19.081Z)"
+}
+F9.175-pre pasada 2 — SOLO LECTURA
+
+caso 4c8a6dbe: T=2026-09-16T16:07:50.553Z mesComp=2026-09 meses=2026-08,2026-09,2026-10,2026-11,2026-12
+  obligación en T: 7HTNXS5cwTNCdf3scIF8 monto=266469.43 venc=[{"fecha":"2026-09-15","monto":266469.43}] confirmadoPago=false origen=c8b5ca52c84ea960b53a326b76fc2c3a5fd1bf6c54179ae6b9b8de2627d36a62
+  reconciliarPorPayee → 0 | reconciliarPorNombre → 0
+  antes=2+adic destino | después=1 destino 7HTNXS5cwTNCdf3scIF8 | guardada=2+adic destino 
+
+§3.2 reconciliarPorPayee, campo por campo (pago vs obligación 7HTNXS5c):
+  tipo:   pago→Gasto  obl=Gasto
+  moneda: ARS vs ARS
+  cuit:   contraparte="30636696281" destino="30636696281" vs "30636696281" → true
+  cbu:    contraparte="0070127920000005316566" destino="0070127920000005316566" vs "0070127920000005316566" → true
+  alias:  "null" vs "null" (vacío en ambos, no participa)
+  montoSalda: |266469.43 - 266469| = 0.4300 (tol 0.01) → false
+  montoSalda venc 2026-09-15: |266469.43 - 266469| = 0.4300 → false
+
+§3.4 evaluados=166 (con propuestaMatch, sin rama 0)
+  fidelidad: ANTES simulado == guardado en 146/166
+  cambian de rama con el guard acotado: 3
+  13c1b187 comprobante_pago 2026-09-15 $5555.59 "Metrogas"
+      guardada=2+adic destino | antes=2+adic destino | después=1 destino mov=yR4NiHeWwX87trZMTVQw
+      desenlace real: mov PREEXISTENTE yR4NiHeWwX87trZMTVQw (origen=a650c026)
+  4c8a6dbe transferencia 2026-09-16 $266469 "CONS PROP PJE DEL SIGNO 4032 AL 42"
+      guardada=2+adic destino | antes=2+adic destino | después=1 destino mov=7HTNXS5cwTNCdf3scIF8
+      desenlace real: mov PREEXISTENTE 7HTNXS5cwTNCdf3scIF8 (origen=c8b5ca52)
+  d37f6034 transferencia 2026-08-14 $184245 "CONS PROP PJE DEL SIGNO 4032 AL 42"
+      guardada=1 destino | antes=2+adic destino | después=1 destino mov=C7ZY6a2iPhaxaGnCF9PG
+      desenlace real: mov PREEXISTENTE C7ZY6a2iPhaxaGnCF9PG (origen=45b9f1c3)
+
+  discrepancias ANTES simulado vs guardado (20):
+  059e7006 comprobante_pago  guardada=2                  simulada=1 payee
+  37c98cbf factura_b         guardada=2                  simulada=2 destino
+  3a8d38d5 transferencia     guardada=2                  simulada=3
+  3b089c12 transferencia     guardada=2                  simulada=3
+  436090c0 recibo_servicio   guardada=2                  simulada=2 destino
+  74739e68 transferencia     guardada=2                  simulada=2 destino
+  801705dd comprobante_pago  guardada=2                  simulada=2 destino
+  811a6b00 recibo_servicio   guardada=2                  simulada=2 destino
+  8f059f3c recibo_servicio   guardada=2                  simulada=2 destino
+  93e6c911 factura_a         guardada=2                  simulada=2 destino
+  9c77b6fc recibo_servicio   guardada=2                  simulada=2 destino
+  a07760b9 comprobante_pago  guardada=1 débil(1)         simulada=1 payee
+  a9da4f68 comprobante_pago  guardada=3                  simulada=1 payee
+  aac68ac9 recibo_servicio   guardada=2                  simulada=2 destino
+  c70ff3e9 factura_c         guardada=2                  simulada=2 destino
+  d37f6034 transferencia     guardada=1 destino          simulada=2+adic destino
+  d895a561 recibo_servicio   guardada=2                  simulada=2 destino
+  eaebb581 transferencia     guardada=2                  simulada=2 destino
+  ee4f3d3a factura_b         guardada=2                  simulada=2 destino
+  fd015e17 comprobante_pago  guardada=1 destino          simulada=2 destino
+pago 13c1b187 {
+  "id": "13c1b1879e9d730f3c5e06d136f62f984d3f9c67f3a807d9daeaf9773246910e",
+  "subidoEn": "TS(2026-09-15T19:48:31.782Z)",
+  "tipoDocumento": "comprobante_pago",
+  "fecha": "2026-09-15",
+  "montoTotal": 5555.59,
+  "moneda": "ARS",
+  "destinoCuit": "30572975831",
+  "destinoCbu": null,
+  "destinoAlias": null,
+  "destinoNombre": "Metrogas",
+  "contraparteCuit": "30572975831",
+  "contraparteCbu": null,
+  "numeroCliente": "010372743000",
+  "vencimientos": [],
+  "propuestaMatch": {
+    "rama": 2,
+    "itemEsperadoId": "90b30edcc0666376321d",
+    "esAdicional": true,
+    "origenDestino": true,
+    "requiereConfirmacion": true,
+    "confianza": 0.8,
+    "categoriaPrellena": "Casa",
+    "subcategoriaPrellena": "Internet",
+    "etiquetaPrellena": null,
+    "calculadoEn": "TS(2026-09-15T19:48:52.269Z)"
+  }
+}
+origen a650c026 {
+  "id": "a650c026283b8a0d8a1a1acd16176eed38e8237a78790ae1b3ace567e29b23a0",
+  "subidoEn": "TS(2026-09-03T03:30:11.871Z)",
+  "tipoDocumento": "recibo_servicio",
+  "fecha": null,
+  "montoTotal": 5291.83,
+  "moneda": "ARS",
+  "destinoCuit": null,
+  "destinoCbu": null,
+  "destinoAlias": null,
+  "destinoNombre": "Metrogas",
+  "numeroCliente": "010372743000",
+  "vencimientos": [
+    {
+      "fecha": "2026-09-14",
+      "monto": 5291.83
+    }
+  ],
+  "propuestaMatch": {
+    "rama": 2,
+    "itemEsperadoId": "eb8e59f225ed73b785b6",
+    "origenDestino": true,
+    "requiereConfirmacion": true,
+    "confianza": 0.8,
+    "calculadoEn": "TS(2026-09-03T03:30:21.533Z)"
+  }
+}
+obligación yR4N {
+  "descripcion": "Metrogas",
+  "monto": 5291.83,
+  "mes": "2026-09",
+  "vencimientos": [
+    {
+      "fecha": "2026-09-14",
+      "monto": 5291.83
+    }
+  ],
+  "itemEsperadoId": "eb8e59f225ed73b785b6",
+  "origenComprobanteId": "a650c026283b8a0d8a1a1acd16176eed38e8237a78790ae1b3ace567e29b23a0",
+  "confirmadoPago": true,
+  "pagado": true,
+  "pagadoEn": "TS(2026-09-15T19:54:35.011Z)",
+  "hashPdf": "13c1b1879e9d730f3c5e06d136f62f984d3f9c67f3a807d9daeaf9773246910e",
+  "destinoCuit": "30572975831",
+  "destinoCbu": null,
+  "destinoNombre": "Metrogas",
+  "creadoEn": "TS(2026-09-03T03:30:39.350Z)"
+}
+item 90b30edcc0666376321d: Casa › Internet notas=null
+  CXLEFRQ5baQ8cjdX7DGS Personal $107897.7 conf=true pagadoEn=2026-09-08T11:09:46.817Z creadoEn=2026-09-03T03:54:20.556Z origen=8f059f3c hash=a07760b9
+item eb8e59f225ed73b785b6: Casa › Gas notas=null
+  yR4NiHeWwX87trZMTVQw Metrogas $5291.83 conf=true pagadoEn=2026-09-15T19:54:35.011Z creadoEn=2026-09-03T03:30:39.350Z origen=a650c026 hash=13c1b187
+destino 3c47cbf874c20e7c0baf3709 {"destinoNorm":"30572975831","tipo":"cuit","categoria":"Casa","etiqueta":null,"creadoPor":"Juan","confianza":0.9,"itemEsperadoId":"eb8e59f225ed73b785b6","subcategoria":"Gas","actualizadoEn":"2026-09-15T19:54:40.897Z"}
+destino f7fd10321554a9c84be2c2ba {"destinoNorm":"metrogas","tipo":"alias","itemEsperadoId":"eb8e59f225ed73b785b6","categoria":"Casa","subcategoria":"Gas","etiqueta":null,"confianza":0.8,"creadoPor":"Juan","actualizadoEn":"2026-09-03T03:30:41.521Z"}

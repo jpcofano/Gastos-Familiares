@@ -268,18 +268,52 @@ export function matchConMovimientos(
  *
  * `excluirMovId` saca al propio movimiento del conjunto — en la reasignación el movimiento ya
  * existe y se contaría a sí mismo como "la otra obligación".
+ *
+ * `tipoDocEntrante` es obligatorio a propósito (F9.175 §1): la elegibilidad depende de qué entra, y
+ * un default silencioso haría que un caller nuevo decida sin saberlo.
  */
 export function esCargoAdicional(
   obligacionesDelMes: Array<Pick<MovimientoMin, 'id' | 'confirmadoPago' | 'origenComprobanteId'>>,
-  excluirMovId?: string,
+  excluirMovId: string | undefined,
+  tipoDocEntrante: string | null | undefined,
 ): boolean {
   const otras = excluirMovId
     ? obligacionesDelMes.filter(m => m.id !== excluirMovId)
     : obligacionesDelMes;
   if (otras.length === 0) return false;
-  // Si hay una impaga ELEGIBLE (misma condición del guard de F9.168: no nacida de otra factura),
-  // este comprobante la salda y no es un cargo adicional — es rama 1.
-  return !otras.some(m => !m.confirmadoPago && !m.origenComprobanteId);
+  // Si hay una impaga ELEGIBLE para lo que entra, este comprobante la salda y no es un cargo
+  // adicional — es rama 1. La elegibilidad es la de `obligacionSaldable`, la misma que usa el guard.
+  return !obligacionSaldable(otras, tipoDocEntrante);
+}
+
+/**
+ * F9.175 §1 — ¿qué obligación impaga del ítem y mes puede saldar el documento que entra?
+ *
+ * ÚNICA definición del guard de rama 1, compartida por `matchPorDestino` (index.ts) y
+ * `esCargoAdicional`. Si se separan, el badge y el matcher vuelven a decir cosas distintas.
+ *
+ * F9.168 excluyó las obligaciones nacidas de una factura (`origenComprobanteId` poblado) para que
+ * una SEGUNDA FACTURA del mismo ítem y mes no diera por pagada la primera: el caso del agua, con
+ * dos boletas por mes. Ese razonamiento vale solo cuando lo que entra es otra obligación.
+ *
+ * Aplicado a todo documento, el guard también frenaba a los PAGOS, y un pago que salda una
+ * obligación nacida de una factura es el flujo normal, no la excepción. Medido en F9.175: la
+ * transferencia de expensas del 16/9 salió "Pago adicional" en vez de saldar la obligación
+ * vencida del 15/9, y la de agosto (`d37f6034`) sólo reconcilió porque corrió antes del guard.
+ *
+ * Es el complemento de la regla de F9.169 §2.5: una factura que todavía no venció nunca es un pago,
+ * y un pago siempre puede saldar una obligación.
+ *
+ *   · entra una obligación (`esObligacionDoc`) → sólo impagas que NO nacieron de una factura;
+ *   · entra cualquier otra cosa (transferencia, comprobante de pago, ticket…) → cualquier impaga,
+ *     como antes de F9.168.
+ */
+export function obligacionSaldable<M extends Pick<MovimientoMin, 'confirmadoPago' | 'origenComprobanteId'>>(
+  obligacionesDelMes: M[],
+  tipoDocEntrante: string | null | undefined,
+): M | undefined {
+  const entraObligacion = esObligacionDoc(tipoDocEntrante);
+  return obligacionesDelMes.find(m => !m.confirmadoPago && (!entraObligacion || !m.origenComprobanteId));
 }
 
 /**

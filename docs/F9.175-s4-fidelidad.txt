@@ -1,0 +1,274 @@
+F9.175 §4 — evaluados=166
+  fidelidad estricta        146/166
+  fidelidad fina            158/166
+  fidelidad comportamiento  155/166
+  comportamiento + destinos reapuntados en su estado de T  160/166
+
+Lo que queda con TODA la reconstrucción (6):
+  37c98cbf guardado=2|94c07e7c61d119db6fb5| sim=3||  → ÍTEM EDITADO (Casa›Agua, 30/7) + DESTINO NACIDO DESPUÉS DE T
+       destino "30709565075" cuit conf=1 item=94c07e7c61d119db6fb5 act=2026-07-03T16:58:51.043Z nac≈2026-07-01T20:15:21.558Z (NACIÓ DESPUÉS DE T)
+       destino "Agua y Saneamientos Argentinos S.A." no existe
+       texto → rama 3 item=-
+  3a8d38d5 guardado=2|90b30edcc0666376321d| sim=3||  → ÍTEM EDITADO: Internet recibió excluye "diego armando vega valdez" el 31/7 00:24:48 (T 31/7 00:16)
+       payee → []
+       débil → []
+       destino "0000003100092745501410" cbu conf=0.8 item=- act=2026-07-31T00:24:46.236Z nac≈2026-07-31T00:24:40.682Z (NACIÓ DESPUÉS DE T)
+       destino "20937373725" no existe
+       destino "Diego Armando Vega Valdez" nombre conf=0.8 item=- act=2026-07-31T00:24:47.175Z nac≈2026-07-31T00:24:40.682Z (NACIÓ DESPUÉS DE T)
+       texto → rama 3 item=-
+  3b089c12 guardado=2|90b30edcc0666376321d| sim=3||  → ÍTEM EDITADO: Internet recibió excluye "bodegon el globito srl" el 31/7 00:24:48 (T 30/7 20:11)
+       payee → []
+       débil → []
+       destino "0000003100041433159859" cbu conf=0.8 item=- act=2026-07-30T20:19:47.342Z nac≈2026-07-23T18:05:34.227Z
+         destino sin ítem → rama 3 con prefill (fallthrough a texto)
+       texto → rama 3 item=-
+  801705dd guardado=2|94c07e7c61d119db6fb5| sim=2|1663f6a600ae1fc05e56|  → ÍTEM EDITADO (los dos Agua, 30/7: hoy matchean ambos) + "aysa" todavía no existía (T 3/7 04:39)
+       payee → []
+       débil → []
+       destino "AYSA" nombre conf=1 item=1663f6a600ae1fc05e56 act=2026-09-08T19:24:59.497Z nac≈2026-07-03T16:57:08.161Z (NACIÓ DESPUÉS DE T)
+         (en T: {"noExistia":true})
+       texto → rama 2 item=1663f6a600ae1fc05e56
+  d37f6034 guardado=1|7407642c379cc0c9cab7|C7ZY6a2iPhaxaGnCF9PG sim=2+adic|7407642c379cc0c9cab7|  → CÓDIGO: procesado 14/8, antes del guard de F9.168 (0cbcf0d, 7/9)
+       payee → []
+       débil → []
+       destino "0070127920000005316566" cbu conf=0.9 item=7407642c379cc0c9cab7 act=2026-09-16T16:31:00.797Z nac≈2026-07-03T09:55:43.068Z
+         (en T: {"itemEsperadoId":"7407642c379cc0c9cab7","existia":true})
+         obligaciones 7407642c379cc0c9cab7/2026-08: C7ZY6a2iPhaxaGnCF9PG(conf=false,orig=45b9f1c3)
+  fd015e17 guardado=1|90b30edcc0666376321d|tEYCtFJhlOPdy931an2h sim=2+adic|90b30edcc0666376321d|  → DESTINO REAPUNTADO (CUIT 30572975831 → Internet en T; a Gas el 15/9) + CÓDIGO: procesado 6/8, antes del guard de F9.168
+       payee → []
+       débil → []
+       destino "30572975831" cuit conf=0.9 item=90b30edcc0666376321d act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z
+         (en T: {"itemEsperadoId":"90b30edcc0666376321d","existia":true})
+         obligaciones 90b30edcc0666376321d/2026-08: tEYCtFJhlOPdy931an2h(conf=false,orig=421b8b6f)
+
+Diferencias de COMPORTAMIENTO que quedan con la reconstrucción fina (11):
+  02a163ac recibo_servicio "AySA" guardado=2|94c07e7c61d119db6fb5| fina=2|1663f6a600ae1fc05e56|  T=2026-07-30T00:24:32.609Z
+     causa: DESTINO OSCILANTE "aysa" (F9.154): en T apuntaba a Casa›Agua, hoy a Auto›Agua
+     pm={"rama":2,"itemEsperadoId":"94c07e7c61d119db6fb5","origenDestino":true,"requiereConfirmacion":false,"confianza":0.9}
+       destino "AySA" nombre conf=1 item=1663f6a600ae1fc05e56 act=2026-09-08T19:24:59.497Z nac≈2026-07-03T16:57:08.161Z
+         obligaciones 1663f6a600ae1fc05e56/2026-08: (ninguna)
+  13c1b187 comprobante_pago "Metrogas" guardado=2+adic|90b30edcc0666376321d| fina=2+adic|eb8e59f225ed73b785b6|  T=2026-09-15T19:48:52.269Z
+     causa: DESTINO REAPUNTADO: CUIT 30572975831 → Internet hasta el 15/9 19:54:40
+     pm={"rama":2,"itemEsperadoId":"90b30edcc0666376321d","esAdicional":true,"origenDestino":true,"requiereConfirmacion":true,"confianza":0.8,"categoriaPrellena":"Casa","subcategoriaPrellena":"Internet","etiquetaPrellena":null}
+       payee → []
+       débil → []
+       destino "30572975831" cuit conf=0.9 item=eb8e59f225ed73b785b6 act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z
+         obligaciones eb8e59f225ed73b785b6/2026-09: yR4NiHeWwX87trZMTVQw(conf=false,orig=a650c026)
+  249624a1 comprobante_pago "AYSA" guardado=1|| fina=2|1663f6a600ae1fc05e56|  T=2026-07-03T16:56:06.762Z
+     causa: DESTINO OSCILANTE + CREADO A MANO: "aysa" (callable, sin rastro en movimientos) → Casa›Agua; el pase débil casaba por ítem aprendido
+     pm={"rama":1,"candidatos":[{"tipo":"movimiento","id":"lek97uWGdQm7DUZd1XAN","score":0,"descripcion":"Agua y Saneamientos Argentinos S.A.","monto":49247.78,"moneda":"ARS","fecha":"2026-07-03"}],"origenReconciliacion":true,"reconciliacionDebil":true}
+       payee → []
+       débil → []
+       destino "AYSA" nombre conf=1 item=1663f6a600ae1fc05e56 act=2026-09-08T19:24:59.497Z nac≈2026-07-03T16:57:08.161Z (NACIÓ DESPUÉS DE T)
+       texto → rama 2 item=1663f6a600ae1fc05e56
+  37c98cbf factura_b "Agua y Saneamientos Argentinos S.A." guardado=2|94c07e7c61d119db6fb5| fina=3||  T=2026-07-01T20:07:18.956Z
+     causa: ÍTEM EDITADO (Casa›Agua, 30/7) + DESTINO NACIDO DESPUÉS DE T
+     pm={"rama":2,"itemEsperadoId":"94c07e7c61d119db6fb5"}
+       destino "30709565075" cuit conf=1 item=94c07e7c61d119db6fb5 act=2026-07-03T16:58:51.043Z nac≈2026-07-01T20:15:21.558Z (NACIÓ DESPUÉS DE T)
+       destino "Agua y Saneamientos Argentinos S.A." no existe
+       texto → rama 3 item=-
+  3a8d38d5 transferencia "Diego Armando Vega Valdez" guardado=2|90b30edcc0666376321d| fina=3||  T=2026-07-31T00:16:22.723Z
+     causa: ÍTEM EDITADO: Internet recibió excluye "diego armando vega valdez" el 31/7 00:24:48 (T 31/7 00:16)
+     pm={"rama":2,"itemEsperadoId":"90b30edcc0666376321d"}
+       payee → []
+       débil → []
+       destino "0000003100092745501410" cbu conf=0.8 item=- act=2026-07-31T00:24:46.236Z nac≈2026-07-31T00:24:40.682Z (NACIÓ DESPUÉS DE T)
+       destino "20937373725" no existe
+       destino "Diego Armando Vega Valdez" nombre conf=0.8 item=- act=2026-07-31T00:24:47.175Z nac≈2026-07-31T00:24:40.682Z (NACIÓ DESPUÉS DE T)
+       texto → rama 3 item=-
+  3b089c12 transferencia "Bodegon El Globito Srl" guardado=2|90b30edcc0666376321d| fina=3||  T=2026-07-30T20:11:45.707Z
+     causa: ÍTEM EDITADO: Internet recibió excluye "bodegon el globito srl" el 31/7 00:24:48 (T 30/7 20:11)
+     pm={"rama":2,"itemEsperadoId":"90b30edcc0666376321d"}
+       payee → []
+       débil → []
+       destino "0000003100041433159859" cbu conf=0.8 item=- act=2026-07-30T20:19:47.342Z nac≈2026-07-23T18:05:34.227Z
+         destino sin ítem → rama 3 con prefill (fallthrough a texto)
+       texto → rama 3 item=-
+  801705dd comprobante_pago "AYSA" guardado=2|94c07e7c61d119db6fb5| fina=2|1663f6a600ae1fc05e56|  T=2026-07-03T04:39:53.280Z
+     causa: ÍTEM EDITADO (los dos Agua, 30/7: hoy matchean ambos) + "aysa" todavía no existía (T 3/7 04:39)
+     pm={"rama":2,"itemEsperadoId":"94c07e7c61d119db6fb5"}
+       payee → []
+       débil → []
+       destino "AYSA" nombre conf=1 item=1663f6a600ae1fc05e56 act=2026-09-08T19:24:59.497Z nac≈2026-07-03T16:57:08.161Z (NACIÓ DESPUÉS DE T)
+       texto → rama 2 item=1663f6a600ae1fc05e56
+  a2c31b98 recibo_servicio "AySA" guardado=2|94c07e7c61d119db6fb5| fina=2|1663f6a600ae1fc05e56|  T=2026-09-08T10:18:36.316Z
+     causa: DESTINO OSCILANTE "aysa" (F9.154): en T apuntaba a Casa›Agua, hoy a Auto›Agua
+     pm={"rama":2,"itemEsperadoId":"94c07e7c61d119db6fb5","origenDestino":true,"requiereConfirmacion":false,"confianza":1}
+       destino "AySA" nombre conf=1 item=1663f6a600ae1fc05e56 act=2026-09-08T19:24:59.497Z nac≈2026-07-03T16:57:08.161Z
+         obligaciones 1663f6a600ae1fc05e56/2026-09: (ninguna)
+  c82eb6ab comprobante_pago "AYSA" guardado=1|| fina=2|1663f6a600ae1fc05e56|  T=2026-07-03T16:58:45.043Z
+     causa: DESTINO OSCILANTE "aysa" → Casa›Agua en T; el pase débil casaba por ítem aprendido
+     pm={"rama":1,"candidatos":[{"tipo":"movimiento","id":"hMcb2YixlaRujBttySnk","score":0,"descripcion":"Agua y Saneamientos Argentinos S.A.","monto":22208.61,"moneda":"ARS","fecha":"2026-07-02"}],"origenReconciliacion":true,"reconciliacionDebil":true}
+       payee → []
+       débil → []
+       destino "AYSA" nombre conf=1 item=1663f6a600ae1fc05e56 act=2026-09-08T19:24:59.497Z nac≈2026-07-03T16:57:08.161Z
+         obligaciones 1663f6a600ae1fc05e56/2026-07: (ninguna)
+  d37f6034 transferencia "CONS PROP PJE DEL SIGNO 4032 AL 42" guardado=1|7407642c379cc0c9cab7|C7ZY6a2iPhaxaGnCF9PG fina=2+adic|7407642c379cc0c9cab7|  T=2026-08-14T20:36:00.434Z
+     causa: CÓDIGO: procesado 14/8, antes del guard de F9.168 (0cbcf0d, 7/9)
+     pm={"rama":1,"movimientoId":"C7ZY6a2iPhaxaGnCF9PG","itemEsperadoId":"7407642c379cc0c9cab7","origenDestino":true,"origenReconciliacion":true}
+       payee → []
+       débil → []
+       destino "0070127920000005316566" cbu conf=0.9 item=7407642c379cc0c9cab7 act=2026-09-16T16:31:00.797Z nac≈2026-07-03T09:55:43.068Z
+         obligaciones 7407642c379cc0c9cab7/2026-08: C7ZY6a2iPhaxaGnCF9PG(conf=false,orig=45b9f1c3)
+  fd015e17 comprobante_pago "Personal" guardado=1|90b30edcc0666376321d|tEYCtFJhlOPdy931an2h fina=2|eb8e59f225ed73b785b6|  T=2026-08-06T15:56:58.711Z
+     causa: DESTINO REAPUNTADO (CUIT 30572975831 → Internet en T; a Gas el 15/9) + CÓDIGO: procesado 6/8, antes del guard de F9.168
+     pm={"rama":1,"movimientoId":"tEYCtFJhlOPdy931an2h","itemEsperadoId":"90b30edcc0666376321d","origenDestino":true,"origenReconciliacion":true}
+       payee → []
+       débil → []
+       destino "30572975831" cuit conf=0.9 item=eb8e59f225ed73b785b6 act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z
+         obligaciones eb8e59f225ed73b785b6/2026-08: (ninguna)
+
+Las 20 discrepancias estrictas, con causa:
+
+■ 059e7006 comprobante_pago fecha=2026-07-06 $146739.5 "Personal"  T=2026-07-06T20:32:11.600Z
+  guardada=2 | cruda=1 payee | fina=2
+  causa: PAYEE ESCRITO POR SU PROPIA VINCULACIÓN: el origen (ee4f3d3a) no trae ese CUIT
+    payee → []
+    débil → []
+    destino "30572975831" cuit conf=0.9 item=eb8e59f225ed73b785b6 act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z (NACIÓ DESPUÉS DE T)
+    destino "Personal" alias conf=0.8 item=90b30edcc0666376321d act=2026-09-03T03:54:22.431Z nac≈2026-09-03T03:54:20.556Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=90b30edcc0666376321d
+
+■ 37c98cbf factura_b fecha=2026-05-30 $49247.78 "Agua y Saneamientos Argentinos S.A."  T=2026-07-01T20:07:18.956Z
+  guardada=2 | cruda=2 destino | fina=3
+  causa: ÍTEM EDITADO (Casa›Agua, 30/7) + DESTINO NACIDO DESPUÉS DE T
+    destino "30709565075" cuit conf=1 item=94c07e7c61d119db6fb5 act=2026-07-03T16:58:51.043Z nac≈2026-07-01T20:15:21.558Z (NACIÓ DESPUÉS DE T)
+    destino "Agua y Saneamientos Argentinos S.A." no existe
+    texto → rama 3 item=-
+
+■ 3a8d38d5 transferencia fecha=2026-07-30 $68000 "Diego Armando Vega Valdez"  T=2026-07-31T00:16:22.723Z
+  guardada=2 | cruda=3 | fina=3
+  causa: ÍTEM EDITADO: Internet recibió excluye "diego armando vega valdez" el 31/7 00:24:48 (T 31/7 00:16)
+    payee → []
+    débil → []
+    destino "0000003100092745501410" cbu conf=0.8 item=- act=2026-07-31T00:24:46.236Z nac≈2026-07-31T00:24:40.682Z (NACIÓ DESPUÉS DE T)
+    destino "20937373725" no existe
+    destino "Diego Armando Vega Valdez" nombre conf=0.8 item=- act=2026-07-31T00:24:47.175Z nac≈2026-07-31T00:24:40.682Z (NACIÓ DESPUÉS DE T)
+    texto → rama 3 item=-
+
+■ 3b089c12 transferencia fecha=2026-07-30 $20600 "Bodegon El Globito Srl"  T=2026-07-30T20:11:45.707Z
+  guardada=2 | cruda=3 | fina=3
+  causa: ÍTEM EDITADO: Internet recibió excluye "bodegon el globito srl" el 31/7 00:24:48 (T 30/7 20:11)
+    payee → []
+    débil → []
+    destino "0000003100041433159859" cbu conf=0.8 item=- act=2026-07-30T20:19:47.342Z nac≈2026-07-23T18:05:34.227Z
+      destino sin ítem → rama 3 con prefill (fallthrough a texto)
+    texto → rama 3 item=-
+
+■ 436090c0 recibo_servicio fecha=null $72414.1 "AFIP - Monotributo"  T=2026-07-01T16:22:22.971Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "AFIP - Monotributo" nombre conf=0.8 item=d08378385da512972004 act=2026-07-01T16:27:52.273Z nac≈2026-07-01T16:27:45.973Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=d08378385da512972004
+
+■ 74739e68 transferencia fecha=2026-07-01 $1635908 "DATANET / INTERPYME"  T=2026-07-01T19:26:46.145Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    payee → []
+    débil → []
+    destino "DATANET / INTERPYME" nombre conf=0.8 item=8d93896a9837280bc4c2 act=2026-09-03T03:57:12.646Z nac≈2026-07-01T19:27:15.088Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=8d93896a9837280bc4c2
+
+■ 801705dd comprobante_pago fecha=2026-07-03 $22498.48 "AYSA"  T=2026-07-03T04:39:53.280Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: ÍTEM EDITADO (los dos Agua, 30/7: hoy matchean ambos) + "aysa" todavía no existía (T 3/7 04:39)
+    payee → []
+    débil → []
+    destino "AYSA" nombre conf=1 item=1663f6a600ae1fc05e56 act=2026-09-08T19:24:59.497Z nac≈2026-07-03T16:57:08.161Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=1663f6a600ae1fc05e56
+
+■ 811a6b00 recibo_servicio fecha=2026-06-24 $269778.85 "Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)"  T=2026-07-01T19:34:23.249Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "Empresa Distribuidora y Comercializadora Norte S.A. (Edenor)" nombre conf=0.8 item=1d186f3b678a358a4af1 act=2026-07-01T19:40:41.330Z nac≈2026-07-01T19:36:48.403Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=1d186f3b678a358a4af1
+
+■ 8f059f3c recibo_servicio fecha=null $107897.7 "Personal"  T=2026-09-03T03:53:54.446Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "Personal" alias conf=0.8 item=90b30edcc0666376321d act=2026-09-03T03:54:22.431Z nac≈2026-09-03T03:54:20.556Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=90b30edcc0666376321d
+
+■ 93e6c911 factura_a fecha=2026-06-26 $735412 "Colegio Guadalupe"  T=2026-07-04T00:30:14.902Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "30525379589" cuit conf=0.8 item=859b249be17306aa6be7 act=2026-09-04T23:44:52.247Z nac≈2026-07-04T00:30:28.562Z (NACIÓ DESPUÉS DE T)
+    destino "Colegio Guadalupe" nombre conf=0.8 item=859b249be17306aa6be7 act=2026-07-04T00:30:32.067Z nac≈2026-07-04T00:30:28.562Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=859b249be17306aa6be7
+
+■ 9c77b6fc recibo_servicio fecha=null $5303.18 "Metrogas"  T=2026-07-14T18:16:27.483Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "Metrogas" alias conf=0.8 item=eb8e59f225ed73b785b6 act=2026-09-03T03:30:41.521Z nac≈2026-07-14T18:29:35.186Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=eb8e59f225ed73b785b6
+
+■ a07760b9 comprobante_pago fecha=2026-09-07 $107897.7 "Personal"  T=2026-09-08T10:23:03.672Z
+  guardada=1 débil(1) | cruda=1 payee | fina=1 débil(1)
+  causa: PAYEE ESCRITO POR SU PROPIA VINCULACIÓN: el origen (8f059f3c) no trae CUIT
+    payee → []
+    débil → [CXLEFRQ5baQ8cjdX7DGS]
+
+■ a9da4f68 comprobante_pago fecha=2026-07-21 $72414.1 "ARCA"  T=2026-07-21T05:30:39.067Z
+  guardada=3 | cruda=1 payee | fina=3
+  causa: PAYEE ESCRITO POR SU PROPIA VINCULACIÓN: el origen (436090c0) no trae CUIT
+    payee → []
+    débil → []
+    destino "20243359679" cuit conf=0.8 item=d08378385da512972004 act=2026-09-04T23:53:07.448Z nac≈2026-07-21T05:31:08.897Z (NACIÓ DESPUÉS DE T)
+    destino "ARCA" nombre conf=0.8 item=d08378385da512972004 act=2026-09-08T19:23:46.327Z nac≈2026-07-21T05:31:08.897Z (NACIÓ DESPUÉS DE T)
+    texto → rama 3 item=-
+
+■ aac68ac9 recibo_servicio fecha=null $71427.65 "AGIP Inmobiliario/ABL"  T=2026-07-01T19:50:54.039Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "AGIP Inmobiliario/ABL" nombre conf=0.8 item=62a96fc83be3b3506032 act=2026-07-01T20:02:01.180Z nac≈2026-07-01T19:51:18.661Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=62a96fc83be3b3506032
+
+■ c70ff3e9 factura_c fecha=2026-06-30 $1484000 "ITPA SA"  T=2026-07-04T00:25:43.047Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "0720036620000003373190" cbu conf=0.8 item=184dde3fb780e48f3c89 act=2026-09-11T20:12:51.767Z nac≈2026-07-04T00:26:06.986Z (NACIÓ DESPUÉS DE T)
+    destino "33648076679" no existe
+    destino "escuela.philips" no existe
+    destino "ITPA SA" nombre conf=0.8 item=184dde3fb780e48f3c89 act=2026-07-04T00:26:16.160Z nac≈2026-07-04T00:26:06.986Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=184dde3fb780e48f3c89
+
+■ d37f6034 transferencia fecha=2026-08-14 $184245 "CONS PROP PJE DEL SIGNO 4032 AL 42"  T=2026-08-14T20:36:00.434Z
+  guardada=1 destino | cruda=2+adic destino | fina=2+adic destino
+  causa: CÓDIGO: procesado 14/8, antes del guard de F9.168 (0cbcf0d, 7/9)
+    payee → []
+    débil → []
+    destino "0070127920000005316566" cbu conf=0.9 item=7407642c379cc0c9cab7 act=2026-09-16T16:31:00.797Z nac≈2026-07-03T09:55:43.068Z
+      obligaciones 7407642c379cc0c9cab7/2026-08: C7ZY6a2iPhaxaGnCF9PG(conf=false,orig=45b9f1c3)
+
+■ d895a561 recibo_servicio fecha=2026-06-01 $660833.43 "Cons. Prop. Pje del Signo 4034/42"  T=2026-07-03T09:54:23.282Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "0070127920000005316566" cbu conf=0.9 item=7407642c379cc0c9cab7 act=2026-09-16T16:31:00.797Z nac≈2026-07-03T09:55:43.068Z (NACIÓ DESPUÉS DE T)
+    destino "30636696281" no existe
+    destino "Cons. Prop. Pje del Signo 4034/42" nombre conf=0.8 item=7407642c379cc0c9cab7 act=2026-07-16T16:52:40.918Z nac≈2026-07-03T09:55:43.068Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=7407642c379cc0c9cab7
+
+■ eaebb581 transferencia fecha=2026-07-01 $45000 "Baggini Juan Francisco"  T=2026-07-01T22:43:02.540Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    payee → []
+    débil → []
+    destino "3108100900010000137703" cbu conf=0.9 item=c2e5d05756037caf3468 act=2026-08-04T18:35:50.307Z nac≈2026-07-01T22:43:19.325Z (NACIÓ DESPUÉS DE T)
+    destino "20222002908" no existe
+    destino "Baggini Juan Francisco" nombre conf=0.8 item=c2e5d05756037caf3468 act=2026-08-04T18:35:51.384Z nac≈2026-07-01T22:43:19.325Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=c2e5d05756037caf3468
+
+■ ee4f3d3a factura_b fecha=2026-06-21 $146739.5 "TELECOM ARGENTINA S.A."  T=2026-07-01T19:55:59.175Z
+  guardada=2 | cruda=2 destino | fina=2
+  causa: DESTINO NACIDO DESPUÉS DE T: la propuesta guardada no tiene origenDestino (el destino no aportó) y el destino se actualizó después de T
+    destino "30639453738" cuit conf=0.9 item=90b30edcc0666376321d act=2026-07-30T16:45:37.466Z nac≈2026-07-01T20:01:12.270Z (NACIÓ DESPUÉS DE T)
+    destino "TELECOM ARGENTINA S.A." nombre conf=0.8 item=90b30edcc0666376321d act=2026-07-30T16:44:39.876Z nac≈2026-07-01T20:01:12.270Z (NACIÓ DESPUÉS DE T)
+    texto → rama 2 item=90b30edcc0666376321d
+
+■ fd015e17 comprobante_pago fecha=2026-08-05 $106037 "Personal"  T=2026-08-06T15:56:58.711Z
+  guardada=1 destino | cruda=2 destino | fina=2 destino
+  causa: DESTINO REAPUNTADO (CUIT 30572975831 → Internet en T; a Gas el 15/9) + CÓDIGO: procesado 6/8, antes del guard de F9.168
+    payee → []
+    débil → []
+    destino "30572975831" cuit conf=0.9 item=eb8e59f225ed73b785b6 act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z
+      obligaciones eb8e59f225ed73b785b6/2026-08: (ninguna)

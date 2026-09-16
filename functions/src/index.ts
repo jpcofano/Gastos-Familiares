@@ -14,6 +14,7 @@ import {
   reconciliarPorNombre,
   mesImputado,
   esCargoAdicional,
+  obligacionSaldable,
   esObligacionDoc,
   esObligacionFutura,
   type DatosExtractosMin,
@@ -760,7 +761,11 @@ async function matchPorDestino(
       // NO se compara por monto a propósito: un pago parcial o un recargo cambian el importe sin
       // cambiar de qué factura se trata, y F9.167 §4 midió que las diferencias no tienen una
       // tolerancia segura. La procedencia sí es un dato duro.
-      const impaga = obligacionesDelMes.find(m => !m.confirmadoPago && !m.origenComprobanteId);
+      //
+      // F9.175 §1 — el guard aplica SOLO si lo que entra es otra obligación. Un pago sí salda una
+      // obligación nacida de una factura: es el flujo normal. La definición vive en
+      // `obligacionSaldable` (matchLogica.ts), compartida con `esCargoAdicional`.
+      const impaga = obligacionSaldable(obligacionesDelMes, datos.tipoDocumento);
       if (impaga) {
         return {
           rama: 1,
@@ -776,14 +781,15 @@ async function matchPorDestino(
       }
       // Hay obligaciones del ítem en el mes pero ninguna elegible para rama 1 → cargo adicional.
       // Son DOS casos y desde F9.168 los cubre el mismo return: o ya están todas pagas, o la
-      // impaga nació de otra factura y por lo tanto ésta es una segunda boleta distinta.
+      // impaga nació de otra factura y lo que entra es otra factura (F9.175 §1: si entra un pago,
+      // esa impaga era elegible y ya salió por rama 1 arriba).
       // F9.169 §2 — la decisión sale de `esCargoAdicional`, la MISMA función que usa la
       // reasignación. Acá siempre da true (llegamos con obligaciones y sin impaga elegible), pero
       // se llama igual para que exista un solo dueño de la definición.
       return {
         rama: 2,
         itemEsperadoId: itemId,
-        esAdicional:          esCargoAdicional(obligacionesDelMes),
+        esAdicional:          esCargoAdicional(obligacionesDelMes, undefined, datos.tipoDocumento),
         origenDestino:        true,
         requiereConfirmacion,
         confianza,
@@ -3608,6 +3614,8 @@ export const reasignarItemDeComprobante = onCall(
             origenComprobanteId: (x.data().origenComprobanteId as string | null) ?? null,
           })),
           movRef.id,
+          // F9.175 §1 — la elegibilidad depende de qué entra; mismo criterio que el matcher.
+          compDatos.tipoDocumento,
         );
 
     // F9.168 §2 — el `propuestaMatch` del comprobante TAMBIÉN se actualiza.
