@@ -209,9 +209,15 @@ export interface DesambiguacionDestino {
   valores: Record<string, string>;   // valor del campo → itemEsperadoId
 }
 
+// F9.176 — qué ES el destino. Sin rol = comportamiento de siempre. Gemelo de `RolDestino` en
+// functions/src/matchLogica.ts (los paquetes no se importan cruzado).
+export type RolDestino = 'comercio' | 'medio_pago' | 'pagador' | 'propio';
+
 export interface Destino {
   destinoNorm: string;
   tipo: 'cbu' | 'cuit' | 'alias' | 'nombre';
+  rol?: RolDestino;
+  medioId?: string;          // F9.176 — sólo con rol 'medio_pago': id en config/familia.bancos
   itemEsperadoId?: string;
   desambiguacion?: DesambiguacionDestino;
   categoria?: string;
@@ -260,6 +266,8 @@ export interface PropuestaMatch {
   // true en la banda 0.7-0.9 (pide confirmación con item+mes editables), false/ausente ≥0.9
   // (alta silenciosa) o cuando el match no viene de destino (sin cambios, siempre confirma).
   requiereConfirmacion?: boolean;
+  // F9.176 — medio que declara un destino `medio_pago` del comprobante (id de config/familia.bancos).
+  medioIdPrellena?: string;
   confianza?: number;
 }
 

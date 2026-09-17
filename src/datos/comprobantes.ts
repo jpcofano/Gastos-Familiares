@@ -38,6 +38,7 @@ export function docAComprobante(id: string, data: DocumentData): Comprobante {
       categoriaPrellena:   (pm.categoriaPrellena  as string | null | undefined),
       subcategoriaPrellena:(pm.subcategoriaPrellena as string | null | undefined),
       etiquetaPrellena:    (pm.etiquetaPrellena   as string | null | undefined),
+      medioIdPrellena:     (pm.medioIdPrellena    as string | undefined),
       dedupInfo: dd ? {
         movId: dd.movId as string,
         mes:   (dd.mes   as string | null) ?? null,

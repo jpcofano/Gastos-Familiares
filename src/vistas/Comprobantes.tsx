@@ -613,6 +613,14 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
     ? ajustarFechaAlMes(fechaOriginal, mesPagoEfectivo)
     : fechaOriginal;
 
+  // F9.176 §1 — el medio que declara un destino `medio_pago` del comprobante (Personal Pay → su
+  // medio). Va DESPUÉS del banco del comprobante y ANTES del ítem y del default: el comprobante dice
+  // por dónde salió de verdad, el ítem sólo de qué cuenta se suele pagar. Si el id no está en la
+  // config (medio borrado), se ignora y queda la precedencia de siempre.
+  const medioDestino = pm.medioIdPrellena && config
+    ? config.bancos.find(b => b.id === pm.medioIdPrellena)?.nombre
+    : undefined;
+
   const preloadBase = {
     // F9.155 §4 — era `'Gasto' as const`, así que toda transferencia RECIBIDA sin ítem esperado que
     // matcheara (rama 3, "movimiento nuevo") entraba como Gasto, con el signo invertido en el mes.
@@ -642,7 +650,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
     // de la config, editable desde Perfil › Medios de pago.
     // Fail-soft: si `config` todavía no resolvió va `undefined` —el campo queda sin escribir y lo
     // elige el usuario—. NO cae a un literal 'BBVA': eso sería el mismo hardcode con otro nombre.
-    banco:               config ? medioPorDefecto(config.bancos)?.nombre : undefined,
+    banco:               medioDestino ?? (config ? medioPorDefecto(config.bancos)?.nombre : undefined),
     // F9.75 — obligaciones (factura*, recibo_servicio) NO se pagan por vencimiento; el pago llega
     // después. Solo pagos/tickets confirman por fecha. (El server recalcula; esto mantiene el
     // preload coherente con lo que se va a guardar.)
@@ -691,7 +699,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
         // mano en cada carga. Precedencia: comprobante → ítem → vacío. No cae al medio por defecto
         // de la config (eso es `preloadBase.banco`, para las ramas SIN ítem): si el ítem no dice
         // nada, mejor vacío que un default de la casa que puede no ser el de este gasto.
-        banco:          bancoDeDatos(d) ?? itemForzado?.banco ?? undefined,
+        banco:          bancoDeDatos(d) ?? medioDestino ?? itemForzado?.banco ?? undefined,
         itemEsperadoId: esperadoForzado,
         // F9.119 — el tipo lo manda el ítem elegido: asignar un comprobante a un cobro
         // esperado tiene que crear un Ingreso, no un Gasto.
@@ -705,7 +713,7 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
     ? {
         ...preloadBase,
         // F9.154b §7 — ver el comentario de la rama de arriba: misma precedencia.
-        banco:          bancoDeDatos(d) ?? esperado?.banco ?? undefined,
+        banco:          bancoDeDatos(d) ?? medioDestino ?? esperado?.banco ?? undefined,
         tipo:           esperado?.tipo         ?? preloadBase.tipo,
         categoria:      esperado?.categoria    ?? undefined,
         subcategoria:   esperado?.subcategoria ?? undefined,

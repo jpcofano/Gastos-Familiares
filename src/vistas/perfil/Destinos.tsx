@@ -10,8 +10,10 @@ import {
 } from '../../datos/catalogos';
 import {
   listarDestinos, upsertDestino, eliminarDestino,
+  ROLES_DESTINO, rolSinClasificacion, clasificacionParaRol,
   type DestinoDoc, type UpsertDestinoInput,
 } from '../../datos/destinos';
+import type { RolDestino } from '../../types';
 
 const UMBRAL = 0.7;
 
@@ -23,6 +25,15 @@ const inputStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = { ...inputStyle, appearance: 'auto' };
 
 const TIPO_LABELS: Record<string, string> = { cbu: 'CBU', cuit: 'CUIT', alias: 'alias', nombre: 'nombre' };
+
+const ROL_LABELS: Record<string, string> = Object.fromEntries(ROLES_DESTINO.map(r => [r.valor, r.label]));
+
+// F9.176 — el rol se ve de un vistazo, con el mismo formato de chip que el tipo pero en otra paleta
+// (la amarilla ya significa "bajo umbral").
+const rolChipStyle: React.CSSProperties = {
+  fontSize: 11, fontWeight: 600, borderRadius: 999, padding: '1px 7px',
+  background: 'var(--gf-ok-bg)', color: 'var(--gf-ok-text)', border: '1px solid var(--gf-ok-line)',
+};
 
 function chipStyle(warn: boolean): React.CSSProperties {
   return {
@@ -48,6 +59,8 @@ export default function Destinos() {
   // form (alta)
   const [fRaw, setFRaw] = useState('');
   // form (alta + edición)
+  const [fRol, setFRol] = useState<RolDestino | ''>('');
+  const [fMedio, setFMedio] = useState('');
   const [fItem, setFItem] = useState('');
   const [fCategoria, setFCategoria] = useState('');
   const [fSubcat, setFSubcat] = useState('');
@@ -82,12 +95,15 @@ export default function Destinos() {
   function abrirNuevo() {
     setEditando(null);
     setFRaw(''); setFItem(''); setFCategoria(''); setFSubcat(''); setFEtiqueta(''); setFConfianza('');
+    setFRol(''); setFMedio('');
     setErrorMsg(null);
     setAbierto(true);
   }
 
   function abrirEdicion(d: DestinoDoc) {
     setEditando(d);
+    setFRol(d.rol ?? '');
+    setFMedio(d.medioId ?? '');
     setFItem(d.itemEsperadoId ?? '');
     setFCategoria(d.categoria ?? '');
     setFSubcat(d.subcategoria ?? '');
@@ -99,16 +115,29 @@ export default function Destinos() {
 
   function cerrar() { setAbierto(false); setEditando(null); setErrorMsg(null); }
 
+  // F9.176 §3 — con `medio_pago` o `propio` el destino no lleva ítem ni categoría: se limpian en el
+  // momento de elegir el rol, no se deja a criterio del usuario. El medio sólo aplica a medio_pago.
+  function cambiarRol(rol: RolDestino | '') {
+    setFRol(rol);
+    const f = clasificacionParaRol(rol, { item: fItem, categoria: fCategoria, subcategoria: fSubcat, etiqueta: fEtiqueta });
+    setFItem(f.item); setFCategoria(f.categoria); setFSubcat(f.subcategoria); setFEtiqueta(f.etiqueta);
+    if (rol !== 'medio_pago') setFMedio('');
+  }
+  const sinClasificacion = rolSinClasificacion(fRol);
+
   async function guardar() {
-    const item = fItem || null;
-    const cat  = fCategoria || null;
-    if (!item && !cat) { setErrorMsg('Se requiere ítem esperado o categoría.'); return; }
+    const f = clasificacionParaRol(fRol, { item: fItem, categoria: fCategoria, subcategoria: fSubcat, etiqueta: fEtiqueta });
+    const item = f.item || null;
+    const cat  = f.categoria || null;
+    if (!sinClasificacion && !item && !cat) { setErrorMsg('Se requiere ítem esperado o categoría.'); return; }
 
     const payload: UpsertDestinoInput = {
       itemEsperadoId: item,
       categoria:      cat,
-      subcategoria:   fSubcat || null,
-      etiqueta:       fEtiqueta || null,
+      subcategoria:   f.subcategoria || null,
+      etiqueta:       f.etiqueta || null,
+      rol:            fRol || null,
+      medioId:        fRol === 'medio_pago' ? (fMedio || null) : null,
     };
 
     if (editando) {
@@ -145,6 +174,7 @@ export default function Destinos() {
   }
 
   const itemsActivos = (items ?? []).filter(i => i.activo !== false);
+  const medios = (config?.bancos ?? []).filter(b => !b.oculto);
   const catsActivas  = (config?.categorias ?? []).filter(c => c.activo);
   const subcatsFiltradas = subcats.filter(s => s.activo && s.categoriaPadre === fCategoria);
 
@@ -177,6 +207,7 @@ export default function Destinos() {
         ) : visibles.map((d, i) => {
           const itemNombre = itemsActivos.find(it => it.id === d.itemEsperadoId)?.nombre;
           const bajUmbral  = d.confianza < UMBRAL;
+          const medioNombre = d.medioId ? (config?.bancos ?? []).find(b => b.id === d.medioId)?.nombre ?? d.medioId : null;
           return (
             <div
               key={d.id}
@@ -192,11 +223,14 @@ export default function Destinos() {
                 <div style={{ fontSize: 12, color: 'var(--color-text-sec)', marginTop: 2 }}>
                   {itemNombre
                     ? `🔗 ${itemNombre}`
+                    : medioNombre
+                    ? `Medio: ${medioNombre}`
                     : [d.categoria, d.subcategoria].filter(Boolean).join(' › ') || '—'
                   }
                 </div>
                 <div style={{ display: 'flex', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
                   <span style={chipStyle(false)}>{TIPO_LABELS[d.tipo] ?? d.tipo}</span>
+                  {d.rol && <span style={rolChipStyle}>{ROL_LABELS[d.rol] ?? d.rol}</span>}
                   <span style={chipStyle(bajUmbral)} title={bajUmbral ? 'Bajo umbral — el matcher lo ignora' : undefined}>
                     {Math.round(d.confianza * 100)}%{bajUmbral ? ' ⚠' : ''}
                   </span>
@@ -228,6 +262,7 @@ export default function Destinos() {
       <p style={{ fontSize: 12, color: 'var(--color-text-sec)', margin: '0 4px', lineHeight: 1.5 }}>
         Un destino vinculado a un ítem esperado prefillará ese ítem (rama 2) en el próximo comprobante que matchee ese payee.
         Destinos con confianza &lt; {UMBRAL * 100}% son ignorados por el matcher.
+        Un medio de pago o un destino propio nunca resuelve ítem: el matcher sigue buscando por las otras llaves del comprobante.
       </p>
 
       {/* bottom-sheet */}
@@ -264,10 +299,37 @@ export default function Destinos() {
               </div>
             )}
 
+            {/* F9.176 — rol */}
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)', display: 'block', marginBottom: 5 }}>Qué es</label>
+              <select value={fRol} onChange={e => cambiarRol(e.target.value as RolDestino | '')} style={selectStyle}>
+                <option value="">— Sin rol (se comporta como comercio) —</option>
+                {ROLES_DESTINO.map(r => <option key={r.valor} value={r.valor}>{r.label}</option>)}
+              </select>
+              {fRol && (
+                <p style={{ fontSize: 11, color: 'var(--color-text-sec)', margin: '4px 0 0' }}>
+                  {ROLES_DESTINO.find(r => r.valor === fRol)?.ayuda}
+                  {sinClasificacion && ' No lleva ítem ni categoría.'}
+                </p>
+              )}
+            </div>
+
+            {/* F9.176 — medio, sólo para medio de pago */}
+            {fRol === 'medio_pago' && (
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)', display: 'block', marginBottom: 5 }}>Medio</label>
+                <select value={fMedio} onChange={e => setFMedio(e.target.value)} style={selectStyle}>
+                  <option value="">— Ninguno —</option>
+                  {medios.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                </select>
+                <p style={{ fontSize: 11, color: 'var(--color-text-sec)', margin: '4px 0 0' }}>Se propone como banco del movimiento.</p>
+              </div>
+            )}
+
             {/* ítem esperado */}
             <div>
               <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)', display: 'block', marginBottom: 5 }}>Ítem esperado</label>
-              <select value={fItem} onChange={e => setFItem(e.target.value)} style={selectStyle}>
+              <select value={fItem} onChange={e => setFItem(e.target.value)} style={selectStyle} disabled={sinClasificacion}>
                 <option value="">— sin vínculo —</option>
                 {itemsActivos.map(it => <option key={it.id} value={it.id}>{it.nombre}</option>)}
               </select>
@@ -276,7 +338,7 @@ export default function Destinos() {
             {/* categoría */}
             <div>
               <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)', display: 'block', marginBottom: 5 }}>Categoría</label>
-              <select value={fCategoria} onChange={e => { setFCategoria(e.target.value); setFSubcat(''); }} style={selectStyle}>
+              <select value={fCategoria} onChange={e => { setFCategoria(e.target.value); setFSubcat(''); }} style={selectStyle} disabled={sinClasificacion}>
                 <option value="">— Ninguna —</option>
                 {catsActivas.map(c => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
               </select>
@@ -285,7 +347,7 @@ export default function Destinos() {
             {/* subcategoría */}
             <div>
               <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)', display: 'block', marginBottom: 5 }}>Subcategoría</label>
-              <select value={fSubcat} onChange={e => setFSubcat(e.target.value)} style={selectStyle} disabled={!fCategoria}>
+              <select value={fSubcat} onChange={e => setFSubcat(e.target.value)} style={selectStyle} disabled={sinClasificacion || !fCategoria}>
                 <option value="">— Ninguna —</option>
                 {subcatsFiltradas.map(s => <option key={s.id} value={s.valor}>{s.valor}</option>)}
               </select>
@@ -294,7 +356,7 @@ export default function Destinos() {
             {/* etiqueta */}
             <div>
               <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-sec)', display: 'block', marginBottom: 5 }}>Etiqueta</label>
-              <select value={fEtiqueta} onChange={e => setFEtiqueta(e.target.value)} style={selectStyle}>
+              <select value={fEtiqueta} onChange={e => setFEtiqueta(e.target.value)} style={selectStyle} disabled={sinClasificacion}>
                 <option value="">— Ninguna —</option>
                 {etiquetas.filter(e => e.activo).map(et => <option key={et.id} value={et.valor}>{et.valor}</option>)}
               </select>

@@ -17,6 +17,11 @@ import {
   obligacionSaldable,
   esObligacionDoc,
   esObligacionFutura,
+  destinoResuelve,
+  elegirLlaveAprendible,
+  destinoSeAprende,
+  rolSinClasificacion,
+  ROLES_DESTINO,
   type DatosExtractosMin,
   type MovimientoMin,
   type ItemEsperadoMin,
@@ -338,7 +343,9 @@ export const reintentarComprobante = onDocumentUpdated(
 );
 
 // F9.82 — carga nombres aprendidos en /destinos tipo='nombre' con confianza suficiente
-async function cargarNombresDestinoAprendidos(): Promise<Map<string, string>> {
+// F9.176 — un nombre cuyo rol no resuelve para esta dirección no entra al mapa: el pase débil no
+// puede casar por el ítem de un medio de pago o de un CUIT propio.
+async function cargarNombresDestinoAprendidos(direccion: string | null | undefined): Promise<Map<string, string>> {
   const snap = await db.collection('destinos')
     .where('tipo', '==', 'nombre')
     .where('confianza', '>=', 0.7)
@@ -347,6 +354,7 @@ async function cargarNombresDestinoAprendidos(): Promise<Map<string, string>> {
   const mapa = new Map<string, string>();
   for (const doc of snap.docs) {
     const data = doc.data();
+    if (!destinoResuelve(data.rol, direccion)) continue;
     if (data.destinoNorm && data.itemEsperadoId) {
       mapa.set(data.destinoNorm as string, data.itemEsperadoId as string);
     }
@@ -508,7 +516,7 @@ export const matchComprobante = onDocumentUpdated(
       // degradar a pase débil sin alias en vez de abortar todo el match
       let nombresAprendidos: Map<string, string> | null = null;
       try {
-        nombresAprendidos = await cargarNombresDestinoAprendidos();
+        nombresAprendidos = await cargarNombresDestinoAprendidos(datos.direccion);
       } catch (e) {
         console.error('[matchComprobante] cargarNombresDestinoAprendidos falló, sigo sin alias:', e);
       }
@@ -546,6 +554,17 @@ export const matchComprobante = onDocumentUpdated(
     // Rama destino: match por CBU/alias/nombre aprendido (prioridad sobre texto)
     const propuestaDestino = await matchPorDestino(datos, movs, mesComp, items, subidoISO);
 
+    // F9.176 §1 — si una llave del comprobante es un medio de pago con medio declarado, viaja en la
+    // propuesta para que el alta lo use como banco. Fail-soft: sin él la propuesta es la de siempre,
+    // y la ausencia del campo es exactamente el comportamiento anterior.
+    let extraMedio: { medioIdPrellena?: string } = {};
+    try {
+      const medioId = await medioDeDestinos(datos);
+      if (medioId) extraMedio = { medioIdPrellena: medioId };
+    } catch (e) {
+      console.error('[matchComprobante] medioDeDestinos falló, sigo sin medio:', e);
+    }
+
     // F6.9.7 (P2) — un destino CON itemEsperadoId (rama 2, incluido adicional) gana directo.
     // F9.106 — rama 1 (impaga del mismo item+mesPago: esta factura ES esa obligación) también
     // gana directo, mismo criterio de "no dejar que texto pise una decisión ya tomada por destino".
@@ -553,7 +572,7 @@ export const matchComprobante = onDocumentUpdated(
     // matchConEsperados pruebe por texto. Si nada engancha, cae a rama 3 conservando el prefill.
     if (propuestaDestino && (propuestaDestino.rama === 2 || propuestaDestino.rama === 1)) {
       await ref.update({
-        propuestaMatch: { ...propuestaDestino, calculadoEn: FieldValue.serverTimestamp() },
+        propuestaMatch: { ...propuestaDestino, ...extraMedio, calculadoEn: FieldValue.serverTimestamp() },
         actualizadoEn:  FieldValue.serverTimestamp(),
       });
       console.log(`[matchComprobante] ${hashActual} → rama destino (rama=${propuestaDestino.rama}, item=${propuestaDestino.itemEsperadoId}, adicional=${propuestaDestino.esAdicional ?? false})`);
@@ -580,6 +599,7 @@ export const matchComprobante = onDocumentUpdated(
     await ref.update({
       propuestaMatch: {
         ...propuestaFinal,
+        ...extraMedio,
         calculadoEn: FieldValue.serverTimestamp(),
       },
       actualizadoEn: FieldValue.serverTimestamp(),
@@ -694,6 +714,10 @@ async function matchPorDestino(
     if (!snap.exists) continue;
 
     const d = snap.data()!;
+    // F9.176 §1/§2 — un destino que no es contraparte (medio de pago, CUIT propio, o el pagador de
+    // un ingreso frente a un documento saliente) no resuelve nada: se sigue con la próxima llave del
+    // comprobante. Sin rol, `destinoResuelve` es true y esto no cambia nada.
+    if (!destinoResuelve(d.rol, datos.direccion)) continue;
     const confianza = (d.confianza as number) ?? 0;
     if (confianza < 0.7) continue;
 
@@ -812,6 +836,22 @@ async function matchPorDestino(
   return null;
 }
 
+// F9.176 §1 — el medio que declara un destino `medio_pago` del comprobante (mismas llaves y mismo
+// orden que `matchPorDestino`). Devuelve el id del medio en config/familia.bancos, o null.
+async function medioDeDestinos(datos: DatosExtractosMin): Promise<string | null> {
+  const raws = [datos.destinoCbu, datos.destinoCuit, datos.destinoAlias, datos.destinoNombre]
+    .filter((r): r is string => typeof r === 'string' && r.trim().length > 0);
+  for (const raw of raws) {
+    const parsed = normalizarDestino(raw);
+    if (!parsed) continue;
+    const snap = await db.collection('destinos').doc(idDestinoNorm(parsed.norm)).get();
+    if (!snap.exists) continue;
+    const d = snap.data()!;
+    if (d.rol === 'medio_pago' && typeof d.medioId === 'string' && d.medioId) return d.medioId;
+  }
+  return null;
+}
+
 async function cargarReglasNormalizacion(): Promise<NormRule[]> {
   const snap = await db.collection('reglasNormalizacion').get();
   return snap.docs
@@ -912,15 +952,28 @@ async function aprenderDestino(data: FirebaseFirestore.DocumentData): Promise<vo
 
   if (!categoria && !itemEsperadoId) return;
 
-  const destinoRaw = destinoCbu ?? destinoCuit ?? destinoAlias ?? destinoNombre;
-  if (!destinoRaw) return;
-
-  const parsed = normalizarDestino(destinoRaw);
+  // F9.176 — la llave que se aprende es la PRIMERA cuyo destino admite aprendizaje. Un medio de pago,
+  // un CUIT propio o el pagador frente a un Gasto se saltean y se prueba la siguiente (decisión del
+  // dueño): así el pago de Metrogas por Personal Pay le enseña "metrogas" y no toca el CUIT del
+  // procesador. Sin roles es idéntico a `destinoCbu ?? destinoCuit ?? …` (ver `elegirLlaveAprendible`).
+  const tipoMov = (data.tipo as string | null) ?? null;
+  const llaves = [destinoCbu, destinoCuit, destinoAlias, destinoNombre];
+  const normalizadas = llaves
+    .map(r => (r ? normalizarDestino(r) : null))
+    .filter((p): p is NonNullable<ReturnType<typeof normalizarDestino>> => p !== null);
+  const snaps = new Map<string, FirebaseFirestore.DocumentSnapshot>();
+  await Promise.all(normalizadas.map(async p => {
+    snaps.set(p.norm, await db.collection('destinos').doc(idDestinoNorm(p.norm)).get());
+  }));
+  const parsed = elegirLlaveAprendible(llaves, norm => snaps.get(norm)?.data()?.rol, tipoMov);
   if (!parsed) return;
+  if (normalizadas[0] && parsed.norm !== normalizadas[0].norm) {
+    console.log(`[aprenderDestino] salteo ${normalizadas[0].norm} por rol (mov ${tipoMov ?? '-'}) → aprendo ${parsed.norm}`);
+  }
 
   const id  = idDestinoNorm(parsed.norm);
   const ref = db.collection('destinos').doc(id);
-  const doc = await ref.get();
+  const doc = snaps.get(parsed.norm) ?? await ref.get();
 
   if (doc.exists) {
     const existing = doc.data()!;
@@ -971,7 +1024,7 @@ async function aprenderDestino(data: FirebaseFirestore.DocumentData): Promise<vo
           actualizadoEn: FieldValue.serverTimestamp(),
         });
         console.log(`[aprenderDestino] insert nombre alias ${idNombre} → item=${itemEsperadoId ?? '-'}`);
-      } else if (itemEsperadoId && !docNombre.data()?.itemEsperadoId) {
+      } else if (itemEsperadoId && !docNombre.data()?.itemEsperadoId && destinoSeAprende(docNombre.data()?.rol, tipoMov)) {
         await refNombre.update({ itemEsperadoId, actualizadoEn: FieldValue.serverTimestamp() });
       }
     }
@@ -3392,17 +3445,38 @@ export const upsertDestino = onCall(
     const {
       id, destinoRaw,
       itemEsperadoId, categoria, subcategoria, etiqueta, confianza,
+      rol, medioId,
     } = (request.data ?? {}) as {
       id?: string; destinoRaw?: string;
       itemEsperadoId?: string | null;
       categoria?: string | null; subcategoria?: string | null; etiqueta?: string | null;
       confianza?: number;
+      // F9.176 — `undefined` = no tocar (clientes viejos); `null` = quitar el rol.
+      rol?: string | null;
+      medioId?: string | null;
     };
 
-    const cat  = (categoria ?? null) || null;
-    const item = (itemEsperadoId ?? null) || null;
+    if (rol != null && !(ROLES_DESTINO as readonly string[]).includes(rol)) {
+      throw new HttpsError('invalid-argument', `rol inválido: ${rol}`);
+    }
+    // F9.176 §3 — un medio de pago o un CUIT propio NO lleva ítem ni categoría: se limpian acá
+    // también, no sólo en el formulario, para que ningún cliente pueda dejar la contradicción.
+    // Si la edición no manda `rol`, vale el que ya tiene el destino.
+    const previo = id ? await db.collection('destinos').doc(id).get() : null;
+    const rolEfectivo = rol !== undefined ? rol : ((previo?.data()?.rol as string | undefined) ?? null);
+    const sinClasificacion = rolSinClasificacion(rolEfectivo);
+    const cat  = sinClasificacion ? null : ((categoria ?? null) || null);
+    const item = sinClasificacion ? null : ((itemEsperadoId ?? null) || null);
 
-    if (!cat && !item) throw new HttpsError('invalid-argument', 'Se requiere categoría o ítem esperado');
+    if (!sinClasificacion && !cat && !item) throw new HttpsError('invalid-argument', 'Se requiere categoría o ítem esperado');
+
+    // El medio sólo tiene sentido en un medio de pago, y tiene que existir en la config.
+    const medio = rolEfectivo === 'medio_pago' ? ((medioId ?? null) || null) : null;
+    if (medio) {
+      const fam = await db.collection('config').doc('familia').get();
+      const bancos = (fam.data()?.bancos ?? []) as Array<{ id?: string }>;
+      if (!bancos.some(b => b?.id === medio)) throw new HttpsError('invalid-argument', `medioId inexistente: ${medio}`);
+    }
 
     if (confianza != null && (typeof confianza !== 'number' || confianza < 0 || confianza > 1)) {
       throw new HttpsError('invalid-argument', 'confianza fuera de rango [0,1]');
@@ -3434,16 +3508,25 @@ export const upsertDestino = onCall(
     const update: Record<string, unknown> = {
       ...base,
       categoria:     cat,
-      subcategoria:  (subcategoria ?? null) || null,
-      etiqueta:      (etiqueta ?? null) || null,
+      subcategoria:  sinClasificacion ? null : ((subcategoria ?? null) || null),
+      etiqueta:      sinClasificacion ? null : ((etiqueta ?? null) || null),
       actualizadoEn: FieldValue.serverTimestamp(),
     };
     update.itemEsperadoId = item;
+    if (rol !== undefined) {
+      update.rol     = rol ?? FieldValue.delete();
+      update.medioId = medio ?? FieldValue.delete();
+    } else if (medioId !== undefined) {
+      update.medioId = medio ?? FieldValue.delete();
+    }
+    // Un medio de pago o un CUIT propio no desambigua entre ítems: el mapa quedaría apuntando a
+    // ítems que el destino ya no puede resolver.
+    if (sinClasificacion) update.desambiguacion = FieldValue.delete();
     if (confianza != null) update.confianza = confianza;
     else if (!id) update.confianza = 0.8;
 
     await ref.set(update, { merge: true });
-    console.log(`[upsertDestino] ${ref.id} → cat=${cat ?? '-'} item=${item ?? '-'} (por ${email})`);
+    console.log(`[upsertDestino] ${ref.id} → cat=${cat ?? '-'} item=${item ?? '-'} rol=${rol === undefined ? '(sin cambio)' : rol ?? '(quitado)'}${medio ? ` medio=${medio}` : ''} (por ${email})`);
     return { ok: true, id: ref.id };
   },
 );
@@ -3544,6 +3627,9 @@ export const reasignarItemDeComprobante = onCall(
       const snap = await ref.get();
       if (!snap.exists) continue;
       const d = snap.data()!;
+      // F9.176 — un medio de pago, un CUIT propio o el pagador frente a un Gasto no se reapuntan:
+      // la reasignación es aprendizaje, y a esos destinos no se les enseña ítem.
+      if (!destinoSeAprende(d.rol, item.tipo as string | undefined)) continue;
       // §2 — si el destino desambigua, la corrección va en el mapa, no en el itemEsperadoId: pisar
       // el id rompería al OTRO ítem que comparte este destino.
       const des = d.desambiguacion as { campo?: string; valores?: Record<string, string> } | undefined;

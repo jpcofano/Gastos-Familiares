@@ -1,0 +1,108 @@
+F9.176 — auditorías. SOLO LECTURA.
+
+══ §2 — comprobantes con payee 30572975831 (destinoCuit o contraparteCuit) ══
+
+  059e7006 comprobante_pago 2026-07-06 $146739.5 dir=- subido=2026-07-06T20:31:52.854Z
+     destinoNombre="Personal" razon="Personal" alias=null cbu=null numeroCliente=1001595659710003
+     propuesta: rama=2 item=Casa›Internet | final (dueño): Casa›Internet
+     numeroCliente → recibos con el mismo número: [421b8b6f Casa›Internet, 8f059f3c Casa›Internet, ee4f3d3a Casa›Internet]  ítems que lo reclaman: []  → ÚTIL
+     destinoNombre → destino alias:"personal" item=Casa›Internet conf=0.8 | matchTexto: [Casa›Internet]  → ÚTIL
+
+  13c1b187 comprobante_pago 2026-09-15 $5555.59 dir=saliente subido=2026-09-15T19:48:31.782Z
+     destinoNombre="Metrogas" razon="Metrogas" alias=null cbu=null numeroCliente=010372743000
+     propuesta: rama=2 item=Casa›Internet | final (dueño): Casa›Gas
+     numeroCliente → recibos con el mismo número: [9c77b6fc Casa›Gas, a650c026 Casa›Gas]  ítems que lo reclaman: []  → ÚTIL
+     destinoNombre → destino alias:"metrogas" item=Casa›Gas conf=0.8 | matchTexto: [Casa›Gas]  → ÚTIL
+
+  a07760b9 comprobante_pago 2026-09-07 $107897.7 dir=saliente subido=2026-09-08T10:22:53.596Z
+     destinoNombre="Personal" razon="Personal" alias=null cbu=null numeroCliente=1001595659710003
+     propuesta: rama=1 item=- | final (dueño): Casa›Internet
+     numeroCliente → recibos con el mismo número: [421b8b6f Casa›Internet, 8f059f3c Casa›Internet, ee4f3d3a Casa›Internet]  ítems que lo reclaman: []  → ÚTIL
+     destinoNombre → destino alias:"personal" item=Casa›Internet conf=0.8 | matchTexto: [Casa›Internet]  → ÚTIL
+
+  fd015e17 comprobante_pago 2026-08-05 $106037 dir=- subido=2026-08-06T15:56:38.988Z
+     destinoNombre="Personal" razon="Personal" alias=null cbu=null numeroCliente=1001595659710003
+     propuesta: rama=1 item=Casa›Internet | final (dueño): Casa›Internet
+     numeroCliente → recibos con el mismo número: [421b8b6f Casa›Internet, 8f059f3c Casa›Internet, ee4f3d3a Casa›Internet]  ítems que lo reclaman: []  → ÚTIL
+     destinoNombre → destino alias:"personal" item=Casa›Internet conf=0.8 | matchTexto: [Casa›Internet]  → ÚTIL
+
+  total=4  con numeroCliente útil=4  con destinoNombre útil=4  con alguno=4  sin nada=0
+  destino 30572975831 hoy: {"destinoNorm":"30572975831","tipo":"cuit","categoria":"Casa","etiqueta":null,"creadoPor":"Juan","confianza":0.9,"itemEsperadoId":"eb8e59f225ed73b785b6","subcategoria":"Gas","actualizadoEn":"2026-09-15T19:54:40.897Z"}
+
+══ §4 — destinos candidatos a un rol distinto de `comercio` ══
+
+  ▸ 0000003100005629554802  [destino cbu, hoy → Educación y chicos›Compritas varias, conf=0.8, rol=(sin rol)]
+      · PATRÓN: payee con apellido Cofano (¿familia?)
+        43288f36 transferencia 2026-08-23 destinoCbu dir=- → -
+        61c83d1f transferencia 2026-09-02 destinoCbu dir=- → -
+        77ce0570 transferencia 2026-08-26 destinoCbu dir=- → -
+
+  ▸ 0000003100007794409332  [destino cbu, hoy → Educación y chicos›Vacaciones, conf=0.8, rol=(sin rol)]
+      · PATRÓN: payee con apellido Cofano (¿familia?)
+        68debac7 transferencia 2026-08-19 destinoCbu dir=- → -
+        ccc8152c transferencia 2026-08-27 destinoCbu dir=- → -
+
+  ▸ 20243359679  [destino cuit, hoy → Impuestos y finanzas›Monotributo, conf=0.8, rol=(sin rol)]
+      · CONOCIDO: CUIL del dueño (a9da4f68) → propio
+        4b9601b9 comprobante_pago 2026-09-04 destinoCuit dir=- → Impuestos y finanzas›Monotributo
+        a9da4f68 comprobante_pago 2026-07-21 destinoCuit dir=- → Impuestos y finanzas›Monotributo
+
+  ▸ 23503201569  [no existe como destino]
+      · PATRÓN: payee con apellido Cofano (¿familia?)
+        43288f36 transferencia 2026-08-23 destinoCuit dir=- → -
+        61c83d1f transferencia 2026-09-02 destinoCuit dir=- → -
+        77ce0570 transferencia 2026-08-26 destinoCuit dir=- → -
+
+  ▸ 27488573778  [no existe como destino]
+      · PATRÓN: payee con apellido Cofano (¿familia?)
+        68debac7 transferencia 2026-08-19 destinoCuit dir=- → -
+        ccc8152c transferencia 2026-08-27 destinoCuit dir=- → -
+
+  ▸ 30572975831  [destino cuit, hoy → Casa›Gas, conf=0.9, rol=(sin rol)]
+      · CONOCIDO: CUIT de Personal Pay (procesador de pagos) → medio_pago
+      · PATRÓN: en comprobantes de 2 ítems distintos (Casa›Internet / Casa›Gas)
+      · PATRÓN: cambió de ítem (propuesta 13c1b187 usó Casa›Internet, hoy Casa›Gas)
+      · PATRÓN: cambió de ítem (propuesta fd015e17 usó Casa›Internet, hoy Casa›Gas)
+        059e7006 comprobante_pago 2026-07-06 destinoCuit dir=- → Casa›Internet
+        13c1b187 comprobante_pago 2026-09-15 destinoCuit dir=saliente → Casa›Gas
+        a07760b9 comprobante_pago 2026-09-07 destinoCuit dir=saliente → Casa›Internet
+        fd015e17 comprobante_pago 2026-08-05 destinoCuit dir=- → Casa›Internet
+
+  ▸ 30709565075  [destino cuit, hoy → Casa›Agua, conf=1, rol=(sin rol)]
+      · CONOCIDO: identificador numérico de AySA (destinoCuit)
+        37c98cbf factura_b 2026-05-30 destinoCuit dir=- → Casa›Agua
+        ec4758ba factura_b 2026-05-30 destinoCuit dir=- → Casa›Agua
+
+  ▸ accenture srl  [destino nombre, hoy → Ingresos›Sueldo, conf=0.8, rol=(sin rol)]
+      · CONOCIDO: aparece en comprobantes de Accenture (destinoNombre)
+        28cab4a0 transferencia 2026-08-28 destinoNombre dir=- → Ingresos›Sueldo
+        32acfa99 transferencia 2026-06-29 destinoNombre dir=- → Ingresos›Sueldo
+        8acd1c73 transferencia 2026-07-30 destinoNombre dir=- → Ingresos›Sueldo
+
+  ▸ aysa  [destino nombre, hoy → Auto›Agua, conf=1, rol=(sin rol)]
+      · PATRÓN: en comprobantes de 2 ítems distintos (Casa›Agua / Auto›Agua)
+      · PATRÓN: cambió de ítem (propuesta 02a163ac usó Casa›Agua, hoy Auto›Agua)
+      · PATRÓN: cambió de ítem (propuesta a2c31b98 usó Casa›Agua, hoy Auto›Agua)
+        02a163ac recibo_servicio null destinoNombre dir=- → Casa›Agua
+        115564b3 comprobante_pago 2026-08-05 destinoNombre dir=- → Auto›Agua
+        249624a1 comprobante_pago 2026-07-03 destinoNombre dir=- → Casa›Agua
+        801705dd comprobante_pago 2026-07-03 destinoNombre dir=- → Casa›Agua
+        97e781db recibo_servicio null destinoNombre dir=saliente → Auto›Agua
+        a2c31b98 recibo_servicio null destinoNombre dir=saliente → Casa›Agua
+        c82eb6ab comprobante_pago 2026-07-03 destinoNombre dir=- → Casa›Agua
+
+  ▸ federico nicolas cofano lascano  [destino nombre, hoy → Educación y chicos›Almuerzo, conf=0.8, rol=(sin rol)]
+      · PATRÓN: payee con apellido Cofano (¿familia?)
+        43288f36 transferencia 2026-08-23 destinoNombre dir=- → -
+        61c83d1f transferencia 2026-09-02 destinoNombre dir=- → -
+        77ce0570 transferencia 2026-08-26 destinoNombre dir=- → -
+
+  ▸ leonidas cofano lascano  [destino nombre, hoy → Educación y chicos›Vacaciones, conf=0.8, rol=(sin rol)]
+      · PATRÓN: payee con apellido Cofano (¿familia?)
+        ccc8152c transferencia 2026-08-27 destinoNombre dir=- → -
+
+  ▸ sofia ines cofano lascano  [destino nombre, hoy → Educación y chicos›Compritas varias, conf=0.8, rol=(sin rol)]
+      · PATRÓN: payee con apellido Cofano (¿familia?)
+        68debac7 transferencia 2026-08-19 destinoNombre dir=- → -
+
+  candidatos: 12 (existentes como destino: 10)

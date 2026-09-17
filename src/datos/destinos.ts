@@ -1,11 +1,17 @@
 import { collection, getDocs } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
+import type { RolDestino } from '../types';
+
+// F9.176 — la regla del rol vive en un módulo sin Firebase para poder verificarla desde un script.
+export { ROLES_DESTINO, rolSinClasificacion, clasificacionParaRol, type ClasificacionForm } from './destinoRol';
 
 export interface DestinoDoc {
   id: string;
   destinoNorm: string;
   tipo: 'cbu' | 'cuit' | 'alias' | 'nombre';
+  rol: RolDestino | null;
+  medioId: string | null;
   itemEsperadoId: string | null;
   categoria: string | null;
   subcategoria: string | null;
@@ -21,6 +27,8 @@ export async function listarDestinos(): Promise<DestinoDoc[]> {
       id: d.id,
       destinoNorm: x.destinoNorm ?? d.id,
       tipo: x.tipo ?? 'nombre',
+      rol: x.rol ?? null,
+      medioId: x.medioId ?? null,
       itemEsperadoId: x.itemEsperadoId ?? null,
       categoria: x.categoria ?? null,
       subcategoria: x.subcategoria ?? null,
@@ -38,6 +46,9 @@ export interface UpsertDestinoInput {
   subcategoria?: string | null;
   etiqueta?: string | null;
   confianza?: number;
+  // F9.176 — `undefined` = no tocar; `null` = quitar.
+  rol?: RolDestino | null;
+  medioId?: string | null;
 }
 
 export async function upsertDestino(input: UpsertDestinoInput): Promise<{ ok: boolean; id: string }> {

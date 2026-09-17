@@ -107,6 +107,70 @@ export interface PropuestaMatch {
   // ítem que el sistema propuso cuando el usuario ya lo corrigió, y para poder distinguir
   // después qué propuso el sistema de qué decidió una persona.
   reasignadoAMano?: boolean;
+  // F9.176 §1 — id del medio (config/familia.bancos) que declara un destino `medio_pago` del
+  // comprobante. El cliente lo usa como banco del alta, después del banco del propio comprobante.
+  medioIdPrellena?: string;
+}
+
+// ── F9.176 — el ROL de un destino: qué ES, no solo a dónde va ────────────────
+//
+// Un destino sin `rol` (o con un valor que no se reconoce) se comporta EXACTAMENTE como antes de
+// F9.176: resuelve y se aprende. Ése es el criterio de no regresión, y por eso las dos funciones
+// devuelven true por defecto.
+//
+//   comercio    → como siempre.
+//   medio_pago  → un procesador de pagos (Personal Pay): no es contraparte de nada. No resuelve ni
+//                 se aprende; la búsqueda sigue por las otras llaves del comprobante.
+//   pagador     → contraparte de un INGRESO (Accenture). No resuelve un documento `saliente` ni se
+//                 aprende de un Gasto. Sin dirección se comporta como siempre (decisión del dueño:
+//                 los comprobantes anteriores a F9.155 no traen dirección y hoy resuelven bien).
+//   propio      → CUIT/CBU de la familia. Nunca es contraparte: no resuelve ni se aprende.
+export type RolDestino = 'comercio' | 'medio_pago' | 'pagador' | 'propio';
+export const ROLES_DESTINO: readonly RolDestino[] = ['comercio', 'medio_pago', 'pagador', 'propio'];
+
+/** ¿Este destino puede resolver ítem/categoría para un documento con esta dirección? */
+export function destinoResuelve(rol: unknown, direccion?: string | null): boolean {
+  if (rol === 'medio_pago' || rol === 'propio') return false;
+  if (rol === 'pagador') return direccion !== 'saliente';
+  return true;
+}
+
+/** ¿Un movimiento de este tipo puede enseñarle ítem/categoría a este destino? */
+export function destinoSeAprende(rol: unknown, tipoMovimiento?: string | null): boolean {
+  if (rol === 'medio_pago' || rol === 'propio') return false;
+  if (rol === 'pagador') return tipoMovimiento !== 'Gasto';
+  return true;
+}
+
+/** Un destino con este rol no lleva ítem ni categoría (el formulario y el callable los limpian). */
+export function rolSinClasificacion(rol: unknown): boolean {
+  return rol === 'medio_pago' || rol === 'propio';
+}
+
+/**
+ * F9.176 — qué llave de un movimiento aprende `aprenderDestino`.
+ *
+ * Es la PRIMERA llave (cbu, cuit, alias, nombre, en ese orden) cuyo destino admite aprendizaje; las
+ * que no (medio de pago, propio, pagador frente a un Gasto) se saltean y se prueba la siguiente.
+ *
+ * Sin roles es idéntico a lo de antes —`cbu ?? cuit ?? alias ?? nombre`, y si esa llave está vacía
+ * o no normaliza, no se aprende nada—: se recorren las no nulas en el mismo orden y la primera corta
+ * igual. `rolDe` devuelve el rol del destino existente para ese `norm` (undefined si no existe).
+ */
+export function elegirLlaveAprendible(
+  llaves: ReadonlyArray<string | null | undefined>,
+  rolDe: (norm: string) => unknown,
+  tipoMovimiento: string | null | undefined,
+): { tipo: 'cbu' | 'cuit' | 'alias' | 'nombre'; norm: string } | null {
+  for (const raw of llaves) {
+    if (raw == null) continue;
+    if (!raw) return null;
+    const p = normalizarDestino(raw);
+    if (!p) return null;
+    if (!destinoSeAprende(rolDe(p.norm), tipoMovimiento)) continue;
+    return p;
+  }
+  return null;
 }
 
 // CBU/CVU argentino = 22 dígitos exactos

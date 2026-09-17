@@ -32,7 +32,7 @@ export type Opciones = {
   // Estado de un destino EN T cuando se sabe que después fue reapuntado (clave: destinoNorm).
   // `existia` fuerza que exista aunque la estimación de nacimiento diga lo contrario (destinos creados
   // por el callable de asignación no dejan rastro en movimientos).
-  destinoEnT?: Record<string, { itemEsperadoId?: string; existia?: boolean; noExistia?: boolean }>;
+  destinoEnT?: Record<string, { itemEsperadoId?: string; existia?: boolean; noExistia?: boolean; rol?: string }>;
   // Fecha de referencia de `esObligacionFutura` (default: día de subida). Sirve para probar una
   // boleta real como si ya estuviera vencida.
   refISO?: string;
@@ -159,13 +159,14 @@ function cargoAdicional(obl: MovimientoMin[], tipoDoc: string, acotado: boolean)
 }
 
 /** Réplica de `cargarNombresDestinoAprendidos` con el estado de destinos en T. */
-export function nombresEnT(E: Estado, T: number, o: Pick<Opciones, 'fina' | 'destinoEnT'>): Map<string, string> {
+export function nombresEnT(E: Estado, T: number, o: Pick<Opciones, 'fina' | 'destinoEnT'>, direccion?: string | null): Map<string, string> {
   const nombres = new Map<string, string>();
   for (const [id, x0] of E.destinos) {
     const ov = o.destinoEnT?.[x0.destinoNorm];
     const x = ov ? { ...x0, ...ov } : x0;
     if (ov?.noExistia) continue;
     if (o.fina && !ov?.existia && (E.nacimiento.get(id) ?? -Infinity) > T) continue;
+    if (!ML.destinoResuelve(x.rol, direccion)) continue;  // F9.176, como cargarNombresDestinoAprendidos
     if (x.tipo === 'nombre' && (x.confianza ?? 0) >= 0.7 && x.destinoNorm && x.itemEsperadoId) nombres.set(x.destinoNorm, x.itemEsperadoId);
   }
   return nombres;
@@ -176,7 +177,7 @@ export function simular(E: Estado, c: FirebaseFirestore.QueryDocumentSnapshot, o
   const { datos, T, mesComp, movs } = ctx;
   const refISO = o.refISO ?? ctx.refISO;
   const traza: string[] = [];
-  const nombres = nombresEnT(E, T, o);
+  const nombres = nombresEnT(E, T, o, datos.direccion);
 
   const esPago = datos.tipoDocumento === 'transferencia' || datos.tipoDocumento === 'comprobante_pago';
   if (esPago) {
@@ -203,6 +204,7 @@ export function simular(E: Estado, c: FirebaseFirestore.QueryDocumentSnapshot, o
     if (ov) traza.push(`  (en T: ${JSON.stringify(ov)})`);
     if (ov?.noExistia) continue;
     if (o.fina && !ov?.existia && nac != null && nac > T) continue;
+    if (!ML.destinoResuelve(d.rol, datos.direccion)) { traza.push(`  rol=${d.rol} no resuelve (dir=${datos.direccion ?? '-'}) → sigue`); continue; }  // F9.176
     if ((d.confianza ?? 0) < 0.7) continue;
 
     let itemId: string | undefined = d.itemEsperadoId;

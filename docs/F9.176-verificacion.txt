@@ -1,0 +1,97 @@
+=== 1. sin roles, todo resuelve igual que hoy ===
+  destinos en producción con rol: 0 de 147
+  OK   ningún destino de producción tiene rol todavía
+  OK   sin rol resuelve (dir=undefined)
+  OK   rol 'comercio' resuelve (dir=undefined)
+  OK   sin rol resuelve (dir=null)
+  OK   rol 'comercio' resuelve (dir=null)
+  OK   sin rol resuelve (dir=entrante)
+  OK   rol 'comercio' resuelve (dir=entrante)
+  OK   sin rol resuelve (dir=saliente)
+  OK   rol 'comercio' resuelve (dir=saliente)
+  OK   sin rol se aprende (mov=undefined)
+  OK   sin rol se aprende (mov=null)
+  OK   sin rol se aprende (mov=Gasto)
+  OK   sin rol se aprende (mov=Ingreso)
+  OK   un rol desconocido se comporta como sin rol
+  OK   sin roles (o todo 'comercio') cero comprobantes cambian de rama, ítem o movimiento — 166/166
+  OK   la verificación commiteada de F9.175 §1 sigue en 21/0
+  OK   aprenderDestino elige la misma llave que antes en todos los movimientos con payee — 141/141
+  OK   llave vacía primero sigue cortando
+
+=== 2 y 3. Personal Pay como medio_pago ===
+  13c1b187 "Metrogas" numeroCliente=010372743000: sin rol=2+adic destino Casa›Internet | medio_pago=1 destino Casa›Gas
+       destino "30572975831" cuit conf=0.9 item=90b30edcc0666376321d act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z
+       rol=medio_pago no resuelve (dir=saliente) → sigue
+       destino "Metrogas" alias conf=0.8 item=eb8e59f225ed73b785b6 act=2026-09-03T03:30:41.521Z nac≈2026-07-14T18:29:35.186Z
+       obligaciones eb8e59f225ed73b785b6/2026-09: yR4NiHeWwX87trZMTVQw(conf=false,orig=a650c026)
+  059e7006 "Personal" numeroCliente=1001595659710003: sin rol=2 Casa›Internet | medio_pago=2 Casa›Internet
+       destino "30572975831" cuit conf=0.9 item=90b30edcc0666376321d act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z (NACIÓ DESPUÉS DE T)
+       destino "Personal" alias conf=0.8 item=90b30edcc0666376321d act=2026-09-03T03:54:22.431Z nac≈2026-09-03T03:54:20.556Z (NACIÓ DESPUÉS DE T)
+  a07760b9 "Personal" numeroCliente=1001595659710003: sin rol=1 débil(1) - | medio_pago=1 débil(1) -
+  fd015e17 "Personal" numeroCliente=1001595659710003: sin rol=1 destino Casa›Internet | medio_pago=2 Casa›Internet
+       destino "30572975831" cuit conf=0.9 item=90b30edcc0666376321d act=2026-09-15T19:54:40.897Z nac≈2026-07-06T20:33:23.983Z
+       rol=medio_pago no resuelve (dir=-) → sigue
+       destino "Personal" alias conf=0.8 item=90b30edcc0666376321d act=2026-09-03T03:54:22.431Z nac≈2026-09-03T03:54:20.556Z (NACIÓ DESPUÉS DE T)
+  OK   sin rol, el pago de Metrogas resuelve a Casa›Internet (el bug)
+  OK   con medio_pago deja de resolver a Casa›Internet
+  OK   y encuentra Metrogas (Casa›Gas) por la siguiente llave — 1 destino
+  OK   lo encontró por destinoNombre, no por el CUIT
+  OK   059e7006 (Personal) resuelve igual con Personal Pay como medio_pago — 2 Casa›Internet
+  OK   a07760b9 (Personal) resuelve igual con Personal Pay como medio_pago — 1 débil(1) -
+  fd015e17: sin rol=1 destino tEYCtFJhlOPdy931an2h | medio_pago con los destinos de T=2 | medio_pago con el alias "personal" de hoy=1 destino tEYCtFJhlOPdy931an2h
+  OK   fd015e17 con medio_pago y el alias "personal" existente salda la misma obligación
+  OK   fd015e17 con medio_pago y SIN el alias pierde la reconciliación (costo del rol, documentado)
+  alcance (volcado de §2 en docs/F9.176-auditoria.txt): 4 comprobantes con ese CUIT, los 4 con numeroCliente y destinoNombre útiles, 0 sin contraparte.
+  [destinos de T] cambia 13c1b187: 2+adic destino Casa›Internet  → 1 destino Casa›Gas yR4NiHeWwX87trZMTVQw | dueño: Casa›Gas yR4NiHeWwX87trZMTVQw → MEJORA
+  [destinos de T] cambia fd015e17: 1 destino Casa›Internet tEYCtFJhlOPdy931an2h → 2 Casa›Internet  | dueño: Casa›Internet tEYCtFJhlOPdy931an2h → EMPEORA
+  [destinos de T] cambian 2: mejoran 1, empeoran 1 [fd015e17]
+  OK   con los destinos de T, lo único que empeora es fd015e17 (el alias "personal" no existía) — [fd015e17]
+  [destinos de hoy] cambia 059e7006: 2 destino Casa›Gas  → 1 destino Casa›Internet bVJuRsNCSwKgwGcr3VmO | dueño: Casa›Internet bVJuRsNCSwKgwGcr3VmO → MEJORA
+  [destinos de hoy] cambia fd015e17: 2 destino Casa›Gas  → 1 destino Casa›Internet tEYCtFJhlOPdy931an2h | dueño: Casa›Internet tEYCtFJhlOPdy931an2h → MEJORA
+  [destinos de hoy] cambian 2: mejoran 2, empeoran 0 []
+  OK   con los destinos de hoy, todo cambio va hacia lo que decidió el dueño
+  OK   aprenderDestino saltea el CUIT de Personal Pay y aprende "metrogas" — {"tipo":"alias","norm":"metrogas"}
+  OK   si todas las llaves son medio_pago/propio no aprende nada
+
+=== resto de los roles ===
+  OK   'propio' nunca resuelve
+  OK   'propio' nunca se aprende
+  OK   'pagador' no resuelve un documento saliente
+  OK   'pagador' resuelve entrante y sin dirección (Accenture)
+  OK   'pagador' se aprende de un Ingreso y no de un Gasto
+  OK   28cab4a0 (Accenture, sin dirección) igual con 'pagador' — 2+adic destino Ingresos›Sueldo
+  OK   32acfa99 (Accenture, sin dirección) igual con 'pagador' — 2 destino Ingresos›Sueldo
+  OK   8acd1c73 (Accenture, sin dirección) igual con 'pagador' — 2+adic destino Ingresos›Sueldo
+  OK   los roles del cliente y del servidor son los mismos
+
+=== 4. el formulario (src/datos/destinoRol.ts, lo que usa Destinos.tsx) ===
+  OK   con 'medio_pago' ítem, categoría, subcategoría y etiqueta quedan vacíos — {"item":"","categoria":"","subcategoria":"","etiqueta":""}
+  OK   con 'medio_pago' los campos se deshabilitan
+  OK   con 'propio' ítem, categoría, subcategoría y etiqueta quedan vacíos — {"item":"","categoria":"","subcategoria":"","etiqueta":""}
+  OK   con 'propio' los campos se deshabilitan
+  OK   con 'sin rol' la clasificación queda como estaba y los campos habilitados
+  OK   con 'comercio' la clasificación queda como estaba y los campos habilitados
+  OK   con 'pagador' la clasificación queda como estaba y los campos habilitados
+  OK   rolSinClasificacion gemela para 'comercio'
+  OK   rolSinClasificacion gemela para 'medio_pago'
+  OK   rolSinClasificacion gemela para 'pagador'
+  OK   rolSinClasificacion gemela para 'propio'
+  OK   Destinos.tsx limpia con clasificacionParaRol al cambiar el rol y al guardar
+  OK   Destinos.tsx deshabilita ítem, categoría, subcategoría y etiqueta
+
+TODO OK — 52 ok, 0 fail
+destino "arca": {"destinoNorm":"arca","tipo":"nombre","itemEsperadoId":"d08378385da512972004","categoria":"Impuestos y finanzas","subcategoria":"Monotributo","etiqueta":null,"confianza":0.8,"creadoPor":"Juan"}
+destino "afip - monotributo": {"destinoNorm":"afip - monotributo","tipo":"nombre","itemEsperadoId":"d08378385da512972004","categoria":"Impuestos y finanzas","subcategoria":"Monotributo","etiqueta":null,"confianza":0.8,"creadoPor":"Juan"}
+a9da4f68 nombre="ARCA" razon="ARCA": sin rol=1 débil(1)   | propio=1 débil(1)  
+    payee → []
+    débil → [BZ6VXwOm10JWPxfI28NS]
+4b9601b9 nombre="ARCA" razon="ARCA": sin rol=2 destino d08378385da512972004  | propio=2 destino d08378385da512972004 
+    payee → []
+    débil → []
+    destino "20243359679" cuit conf=0.8 item=d08378385da512972004 act=2026-09-04T23:53:07.448Z nac≈2026-07-21T05:31:08.897Z
+      (en T: {"existia":true,"rol":"propio"})
+      rol=propio no resuelve (dir=-) → sigue
+    destino "ARCA" nombre conf=0.8 item=d08378385da512972004 act=2026-09-08T19:23:46.327Z nac≈2026-07-21T05:31:08.897Z
+      (en T: {"existia":true})
+      obligaciones d08378385da512972004/2026-09: (ninguna)
