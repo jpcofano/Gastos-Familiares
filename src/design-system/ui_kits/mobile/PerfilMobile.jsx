@@ -117,17 +117,10 @@ function PerfilMobile({ onNav }) {
         <Item icon="bell" title="Notificaciones" desc="Vencimientos y recordatorios" right={(() => {
           const n = window.contarVencProximos ? window.contarVencProximos() : 0;
           return n > 0
-            ? <span style={{ minWidth: 20, height: 20, borderRadius: 999, background: 'var(--gf-expense)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{n}</span>
+            ? <span style={{ minWidth: 20, height: 20, borderRadius: 999, background: 'var(--gf-expense)', color: 'var(--color-on-danger)', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 6px' }}>{n}</span>
             : <Icon name="chevron-right" size={18} color="var(--gf-gray-300)" />;
         })()} onClick={() => onNav && onNav('notificaciones')} />
-        <Item icon="palette" title="Apariencia" desc="Tema claro" right={<PBadge tone="neutral">Pronto: oscuro</PBadge>} last />
-      </Group>
-
-      {/* Gate real en la app: window.M_MIEMBRO.email === 'jpcofano@gmail.com'.
-          En el kit se muestra siempre (con chip "Solo vos") para poder revisar el diseño. */}
-      <Group title="Patrimonio · privado">
-        <Item icon="landmark" title="Patrimonio" desc="Portafolio de inversión · USD"
-          right={<PBadge tone="neutral">Solo vos</PBadge>} onClick={() => onNav && onNav('patrimonio')} last />
+        <Item icon="palette" title="Apariencia" desc="Tema claro u oscuro" right={<Icon name="chevron-right" size={18} color="var(--gf-gray-300)" />} last />
       </Group>
 
       <Group title="Configuración familiar · admin">

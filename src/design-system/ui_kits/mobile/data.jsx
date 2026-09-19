@@ -23,7 +23,27 @@ const M_MOVS = [
   _m(22, 'Cena restaurante', 71400, 'Gasto', 'Salidas', '', 'María', 'Galicia'),
   // Pago de hoy (29) que concilia con el esperado 'luz' que vence hoy.
   _m(29, 'Edenor — luz', 38900, 'Gasto', 'Casa', 'Luz', 'Juan', 'Mercado Pago'),
+  // F9.132.2 — impagos de HOY: alimentan la card 1 ("a pagar"), nunca la 2 ("gastado").
+  _m(29, 'AYSA', 34800, 'Gasto', 'Casa', 'Agua', 'Juan', 'BBVA'),
+  _m(29, 'Seguro integral', 96500, 'Gasto', 'Casa', 'Seguro', 'Juan', 'Galicia'),
+  // Impago con fecha anterior → sección "Vencido" dentro de la card 1.
+  _m(24, 'Patente auto', 61200, 'Gasto', 'Auto', 'Patente', 'Juan', 'BBVA'),
+  _m(20, 'ABL', 18400, 'Gasto', 'Casa', 'ABL', 'Juan', 'BBVA'),
+  _m(18, 'Seguro auto', 74300, 'Gasto', 'Auto', 'Seguro', 'Juan', 'Galicia'),
+  // F9.99.8 — gasto futuro SIN plantilla → entra a la agenda como "suelto".
+  _m(30, 'Gimnasio', 42000, 'Gasto', 'Salud', 'Gimnasio', 'María', 'Mercado Pago'),
 ];
+
+// F9.132.2 / F9.140 — flags de caja del modelo real:
+//  · `pagado`         → la plata ya salió (parte las dos cards de HOY).
+//  · `confirmadoPago` → ese movimiento saldó su obligación.
+//  · `incluirResumenMes` → scope caja (Resumen); el devengado (Dashboard) usa otro.
+// "Cubierto" = pagado || confirmadoPago (las dos direcciones, F9.140 §1).
+M_MOVS.forEach((m) => { m.pagado = true; m.confirmadoPago = true; m.incluirResumenMes = true; });
+[['aysa-29', {}], ['seguro-integral-29', {}], ['patente-auto-24', {}], ['abl-20', {}], ['seguro-auto-18', {}], ['gimnasio-30', {}]].forEach(([id]) => {
+  const m = M_MOVS.find((x) => x.id === id);
+  if (m) { m.pagado = false; m.confirmadoPago = false; }
+});
 
 // Medios de pago reales (hoja ResumenMes / Obligaciones): banco / billetera / efectivo.
 // Efectivo existe en el modelo real → lo mantenemos para paridad, pero como para la
@@ -67,7 +87,7 @@ const M_ESPERADOS = [
   { id: 'luz', label: 'Edenor — luz', persona: 'Juan', monto: 38900, moneda: 'ARS', estado: 'pagado', vence: 29, categoria: 'Casa', subcat: 'Luz', etiqueta: 'rutina-casa', conciliadoCon: 'edenor-—-luz-29' },
   { id: 'gas', label: 'Metrogas', persona: 'Juan', monto: 21500, moneda: 'ARS', estado: 'pendiente', vence: 29, categoria: 'Casa', subcat: 'Gas', etiqueta: 'rutina-casa' },
   { id: 'inet', label: 'Internet Fibertel', persona: 'Juan', monto: 29900, moneda: 'ARS', estado: 'vencido', vence: 22, categoria: 'Casa', subcat: 'Internet', etiqueta: 'rutina-casa' },
-  { id: 'mono', label: 'Monotributo Juan', persona: 'Juan', monto: 48000, moneda: 'ARS', estado: 'automatico', vence: 20, categoria: 'Impuestos y finanzas', subcat: 'Monotributo', etiqueta: 'rutina-trabajo' },
+  { id: 'mono', label: 'Monotributo Juan', persona: 'Juan', monto: 48000, moneda: 'ARS', estado: 'automatico', pagoAutomatico: true, vence: 20, categoria: 'Impuestos y finanzas', subcat: 'Monotributo', etiqueta: 'rutina-trabajo' },
   { id: 'galvisa', label: 'Galicia Visa', persona: 'María', monto: 1403704, moneda: 'ARS', estado: 'parcial', vence: 30, categoria: 'Tarjetas', subcat: 'Pago Tarjeta', etiqueta: 'Galicia VisaARS' },
   { id: 'bbvavisa', label: 'BBVA Visa Signature', persona: 'Juan', monto: 2018435, moneda: 'ARS', estado: 'pendiente', vence: 16, categoria: 'Tarjetas', subcat: 'Pago Tarjeta', etiqueta: 'Frances VisaARS' },
 ];
@@ -78,12 +98,18 @@ const M_ESPERADOS = [
 // badge de match, tamaño y —en facturas— info de vencimientos.
 // El título usa payee; cae al nombre de archivo solo mientras se extrae (proceso).
 const M_COMPROBANTES = [
-  { id: 'c0', nombre: 'IMG-20260701-WA0015.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Baggini Juan Francisco', medio: 'Mercado Pago', monto: 45000, fechaFull: '2026-07-01', vinculo: 'vinculado', match: true, kb: 80, detalle: 'Personal', fecha: '01/07' },
-  { id: 'c1', nombre: 'Aysa_0111B15526643.pdf', tipoDoc: 'factura', tipoLabel: 'Factura B', payee: 'Agua y Saneamientos Argentinos S.A.', medio: null, monto: 22208.61, fechaFull: '2026-05-30', vinculo: 'vinculado', match: true, kb: 1023, detalle: 'Casa · Agua', fecha: '30/05', vencimientos: { n: 2, segVenc: 22498.48 } },
+  { id: 'c0', nombre: 'IMG-20260701-WA0015.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Baggini Juan Francisco', medio: 'Mercado Pago', monto: 45000, fechaFull: '2026-07-01', vinculo: 'vinculado', match: true, kb: 80, detalle: 'Personal', fecha: '01/07', razon: 'pago_obligacion', razonItem: 'Servicios › Celular', razonMes: 'Julio 2026' },
+  { id: 'c1', nombre: 'Aysa_0111B15526643.pdf', tipoDoc: 'factura', tipoLabel: 'Factura B', payee: 'Agua y Saneamientos Argentinos S.A.', medio: null, monto: 22208.61, fechaFull: '2026-05-30', vinculo: 'vinculado', match: true, kb: 1023, detalle: 'Casa · Agua', fecha: '30/05', vencimientos: { n: 2, segVenc: 22498.48 }, razon: 'creo_obligacion', razonItem: 'Casa › Agua', razonMes: 'Septiembre 2026' },
   { id: 'c2', nombre: 'Edenor_factura_07.pdf', tipoDoc: 'factura', tipoLabel: 'Factura', payee: null, medio: null, monto: null, fechaFull: null, vinculo: 'proceso', match: false, kb: 210, detalle: 'Extrayendo datos…', fecha: '01/07' },
   { id: 'c3', nombre: 'Metrogas_junio.pdf', tipoDoc: 'factura', tipoLabel: 'Factura', payee: 'Metrogas S.A.', medio: null, monto: 18400, fechaFull: '2026-06-20', vinculo: 'revisar', match: false, kb: 96, detalle: 'Falta categoría', fecha: '20/06' },
-  { id: 'c4', nombre: 'transf_movistar.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Telefónica Móviles Arg.', medio: 'Personal Pay', monto: 12999, fechaFull: '2026-06-18', vinculo: 'nuevo', match: false, kb: 64, detalle: 'Telefonía', fecha: '18/06' },
-  { id: 'c5', nombre: 'Farmacity_ticket.jpg', tipoDoc: 'factura', tipoLabel: 'Ticket', payee: 'Farmacity', medio: null, monto: 27600, fechaFull: '2026-06-17', vinculo: 'vinculado', match: true, kb: 120, detalle: 'Salud', fecha: '17/06' },
+  { id: 'c4', nombre: 'transf_movistar.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Telefónica Móviles Arg.', medio: 'Personal Pay', monto: 12999, fechaFull: '2026-06-18', vinculo: 'nuevo', match: false, kb: 64, detalle: 'Telefonía', fecha: '18/06', razon: 'mov_nuevo', razonItem: null, razonMes: 'Junio 2026' },
+  { id: 'c5', nombre: 'Farmacity_ticket.jpg', tipoDoc: 'factura', tipoLabel: 'Ticket', payee: 'Farmacity', medio: null, monto: 27600, fechaFull: '2026-06-17', vinculo: 'vinculado', match: true, kb: 120, detalle: 'Salud', fecha: '17/06', razon: 'adjunto', razonItem: 'Salud › Farmacia', razonMes: 'Junio 2026' },
+  { id: 'c6', nombre: 'ARCA_monotributo_09.pdf', tipoDoc: 'factura', tipoLabel: 'Recibo Servicio', payee: 'ARCA', medio: null, monto: 66020.12, fechaFull: '2026-09-08', vinculo: 'vinculado', match: true, kb: 77, detalle: 'Monotributo', fecha: '08/09', razon: 'auto_obligacion', razonItem: 'Impuestos y finanzas › Monotributo', razonMes: 'Septiembre 2026' },
+  { id: 'c7', nombre: 'edenor_septiembre.pdf', tipoDoc: 'factura', tipoLabel: 'Recibo Servicio', payee: 'Edenor', medio: null, monto: 41310.55, fechaFull: '2026-09-05', vinculo: 'vinculado', match: true, kb: 88, detalle: 'Luz', fecha: '05/09', razon: 'auto_pagado', razonItem: 'Casa › Luz', razonMes: 'Septiembre 2026' },
+  { id: 'c8', nombre: 'transf_expensas_2.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Consorcio Ugarte 2870', medio: 'BBVA', monto: 31000, fechaFull: '2026-09-04', vinculo: 'vinculado', match: true, kb: 52, detalle: 'Expensas', fecha: '04/09', razon: 'pago_adicional', razonItem: 'Casa › Expensas', razonMes: 'Septiembre 2026' },
+  { id: 'c9', nombre: 'ticket_nafta.jpg', tipoDoc: 'factura', tipoLabel: 'Ticket', payee: 'YPF', medio: null, monto: 54200, fechaFull: '2026-09-03', vinculo: 'vinculado', match: true, kb: 61, detalle: 'Nafta', fecha: '03/09', razon: 'saldo_cargado', razonItem: 'Auto › Nafta', razonMes: 'Septiembre 2026' },
+  { id: 'c10', nombre: 'IMG-20260902-WA0004.jpg', tipoDoc: 'transferencia', tipoLabel: 'Transferencia', payee: 'Washington Quispe Vasquez', medio: 'Mercado Pago', monto: 29700, fechaFull: '2026-09-02', vinculo: 'vinculado', match: false, kb: 21, detalle: 'Servicio doméstico', fecha: '02/09', razon: 'vinculado_mov', razonItem: null, razonMes: null },
+  { id: 'c11', nombre: 'Aysa_0111B15526643.pdf', tipoDoc: 'factura', tipoLabel: 'Factura B', payee: 'Agua y Saneamientos Argentinos S.A.', medio: null, monto: 22208.61, fechaFull: '2026-09-01', vinculo: 'vinculado', match: false, kb: 1023, detalle: 'Duplicado', fecha: '01/09', razon: 'ya_cargado', razonItem: null, razonMes: 'Septiembre 2026' },
 ];
 const M_RESUMENES_IN = [
   { id: 'r1', nombre: 'Resumen_Visa_junio.pdf', estado: 'ok', detalle: 'Conciliado · 14 consumos', fecha: '16/06' },

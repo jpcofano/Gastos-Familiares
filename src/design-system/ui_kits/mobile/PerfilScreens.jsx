@@ -17,7 +17,7 @@ function AddBtn({ children, onClick }) {
     <button onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
       padding: '14px', borderRadius: 'var(--radius-card)', border: '1.5px dashed var(--gf-gray-300)',
-      background: 'transparent', color: 'var(--color-accent)', fontFamily: 'var(--font-base)',
+      background: 'transparent', color: 'var(--color-accent-text)', fontFamily: 'var(--font-base)',
       fontSize: 14, fontWeight: 600, cursor: 'pointer',
     }}>
       <Icon name="plus" size={18} /> {children}

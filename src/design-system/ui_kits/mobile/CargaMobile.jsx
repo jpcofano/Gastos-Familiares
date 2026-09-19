@@ -76,7 +76,7 @@ function ResumenColapsado({ c, onAbrir }) {
           <button onClick={() => onAbrir && onAbrir(c)} style={{
             width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '9px',
             borderTop: '1px solid var(--color-border-card)', background: 'transparent', border: 'none', borderTopStyle: 'solid',
-            cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 600, color: 'var(--color-accent)',
+            cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 600, color: 'var(--color-accent-text)',
           }}>
             Ver {m.total} consumos <Icon name="chevron-right" size={14} />
           </button>
@@ -109,7 +109,7 @@ function ResumenesSeccion({ items, onAbrir }) {
             <button onClick={() => setVerTodo((v) => !v)} style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '9px',
               background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)',
-              fontSize: 12.5, fontWeight: 600, color: 'var(--color-accent)',
+              fontSize: 12.5, fontWeight: 600, color: 'var(--color-accent-text)',
             }}>
               {verTodo ? 'Ver menos' : `Ver todo (${total})`}
               <Icon name={verTodo ? 'chevron-up' : 'chevron-down'} size={15} />
@@ -123,11 +123,64 @@ function ResumenesSeccion({ items, onAbrir }) {
 
 // Estado de vínculo del comprobante (chip arriba a la izquierda, como el vivo).
 const C_VINCULO = {
-  vinculado: { label: 'Vinculado', bg: 'var(--st-pagado-badge-bg)', tx: 'var(--st-pagado-badge-tx)' },
+  // F9.170 §2 — baja a gris: competía con el chip de resultado en la misma card.
+  vinculado: { label: 'Vinculado', bg: 'var(--gf-gray-100)', tx: 'var(--color-text-sec)' },
   nuevo: { label: 'Nuevo', bg: 'var(--st-por-confirmar-badge-bg)', tx: 'var(--st-por-confirmar-badge-tx)' },
   proceso: { label: 'Procesando', bg: 'var(--st-pendiente-badge-bg)', tx: 'var(--st-pendiente-badge-tx)' },
   revisar: { label: 'Revisar', bg: 'var(--st-parcial-badge-bg)', tx: 'var(--st-parcial-badge-tx)' },
 };
+// F9.170 §1 — un color por hecho. El eje es qué hizo el sistema con el archivo:
+// ámbar = dejó una obligación impaga (el único que salta, y el único con borde) ·
+// azul = pagó / se vinculó a un movimiento · celeste = se posó sobre algo ya cargado ·
+// verde = creó un movimiento cerrado · gris = no hizo nada.
+// `chispas` marca las altas silenciosas: el tono lo sigue definiendo el resultado.
+const C_RAZON = {
+  creo_obligacion: { label: 'Creó la obligación',            tono: 'ambar',   icon: 'git-compare' },
+  auto_obligacion: { label: 'Asignado automáticamente',      tono: 'ambar',   icon: 'git-compare', chispas: true },
+  pago_obligacion: { label: 'Pagó una obligación',           tono: 'verdeOsc', icon: 'check-check' },
+  vinculado_mov:   { label: 'Vinculado a un movimiento',     tono: 'azul',    icon: 'link' },
+  adjunto:         { label: 'Se adjuntó a un gasto ya cargado', tono: 'celeste', icon: 'paperclip' },
+  saldo_cargado:   { label: 'Saldó un gasto ya cargado',     tono: 'celeste', icon: 'paperclip' },
+  mov_nuevo:       { label: 'Cargado como movimiento nuevo', tono: 'verde',   icon: 'plus' },
+  pago_adicional:  { label: 'Pago adicional',                tono: 'verde',   icon: 'plus' },
+  auto_pagado:     { label: 'Asignado automáticamente',      tono: 'verde',   icon: 'plus', chispas: true },
+  ya_cargado:      { label: 'Ya cargado',                    tono: 'gris',    icon: 'copy' },
+};
+// §3 — los cerrados en tinte suave y sin borde; el ámbar pleno y con contorno.
+const C_TONO = {
+  ambar:   { bg: 'var(--st-parcial-badge-bg)',       tx: 'var(--st-parcial-badge-tx)',       bd: 'var(--st-parcial-line)' },
+  azul:    { bg: 'var(--st-automatico-badge-bg)',    tx: 'var(--st-automatico-badge-tx)',    bd: 'transparent' },
+  celeste: { bg: 'var(--st-por-confirmar-badge-bg)', tx: 'var(--st-por-confirmar-badge-tx)', bd: 'transparent' },
+  verde:   { bg: 'var(--st-pagado-badge-bg)',        tx: 'var(--st-pagado-badge-tx)',        bd: 'transparent' },
+  // Verde más profundo: mismo hue que `verde`, un escalón más oscuro — "cerró una deuda"
+  // se distingue de "creó un movimiento nuevo" sin salirse de la familia.
+  verdeOsc:{ bg: 'var(--gf-emerald-50)',             tx: 'var(--gf-emerald-deep)',           bd: 'transparent' },
+  gris:    { bg: 'var(--gf-gray-100)',               tx: 'var(--color-text-sec)',            bd: 'transparent' },
+};
+
+// F9.170 §4 — la pill se queda con el VERBO; categoría y mes bajan a su propia línea.
+// Antes iban todos concatenados adentro con `whiteSpace: nowrap` y el chip se iba del
+// borde de la card ("IMPUESTOS Y FINANZAS › MONOTRIBUT…").
+function RazonChip({ it }) {
+  const Icon = window.Icon;
+  const r = C_RAZON[it.razon];
+  if (!r) return null;
+  const t = C_TONO[r.tono];
+  const sufijo = [it.razonItem, it.razonMes].filter(Boolean).join(' · ');
+  return (
+    <span style={{ display: 'block', marginTop: 10 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: '.4px', textTransform: 'uppercase', color: t.tx, background: t.bg, border: '1px solid ' + t.bd, borderRadius: 8, padding: '5px 9px' }}>
+        <Icon name={r.icon} size={12} />
+        {r.label}
+        {r.chispas && <Icon name="sparkles" size={11} />}
+      </span>
+      {sufijo && (
+        <span style={{ display: 'block', marginTop: 5, fontSize: 12, color: 'var(--color-text-sec)' }}>{sufijo}</span>
+      )}
+    </span>
+  );
+}
+
 const cFmtMonto = (n) => '$ ' + n.toLocaleString('es-AR', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
 
 // Card de comprobante — refleja el historial vivo (F9.60–64): chip de vínculo +
@@ -174,12 +227,10 @@ function FileRow({ it, onAbrir }) {
         </span>
       )}
 
-      {/* Fila 4: badge de match */}
+      {/* Fila 4: razón del vínculo (F9.170) */}
       {!enProceso && (
-        it.match ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 10.5, fontWeight: 800, letterSpacing: '.4px', textTransform: 'uppercase', color: 'var(--gf-emerald-deep, var(--color-accent))', background: 'var(--gf-emerald-50)', borderRadius: 8, padding: '5px 9px' }}>
-            <Icon name="git-compare" size={12} /> Cumplió un gasto esperado
-          </span>
+        it.razon ? (
+          <RazonChip it={it} />
         ) : it.vinculo === 'revisar' ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, fontSize: 10.5, fontWeight: 800, letterSpacing: '.4px', textTransform: 'uppercase', color: 'var(--st-parcial-badge-tx)', background: 'var(--st-parcial-badge-bg)', borderRadius: 8, padding: '5px 9px' }}>
             <Icon name="triangle-alert" size={12} /> {it.detalle}
@@ -219,7 +270,7 @@ function HistorialSeccion({ icon, titulo, items, emptyText, onAbrir }) {
             <button onClick={() => setVerTodo((v) => !v)} style={{
               width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               padding: '9px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)',
-              fontSize: 12.5, fontWeight: 600, color: 'var(--color-accent)',
+              fontSize: 12.5, fontWeight: 600, color: 'var(--color-accent-text)',
             }}>
               {verTodo ? 'Ver menos' : `Ver todo (${total})`}
               <Icon name={verTodo ? 'chevron-up' : 'chevron-down'} size={15} />
@@ -244,7 +295,7 @@ function CargaMobile({ onAbrir }) {
         padding: '26px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
         cursor: 'pointer', fontFamily: 'var(--font-base)',
       }}>
-        <span style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--gf-emerald-50)', color: 'var(--color-accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--gf-emerald-50)', color: 'var(--color-accent-text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="file-up" size={24} />
         </span>
         <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text)' }}>Subir comprobante o resumen</span>
@@ -263,7 +314,8 @@ function CargaMobile({ onAbrir }) {
       <ResumenesSeccion items={window.M_RESUMENES_TARJETA || []} onAbrir={onAbrir} />
 
       <CBtn variant="secondary" size="cta" onClick={onAbrir}>Cargar manualmente</CBtn>
-      <div style={{ height: 4 }} />
+      {/* F9.170 §5 — aire para que el FAB no tape la última card */}
+      <div style={{ height: 88 }} />
     </div>
   );
 }

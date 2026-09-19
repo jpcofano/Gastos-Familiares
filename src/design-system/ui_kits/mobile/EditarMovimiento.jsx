@@ -117,7 +117,7 @@ function EditarMovimiento({ mov, onClose, onSave, onDelete }) {
             <div style={{ display: 'flex', gap: 10 }}>
               <EBtn variant="secondary" size="cta" style={{ flex: 1 }} onClick={() => setConfirmDel(false)}>Cancelar</EBtn>
               <button onClick={() => { setConfirmDel(false); onDelete && onDelete(mov.id); }} style={{
-                flex: 1, padding: '12px', borderRadius: 12, border: 'none', background: 'var(--gf-expense)', color: '#fff',
+                flex: 1, padding: '12px', borderRadius: 12, border: 'none', background: 'var(--gf-expense)', color: 'var(--color-on-danger)',
                 fontFamily: 'var(--font-base)', fontSize: 15, fontWeight: 700, cursor: 'pointer',
               }}>Eliminar</button>
             </div>

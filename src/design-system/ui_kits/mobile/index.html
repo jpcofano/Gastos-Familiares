@@ -5,9 +5,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Gastos Familiares — móvil</title>
-<!-- F9.174 — el entry real es dist/styles.css; `../../styles.css` no existe en este repo
-     y el kit se abria SIN un solo token (ver §4 del prompt). -->
-<link rel="stylesheet" href="../../dist/styles.css" />
+<link rel="stylesheet" href="../../styles.css" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" />
@@ -43,8 +41,7 @@
      copiá tu Client ID y pegalo acá. Sin esto, los medios usan el monograma. */
   window.BRANDFETCH_CLIENT_ID = '1idDEHYBi7zAzQv9-MQ';
 </script>
-<!-- F9.174 — mismo caso que la hoja de estilos: el bundle quedo en dist/. -->
-<script src="../../dist/_ds_bundle.js"></script>
+<script src="../../_ds_bundle.js"></script>
 
 <script type="text/babel" src="data.jsx"></script>
 <script type="text/babel" src="money.jsx"></script>
@@ -70,6 +67,7 @@
     resumen: { t: 'Resumen', s: 'Gastos del mes' },
     cargar: { t: 'Cargar', s: 'Comprobantes y resúmenes' },
     perfil: { t: 'Tu Perfil', s: 'Cuenta y configuración' },
+    patrimonio: { t: 'Patrimonio', s: 'Portafolio de inversión · privado' },
     tarjetas: { t: 'Tarjetas', s: 'Resúmenes de tarjeta' },
   };
 
@@ -81,7 +79,6 @@
     'tarjetas-cfg': { t: 'Tarjetas', s: 'Tus tarjetas y sus ciclos' },
     tc:         { t: 'Tipo de cambio', s: 'USD → ARS' },
     notificaciones: { t: 'Notificaciones', s: 'Vencimientos y recordatorios' },
-    patrimonio: { t: 'Patrimonio', s: 'Portafolio de inversión · privado' },
     'buscar-mov': { t: 'Buscar movimiento', s: 'Editar o eliminar un cargado' },
     diccionario:   { t: 'Diccionario', s: 'Reglas de prellenado' },
     destinos:      { t: 'Destinos', s: 'Payees aprendidos' },
@@ -130,7 +127,7 @@
     const bellBtn = (
       <button onClick={() => setSub('notificaciones')} aria-label="Notificaciones" style={{ position: 'relative', width: 34, height: 34, borderRadius: 999, border: 'none', background: 'var(--gf-gray-100)', color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
         <Icon name="bell" size={18} />
-        {vencN > 0 && <span style={{ position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 999, background: 'var(--gf-expense)', color: '#fff', fontSize: 10, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px', border: '2px solid var(--color-surface)' }}>{vencN}</span>}
+        {vencN > 0 && <span style={{ position: 'absolute', top: -2, right: -2, minWidth: 16, height: 16, borderRadius: 999, background: 'var(--gf-expense)', color: 'var(--color-on-danger)', fontSize: 10, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px', border: '2px solid var(--color-surface)' }}>{vencN}</span>}
       </button>
     );
     const globalRight = (<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{avatarBtn}{themeBtn}{bellBtn}</div>);
@@ -141,7 +138,7 @@
     // Sub-screen takes over (reached from Perfil)
     if (sub) {
       const meta = SUB_TITLES[sub];
-      const map = { miembros: <MiembrosMobile />, esperados: <EsperadosConfigMobile />, categorias: <CategoriasMobile />, medios: <MediosPagoMobile />, 'tarjetas-cfg': <TarjetasConfigMobile />, tc: <TipoCambioMobile />, notificaciones: <NotificacionesMobile />, patrimonio: <PatrimonioMobile />, 'buscar-mov': <BuscarMovimiento />, diccionario: <DiccionarioMobile />, destinos: <DestinosMobile />, normalizacion: <NormalizacionMobile /> };
+      const map = { miembros: <MiembrosMobile />, esperados: <EsperadosConfigMobile />, categorias: <CategoriasMobile />, medios: <MediosPagoMobile />, 'tarjetas-cfg': <TarjetasConfigMobile />, tc: <TipoCambioMobile />, notificaciones: <NotificacionesMobile />, 'buscar-mov': <BuscarMovimiento />, diccionario: <DiccionarioMobile />, destinos: <DestinosMobile />, normalizacion: <NormalizacionMobile /> };
       return (
         <Phone>
           <AppBar title={meta.t} sub={meta.s} onBack={() => setSub(null)} right={globalRight} />
@@ -159,6 +156,7 @@
     else if (view === 'resumen') screen = <ResumenMobile />;
     else if (view === 'cargar') screen = <CargaMobile onAbrir={() => setModal('comprobante')} />;
     else if (view === 'tarjetas') screen = <TarjetasMobile />;
+    else if (view === 'patrimonio') screen = <PatrimonioMobile />;
     else screen = <PerfilMobile onNav={onNav} />;
 
     const headerRight = view === 'resumen'
@@ -193,7 +191,7 @@
   }/*EDITMODE-END*/;
 
   const PALETTES = [
-    { name: 'Marca', inc: '#047857', out: '#d97706', note: 'La actual. Esmeralda del brand + naranja. Coherente con todo el sistema.' },
+    { name: 'Marca', inc: '#047857', out: '#d97706', note: 'La actual. Esmeralda del brand + ámbar. Coherente con todo el sistema.' },
     { name: 'Menta', inc: '#10b981', out: '#f97316', note: 'Verde menta más brillante. Fresca y moderna, pero menos "marca".' },
     { name: 'Neón', inc: '#06b6d4', out: '#ec4899', note: 'Cian + magenta. Tech y vibrante; el cian se aleja del verde-finanzas.' },
     { name: 'Clásica', inc: '#22c55e', out: '#ef4444', note: 'Verde + rojo, la convención universal ingreso/gasto. Directa, sin matices.' },
@@ -232,24 +230,22 @@
     { name: 'Daltónico-safe', colors: ['#0072b2','#009e73','#d55e00','#e6c200','#cc79a7','#56b4e9','#e69f00','#555555'], note: 'Okabe–Ito, distinguible con daltonismo.' },
   ];
 
-  // F9.174 §3 — las preferencias que pisan tokens del TEMA no pueden ir inline: lo inline
-  // esta fuera de la cascada y le gana a `html[data-theme="dark"]`, asi que en oscuro los
-  // siete tokens de acento quedaban clavados en su valor CLARO (el rotulo `Hoy` a 3,15:1, el
-  // label activo del nav a 2,25:1) con todo resolviendo bien y nada fallando a la vista.
-  // No alcanza con "no escribir el default": con cualquier opcion elegida el problema vuelve.
-  // Van a una hoja acotada a claro, y en oscuro manda el tema.
-  const cssVar = (id, decls) => {
-    let el = document.getElementById(id);
-    if (!decls) { if (el) el.remove(); return; }
-    if (!el) { el = document.createElement('style'); el.id = id; document.head.appendChild(el); }
-    el.textContent = `html:not([data-theme="dark"]){${decls}}`;
-  };
-
   function Root() {
     const { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakToggle, TweakButton } = window;    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+    // Los tweaks de paleta y acento pisan tokens que el tema oscuro remapea. Escritos inline
+    // en <html> le ganaban a todo selector y dejaban esos tokens clavados en su valor claro
+    // (el rótulo "Hoy" a 3,15:1, el label activo del nav a 2,25:1). Van a una hoja acotada a
+    // `html:not([data-theme="dark"])`: valen en claro, y en oscuro manda el tema.
+    // Los `--gf-cat-*` de gráficos SÍ van inline — son independientes del tema.
+    const cssVar = (sel, decls) => {
+      let el = document.getElementById(sel);
+      if (!decls) { if (el) el.remove(); return; }
+      if (!el) { el = document.createElement('style'); el.id = sel; document.head.appendChild(el); }
+      el.textContent = `html:not([data-theme="dark"]){${decls}}`;
+    };
     React.useEffect(() => {
-      const [inc, out] = t.palette || TWEAK_DEFAULTS.palette;
-      cssVar('tw-palette', `--gf-income:${inc};--gf-out:${out}`);
+      const p = t.palette || TWEAK_DEFAULTS.palette;
+      cssVar('tw-palette', `--gf-income:${p[0]};--gf-out:${p[1]}`);
     }, [t.palette]);
     React.useEffect(() => {
       const f = FONTS.find((x) => x.name === t.font) || FONTS[0];
@@ -258,15 +254,7 @@
     }, [t.font]);
     React.useEffect(() => {
       const a = ACCENTS.find((x) => x.name === t.accent) || ACCENTS[0];
-      cssVar('tw-accent', [
-        `--color-accent:${a.base}`,
-        `--color-primary:${a.base}`,
-        `--gf-emerald:${a.base}`,
-        `--color-primary-dark:${a.deep}`,
-        `--gf-emerald-deep:${a.deep}`,
-        `--color-focus-ring:${a.ring}`,
-        `--gf-emerald-50:${a.tint}`,
-      ].join(';'));
+      cssVar('tw-accent', `--color-accent:${a.base};--color-primary:${a.base};--gf-emerald:${a.base};--color-primary-dark:${a.deep};--gf-emerald-deep:${a.deep};--color-focus-ring:${a.ring};--gf-emerald-50:${a.tint}`);
     }, [t.accent]);
     React.useEffect(() => {
       const p = CHART_PALETTES.find((x) => x.name === t.chartPalette) || CHART_PALETTES[0];
@@ -292,7 +280,7 @@
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <span style={{ fontWeight: 700, fontSize: 14 }}>{f.name}</span>
                     <span style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>$ 1.234.567</span>
-                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)' }}>✓</span>}
+                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent-text)' }}>✓</span>}
                   </div>
                   <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sec)', fontFamily: 'var(--font-base)' }}>{f.note}</span>
                 </button>
@@ -313,7 +301,7 @@
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                     <span style={{ width: 18, height: 18, borderRadius: 5, background: a.base, flexShrink: 0 }} />
                     <span style={{ fontWeight: 700, fontSize: 13 }}>{a.name}</span>
-                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)' }}>✓</span>}
+                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent-text)' }}>✓</span>}
                   </div>
                   <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sec)' }}>{a.note}</span>
                 </button>
@@ -336,7 +324,7 @@
                       {p.colors.map((c, i) => <span key={i} style={{ width: 12, height: 16, background: c }} />)}
                     </span>
                     <span style={{ fontWeight: 700, fontSize: 13, marginLeft: 3 }}>{p.name}</span>
-                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)' }}>✓</span>}
+                    {active && <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--color-accent-text)' }}>✓</span>}
                   </div>
                   <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--color-text-sec)' }}>{p.note}</span>
                 </button>

@@ -128,7 +128,7 @@ function BuscarMovimiento() {
 
       {flash && (
         <div style={{ position: 'absolute', left: 16, right: 16, bottom: 78, zIndex: 55, display: 'flex', alignItems: 'center', gap: 9, background: 'var(--gf-ink)', color: '#fff', borderRadius: 12, padding: '11px 14px', boxShadow: '0 10px 30px rgba(0,0,0,.3)', animation: 'gfRiseIn .3s ease both' }}>
-          <Icon name={flash.tipo === 'del' ? 'trash-2' : 'check'} size={16} color="var(--gf-emerald-100)" />
+          <Icon name={flash.tipo === 'del' ? 'trash-2' : 'check'} size={16} color="var(--gf-on-ink-pos)" />
           <span style={{ fontSize: 13, fontWeight: 600 }}>{flash.tipo === 'del' ? 'Movimiento eliminado' : 'Cambios guardados'}</span>
         </div>
       )}

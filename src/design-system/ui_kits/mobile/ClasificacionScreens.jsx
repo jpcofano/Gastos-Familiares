@@ -21,7 +21,7 @@ function ClsAddBtn({ children, onClick }) {
     <button onClick={onClick} style={{
       width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
       padding: '14px', borderRadius: 'var(--radius-card)', border: '1.5px dashed var(--gf-gray-300)',
-      background: 'transparent', color: 'var(--color-accent)', fontFamily: 'var(--font-base)',
+      background: 'transparent', color: 'var(--color-accent-text)', fontFamily: 'var(--font-base)',
       fontSize: 14, fontWeight: 600, cursor: 'pointer',
     }}>
       <Icon name="plus" size={18} /> {children}
@@ -33,8 +33,8 @@ function Chip({ children, warn }) {
   return (
     <span style={{
       fontSize: 11, fontWeight: 600, borderRadius: 999, padding: '2px 8px',
-      background: warn ? 'var(--gf-amber-50)' : 'var(--gf-gray-100)',
-      color: warn ? 'var(--gf-amber-700)' : 'var(--color-text-sec)',
+      background: warn ? 'var(--gf-amber-50, #fef3c7)' : 'var(--gf-gray-100)',
+      color: warn ? 'var(--gf-amber-700, #b45309)' : 'var(--color-text-sec)',
     }}>{children}</span>
   );
 }
@@ -360,7 +360,7 @@ function NormalizacionMobile() {
               {pasos.map((p, i) => {
                 const prev = i > 0 ? pasos[i - 1].resultado : muestra;
                 return (
-                  <div key={p.regla.id} style={{ fontSize: 12, display: 'flex', gap: 7, alignItems: 'baseline', background: p.regla.esEditando ? 'var(--gf-amber-50)' : 'transparent', borderRadius: 4, padding: '2px 4px' }}>
+                  <div key={p.regla.id} style={{ fontSize: 12, display: 'flex', gap: 7, alignItems: 'baseline', background: p.regla.esEditando ? 'var(--gf-amber-50, #fef3c7)' : 'transparent', borderRadius: 4, padding: '2px 4px' }}>
                     <span style={{ color: 'var(--gf-gray-400)', minWidth: 16, textAlign: 'right' }}>{i + 1}.</span>
                     <span style={{ ...monoChip, fontSize: 10.5, background: 'var(--gf-gray-50)', color: 'var(--gf-gray-500)' }}>{p.regla.tipo}</span>
                     <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, flex: 1, color: p.resultado !== prev ? 'var(--color-accent)' : 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.resultado}</span>

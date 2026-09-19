@@ -37,7 +37,7 @@ function SLDoc({ scanning, listo, esResumen }) {
       }}>
         {/* cabecera: marca + título */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--gf-emerald-50)', color: 'var(--color-accent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <span style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--gf-emerald-50)', color: 'var(--color-accent-text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Icon name={esResumen ? 'credit-card' : 'receipt'} size={13} />
           </span>
           <span style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1 }}>
@@ -75,7 +75,7 @@ function SLInd({ icon, label, tone }) {
     ? { tint: 'rgba(217,119,6,.15)', line: 'rgba(245,158,11,.55)', iconBg: 'rgba(245,158,11,.9)', iconTx: '#1a1205' }
     : tone === 'green'
       ? { tint: 'rgba(12,143,98,.18)', line: 'var(--gf-emerald-line)', iconBg: 'var(--color-accent)', iconTx: '#fff' }
-      : { tint: 'rgba(255,255,255,.08)', line: 'rgba(255,255,255,.14)', iconBg: 'rgba(255,255,255,.14)', iconTx: 'var(--gf-emerald-100)' };
+      : { tint: 'rgba(255,255,255,.08)', line: 'rgba(255,255,255,.14)', iconBg: 'rgba(255,255,255,.14)', iconTx: 'var(--gf-on-ink-pos)' };
   return (
     <span className="gf-badge-pop" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '7px 14px 7px 8px', borderRadius: 999, background: T.tint, border: `1px solid ${T.line}` }}>
       <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: T.iconBg, color: T.iconTx }}>
@@ -147,12 +147,12 @@ function ShareLanding({ tipo = 'factura', onReady, onClose }) {
         {/* chip de tipo */}
         <span style={{ height: 24, display: 'flex', alignItems: 'center' }}>
           {clasificado ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-emerald-100)', borderRadius: 999, padding: '5px 13px', fontSize: 11.5, fontWeight: 800, letterSpacing: '.5px', textTransform: 'uppercase', animation: 'gfRiseIn .4s ease both' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(12,143,98,.2)', border: '1px solid var(--gf-emerald-line)', color: 'var(--gf-on-ink-pos)', borderRadius: 999, padding: '5px 13px', fontSize: 11.5, fontWeight: 800, letterSpacing: '.5px', textTransform: 'uppercase', animation: 'gfRiseIn .4s ease both' }}>
               <Icon name={esResumen ? 'credit-card' : 'receipt'} size={13} />
               {esResumen ? 'Resumen de tarjeta' : 'Comprobante'}
             </span>
           ) : (
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--gf-emerald-100)' }}>Compartido a Gastos</span>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--gf-on-ink-pos)' }}>Compartido a Gastos</span>
           )}
         </span>
 
@@ -192,7 +192,7 @@ function ShareLanding({ tipo = 'factura', onReady, onClose }) {
               ))}
             </div>
             {data.match && (
-              <div style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: -6 }}>Coincide con <span style={{ color: 'var(--gf-emerald-100)', fontWeight: 600 }}>{data.match.nombre} · {data.match.periodo}</span></div>
+              <div style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', marginTop: -6 }}>Coincide con <span style={{ color: 'var(--gf-on-ink-pos)', fontWeight: 600 }}>{data.match.nombre} · {data.match.periodo}</span></div>
             )}
           </React.Fragment>
         )}
@@ -210,10 +210,10 @@ function ShareLanding({ tipo = 'factura', onReady, onClose }) {
             </div>
             <div style={{ minHeight: 42, display: 'flex', gap: 9, justifyContent: 'center', opacity: clasificado ? 1 : 0, transition: 'opacity .4s' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                <Icon name="list" size={14} color="var(--gf-emerald-100)" />{data.consumos} consumos
+                <Icon name="list" size={14} color="var(--gf-on-ink-pos)" />{data.consumos} consumos
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                <Icon name="layers" size={14} color="var(--gf-emerald-100)" />{data.enCuotas} en cuotas
+                <Icon name="layers" size={14} color="var(--gf-on-ink-pos)" />{data.enCuotas} en cuotas
               </span>
             </div>
           </React.Fragment>
@@ -230,17 +230,17 @@ function ShareLanding({ tipo = 'factura', onReady, onClose }) {
             </div>
             <div style={{ display: 'flex', gap: 9, justifyContent: 'center' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                <Icon name="list" size={14} color="var(--gf-emerald-100)" />{data.consumos} consumos
+                <Icon name="list" size={14} color="var(--gf-on-ink-pos)" />{data.consumos} consumos
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,.08)', borderRadius: 9, padding: '7px 12px', fontSize: 12.5, fontWeight: 600 }}>
-                <Icon name="layers" size={14} color="var(--gf-emerald-100)" />{data.enCuotas} en cuotas
+                <Icon name="layers" size={14} color="var(--gf-on-ink-pos)" />{data.enCuotas} en cuotas
               </span>
             </div>
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.4px', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 1 }}>Se divide en</div>
               {[{ icon: 'calendar-check', label: 'A pagar este mes', val: data.esteMes, hi: true }, { icon: 'clock', label: 'Deuda futura (cuotas)', val: data.deudaFutura }].map((r, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 11, borderRadius: 13, padding: '12px 15px', background: r.hi ? 'rgba(12,143,98,.16)' : 'rgba(255,255,255,.06)', border: r.hi ? '1px solid var(--gf-emerald-line)' : '1px solid transparent' }}>
-                  <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: r.hi ? 'var(--color-accent)' : 'rgba(255,255,255,.1)', color: r.hi ? '#fff' : 'var(--gf-emerald-100)' }}>
+                  <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: r.hi ? 'var(--color-accent)' : 'rgba(255,255,255,.1)', color: r.hi ? '#fff' : 'var(--gf-on-ink-pos)' }}>
                     <Icon name={r.icon} size={15} />
                   </span>
                   <span style={{ flex: 1, fontSize: 13.5, fontWeight: r.hi ? 700 : 500, color: '#fff' }}>{r.label}</span>
@@ -258,7 +258,7 @@ function ShareLanding({ tipo = 'factura', onReady, onClose }) {
           <div style={{ height: '100%', width: ((fase / 5) * 100) + '%', background: 'var(--color-accent)', borderRadius: 999, transition: 'width .5s ease' }} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, fontSize: 13, color: '#9ca3af' }}>
-          {!listo && <span style={{ width: 13, height: 13, border: '2px solid rgba(255,255,255,.25)', borderTopColor: 'var(--gf-emerald-100)', borderRadius: '50%', animation: 'gfSpin .7s linear infinite' }} />}
+          {!listo && <span style={{ width: 13, height: 13, border: '2px solid rgba(255,255,255,.25)', borderTopColor: 'var(--gf-on-ink-pos)', borderRadius: '50%', animation: 'gfSpin .7s linear infinite' }} />}
           {fase === 0 && 'Recibiendo archivo…'}
           {fase === 1 && 'Leyendo el documento…'}
           {fase === 2 && 'Clasificando…'}

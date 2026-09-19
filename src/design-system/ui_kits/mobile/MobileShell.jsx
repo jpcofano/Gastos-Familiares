@@ -160,7 +160,7 @@ const NAV = [
   { id: 'inicio', label: 'Inicio', icon: 'house' },
   { id: 'resumen', label: 'Resumen', icon: 'list-checks' },
   { id: 'cargar', label: 'Cargar', icon: 'upload' },
-  { id: 'perfil', label: 'Perfil', icon: 'user-round' },
+  { id: 'patrimonio', label: 'Patrimonio', icon: 'landmark' },
 ];
 
 function BottomNav({ active, onSelect, onFab }) {
@@ -175,7 +175,7 @@ function BottomNav({ active, onSelect, onFab }) {
           <button key={n.id} onClick={() => onSelect(n.id)} style={{
             flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
             background: 'none', border: 'none', cursor: 'pointer',
-            color: on ? 'var(--color-accent)' : 'var(--gf-gray-400)', fontFamily: 'var(--font-base)',
+            color: on ? 'var(--color-accent-text)' : 'var(--gf-gray-400)', fontFamily: 'var(--font-base)',
           }}>
             <span style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -220,7 +220,7 @@ function Hero({ eyebrow, amount, desc, tags = [], badge }) {
       background: 'linear-gradient(180deg, var(--gf-ink) 0%, var(--gf-ink-soft) 100%)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
     }}>
-      {eyebrow && <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'var(--gf-emerald-100)', marginBottom: 12 }}>{eyebrow}</div>}
+      {eyebrow && <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'var(--gf-on-ink-pos)', marginBottom: 12 }}>{eyebrow}</div>}
       <div style={{ fontSize: 40, fontWeight: 800, letterSpacing: '-1px', lineHeight: 1, marginBottom: 8, fontVariantNumeric: 'tabular-nums' }}>{amount}</div>
       {desc && <div style={{ fontSize: 16, color: '#9ca3af', marginBottom: 14 }}>{desc}</div>}
       {badge && <div style={{ marginBottom: tags.length > 0 ? 12 : 0 }}>{badge}</div>}

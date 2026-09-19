@@ -26,6 +26,11 @@ const PAT_POS = [
   { cuenta: 'Acciones',       ticker: 'GLOB',  nombre: 'Globant',        tipo: 'cedear', sector: 'Global',     pais: 'global', mon: 'ARS', usd: 700 },
 ];
 const PAT_META = { fecha: '01/07/2026', declaradoUsd: 111000 };
+// Bienes fuera del portafolio de inversión (se suman solo en "Patrimonio total").
+const PAT_BIENES = [
+  { nombre: 'Departamento', tipo: 'Propiedad', usd: 220000 },
+  { nombre: 'Auto', tipo: 'Vehículo', usd: 10000 },
+];
 
 const SECTOR_COL = {
   'Energía AR':     '#f5a623',
@@ -78,8 +83,8 @@ function banda(metrica, v) {
 }
 const SEM = {
   verde:    { dot: 'var(--gf-emerald)', tone: 'success', label: 'En banda', bg: 'var(--gf-emerald-50)' },
-  amarillo: { dot: 'var(--gf-out)',     tone: 'warning', label: 'Atención',  bg: 'rgba(245,158,11,.12)' },
-  rojo:     { dot: 'var(--gf-expense)', tone: 'danger',  label: 'Concentrado', bg: 'rgba(220,38,38,.10)' },
+  amarillo: { dot: 'var(--gf-out)',     tone: 'warning', label: 'Atención',  bg: 'var(--gf-gray-100)' },
+  rojo:     { dot: 'var(--gf-expense)', tone: 'danger',  label: 'Concentrado', bg: 'var(--gf-gray-100)' },
 };
 const pct = (x) => Math.round(x * 100) + '%';
 
@@ -124,8 +129,10 @@ function HeadlineSem({ M }) {
   );
 }
 
-// ── VARIANTE A — Hero oscuro + composición por sector ────────────────────────
+// ── VARIANTE A — Hero negro + 3 recomendaciones + patrimonio total (con bienes) ──
 function ResumenA({ M }) {
+  const bienesTot = PAT_BIENES.reduce((s, b) => s + b.usd, 0);
+  const patrimonioTotal = M.total + bienesTot;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 20, padding: '22px 20px', textAlign: 'center' }}>
@@ -138,9 +145,24 @@ function ResumenA({ M }) {
           <span><span style={{ display: 'block', fontSize: 11, opacity: .6 }}>% Renta variable</span><span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{pct(M.rvPct)}</span></span>
         </div>
       </div>
+
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', textTransform: 'uppercase', letterSpacing: '.5px', margin: '2px 2px -2px' }}>Riesgos principales</div>
+      <HeadlineSem M={M} />
+
       <PCard>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Composición por sector</div>
-        <CompBar M={M} />
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>Patrimonio total</span>
+          <span style={{ marginLeft: 'auto', fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{window.GFMoney.usd(patrimonioTotal)}</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'right', marginTop: -2, marginBottom: 10, fontVariantNumeric: 'tabular-nums' }}>{window.GFMoney.ars(patrimonioTotal * window.GFMoney.tc())}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10, borderTop: '1px solid var(--gf-gray-100)' }}>
+          {[{ n: 'Portafolio de inversión', v: M.total }, ...PAT_BIENES.map((b) => ({ n: b.nombre, v: b.usd }))].map((r) => (
+            <div key={r.n} style={{ display: 'flex', alignItems: 'center', fontSize: 13 }}>
+              <span style={{ color: 'var(--color-text-sec)' }}>{r.n}</span>
+              <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{window.GFMoney.usd(r.v)}</span>
+            </div>
+          ))}
+        </div>
       </PCard>
     </div>
   );
@@ -199,6 +221,10 @@ function TenenciasTab({ M }) {
   const segs = Object.entries(M.bySector).sort((a, b) => b[1] - a[1]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <PCard>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Composición por sector</div>
+        <CompBar M={M} />
+      </PCard>
       {segs.map(([sec, secTotal]) => (
         <div key={sec}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '0 2px' }}>
@@ -209,10 +235,10 @@ function TenenciasTab({ M }) {
           <PCard padding="0">
             {PAT_POS.filter((p) => p.sector === sec).sort((a, b) => b.usd - a.usd).map((p, i, arr) => (
               <div key={p.ticker} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 14px', borderBottom: i < arr.length - 1 ? '1px solid var(--gf-gray-100)' : 'none' }}>
-                <span style={{ width: 40, height: 34, borderRadius: 8, background: 'var(--gf-gray-100)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 800, letterSpacing: '.3px', flexShrink: 0, color: 'var(--color-text-strong)' }}>{p.ticker}</span>
+                <window.MerchantLogo nombre={p.nombre} size={34} radius={8} />
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ display: 'block', fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.nombre}</span>
-                  <span style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>{TIPO_LABEL[p.tipo]} · {p.pais === 'AR' ? 'Argentina' : 'Global'} · {p.mon}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>{p.ticker} · {TIPO_LABEL[p.tipo]} · {p.pais === 'AR' ? 'Argentina' : 'Global'} · {p.mon}</span>
                 </span>
                 <span style={{ textAlign: 'right', flexShrink: 0 }}>
                   <span style={{ display: 'block', fontSize: 14, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{window.GFMoney.usd(p.usd)}</span>

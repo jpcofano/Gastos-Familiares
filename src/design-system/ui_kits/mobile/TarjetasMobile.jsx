@@ -223,7 +223,7 @@ function TarjetasMobile() {
       {!esActual && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--color-text-sec)', background: 'var(--gf-gray-100)', borderRadius: 10, padding: '8px 12px' }}>
           <window.Icon name="history" size={14} /> Estás viendo un mes pasado.
-          <button onClick={() => setPeriodo(actual)} style={{ marginLeft: 'auto', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-accent)', fontWeight: 700, fontFamily: 'var(--font-base)', fontSize: 12 }}>Volver al actual</button>
+          <button onClick={() => setPeriodo(actual)} style={{ marginLeft: 'auto', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--color-accent-text)', fontWeight: 700, fontFamily: 'var(--font-base)', fontSize: 12 }}>Volver al actual</button>
         </div>
       )}
       {visibles.map((c) => (
