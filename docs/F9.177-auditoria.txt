@@ -1,0 +1,387 @@
+F9.177 — AUDITORÍA: comprobantes que no entran, y pagos que entran sin marcar nada
+Base 2f5846b · 24/09/2026 · SOLO LECTURA (ninguna escritura a producción)
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN EN UNA LÍNEA
+════════════════════════════════════════════════════════════════════════════════
+
+El pipeline del servidor está impecable: 183/183 entrantes ruteados y 170/170
+comprobantes vinculados, en TODA la historia. El problema es anterior: desde el
+19/09 no llega un solo archivo al servidor, y la app no lo dice. Y los tres
+movimientos "sin pagar" que se ven hoy no son pagos que fallaron: son las
+boletas, esperando un comprobante de pago que nunca llegó.
+
+════════════════════════════════════════════════════════════════════════════════
+§1 — INVENTARIO: DÓNDE SE FRENÓ CADA ARCHIVO
+════════════════════════════════════════════════════════════════════════════════
+
+Script: scripts/auditF9177.ts. Universo: todo lo creado desde 2026-09-15.
+Colecciones: entrantes 183 · comprobantes 170 · resumenesTarjeta 30 · movimientos 2112
+
+hash     par creado     por   origen       mime    kb  entrante comp      tipoDoc          fecha      monto   rama mov      pag
+-------- --- ---------- ----- ------------ ------- --- -------- --------- ---------------- ---------- ------- ---- -------- ----
+13c1b187 P8  2026-09-15 Juan  share_target pdf      68 ruteado  vinculado comprobante_pago 2026-09-15   5.556 2    yR4NiHeW true
+680852ca P8  2026-09-15 Juan  share_target pdf      21 ruteado  vinculado transferencia    2026-09-11 770.901 1    2nnnWCKX true
+ea9a447b P8  2026-09-15 María share_target pdf      21 ruteado  vinculado transferencia    2026-09-15  48.000 3    hvkdjgJ3 true
+adfb010d P8  2026-09-17 Juan  share_target pdf      21 ruteado  vinculado transferencia    2026-09-17  12.000 3    d65K1k1u true
+b9b531b5 P8  2026-09-17 María share_target img/png 493 ruteado  vinculado transferencia    2026-09-17   6.155 3    UVb3iITP true
+cd31a562 P8  2026-09-17 Juan  share_target pdf      21 ruteado  vinculado transferencia    2026-09-16 266.469 2    TLBcWp6R true
+d32548d9 P8  2026-09-17 Juan  share_target img/png 473 ruteado  vinculado transferencia    2026-09-17     700 3    2wyQgBqj true
+df724c41 P8  2026-09-17 María share_target img/png 475 ruteado  vinculado transferencia    2026-09-17  10.000 3    0AQlEtFi true
+73b4589e P8  2026-09-18 María share_target pdf      21 ruteado  vinculado transferencia    2026-09-18  54.000 3    CYDvuMo7 true
+
+CONTEOS POR PARADA (corte 2026-09-17, F9.176)
+
+  par  antes  desde  total  qué significa
+  ---  -----  -----  -----  -------------------------------------------------
+  P8       3      6      9  'vinculado' y pagado:true — sano
+  tot      3      6      9
+
+  P0…P7: CERO, antes y después. La distribución NO cambió con F9.176.
+
+Y sobre TODA la historia, no solo desde el 15/09:
+
+  entrantes.estado    : {"ruteado": 183}        ← 183 de 183
+  comprobantes.estado : {"vinculado": 170}      ← 170 de 170
+  entrantes no ruteados  : ninguno
+  comprobantes no vinculados: ninguno
+
+  => No existe NI UN caso P1, P2, P3, P4, P5 ni P6 en la base. El servidor no
+     está perdiendo nada. Todo lo que llega, termina vinculado.
+
+════════════════════════════════════════════════════════════════════════════════
+§2 — P0: LO QUE NUNCA LLEGA  ← ACÁ ESTÁ EL SÍNTOMA 1
+════════════════════════════════════════════════════════════════════════════════
+
+Scripts: auditF9177.ts (señales) y auditF9177c.ts (Storage vs Firestore).
+
+EL DATO CENTRAL
+
+  ÚLTIMO objeto en Storage      : 2026-09-18
+  ÚLTIMO doc en entrantes       : 2026-09-18
+  ÚLTIMO comprobante (subidoEn) : 2026-09-18
+  hoy                           : 2026-09-24
+
+  Seis días sin un solo archivo. El ritmo previo, por día:
+
+    09-01  7 · 09-02  4 · 09-03  5 · 09-04  5 · 09-07  1 · 09-08  7
+    09-09  1 · 09-11  3 · 09-12  1 · 09-13  7 · 09-14  2 · 09-15  3
+    09-17  5 · 09-18  1 · 09-19 … 09-24  CERO
+
+  No hay una pausa parecida en los 80 días anteriores.
+
+STORAGE Y FIRESTORE COINCIDEN EXACTO
+
+  objetos bajo entrantes/                  : 183
+  docs en entrantes                        : 183
+  objetos en Storage SIN doc en Firestore  : 0
+  docs en Firestore SIN objeto en Storage  : 0
+
+  => Esto DESCARTA la hipótesis "el binario sube y la escritura del doc falla".
+     `subirEntrante` hace `uploadBytes` ANTES del `setDoc`; si el doc fallara,
+     quedaría el objeto huérfano. No hay ninguno. El archivo no sale del teléfono,
+     o falla antes de la primera escritura.
+
+LO QUE SE PUDO MEDIR DE LOS PUNTOS DEL §2
+
+  §2.3 memberId sin resolver → entrantes con `creadoPor` vacío: 0 (en toda la
+       historia). Si alguna vez se subió con creadoPor:'', no quedó rastro.
+       La hipótesis no se confirma; tampoco se puede refutar del todo, porque
+       si el efecto falla antes de subir no escribe nada.
+
+  §2.5 filtros previos a la subida:
+       mimeType en TODO entrantes: {"application/pdf":90,"image/png":65,"image/jpeg":28}
+       No hay ni un HEIC ni un application/octet-stream en la historia.
+       entrantes > 10 MB: 0.
+       => Con los datos que hay, ni el MIME ni el tamaño explican nada.
+
+  §2.4 rama `duplicado`: no hay NINGÚN comprobante descartado ni entrante no
+       ruteado, así que hoy no hay ningún doc "vivo" bloqueando un re-envío.
+
+LO QUE NO SE PUEDE MEDIR, Y HAY QUE DECIRLO
+
+  §2.1 (el SW guarda solo files[0]) y §2.2 (el catch del SW traga el fallo de
+  IDB y redirige igual) son ciertos leyendo public/sw.js:36-45, pero NO DEJAN
+  RASTRO: no hay telemetría, ni log, ni doc. Con los datos de producción no se
+  puede saber si alguno de los seis días perdidos fue por ahí. Es exactamente
+  el agujero que hay que tapar (ver propuesta A).
+
+QUÉ NO CAMBIÓ (verificado, para descartar)
+
+  · El SW desplegado en https://gastos-familiares-jmsf.web.app/sw.js es
+    IDÉNTICO byte a byte a public/sw.js del repo.
+  · El manifest desplegado es IDÉNTICO al repo, con su bloque share_target
+    intacto (action /share-target, POST, multipart/form-data, accept pdf/jpeg/
+    png/webp).
+  · /icons/icon-192.png, /screenshots/mobile-dashboard.png y
+    /screenshots/desktop-dashboard.png devuelven 200. El manifest no tiene
+    referencias rotas.
+  · Último deploy de hosting: 2026-09-17 01:25 AR (Last-Modified del sitio).
+    DESPUÉS de ese deploy entraron 5 archivos el 17/09 y 1 el 18/09, así que
+    el deploy no coincide con el corte.
+  · firestore.rules y storage.rules no se tocan desde 2026-08-17 (F9.143).
+  · F9.176 (0e76ef6) tocó Comprobantes.tsx SOLO en PropuestaCard (el medio
+    prellenado); no tocó el efecto del share-landing.
+  · El commit 2f5846b ("Kit mobile", 19/09 14:44) toca únicamente
+    src/design-system/ui_kits/mobile/*.jsx y NO está desplegado.
+
+  => Ningún cambio de código ni de configuración explica el corte del 19/09.
+     La causa está del lado del dispositivo (PWA/SW/permiso/sesión) o en el
+     hábito de uso, y hoy el sistema no tiene forma de distinguirlos.
+
+════════════════════════════════════════════════════════════════════════════════
+§3 — P1 a P5: LO QUE LLEGA Y SE TRABA EN EL SERVIDOR
+════════════════════════════════════════════════════════════════════════════════
+
+No hay nada que auditar: P1–P5 = 0 en toda la base (§1). No hay errorExtraccion
+que agrupar (§3.3) ni propuestas faltantes que explicar (§3.4).
+
+§3.1 — DEPLOY DE FUNCTIONS vs REPO: NO SE PUDO DETERMINAR
+
+  Las 20+ functions están desplegadas (firebase functions:list), v2, nodejs22,
+  southamerica-east1, todas en estado ACTIVE, incluidas routearEntrante,
+  extraerComprobante, reintentarComprobante y matchComprobante.
+
+  La FECHA de despliegue no se pudo leer:
+    · `firebase functions:list --json` no devuelve updateTime (viene null).
+    · La API de Cloud Run la tiene, pero la service account de
+      secrets/serviceAccountKey.json no tiene permiso:
+        Permission 'run.services.list' denied on resource
+        'projects/gastos-familiares-e6415/locations/southamerica-east1/services'
+
+  Prueba de comportamiento, inconclusa por falta de tráfico:
+    · comprobantes con propuestaMatch.medioIdPrellena (campo que SOLO escribe
+      F9.176): 0
+    · destinos con rol declarado: 1 de 153 → 3c47cbf8, tipo=cuit,
+      rol=medio_pago, medioId=pp (Personal Pay)
+    · último propuestaMatch.calculadoEn de toda la colección: 2026-09-18
+
+    Es decir: hay un único destino que podría activar el código nuevo, y desde
+    que existe no entró ningún comprobante que lo tocara. El campo vacío NO
+    prueba que las functions estén viejas; prueba que nada ejercitó la rama.
+
+  PARA CERRARLO HACE FALTA UNA MIRADA CON MÁS PERMISO. Cualquiera de estas:
+    gcloud run services list --project gastos-familiares-e6415 \
+      --region southamerica-east1 \
+      --format='table(metadata.name, status.conditions[0].lastTransitionTime)'
+  o la consola: Firebase → Functions → columna "Última actualización".
+
+════════════════════════════════════════════════════════════════════════════════
+§4 — P6: LO QUE ESTÁ ESPERANDO UN TAP
+════════════════════════════════════════════════════════════════════════════════
+
+CERO comprobantes en P6. No hay nada en la bandeja esperando confirmación, ni
+ahora ni en la historia (los 170 comprobantes están vinculados). Los límites de
+suscribirEntrantes (admin 50 / dependiente 20) no están escondiendo nada: con
+183 entrantes históricos y 0 pendientes, no hay cola que recortar.
+
+════════════════════════════════════════════════════════════════════════════════
+§5 — P7: PAGOS QUE ENTRAN Y NO MARCAN NADA  ← NO ES LO QUE PARECÍA
+════════════════════════════════════════════════════════════════════════════════
+
+Script: scripts/auditF9177b.ts. Movimientos con comprobante vinculado y
+pagado:false desde 2026-09-01: exactamente 3, que son los tres del §0.
+
+  mov      fecha       monto   item                              tipoDoc          creado    origen
+  -------- ----------  ------- --------------------------------- ---------------- --------- ------
+  1v1v03DY 2026-09-21   66.020 Impuestos y finanzas›Monotributo  recibo_servicio  08/09     Manual
+  YOmyAvUT 2026-09-24   23.302 Auto›Agua                         recibo_servicio  08/09     Manual
+  dIPI1qQG 2026-09-28   51.672 Casa›Agua                         recibo_servicio  08/09     Manual
+
+  Los tres: creadoPor=Juan, banco=BBVA, origen=Manual, creadoEn=2026-09-08,
+  confirmadoPago=false, pagadoEn=null, vencimientos=[su propia fecha/su monto].
+
+§5.1 — ¿tipoDocumento equivocado?
+
+  Los tres son `recibo_servicio`, y `esObligacionDoc` los trata como obligación:
+  por diseño NO marcan nada. Pero eso es CORRECTO: son las boletas, no los pagos.
+  El comprobante de pago de cada una nunca llegó — coherente con el §2, que dice
+  que desde el 19/09 no entró ningún archivo. No hay ningún comprobante de pago
+  mal clasificado como recibo_servicio: no hay ningún comprobante de pago.
+
+§5.2 — ¿por qué rama entró?
+
+  Ninguno entró por rama de match: los tres tienen origen `Manual` y fecha de
+  creación 08/09, el mismo día que se subieron sus tres comprobantes. Son altas
+  de obligación desde el comprobante, no reconciliaciones. No hay obligación
+  duplicada al lado de ninguno.
+
+§5.3 — la hipótesis de `quedaConfirmado` con vencimiento futuro
+
+  NO SE PUEDE CONFIRMAR NI REFUTAR con los datos de hoy, y conviene decirlo
+  claro: la hipótesis es sobre qué pasa cuando llega un comprobante de PAGO
+  adelantado, y no hay ninguno en la ventana. Los tres casos que parecían
+  probarla resultaron ser obligaciones, no pagos. La hipótesis sigue viva como
+  riesgo de código (confirmarRama1 usa vencimientos[0].fecha ?? fecha, no la
+  fecha del pago), pero hoy no tiene ni un caso real que la sostenga.
+
+§5.4 — AYSA 24/9 en `Auto › Agua`: NO SALIÓ DEL MATCH
+
+  El ítem esperado 1663f6a6 está literalmente cargado así en itemsEsperados:
+
+    1663f6a6  Auto›Agua   activo=true  montoEsperado=22.000  claves=[]
+    94c07e7c  Casa›Agua   activo=true  montoEsperado=50.000  claves=[]
+
+  El movimiento quedó atado a 1663f6a6 y heredó SU categoría. No hubo destino
+  aprendido que lo desviara: destinoCbu y destinoCuit del movimiento están
+  vacíos, y no hay ningún destino con desambiguación configurada (solo 1 de 153
+  destinos tiene rol, y es Personal Pay). O sea: el dato está mal cargado en el
+  ítem, no lo decidió el algoritmo.
+
+  Los dos suministros de AySA CONVIVEN BIEN: cada movimiento quedó atado a su
+  propio ítem (23.302→Auto›Agua, 51.672→Casa›Agua) y los montos esperados
+  (22.000 y 50.000) discriminan con holgura. El problema es solo el nombre de la
+  categoría de uno de los dos.
+
+§5.5 — ARCA 21/9
+
+  No hay ningún comprobante de pago de Monotributo en la base. El único
+  documento vinculado al movimiento es la boleta (e532f5f6, recibo_servicio,
+  subida el 08/09). No hay nada que `reconciliarPorPayee` haya rechazado: no
+  hubo qué reconciliar.
+
+════════════════════════════════════════════════════════════════════════════════
+§0 — EL BANNER: LOS "2 SIN PAGAR" NO SON LOS QUE SE VEN EN LAS CARDS
+════════════════════════════════════════════════════════════════════════════════
+
+Script: scripts/auditF9177d.ts. Reconcilia exacto con "2 sin pagar · $185.994":
+
+  El contador (porRevisar, Resumen.tsx:1383) cuenta ítems del checklist SIN
+  NINGÚN movimiento asociado:
+
+    62a96fc8  Casa›ABL                                          esperado: (sin monto)
+    c2e5d057  Educación y chicos›Actividades extracurriculares  esperado: 45.000
+                                                                       ── 2 ítems, 45.000
+
+  El monto (pendienteAgenda, agenda.ts:66) suma TODA la agenda pendiente, que
+  además incluye los que sí tienen movimiento pero sin confirmar:
+
+    Auto›Agua          mov YOmyAvUT  23.302
+    Casa›Agua          mov dIPI1qQG  51.672
+    Monotributo        mov 1v1v03DY  66.020
+                                     ── 3 ítems, 140.994
+
+    45.000 + 140.994 = 185.994  ✔ exactamente el monto del banner
+
+  => El "2" y el "$185.994" hablan de CONJUNTOS DISTINTOS. Los dos ítems que
+     cuenta el contador (ABL y Actividades extracurriculares) ni siquiera
+     aparecen en las cards que el dueño mencionó. Es correcto según el código
+     (F9.99.8.1 lo hizo a propósito), pero se lee como si fueran lo mismo.
+
+════════════════════════════════════════════════════════════════════════════════
+§6 — CAUSAS, SEPARADAS POR TIPO
+════════════════════════════════════════════════════════════════════════════════
+
+──────────────────────────────────────────────────────────────────────────────
+CAUSA A — FALTA DE VISIBILIDAD (la grave). Nada llega desde el 19/09 y el
+          sistema no lo dice ni lo registra.
+──────────────────────────────────────────────────────────────────────────────
+  Prueba: 0 objetos en Storage y 0 docs en entrantes entre el 19/09 y el 24/09,
+  contra un ritmo previo de 1 a 7 por día. Storage y Firestore coinciden exacto
+  (183=183, 0 huérfanos), así que el archivo ni siquiera empieza a subir.
+
+  Por qué no se sabe la causa raíz: el camino del share no deja rastro de sus
+  fallos. public/sw.js:41-43 tiene un `catch (_) {}` vacío y redirige igual;
+  subirEntrante devuelve {ok:false} y el share-landing no lo muestra. Un fallo
+  de IDB, de permiso, de sesión vencida o de cuota se ven todos igual desde
+  afuera: la app abre Comprobantes y no pasa nada.
+
+  Propuesta (SIN IMPLEMENTAR):
+    A1. Un doc de telemetría por intento de share, escrito ANTES de tocar
+        Storage: {hash?, nombreArchivo, mimeType, tamano, paso, error, ts}.
+        Así un fallo deja rastro aunque no suba nada. Rompe si las reglas no
+        permiten esa colección al usuario — hay que abrirla explícitamente.
+        Se verifica compartiendo un archivo con el modo avión puesto: tiene que
+        quedar el doc con paso='upload' y el error.
+    A2. Que el share-landing MUESTRE el resultado: "subido", "ya lo tenías"
+        (duplicado) o el error. Hoy `duplicado` y `{ok:false}` son silencio.
+        No rompe nada; es UI que falta.
+    A3. Que el SW guarde TODOS los files, no solo files[0] (§2.1). Rompe el
+        contrato del landing, que hoy lee una clave única de IDB: hay que pasar
+        a una lista. Se verifica compartiendo dos PDF juntos desde el banco.
+    A1 y A3 se pisan en el mismo archivo pero son independientes; A1 primero,
+    porque sin telemetría no se sabe si A3 alguna vez importó.
+
+  Lo que A NO resuelve: por qué se cortó el 19/09. Eso hay que mirarlo en el
+  teléfono (¿la PWA sigue instalada? ¿sigue apareciendo en el menú Compartir?
+  ¿la sesión sigue abierta?). Ninguna de las tres cosas deja rastro en la base.
+
+──────────────────────────────────────────────────────────────────────────────
+CAUSA B — DATO MAL CARGADO. El ítem 1663f6a6 se llama `Auto › Agua`.
+──────────────────────────────────────────────────────────────────────────────
+  Prueba: el doc itemsEsperados/1663f6a6 tiene categoria='Auto',
+  subcategoria='Agua', montoEsperado=22.000, activo=true. El movimiento hereda
+  la categoría del ítem; no hay destino ni aprendizaje involucrado.
+
+  Propuesta (SIN IMPLEMENTAR): cambiar la categoría del ítem a 'Casa' desde
+  Perfil › Ítems esperados. Rompe la serie histórica de ese suministro si algún
+  gráfico agrupa por categoría guardada en el movimiento y no por ítem: los
+  movimientos viejos siguen diciendo 'Auto'. Se verifica mirando cuántos
+  movimientos históricos tienen itemEsperadoId=1663f6a6 antes de tocarlo.
+  NO LO TOQUÉ.
+
+──────────────────────────────────────────────────────────────────────────────
+CAUSA C — UI QUE CONFUNDE. El banner mezcla dos conjuntos.
+──────────────────────────────────────────────────────────────────────────────
+  Prueba: "2 sin pagar" = 2 ítems sin movimiento ($45.000); "$185.994" = esos 2
+  más 3 ítems con movimiento sin confirmar ($140.994). Suma verificada al peso.
+
+  Propuesta (SIN IMPLEMENTAR): que el contador y el monto hablen del mismo
+  conjunto, o que el texto lo separe ("2 sin cargar · 3 sin confirmar ·
+  $185.994"). Rompe la comparación con capturas viejas del banner y con lo que
+  F9.99.8.1/F9.110 decidieron a propósito — conviene releer esos dos antes de
+  cambiarlo.
+
+──────────────────────────────────────────────────────────────────────────────
+CAUSA D — DISEÑO QUE EL DUEÑO NO ESPERABA. Una boleta entra como obligación y
+          queda "sin pagar" hasta que llegue el comprobante de pago.
+──────────────────────────────────────────────────────────────────────────────
+  Prueba: los tres movimientos impagos son recibo_servicio subidos el 08/09, sin
+  ningún comprobante de pago asociado. El sistema hizo exactamente lo que debía.
+
+  No hay nada que arreglar acá — pero con la CAUSA A activa se vive como si el
+  sistema "no marcara nada", porque los pagos que el dueño sí hizo nunca
+  llegaron a entrar. Las dos causas se pisan: resolver A hace desaparecer D.
+
+════════════════════════════════════════════════════════════════════════════════
+COMPROBANTES A RE-PROCESAR O CONFIRMAR A MANO
+════════════════════════════════════════════════════════════════════════════════
+
+  NINGUNO. No hay un solo comprobante trabado: los 170 están vinculados y los
+  183 entrantes ruteados. No hay nada que reintentar.
+
+  Lo que sí queda pendiente, y no es re-procesar sino VOLVER A MANDAR:
+  los comprobantes de pago de las tres boletas de septiembre, que nunca
+  llegaron al servidor.
+
+    1v1v03DY  ARCA Monotributo  venció 21/09   66.020
+    YOmyAvUT  AySA (Auto›Agua)  vence  24/09   23.302
+    dIPI1qQG  AySA (Casa›Agua)  vence  28/09   51.672
+
+  Antes de reenviarlos conviene verificar en el teléfono que la app sigue
+  apareciendo en el menú Compartir: si el share sigue roto, se van a perder
+  igual y en silencio.
+
+════════════════════════════════════════════════════════════════════════════════
+LO QUE NO PUDE RESPONDER
+════════════════════════════════════════════════════════════════════════════════
+
+  1. Por qué dejó de llegar el 19/09. No hay rastro de intentos fallidos.
+  2. La fecha exacta de deploy de las functions (§3.1): falta el permiso
+     run.services.list en la service account.
+  3. Si el share del BBVA manda más de un archivo (§2.1): no hay ningún caso
+     medible en la base, porque el SW descarta los extras antes de escribir.
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  Base 2f5846b confirmada, árbol limpio al abrir.
+  Cero cambios en src/, functions/, firestore.rules, firestore.indexes.json,
+  storage.rules y datos de producción. Todos los scripts son de lectura.
+  tsc cliente: 41 al abrir · tsc functions: 0 al abrir.
+  Archivos nuevos: scripts/auditF9177.ts, auditF9177b.ts, auditF9177c.ts,
+  auditF9177d.ts, auditF9177e.ts, docs/F9.177-auditoria.txt y el prompt
+  docs/F9.177-auditoria-gastos-que-no-entran.md.
+  Privacidad: hashes a 8 caracteres, CBU/CUIT enmascarados, sin nombres de
+  terceros completos.
