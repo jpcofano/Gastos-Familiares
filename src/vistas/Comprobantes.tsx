@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
 import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, reasignarItemDeComprobante, desvincularObligacion, type ObligacionAbierta } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
-import { leerYBorrarArchivoCompartido } from '../datos/shareTargetIdb';
+import { leerYBorrarArchivosCompartidos } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
 import { useResumenesTarjeta } from '../hooks/useResumenesTarjeta';
 import { useMovimientosDelMes } from '../hooks/useMovimientosDelMes';
@@ -1423,29 +1423,86 @@ export default function Comprobantes() {
   const [autoAbrirCompId, setAutoAbrirCompId] = useState<string | null>(null);
   const [abrirResumenId,  setAbrirResumenId]  = useState<string | null>(null);
 
+  // F9.178 — una llegada por share NUNCA termina en Comprobantes sin aviso: cada salida (nada
+  // recibido, IDB vacío, tipo, tamaño, error de subida, duplicado) deja un mensaje que dice en
+  // qué etapa quedó. `sw` lo pone el SW en el redirect; null = SW anterior a F9.178.
+  const [avisoShare, setAvisoShare] = useState<{ kind: 'ok' | 'warn' | 'err'; titulo: string; lineas: string[] } | null>(null);
+
   useEffect(() => {
+    // Sin miembro no se toca ni la URL ni IDB: el archivo espera ahí hasta que haya con quién subirlo.
+    if (!memberId) return;
     const params = new URLSearchParams(window.location.search);
     if (!params.has('share')) return;
+    const sw      = params.get('sw');
+    const etapaSw = params.get('etapa');
+    const nSw     = Number(params.get('n') ?? NaN);
     window.history.replaceState({}, '', window.location.pathname);
-    leerYBorrarArchivoCompartido().then(file => {
-      if (!file) return; // refresh sin archivo en IDB → Comprobantes normal, sin romper
+    const HACER = 'Probá subirlo desde Cargar.';
+
+    if (sw === 'vacio') {
+      setAvisoShare({ kind: 'err', titulo: 'No llegó ningún archivo.', lineas: [`Etapa: recepción — el teléfono abrió la app sin pasarle el archivo. ${HACER}`] });
+      return;
+    }
+
+    leerYBorrarArchivosCompartidos().then(async ({ archivos, diag }) => {
+      if (!archivos.length) {
+        const porQue =
+          sw === 'err' ? `Etapa: guardado en el teléfono (${etapaSw ?? diag?.etapa ?? '?'}) — ${diag?.error ?? 'sin detalle'}.`
+          : sw === 'ok' ? 'Etapa: lectura — el archivo se guardó pero ya no estaba al abrir la app.'
+          : 'Etapa: recepción — la versión anterior de la app no dejó el archivo. Cerrá la app del todo y volvé a abrirla para que se actualice.';
+        setAvisoShare({ kind: 'err', titulo: 'El archivo compartido no llegó.', lineas: [porQue, HACER] });
+        return;
+      }
+
       const TIPOS = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-      if (!TIPOS.includes(file.type)) {
-        setResultado({ tipo: 'error', mensaje: `Tipo no permitido: ${file.type}` });
-        return;
+      const lineas: string[] = [];
+      let hayError = false, hayDuplicado = false;
+      if (nSw > archivos.length) {
+        hayError = true;
+        lineas.push(`Llegaron ${nSw} elementos pero solo ${archivos.length} eran archivos (etapa: recepción).`);
       }
-      if (file.size > 10 * 1024 * 1024) {
-        setResultado({ tipo: 'error', mensaje: 'El archivo supera los 10 MB.' });
-        return;
+      const validos: File[] = [];
+      for (const f of archivos) {
+        const rechazo = !TIPOS.includes(f.type) ? `tipo no permitido (${f.type || 'sin tipo'})`
+          : f.size > 10 * 1024 * 1024 ? 'supera los 10 MB'
+          : null;
+        if (rechazo) { hayError = true; lineas.push(`${f.name}: ${rechazo} — etapa: validación. ${HACER}`); }
+        else validos.push(f);
       }
-      setCompartido({ hash: null, nombreArchivo: file.name, tamano: file.size, errorSubida: null });
-      subirEntrante(file, memberId, 'share_target')
-        .then(res => {
-          if (!res.ok) { setCompartido(c => c && { ...c, errorSubida: res.error.message }); return; }
+
+      // El primero va por el landing, como siempre; el resto se sube en orden detrás.
+      const [primero, ...resto] = validos;
+      if (primero) {
+        setCompartido({ hash: null, nombreArchivo: primero.name, tamano: primero.size, errorSubida: null });
+        const res = await subirEntrante(primero, memberId, 'share_target');
+        if (!res.ok) {
+          hayError = true;
+          setCompartido(c => c && { ...c, errorSubida: `Etapa: subida — ${res.error.message}` });
+          lineas.push(`${primero.name}: error en la subida — ${res.error.message}. ${HACER}`);
+        } else {
           setCompartido(c => c && { ...c, hash: res.entrante.hash });
-        })
-        .catch(err => setCompartido(c => c && { ...c, errorSubida: (err as Error).message }));
-    }).catch(() => {});
+          if (res.duplicado) { hayDuplicado = true; lineas.push(`${primero.name}: ya estaba cargado — no se procesa de nuevo.`); }
+          else if (archivos.length > 1) lineas.push(`${primero.name}: subido, en bandeja.`);
+        }
+      }
+      for (const f of resto) {
+        const res = await subirEntrante(f, memberId, 'share_target');
+        if (!res.ok) { hayError = true; lineas.push(`${f.name}: error en la subida — ${res.error.message}. ${HACER}`); }
+        else if (res.duplicado) { hayDuplicado = true; lineas.push(`${f.name}: ya estaba cargado — no se procesa de nuevo.`); }
+        else lineas.push(`${f.name}: subido, en bandeja.`);
+      }
+
+      if (lineas.length) {
+        setAvisoShare({
+          kind:   hayError ? 'err' : hayDuplicado ? 'warn' : 'ok',
+          titulo: archivos.length > 1 ? `Llegaron ${archivos.length} archivos compartidos.` : 'Archivo compartido.',
+          lineas,
+        });
+      }
+    }).catch(err => setAvisoShare({
+      kind: 'err', titulo: 'No se pudo leer el archivo compartido.',
+      lineas: [`Etapa: lectura — ${(err as Error)?.message ?? String(err)}.`, HACER],
+    }));
   }, [memberId]);
 
   const faseCompartido = calcularFaseCompartido(compartido?.hash ?? null, entrantes, comprobantes, resumenes);
@@ -1542,6 +1599,11 @@ export default function Comprobantes() {
         )}
         {resultado?.tipo === 'error' && (
           <Message kind="err" title="Error al subir.">{resultado.mensaje}</Message>
+        )}
+        {avisoShare && (
+          <Message kind={avisoShare.kind} title={avisoShare.titulo}>
+            {avisoShare.lineas.map((l, i) => <div key={i}>{l}</div>)}
+          </Message>
         )}
 
         {/* ── Bandeja de entrada ─────────────────────────────────────────── */}

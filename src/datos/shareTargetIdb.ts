@@ -1,6 +1,19 @@
 const DB_NAME  = 'gastos-share';
 const STORE    = 'pendiente';
-const KEY      = 'archivo';
+// F9.178 — el SW guarda todos los compartidos en 'archivos'. 'archivo' (uno solo) es lo que
+// escribía el SW anterior: se sigue leyendo porque el teléfono puede tener ese SW todavía.
+const KEY        = 'archivos';
+const KEY_LEGACY = 'archivo';
+const KEY_DIAG   = 'diag';
+
+// Lo que el SW anotó del intento: qué llegó y en qué etapa terminó. Nunca el contenido.
+export interface DiagShare {
+  fecha: string;
+  recibidos: number;
+  archivos: { nombre?: string; tipo?: string; tamano?: number; noEsArchivo?: string }[];
+  etapa: string;
+  error: string | null;
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -11,19 +24,25 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-// Lee y borra en una sola transacción — si la página se refresca, IDB ya está vacío.
-export async function leerYBorrarArchivoCompartido(): Promise<File | null> {
+// Lee y borra los archivos en una sola transacción — si la página se refresca, IDB ya está
+// vacío. El diagnóstico NO se borra: queda el historial de los últimos intentos.
+export async function leerYBorrarArchivosCompartidos(): Promise<{ archivos: File[]; diag: DiagShare | null }> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx    = db.transaction(STORE, 'readwrite');
     const store = tx.objectStore(STORE);
-    const req   = store.get(KEY);
-    req.onsuccess = () => {
-      const file: File | undefined = req.result;
-      if (file) store.delete(KEY);
-      tx.oncomplete = () => resolve(file ?? null);
+    const reqNuevo  = store.get(KEY);
+    const reqLegacy = store.get(KEY_LEGACY);
+    const reqDiag   = store.get(KEY_DIAG);
+    store.delete(KEY);
+    store.delete(KEY_LEGACY);
+    tx.oncomplete = () => {
+      const nuevos: unknown[] = Array.isArray(reqNuevo.result) ? reqNuevo.result : [];
+      const archivos = [...nuevos, reqLegacy.result].filter((f): f is File => f instanceof Blob);
+      const diags: DiagShare[] = Array.isArray(reqDiag.result) ? reqDiag.result : [];
+      resolve({ archivos, diag: diags[diags.length - 1] ?? null });
     };
-    req.onerror = () => reject(req.error);
-    tx.onerror  = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
   });
 }
