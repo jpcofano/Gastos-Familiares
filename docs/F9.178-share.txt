@@ -1,0 +1,139 @@
+F9.178 — EL SHARE: DÓNDE SE PIERDE EL ARCHIVO, Y QUE NO SE PIERDA EN SILENCIO
+Base 5164323 · commit e407427 · 24/09/2026 · release de hosting 24/09 22:01 (-03)
+
+════════════════════════════════════════════════════════════════════════════════
+ESTADO EN UNA LÍNEA
+════════════════════════════════════════════════════════════════════════════════
+
+La causa del share roto en el teléfono SIGUE SIN CONOCERSE: no se reproduce en
+local. Lo que quedó publicado es instrumentación: cada share que falle ahora dice
+en pantalla en qué etapa se frenó. EL PRÓXIMO PASO ES UNA PRUEBA EN EL TELÉFONO (§4).
+
+════════════════════════════════════════════════════════════════════════════════
+§1 — QUÉ SE REPRODUJO EN LOCAL
+════════════════════════════════════════════════════════════════════════════════
+
+Chrome headless + SW real sobre `npm run build && npx vite preview`, con un
+formulario POST multipart a /share-target (lo mismo que genera Android).
+
+  E1  SW: formData → getAll('files')      ANDA. PDF e imagen llegan como File.
+  E2  SW: guardado en IDB                 ANDA. El archivo queda en
+                                          gastos-share/pendiente.
+  E3  redirect 303                        ANDA. Aterriza en /comprobantes?share=1.
+  E4  lectura en Comprobantes             La carrera de memberId NO PUEDE PASAR:
+                                          AppShell solo monta Comprobantes con
+                                          estado 'autenticado' y memberId resuelto.
+                                          Sin sesión el archivo queda en IDB y no
+                                          se pierde (nadie lo lee hasta que se entra).
+  E5  filtro de tipo/tamaño               NO SE PUDO PROBAR (exige login).
+  E6  subirEntrante                       NO SE PUDO PROBAR (exige login).
+
+  Por qué se paró en E4: E5–E6 necesitan un miembro real. Los emuladores de
+  Firestore/Storage necesitan Java y la máquina donde se hizo esto no lo tenía.
+  No se armó ningún atajo de auth.
+
+  CAUSA ENCONTRADA (no es la del teléfono, pero era real): con 2 o más archivos
+  compartidos, el SW guardaba solo files[0] y el resto se perdía sin aviso.
+
+  Lo que SIGUE sin explicarse, de F9.177.1: un comprobante subido desde Cargar el
+  24/9 creó su doc en Firestore y corrió el pipeline, pero no apareció su objeto
+  en Storage bajo entrantes/.
+
+════════════════════════════════════════════════════════════════════════════════
+§2 — QUÉ CAMBIÓ (commit e407427)
+════════════════════════════════════════════════════════════════════════════════
+
+  public/sw.js
+    · Guarda TODOS los archivos en la clave 'archivos' (un array). Antes era
+      'archivo', con uno solo.
+    · Registro de diagnóstico en la clave 'diag': los últimos 20 intentos, cada uno
+      con { fecha, recibidos, archivos:[{nombre,tipo,tamano}], etapa, error }.
+      Nunca guarda el contenido del archivo.
+    · El redirect lleva el resultado:
+        /comprobantes?share=1&sw=ok|vacio|err&n=<recibidos>[&etapa=<donde falló>]
+
+  src/datos/shareTargetIdb.ts
+    · leerYBorrarArchivosCompartidos() → { archivos: File[], diag }. Lee 'archivos'
+      y también 'archivo', el formato del SW viejo que el teléfono puede tener
+      todavía. Borra los archivos, pero no el diagnóstico.
+
+  src/vistas/Comprobantes.tsx (el efecto del share y el mensaje avisoShare)
+    · Sin memberId no toca ni la URL ni IDB.
+    · Cada salida termina en un mensaje visible con la etapa:
+        sw=vacio                → "No llegó ningún archivo" (etapa: recepción)
+        IDB vacío con sw=err    → etapa: guardado en el teléfono + error del SW
+        IDB vacío con sw=ok     → etapa: lectura
+        IDB vacío sin sw        → SW viejo: cerrar la app del todo y reabrirla
+        tipo / más de 10 MB     → etapa: validación, por archivo
+        error de subida         → etapa: subida (en el landing y en el mensaje)
+        duplicado               → "ya estaba cargado" (antes se ignoraba)
+        varios archivos         → una línea por archivo con su resultado
+    · El primer archivo sigue pasando por el ShareLanding como antes. El resto se
+      sube en orden detrás de él.
+
+  NO SE TOCÓ: handleSubir (Subir desde Cargar), las functions ni las reglas.
+  tsc cliente 41 (igual que antes; el error en Comprobantes.tsx:1063 ya existía),
+  functions 0, build OK.
+
+  Sin verificar: el deploy informó "release complete", pero no se confirmó que el
+  sw.js publicado sea el nuevo. Para confirmarlo, abrir
+  https://gastos-familiares-jmsf.web.app/sw.js y buscar IDB_KEY_DIAG.
+
+════════════════════════════════════════════════════════════════════════════════
+§3 — REGISTRO DEL LADO DEL SERVIDOR (PROPUESTA — NO IMPLEMENTADO, DECIDE EL DUEÑO)
+════════════════════════════════════════════════════════════════════════════════
+
+  1. RECOMENDADA — colección `shareIntentos`. La app escribe un doc por intento al
+     terminar: fecha, memberId (corto), etapa, resultado, nombre/tipo/tamaño.
+     Regla: create solo para un miembro verificado con creadoPor == memberId;
+     read solo admin; sin update ni delete. Costo: decenas de escrituras por
+     mes, US$0. Límite: si la app nunca llega a abrirse, no queda registro.
+  2. Campo en `entrantes`: solo registra lo que llegó a subirse, que es lo que
+     menos interesa. No conviene.
+  3. Integración Hosting → Cloud Logging (la P1 de F9.177.1): cubre el caso "el SW
+     no interceptó y el POST fue al servidor". ~US$0 a esta escala. Complementa a
+     la 1.
+
+════════════════════════════════════════════════════════════════════════════════
+§4 — PRÓXIMO PASO: PRUEBA EN EL TELÉFONO
+════════════════════════════════════════════════════════════════════════════════
+
+  1. Abrir la app una vez, normal, para que tome el SW nuevo. Si hace falta,
+     cerrarla del todo desde Recientes y volver a abrirla.
+  2. Compartir un PDF desde la app del banco hacia Gastos.
+  3. Anotar el mensaje que aparece en Cargar: el título y la línea con "Etapa: …".
+     Con eso se decide el arreglo.
+  4. Si aparece el landing y el archivo sube, el share volvió a andar. Queda por
+     saber qué lo tenía roto; lo más probable es que fuera el SW o la caché del
+     teléfono.
+  5. El historial completo de intentos queda en el teléfono. Con depuración remota
+     (chrome://inspect → la app → Application → IndexedDB → gastos-share →
+     pendiente → diag) se ven los últimos 20.
+
+════════════════════════════════════════════════════════════════════════════════
+§5 — CÓMO REPETIR LA SIMULACIÓN EN OTRA MÁQUINA
+════════════════════════════════════════════════════════════════════════════════
+
+  Scripts en scripts/F9178/. Usan playwright-core con el Chrome instalado (ruta
+  fija: C:/Program Files/Google/Chrome/Application/chrome.exe; cambiarla si es
+  otra). playwright-core NO está en el package.json del proyecto: instalarlo
+  en una carpeta aparte para no tocar las dependencias.
+
+    mkdir %TEMP%\pw && cd %TEMP%\pw && npm init -y && npm i playwright-core@1
+    copiar ahí scripts/F9178/*.mjs y un par de archivos de prueba (.pdf, .png)
+
+  A) Share contra el build (E1–E3):
+       en el repo:  npm run build && npx vite preview --port 4173
+       en %TEMP%\pw: node simularShare.mjs prueba.pdf prueba.png
+     Imprime la URL del redirect y el contenido de IDB al aterrizar ('archivos' y
+     'diag'). Sin sesión la app muestra "Ingresar con Google" y los archivos
+     quedan en IDB: eso es lo esperado.
+
+  B) Lector real de la app:
+       en el repo:  npx vite --port 5179
+       en %TEMP%\pw: node probarLector.mjs
+     Esperado: la primera lectura trae los 2 archivos, la segunda sale vacía y la
+     del formato viejo trae 'viejo.pdf'.
+
+  Para llegar a E5–E6 en local hace falta Java (emuladores de Firestore y Storage)
+  y sembrar config/familia con un miembro. No se hizo.
