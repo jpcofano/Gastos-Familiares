@@ -1,0 +1,329 @@
+F9.177.1 — ¿QUÉ QUEDÓ REGISTRADO DEL SHARE ROTO?
+Base c8f5aff · 24/09/2026 · SOLO LECTURA · no se habilitó ninguna integración, log ni API
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN EN UNA LÍNEA
+════════════════════════════════════════════════════════════════════════════════
+
+Quedó rastro, pero no del intento fallido: los logs de Cloud Functions confirman
+el corte con precisión de minutos (último pipeline 18/09 20:44, nada hasta hoy) y
+Cloud Monitoring lo confirma por una vía independiente. Lo que NO se pudo mirar
+es lo único que probaría por qué: los logs de requests de Hosting, que esta
+service account no puede leer y cuya integración no pude verificar si está
+prendida.
+
+════════════════════════════════════════════════════════════════════════════════
+§1 — TABLA DE FUENTES
+════════════════════════════════════════════════════════════════════════════════
+
+Sonda: scripts/auditF91771.ts (API de Google, credencial secrets/serviceAccountKey.json)
+más `npx firebase functions:log` (credencial del dueño en la CLI).
+
+  #    fuente                                  estado              qué se pudo ver
+  ---  --------------------------------------  ------------------  ------------------------------------------
+  1    Hosting → requests en Cloud Logging     NO SE PUDO LEER     "Permission denied for all log views".
+                                                                   NO es "apagada": es desconocida. Ver nota A.
+  2    Hosting → historial de releases         LEÍDA, CON DATOS    2 releases desde el 12/9. Ver §1.2.
+  3    Cloud Run → deploy de functions         NO SE PUDO LEER     run.services.list denegado (SA) y gcloud con
+                                                                   el token vencido. Ver §1.3.
+  4a   Data Access audit logs — configuración  NO SE PUDO LEER     getIamPolicy denegado: no pude confirmar si
+                                                                   están prendidos. Ver nota B.
+  4b   Storage → audit logs de datos           NO SE PUDO LEER     "Permission denied for all log views".
+  5    Identity Toolkit / Auth                 NO SE PUDO LEER     "Permission denied for all log views".
+  6    Cloud Monitoring                        LEÍDA, CON DATOS    Series diarias de Storage y Firestore. §1.6.
+  7a   Cloud Logging — barrido general         NO SE PUDO LEER     "Permission denied for all log views".
+  7b   Cloud Functions → logs                  LEÍDA, CON DATOS    Vía la CLI del dueño. Es la fuente que más
+                                                                   dice. Ver §1.7.
+  --   APIs habilitadas (serviceusage)         NO SE PUDO LEER     "Permission denied to list services".
+
+  NOTA A — por qué "desconocida" y no "apagada". La API de Logging respondió
+  PERMISSION_DENIED, no SERVICE_DISABLED. Son cosas distintas y el prompt pide no
+  confundirlas: la primera dice "no podés mirar", la segunda "no hay nada que
+  mirar". Con esta credencial no se puede saber cuál de las dos es. Que
+  `firebase functions:log` SÍ devuelva entradas prueba que Cloud Logging está
+  activo en el proyecto — pero no prueba nada sobre la integración específica de
+  Hosting, que se activa aparte (Consola → Hosting → Integraciones).
+
+  NOTA B — los Data Access audit logs vienen apagados por defecto en GCP, pero
+  eso es conocimiento general, no una verificación. No lo reporto como apagado
+  porque no lo pude leer.
+
+────────────────────────────────────────────────────────────────────────────────
+§1.2 — RELEASES DE HOSTING (sitio gastos-familiares-jmsf)
+────────────────────────────────────────────────────────────────────────────────
+
+  2026-09-17 01:25  DEPLOY  version 76ac183d199a10ca  FINALIZED  por el dueño
+  2026-09-14 15:50  DEPLOY  version f00f29d67fc6a5b4  FINALIZED  por el dueño
+
+  Son los ÚNICOS dos releases desde el 12/9 (se trajeron los últimos 40).
+
+  => NO hubo ningún deploy el 18 ni el 19/9. El release del 17/09 01:25 es el de
+     F9.176, y después de él entraron 6 archivos (5 el 17, 1 el 18). Queda
+     descartado que un deploy haya coincidido con el corte.
+
+────────────────────────────────────────────────────────────────────────────────
+§1.3 — DEPLOY DE FUNCTIONS: SIGUE SIN CERRARSE
+────────────────────────────────────────────────────────────────────────────────
+
+  · La service account no tiene run.services.list (mismo error que en F9.177).
+  · gcloud ESTÁ instalado, con dos cuentas de Google del dueño, pero
+    las dos tienen el refresh token vencido:
+      "invalid_grant: Bad Request"
+    Re-autenticar es un flujo interactivo y además es una decisión del dueño, así
+    que no lo hice.
+
+  PARA CERRARLO, correr una de las dos:
+
+    gcloud auth login
+    gcloud run services list --project gastos-familiares-e6415 \
+      --region southamerica-east1 \
+      --format='table(metadata.name, status.conditions[0].lastTransitionTime)'
+
+  o mirar en la consola: Firebase → Functions → columna "Última actualización".
+
+  Dato indirecto que sí tengo: los logs muestran a routearEntrante,
+  extraerComprobante, matchComprobante y cargarMovimientoDesdeComprobante
+  corriendo normalmente el 17 y el 18/9, o sea que están desplegadas y sanas.
+  Lo que no se sabe es de qué fecha es el código que corre.
+
+────────────────────────────────────────────────────────────────────────────────
+§1.6 — CLOUD MONITORING: EL CORTE, CONFIRMADO POR UNA VÍA INDEPENDIENTE
+────────────────────────────────────────────────────────────────────────────────
+
+  Agregación diaria (ALIGN_SUM, 86400 s). La etiqueta es el FIN de la ventana,
+  así que "09-19" = las 24 h que terminan el 19/9 a las 00:00 UTC.
+  Los días ausentes son cero: Monitoring no emite puntos vacíos.
+
+  storage.googleapis.com/api/request_count
+
+    termina 09-12 →  6
+    termina 09-13 →  1
+    termina 09-14 → 11
+    termina 09-15 →  8
+    termina 09-16 →  6
+    termina 09-17 →  2
+    termina 09-18 → 18
+    termina 09-19 →  2
+    termina 09-20 … 09-24 → (sin puntos = 0)
+    termina 09-25 → 10      ← las pruebas del dueño de hoy
+
+  firestore.googleapis.com/document/write_count
+
+    09-12 102 · 09-13 10 · 09-14 75 · 09-15 90 · 09-16 94 · 09-17 87 · 09-18 130
+    09-19  80 · 09-20  1 · 09-21  1 · 09-22 73 · 09-23 38 · 09-24  71 · 09-25  81
+
+  => Storage deja de recibir pedidos después del 18/9 y vuelve HOY, con 10.
+     Firestore, en cambio, nunca se detuvo (salvo dos días de uso casi nulo):
+     la app se siguió usando y escribiendo. El corte es específico de la subida
+     de archivos, no de la conexión ni de la sesión.
+  => Esto es independiente de F9.177, que lo dedujo contando documentos. Dos
+     fuentes distintas, el mismo corte.
+
+────────────────────────────────────────────────────────────────────────────────
+§1.7 — LOGS DE CLOUD FUNCTIONS: LA FUENTE QUE MÁS DICE
+────────────────────────────────────────────────────────────────────────────────
+
+  Leídos con `npx firebase functions:log --lines 900` (credencial del dueño en la
+  CLI, no la service account). Cubren del 14/9 al 25/9. Entradas por día:
+
+    09-14 163 · 09-15  91 · 09-16  58 · 09-17 389 · 09-18  53
+    09-19   8 · 09-20   8 · 09-21  23 · 09-22  23 · 09-23  23 · 09-24  23
+    09-25  38
+
+  ÚLTIMA ACTIVIDAD DEL PIPELINE, completa y sana:
+
+    2026-09-18T20:44:49Z  routearEntrante  73b4589e… → comprobante
+    2026-09-18T20:45:03Z  procesarComprobante 73b4589e… → extraido (transferencia, ARS)
+    2026-09-18T20:45:15Z  matchComprobante 73b4589e… → rama 3 (cat. de destino)
+    2026-09-18T20:45:25Z  cargarMovimientoDesdeComprobante → CYDvuMo7… (por el miembro María)
+
+  ENTRE EL 19/9 Y EL 24/9: ni una sola invocación del pipeline. Las 8 a 23
+  entradas diarias son ÚNICAMENTE los jobs programados —actualizarTCDiario,
+  actualizarPreciosDiarios y sincronizarRecordatoriosCalendar—. Ningún
+  routearEntrante, ningún extraerComprobante, ningún error.
+
+  HOY (25/9 UTC 00:05 = 24/9 21:05 AR), las pruebas del dueño:
+
+    00:05:40  routearEntrante cd3246a4… → comprobante
+    00:05:53  procesarComprobante cd3246a4… → extraido (transferencia, ARS)
+    00:06:07  matchComprobante cd3246a4… → rama 3
+    00:06:22  descartarEntranteCompleto cd3246a4… descartado (por el miembro Juan)
+    00:10:34  (lo mismo otra vez, mismo hash)
+    00:11:12  descartado de nuevo
+
+  => Subir desde Cargar funciona de punta a punta, y el dueño descartó las dos
+     pruebas. Coincide con lo que él reportó.
+
+  DOS HALLAZGOS LATERALES, que el §1.7 pedía reportar aunque no parezcan
+  relacionados:
+
+  (a) sincronizarRecordatoriosCalendar FALLA TODOS LOS DÍAS, a las 11:00 UTC,
+      desde por lo menos el 14/9:
+        2026-09-19T11:00:08Z E sincronizarrecordatorioscalendar: Error: invalid_client
+      Se repite el 20, 21, 22, 23 y 24. Es la integración con Google Calendar con
+      credenciales inválidas. No tiene nada que ver con el share, pero está rota
+      y en silencio.
+
+  (b) EL DESCARTE DE HOY NO ENCONTRÓ EL ARCHIVO EN STORAGE:
+        2026-09-25T00:06:22Z  [descartarEntranteCompleto] PDF entrante no borrado:
+          Error: No such object: …/entrantes/cd3246a4605c…
+      Y verificado después: Storage sigue teniendo 183 objetos bajo entrantes/,
+      con el último del 18/9. O sea que el archivo de hoy creó su documento en
+      Firestore y disparó todo el pipeline, PERO NUNCA HUBO UN OBJETO en
+      entrantes/{hash}.
+
+      ESTO DEBILITA UNA INFERENCIA DE F9.177. Ahí argumenté que, como
+      `subirEntrante` hace uploadBytes ANTES del setDoc, "cero huérfanos en
+      Storage" probaba que el archivo no empieza a subir. El caso de hoy es el
+      inverso —documento sin objeto— y no debería poder pasar por ese camino.
+      Verifiqué que el pipeline NO borra entrantes/{hash} (routearEntrante,
+      líneas 1860–2035 de functions/src/index.ts, no tiene delete ni move), así
+      que la explicación está en otro lado: o la subida de hoy usó otro camino
+      (hay tres uploadBytes en el cliente: entrantes.ts:51, comprobantes.ts:74 y
+      resumenesTarjeta.ts:107), o el upload se dio por bueno sin persistir.
+      NO LO PUDE RESOLVER y no lo doy por cerrado.
+
+      El conteo 183 = 183 de F9.177 sigue siendo cierto como hecho; lo que ya no
+      se sostiene con la misma fuerza es usarlo para afirmar que el archivo nunca
+      empieza a subir.
+
+════════════════════════════════════════════════════════════════════════════════
+§2 — QUÉ SE PUEDE AFIRMAR, Y QUÉ NO
+════════════════════════════════════════════════════════════════════════════════
+
+SE PUEDE AFIRMAR
+
+  1. El corte es real y está fechado: última entrada del pipeline el 18/09 a las
+     20:44:49 UTC (functions log), último pedido a Storage en la ventana que
+     termina el 19/9 (Monitoring). Dos fuentes independientes, y una tercera
+     —el conteo de documentos de F9.177— que coincide.
+  2. No lo causó un deploy: los únicos releases desde el 12/9 son del 14/09 15:50
+     y del 17/09 01:25, y después del segundo entraron seis archivos.
+  3. No es un problema de sesión ni de conectividad general: Firestore siguió
+     recibiendo escrituras todos los días del corte (80, 1, 1, 73, 38, 71).
+  4. El servidor no rechazó nada: en seis días no hay ni una invocación fallida
+     del pipeline, porque no hubo ni una invocación.
+  5. Hoy, subir desde Cargar anda de punta a punta (logs de las 00:05 y 00:10).
+
+NO SE PUEDE AFIRMAR
+
+  6. Si los `POST /share-target` llegaron a Hosting. Es LA pregunta del prompt y
+     es exactamente la que quedó sin respuesta: los logs de requests de Hosting
+     no son legibles con esta credencial, y no pude verificar si la integración
+     está siquiera activada.
+  7. De qué fecha es el código de las functions desplegadas (§1.3).
+  8. Si hubo fallos de autenticación alrededor del 19/9 (§1.5, sin permiso).
+  9. Por qué el archivo de hoy quedó sin objeto en Storage (§1.7 b).
+
+════════════════════════════════════════════════════════════════════════════════
+§3 — QUÉ CONVIENE DEJAR PRENDIDO (PROPUESTA — NO SE PRENDIÓ NADA)
+════════════════════════════════════════════════════════════════════════════════
+
+Los costos son ESTIMACIONES, con el razonamiento a la vista para que se puedan
+discutir. No son cotizaciones.
+
+  P1. Integración Hosting → Cloud Logging.  [la más útil de las tres]
+      Qué destraba: saber si el POST /share-target llega al servidor. Hoy es la
+      diferencia entre "el SW no interceptó" y "el teléfono ni lo intentó", que
+      son dos arreglos completamente distintos.
+      Costo: se paga como ingesta de Cloud Logging. Cloud Logging no cobra los
+      primeros 50 GiB por mes por cuenta de facturación, y arriba de eso ronda
+      los US$0,50 por GiB. Una entrada de request pesa unos cientos de bytes; a
+      esta escala (una familia, unos pocos miles de requests por mes) el volumen
+      es de megabytes, no gigabytes. Estimado: US$0 mientras siga bajo el tope
+      gratuito. El riesgo no es el precio sino el volumen si algún día se sirve
+      mucho tráfico estático, porque registra TODOS los requests.
+      Se activa en Consola → Hosting → Integraciones → Cloud Logging.
+
+  P2. Telemetría propia del share (es la propuesta A1 de F9.177).
+      Un documento por intento, escrito ANTES de tocar Storage. A diferencia de
+      P1, funciona aunque el POST no llegue nunca al servidor, porque lo escribe
+      la app. Cubre el agujero que P1 no cubre.
+      Costo: escrituras de Firestore. Unas decenas por mes contra un tope
+      gratuito de 20.000 diarias. Estimado: US$0.
+      Requiere código y una regla nueva: no es solo prender algo.
+
+  P3. Data Access audit logs de Cloud Storage.
+      Qué destraba: uploads rechazados con 403/401/413.
+      Costo: también ingesta de Logging, pero estos logs son bastante más
+      verbosos que los de Hosting porque registran cada operación de lectura y
+      escritura. A esta escala igual debería quedar bajo el tope gratuito.
+      Estimado: US$0, con más varianza que P1.
+      Mi opinión: es la menos necesaria de las tres. Con P1 y P2 ya se sabe si el
+      pedido salió y si llegó; esto solo agrega por qué lo rechazó Storage, que
+      es un caso que hoy no hay evidencia de que esté pasando.
+
+  P4. Arreglar o apagar sincronizarRecordatoriosCalendar.
+      No es una fuente de logs, es un job que falla todos los días hace por lo
+      menos once. Cuesta plata cada corrida y ensucia los logs. Costo de
+      arreglarlo: renovar las credenciales OAuth. Costo de dejarlo: unas monedas
+      y ruido.
+
+  ORDEN SUGERIDO: P1 primero, porque es prender una casilla y contesta la
+  pregunta abierta. P2 después, cuando haya que tocar código igual. P3 solo si
+  P1 y P2 no alcanzan.
+
+════════════════════════════════════════════════════════════════════════════════
+§4 — LO QUE HAY QUE MIRAR EN EL TELÉFONO (INSTRUCCIONES PARA EL DUEÑO)
+════════════════════════════════════════════════════════════════════════════════
+
+Todo esto es mirar, no tocar. Sacá una captura de cada pantalla y pasámelas.
+
+  PASO 1 — ¿Hay un service worker vivo?
+
+    1. Abrí Chrome en el teléfono (el navegador, no la app instalada).
+    2. En la barra de direcciones escribí:  chrome://serviceworker-internals
+    3. Es una lista larga. Buscá  gastos-familiares-jmsf.web.app
+       (tenés la lupa del menú ⋮ → "Buscar en la página").
+    4. Si aparece, fijate en "Status": tiene que decir ACTIVATED y RUNNING (o
+       ACTIVATED y STOPPED, que también sirve). Anotá también "Installation
+       Status" y "Script".
+    5. SI NO APARECE NADA: ese es el diagnóstico. El share no puede funcionar sin
+       service worker, porque nadie intercepta el POST.
+
+  PASO 2 — ¿La app instalada declara el share target?
+
+    1. En la misma barra:  chrome://webapks
+    2. Buscá "Gastos" o "Gastos Familiares".
+    3. Anotá: "Last Update Check Time", "Last Update Completion Time" y si
+       aparece "Share Target" en la lista de datos del WebAPK.
+    4. Lo que importa: si la última actualización es MUY vieja, el APK instalado
+       puede estar declarando un manifest de antes.
+
+  PASO 3 — Ver qué pasa en vivo (es el que da la respuesta definitiva)
+
+    Esto necesita la computadora y el cable USB. Son cinco minutos.
+
+    a. En el teléfono: Ajustes → Acerca del teléfono → tocá siete veces seguidas
+       "Número de compilación". Va a decir "Ya eres desarrollador".
+    b. Volvé a Ajustes → Sistema → Opciones de desarrollador → activá
+       "Depuración por USB".
+    c. Conectá el teléfono a la compu por USB. En el teléfono va a aparecer un
+       cartel "¿Permitir depuración USB?" → Permitir.
+    d. En la compu, abrí Chrome y andá a:  chrome://inspect/#devices
+    e. Esperá unos segundos: tiene que aparecer el teléfono y, debajo, la lista
+       de pestañas y de service workers.
+    f. AHORA, con eso abierto, agarrá el teléfono y compartí un PDF hacia la app
+       como hacés siempre.
+    g. En la compu, en chrome://inspect, buscá si aparece algo nuevo. Si hay una
+       línea que diga "sw.js" o "service worker", tocá "inspect" al lado: se abre
+       una consola. Sacá captura de lo que diga, sobre todo si hay texto en rojo.
+    h. Si al compartir se abre la app y NO aparece ningún service worker nuevo en
+       la lista, eso también es un dato: quiere decir que el SW no se despertó.
+
+  QUÉ ME PASÁS: las capturas de los pasos 1 y 2, y del 3 la consola (o "no
+  apareció nada", que también es una respuesta).
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  Base c8f5aff confirmada, árbol limpio al abrir.
+  Cero cambios de configuración en el proyecto: no se activó ninguna integración,
+  log ni API. Las sondas solo leen; los 403 se reportan como tales.
+  No se re-autenticó gcloud ni se generó ningún token.
+  Archivos nuevos: scripts/auditF91771.ts, docs/F9.177.1-logs.txt y el prompt
+  docs/F9.177.1-logs-del-share.md.
+  Privacidad: sin emails (los actores de los logs figuran por nombre de miembro),
+  sin UIDs completos, sin IPs (no hubo ninguna legible) y sin tokens. Las
+  versiones de release van con su id corto, que no es un dato personal.
