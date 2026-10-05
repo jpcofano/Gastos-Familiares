@@ -1,0 +1,245 @@
+F9.179-pre — Confirmar resumen de tarjeta: "Missing or insufficient permissions"
+corrido: 2026-10-05 13:30:48 (AR) · TZ del proceso: America/Argentina/Buenos_Aires · SOLO LECTURA (commit() simulado)
+
+=== §1.1 Identificar el resumen ===
+criterio: una línea USD de 0,29 Y una línea reverso de 149,96 (confirmación: imp. ARS 8,79 / 92,38 / 131,97)
+resúmenes en la colección: 31 · con USD 0,29 o reverso 149,96: 1 · con los dos: 1
+  2a0f81f8  GAL-VISA   periodo=2026-10  estado=parseado   actualizadoEn=2026-10-05 13:09:55  líneas=43 incluir=43 USD0,29=sí rev149,96=sí imp=3/3
+=> resumen: 2a0f81f8 (GAL-VISA · Visa · 2026-10)
+
+=== §1.2 Estado del resumen ===
+  estado:               parseado
+  confirmadoEn:         (ausente)
+  confirmadoPor:        (ausente)
+  totalARS (PDF):       751813.57 (number)
+  totalUSD (PDF):       -14.4 (number)
+  ajustesConsolidado:   1
+      · ARS=-149.96 USD=-14.69 origen=manual creadoPor=Juan creadoEn=2026-10-05 13:09:54
+        concepto: "Ajuste manual: dolares que estan en negativo"
+  movimientosParseados: 43
+  fechaCierre:          2026-10-01 · fechaVencimiento: 2026-10-09 (crudo: "2026-10-09")
+  subidoPor/subidoEn:   Juan · 2026-10-05 10:19:05
+  parseadoEn:           2026-10-05 10:20:43
+  actualizadoEn:        2026-10-05 13:09:55
+  saldo/pagos consolidado: saldoAnteriorARS=1328762.43 pagosDelPeriodoARS=-1328762.43 saldoAnteriorUSD=-14.69 pagosDelPeriodoUSD=0
+
+=== §1.3 Movimientos con resumenTarjetaId en clavesDeResumen(resumen) ===
+  clave 2a0f81f8 (doc id): 0
+  clave GAL-VISA (legacy tarjetaCodigo_nroResumen): 0
+  total: 0 (esperado 0) OK
+
+=== §1.4 Movimientos origen == "Tarjeta" con creadoEn del 2026-10-05 (AR) ===
+  creados el 2026-10-05 (cualquier origen): 0 · origen Tarjeta: 0 · de GAL-VISA: 0 (esperado 0) OK
+
+Cierre §1: no se guardó nada (0 movimientos del resumen, 0 de la tarjeta hoy, resumen sin confirmar)
+
+=== §2.0 memberId: el que manda el cliente vs el que exige la regla ===
+  cliente: useMiembro → resolverMiembro(email, config/familia)   (src/hooks/useMiembro.ts)
+  reglas:  miMemberId() = autorizados/{email.lower()}.memberId    (firestore.rules:16-19)
+  fe…1@gmail.com         autorizados: rol=dependiente memberId=Federico · config: memberId=Federico rol=dependiente → coincide
+  jp…2@gmail.com         autorizados: rol=admin       memberId=Juan     · config: memberId=Juan     rol=admin       → coincide
+  jp…o@gmail.com         autorizados: rol=admin       memberId=Juan     · config: memberId=Juan     rol=admin       → coincide
+  ma…o@gmail.com         autorizados: rol=admin       memberId=María    · config: memberId=María    rol=admin       → coincide
+  ma…o@accenture.com     autorizados: rol=admin       memberId=María    · config: memberId=María    rol=admin       → coincide
+  so…o@gmail.com         autorizados: rol=dependiente memberId=Sofía    · config: memberId=Sofía    rol=dependiente → coincide
+  admins a evaluar (uno por miembro): Juan (jp…2@gmail.com), María (ma…o@gmail.com)
+  (la vista de resúmenes lee resumenesTarjeta, que es esAdmin(): quien vio el preview pasa esAdmin() con email_verified)
+  subidoPor del resumen: Juan · creadoPor del ajuste manual: Juan
+
+=== §2.1 movimientosParseados guardado vs la captura ===
+  LIMITACIÓN: las ediciones de la UI (incluir / noDebitado / tipoLinea) no se persistieron —
+  el batch falló entero, y el update del resumen iba en ese mismo batch. Lo guardado es el estado previo.
+  líneas: 43 · incluir=true: 43 (botón de la captura: 42)
+  reverso 149,96: seq=39 incluir=true noDebitado=false moneda=ARS  (captura: destildado)
+  USD 0,29:       seq=35 tipoLinea=consumo incluir=true noDebitado=false "GOOGLE *CLOUD 7K"  (captura: tildado)
+  imp. 8.79      seq=41 incluir=true noDebitado=false "IIBB PERCEP-CABA 2,00%( …"  (captura: tildado)
+  imp. 92.38     seq=42 incluir=true noDebitado=false "IVA RG 4240 21%( 439,93)"  (captura: tildado)
+  imp. 131.97    seq=43 incluir=true noDebitado=false "DB.RG 5617 30% ( 439,93 …"  (captura: tildado)
+  ¿coincide con la captura?: NO
+  líneas con monto no numérico / moneda fuera de ARS|USD / descripción vacía / fechaConsumo inválida: 0
+
+=== §2.2 Batch reconstruido — variante A — estado guardado ===
+  usuario: Juan (jp…2@gmail.com) · botón: "Confirmar 43 líneas + 2 totales"
+  tildadas que NO van al batch (noDebitado o monto <= 0): 0
+  lecturas previas al batch (rules: itemsEsperados → esMiembro(); movimientos → esAdmin()):
+  >>> la función cortó ANTES del commit: Cuadre fallido (ARS dif $149.96) — revisá las líneas antes de confirmar
+  mismo resultado con María (ma…o@gmail.com): cortó antes del commit (Cuadre fallido (ARS dif $149.96) — revisá las líneas antes de confirmar)
+
+=== §2.2 Batch reconstruido — variante B — con las ediciones de la captura (reverso 149,96 destildado; USD 0,29 e imp. tildados) ===
+  usuario: Juan (jp…2@gmail.com) · botón: "Confirmar 42 líneas + 2 totales"
+  tildadas que NO van al batch (noDebitado o monto <= 0): 0
+  lecturas previas al batch (rules: itemsEsperados → esMiembro(); movimientos → esAdmin()):
+    · itemsEsperados tarjetaCodigo == "GAL-VISA" & activo == true → 2
+    · movimientos resumenTarjetaId == "2a0f81f8…" → 0
+    · movimientos resumenTarjetaId == "GAL-VISA_VI00000000007081620" → 0
+  commit() alcanzado · ops=45: 44 create movimientos, 1 update, 0 delete
+  --- §2.3 cuadre (calcularCuadre real, con los ajustes guardados) ---
+  ARS: totalARS PDF=751.813,57 · noDebitadoARS=0,00 · objetivoARS=751.813,57 · sumaARS=751.813,57 · diff=0,00 (umbral 75,18) · balance=true
+       totalARSMov = Math.max(objetivoARS, 0) = 751813.57
+  USD: totalUSD PDF=-14.4 · noDebitadoUSD=0 · objetivoUSD=-14.4 · sumaUSD=-14.4 · diff=0 · balance=true
+       totalUSDMov = Math.max(objetivoUSD, 0) = Math.max(-14.4, 0) = 0
+  rama `totalUSD === 0` de resumenesTarjeta.ts:253 (ahí totalUSD ya es el objetivo neto): NO — objetivoUSD=-14.4; balanceUSD salió por diffUSD 0 <= 1
+  decisión ajustes (F9.163): {"decision":"computa","motivo":"no hay ajustes de PDF","a":0,"b":0}
+  sin el ajuste manual, estas líneas: ARS diff=149,96 balance=false · USD sumaUSD=0.29 vs objetivo -14.4 diff=14.69 balance=false
+  sin el ajuste manual, las 43 guardadas (reverso tildado): ARS diff=0,00 balance=true · USD sumaUSD=0.29 vs objetivo -14.4 diff=14.69 balance=false
+  --- §2.4 firestore.rules:55-68 por payload (auth: email_verified, autorizados rol=admin memberId=Juan) ---
+   1 línea     Gasto   ARS       25000 mes=2026-04 "863429*MOVISTAR AREN"     → OK
+   2 línea     Gasto   ARS     3417.41 mes=2026-07 "FARMACITY73"              → OK
+   3 línea     Gasto   ARS    13072.86 mes=2026-07 "FARMACITY201"             → OK
+   4 línea     Gasto   ARS     46166.5 mes=2026-07 "MERPAGO*PUMASPORTSARGE…"  → OK
+   5 línea     Gasto   ARS     4520.66 mes=2026-07 "FARMACITY48"              → OK
+   6 línea     Gasto   ARS     6845.75 mes=2026-07 "FARMACITY110"             → OK
+   7 línea     Gasto   ARS     5773.58 mes=2026-07 "FARMACITY48"              → OK
+   8 línea     Gasto   ARS    13141.52 mes=2026-07 "FARMACITY16"              → OK
+   9 línea     Gasto   ARS     6868.83 mes=2026-07 "LAS MARGARITAS"           → OK
+  10 línea     Gasto   ARS    44999.83 mes=2026-07 "ALTO PALERMO"             → OK
+  11 línea     Gasto   ARS    19431.53 mes=2026-08 "FARMACITY142"             → OK
+  12 línea     Gasto   ARS    20706.94 mes=2026-08 "FARMACITY31"              → OK
+  13 línea     Gasto   ARS    15638.44 mes=2026-08 "FARMACITY48"              → OK
+  14 línea     Gasto   ARS        6740 mes=2026-08 "FARMACITY48"              → OK
+  15 línea     Gasto   ARS      103000 mes=2026-08 "EL BARCITO"               → OK
+  16 línea     Gasto   ARS    11842.57 mes=2026-08 "FARMACITY48"              → OK
+  17 línea     Gasto   ARS        7200 mes=2026-08 "MERPAGO*ILNOSTRO"         → OK
+  18 línea     Gasto   ARS       46300 mes=2026-08 "MERPAGO*GRANJAJUANA"      → OK
+  19 línea     Gasto   ARS        7700 mes=2026-08 "STARBUCKS BELLINI"        → OK
+  20 línea     Gasto   ARS       12000 mes=2026-08 "MERPAGO*VIBRACAFE"        → OK
+  21 línea     Gasto   ARS        9900 mes=2026-09 "MERPAGO*ILNOSTRO"         → OK
+  22 línea     Gasto   ARS      1077.1 mes=2026-09 "SUBE VIAJES - BUSES"      → OK
+  23 línea     Gasto   ARS     13510.5 mes=2026-09 "VILLA FREUD-FARMACIA V…"  → OK
+  24 línea     Gasto   ARS    12661.72 mes=2026-09 "FARMACITY48"              → OK
+  25 línea     Gasto   ARS     2936.54 mes=2026-09 "FARMACITY48"              → OK
+  26 línea     Gasto   ARS       13700 mes=2026-09 "MERPAGO*ILNOSTRO"         → OK
+  27 línea     Gasto   ARS        1753 mes=2026-09 "EMOVA SUBTE"              → OK
+  28 línea     Gasto   ARS       11200 mes=2026-09 "MERPAGO*ILNOSTRO"         → OK
+  29 línea     Gasto   ARS      113017 mes=2026-09 "ACA PALERMO COMB"         → OK
+  30 línea     Gasto   ARS        5600 mes=2026-09 "MERPAGO*NEWGARDEN"        → OK
+  31 línea     Gasto   ARS      2199.8 mes=2026-09 "FARMACITY40"              → OK
+  32 línea     Gasto   ARS     13915.2 mes=2026-09 "FARMACITY40"              → OK
+  33 línea     Gasto   ARS     8294.14 mes=2026-09 "FARMACITY40"              → OK
+  34 línea     Gasto   ARS    25583.33 mes=2026-06 "LEVI'S DIST ARCOS"        → OK
+  35 línea     Gasto   USD        0.29 mes=2026-08 "GOOGLE *CLOUD 7K"         → OK
+  36 línea     Gasto   ARS       81639 mes=2026-09 "PEDIDOSYA*EL BOLICHE D…"  → OK
+  37 línea     Gasto   ARS         900 mes=2026-09 "DLO*PedidosYa Propina"    → OK
+  38 línea     Gasto   ARS    12926.64 mes=2026-09 "DLO*PedidosYa Market"     → OK
+  39 línea     Gasto   ARS         550 mes=2026-09 "DLO*PedidosYa Propina"    → OK
+  40 línea     Gasto   ARS        8.79 mes=2026-09 "IIBB PERCEP-CABA 2,00%…"  → OK
+  41 línea     Gasto   ARS       92.38 mes=2026-09 "IVA RG 4240 21%( 439,9…"  → OK
+  42 línea     Gasto   ARS      131.97 mes=2026-09 "DB.RG 5617 30% ( 439,9…"  → OK
+  43 TOTAL ARS Gasto   ARS   751813.57 mes=2026-10 "Resumen Visa 2026-10"     → OK
+  44 TOTAL USD Gasto   USD           0 mes=2026-10 "Resumen Visa 2026-10 (…"  → FALLA :61 monto > 0 [0]
+  update resumenesTarjeta/2a0f81f8… → match /resumenesTarjeta: esAdmin() → OK
+  resultado: 1 violación(es): :61 monto > 0 → payload 44
+  mismo batch con María (ma…o@gmail.com, autorizados rol=admin): 44 create + 1 update + 0 delete → 1 violación(es): :61 monto > 0 → payload 44
+
+=== §2.5 Alcance: resúmenes cuyo movimiento-total saldría en 0 (objetivo neto <= 0 en alguna moneda) ===
+  (totalesNetos real sobre las líneas guardadas; el estado dice si ya pasaron por otro camino)
+  GAL-VISA GAL-VISA   periodo=2025-05  estado=confirmado objetivoARS=1439062.19 objetivoUSD=-6.88
+  17e51e81 GAL-MASTER-BLK periodo=2026-07  estado=confirmado objetivoARS=228208.53 objetivoUSD=0
+  fc31ca48 GAL-VISA   periodo=2026-07  estado=confirmado objetivoARS=965344.91 objetivoUSD=-14.99
+  879eb89a GAL-MASTER-BLK periodo=2026-08  estado=confirmado objetivoARS=264292.38 objetivoUSD=0
+  f9d9b308 GAL-VISA   periodo=2026-08  estado=confirmado objetivoARS=1328762.43 objetivoUSD=-14.69
+  2a0f81f8 GAL-VISA   periodo=2026-10  estado=parseado   objetivoARS=751813.57 objetivoUSD=-14.4
+  total: 6 de 31 · por estado: {"confirmado":5,"parseado":1}
+
+§3 (emulador) no se corre: §2 encontró el payload que viola la regla.
+nota: el comentario de resumenesTarjeta.ts:394/:399 cita firestore.rules:74 (delete) y :62 (monto > 0);
+      en el archivo actual son :73 y :61.
+
+════════════════════════════════════════════════════════════════════════════════
+RESPUESTAS
+════════════════════════════════════════════════════════════════════════════════
+
+  (a) ¿Se guardó algo?  NO.
+      · 0 movimientos con resumenTarjetaId en las dos claves del resumen (doc id y
+        legacy GAL-VISA_VI…).
+      · 0 movimientos creados el 2026-10-05, de cualquier origen.
+      · El resumen sigue 'parseado', sin confirmadoEn ni confirmadoPor.
+      · La última escritura sobre el resumen es el ajuste manual de las 13:09:54
+        (actualizadoEn 13:09:55; Juan, "dolares que estan en negativo",
+        ARS −149,96 / USD −14,69). Va por un updateDoc aparte, un minuto antes de
+        confirmar: no es parte del batch. Antes de eso, solo la subida (10:19) y
+        el parseo (10:20).
+
+  (b) ¿Qué payload viola qué línea de las reglas?  UNO SOLO: el movimiento-total
+      USD (payload 44 de 44), con monto 0, contra firestore.rules:61
+      (request.resource.data.monto > 0).
+      · totalUSD del PDF = −14,40: es saldo a favor (saldoAnteriorUSD −14,69 más
+        el consumo GOOGLE *CLOUD de 0,29). noDebitadoUSD = 0, así que
+        objetivoUSD = −14,40 y resumenesTarjeta.ts:557 lo lleva a
+        Math.max(−14,40, 0) = 0.
+      · ARS: totalARS 751.813,57, noDebitadoARS 0 → total ARS de 751.813,57, pasa.
+      · Las 42 líneas, el total ARS y el update de resumenesTarjeta pasan todas las
+        condiciones de :55-68 (y esAdmin()). 0 deletes.
+      · creadoPor == miMemberId() pasa: config/familia y autorizados dan el mismo
+        memberId para los dos admins (Juan y María), con todos sus emails.
+      · Hipótesis 3 del prompt: confirmada con un matiz. El total no es cero, es
+        NEGATIVO; es el clamp de :557 lo que lo deja en cero.
+      · Hipótesis 5 (descripción vacía): refutada. Ninguna línea tiene descripción
+        vacía, monto no numérico, moneda fuera de ARS/USD ni fechaConsumo inválida.
+
+  (c) ¿El cuadre USD pasó por la rama `=== 0`?  NO.
+      En :253 totalUSD ya es el objetivo neto, que vale −14,40 y no 0. El cuadre
+      USD cerró por diffUSD <= 1: sumaUSD = 0,29 + (−14,69 del ajuste manual) =
+      −14,40, igual al objetivo, diff 0. Sin el ajuste manual el USD no cuadraba
+      (diff 14,69); el motivo del ajuste ("dolares que estan en negativo") apunta a
+      eso. La hipótesis 4 (agravante) no aplica a este resumen.
+
+════════════════════════════════════════════════════════════════════════════════
+HALLAZGOS LATERALES (medidos, sin propuesta)
+════════════════════════════════════════════════════════════════════════════════
+
+  1. El ajuste manual también trae ARS −149,96, aunque el motivo habla solo de
+     dólares. Sin el ajuste, las 43 líneas guardadas (con el reverso tildado)
+     cuadran ARS exacto (diff 0,00). Con el reverso destildado no cuadran por
+     149,96. Encaja con que el reverso ya estaba destildado cuando se tocó "Cerrar
+     diferencia": agregarAjusteCuadreManual calcula el residuo de las dos monedas a
+     la vez, y el de ARS absorbió el reverso destildado. El ajuste quedó guardado y
+     el destildado no. Por eso hoy, con el estado guardado (reverso tildado más el
+     ajuste), el cuadre ARS falla por 149,96 (variante A).
+
+  2. Alcance (§2.5): 6 de 31 resúmenes tienen objetivo neto <= 0, todos en USD.
+     Ninguno de los 5 confirmados pasó por este batch con el código actual:
+     17e51e81, 879eb89a, fc31ca48 y f9d9b308 son los cuatro de F9.156 / F9.158 §2,
+     cuyos totales en cero se crearon por Admin SDK (scripts/ejecutarF9158s2.ts).
+     El quinto, GAL-VISA 2025-05, tiene id del seed. 2a0f81f8 es el único de los
+     seis que sigue pendiente. GAL-VISA arrastra saldo a favor en
+     USD desde 2026-07 (−14,99 → −14,69 → −14,40). Si el mes que viene los consumos
+     en USD no pasan de U$S 14,40, el resumen siguiente choca con la misma regla.
+
+  3. Comentarios desfasados: resumenesTarjeta.ts:394 y :399 citan
+     firestore.rules:74 (delete) y :62 (monto > 0). En el archivo actual son :73 y
+     :61.
+
+════════════════════════════════════════════════════════════════════════════════
+LIMITACIONES
+════════════════════════════════════════════════════════════════════════════════
+
+  · Las ediciones de la UI no se persistieron, porque el update del resumen iba en
+    el mismo batch. Lo guardado es el estado previo: 43 líneas tildadas, reverso
+    incluido. La captura (42 líneas, reverso destildado) se reprodujo aplicando ese
+    único cambio (variante B), y el botón da el mismo texto: "Confirmar 42 líneas +
+    2 totales". No se puede descartar otra edición que no se vea en la captura (una
+    categoría, una persona), pero ninguna condición de la regla mira esos campos.
+  · categoria/subcategoria no se reprodujeron: salen del clasificador del cliente,
+    y la regla no las mira.
+  · No se sabe con certeza quién tocó Confirmar. El ajuste de un minuto antes es de
+    Juan. Se evaluó con los dos admins: mismo resultado.
+  · Las condiciones de la regla las evalúa el script, no el motor de reglas. §3
+    (emulador) no se corrió porque §2 encontró el culpable, y la falla no es
+    ambigua: monto 0 contra monto > 0.
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  Base 2b95245 (= origin/main) confirmada. Árbol limpio al abrir, salvo dos
+  carpetas .claude/ sin trackear que ya estaban.
+  Cero cambios en src/, functions/ y firestore.rules. Producción solo se leyó (Admin
+  SDK). El batch se armó con el código real y commit() no manda nada.
+  tsc cliente: 41 al abrir, 41 al cerrar (la misma lista; 0 errores en el script
+  nuevo). tsc functions: 0 al abrir, 0 al cerrar.
+  Archivos nuevos: scripts/verificarF9179pre.ts, docs/F9.179-pre.txt y el prompt
+  docs/prompts/F9.179-pre-confirmar-resumen-permisos.md.
+  Privacidad: ids a 8 caracteres, emails enmascarados, descripciones recortadas.
+  Para repetirlo: npx tsx scripts/verificarF9179pre.ts (necesita
+  secrets/serviceAccountKey.json).
