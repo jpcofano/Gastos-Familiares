@@ -3,9 +3,10 @@
 // Nació en scripts/verificarF9179pre.ts (F9.179-pre). Se extrajo acá en F9.180 para que la
 // verificación, el dry-run de §4 y el fixture del test de reglas usen la misma reconstrucción.
 //
-// · Las lecturas (getDoc/getDocs) van a producción por Admin SDK.
-// · Las escrituras (writeBatch.set/update/delete) solo se anotan: `commit()` no manda nada, y
-//   updateDoc/addDoc/setDoc tiran error si alguien las llama.
+// · Las lecturas (getDoc/getDocs) van a producción por Admin SDK. getDoc y tx.get leen primero
+//   `docs`, un mapa de documentos simulados (F9.180.1: un resumen en un estado que no existe).
+// · Las escrituras solo se anotan: writeBatch.commit() en `batches`, updateDoc y runTransaction en
+//   `escrituras` (F9.180.1). Nada llega a Firestore. addDoc/setDoc/deleteDoc tiran error.
 // · `cargar(ruta, ref)` transpila un .ts del repo y lo evalúa con stubs. Con `ref` (un commit) lee el
 //   archivo de git en vez del árbol de trabajo, y los imports relativos se resuelven contra esa misma
 //   versión: así un proceso corre el código viejo y el nuevo lado a lado.
@@ -33,6 +34,11 @@ export interface Sim {
   cargar<T>(ruta: string, ref?: string | null): T;
   lecturas: Array<{ que: string; n: number }>;
   batches: OpBatch[][];
+  /** updateDoc y runTransaction, anotados en orden. Una transacción que tira error no se anota. */
+  escrituras: Array<{ via: 'updateDoc' | 'runTransaction'; ops: OpBatch[] }>;
+  /** Documentos simulados por path ('resumenesTarjeta/x'): getDoc y tx.get los leen antes que producción. */
+  docs: Map<string, Record<string, unknown>>;
+  /** Vacía lecturas, batches y escrituras. `docs` queda: lo maneja quien arma el escenario. */
   reset(): void;
 }
 
@@ -41,8 +47,21 @@ const noEscribe = (que: string) => async () => { throw new Error(`${que} no tien
 export function crearSim(adminDb: FirebaseFirestore.Firestore): Sim {
   const lecturas: Sim['lecturas'] = [];
   const batches: OpBatch[][] = [];
+  const escrituras: Sim['escrituras'] = [];
+  const docs: Sim['docs'] = new Map();
   let autoId = 0;
   const DB_SIM = { __dbSimulado: true };
+
+  const leerDoc = async (ref: RefSim) => {
+    const simulado = docs.get(ref.path);
+    if (simulado) {
+      lecturas.push({ que: `${ref.path} (simulado)`, n: 1 });
+      return { id: ref.id, exists: () => true, data: () => simulado };
+    }
+    const snap = await adminDb.doc(ref.path).get();
+    lecturas.push({ que: `${ref.path} (getDoc)`, n: snap.exists ? 1 : 0 });
+    return { id: snap.id, exists: () => snap.exists, data: () => snap.data() };
+  };
 
   const fsSimulado: Mod = {
     Timestamp: clienteFS.Timestamp,
@@ -71,11 +90,7 @@ export function crearSim(adminDb: FirebaseFirestore.Firestore): Sim {
         docs: snap.docs.map(d => ({ id: d.id, ref: { __ref: true, path: d.ref.path, id: d.id, col } as RefSim, data: () => d.data() })),
       };
     },
-    getDoc: async (ref: RefSim) => {
-      const snap = await adminDb.doc(ref.path).get();
-      lecturas.push({ que: `${ref.path} (getDoc)`, n: snap.exists ? 1 : 0 });
-      return { id: snap.id, exists: () => snap.exists, data: () => snap.data() };
-    },
+    getDoc: leerDoc,
     writeBatch: () => {
       const ops: OpBatch[] = [];
       const b = {
@@ -86,7 +101,22 @@ export function crearSim(adminDb: FirebaseFirestore.Firestore): Sim {
       };
       return b;
     },
-    updateDoc: noEscribe('updateDoc'),
+    // NO escriben: se anotan en `escrituras`.
+    updateDoc: async (ref: RefSim, data: Record<string, unknown>) => {
+      escrituras.push({ via: 'updateDoc', ops: [{ op: 'update', ref, data }] });
+    },
+    runTransaction: async (_db: unknown, fn: (tx: unknown) => Promise<unknown>) => {
+      const ops: OpBatch[] = [];
+      const tx = {
+        get: leerDoc,
+        set: (ref: RefSim, data: Record<string, unknown>) => { ops.push({ op: 'set', ref, data }); return tx; },
+        update: (ref: RefSim, data: Record<string, unknown>) => { ops.push({ op: 'update', ref, data }); return tx; },
+        delete: (ref: RefSim) => { ops.push({ op: 'delete', ref }); return tx; },
+      };
+      const r = await fn(tx);           // si tira, la transacción no se anota: como en Firestore
+      escrituras.push({ via: 'runTransaction', ops });
+      return r;
+    },
     addDoc: noEscribe('addDoc'),
     setDoc: noEscribe('setDoc'),
     deleteDoc: noEscribe('deleteDoc'),
@@ -139,7 +169,9 @@ export function crearSim(adminDb: FirebaseFirestore.Firestore): Sim {
     cargar: <T>(ruta: string, ref?: string | null) => cargarModulo(ruta, ref ?? null) as unknown as T,
     lecturas,
     batches,
-    reset: () => { lecturas.length = 0; batches.length = 0; autoId = 0; },
+    escrituras,
+    docs,
+    reset: () => { lecturas.length = 0; batches.length = 0; escrituras.length = 0; autoId = 0; },
   };
 }
 

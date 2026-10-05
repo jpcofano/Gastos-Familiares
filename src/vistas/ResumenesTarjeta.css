@@ -266,6 +266,18 @@ select.rt-tipo:hover { border-color: var(--gf-gray-300); }
   margin: 0.35rem 0 0;
   font-weight: 600;
 }
+/* F9.180.1 §2 — un botón por moneda; en el celu bajan a otra línea en vez de desbordar. */
+.rt-cuadre-warn-botones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+/* F9.180.1 §3.2 — "Quitar" al lado de un ajuste manual: chico, para no ensanchar la fila. */
+.rt-cuadre-ajuste-quitar {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.72rem;
+}
 
 /* ── Footer preview ──────────────────────────────────────────────────────────── */
 .rt-preview-footer {

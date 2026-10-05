@@ -9,15 +9,18 @@ import {
   resumenYaGeneroMovimientos,
   listarMovimientosDeResumen,
   agregarAjusteCuadreManual,
+  quitarAjusteManual,
   MOTIVO_AJUSTE_MIN,
   calcularCuadre,
+  residuoCuadre,
+  monedasSinCuadrar,
   reintentarResumen,
   TOLERANCIA_ARRASTRE,
   type CuadreResult,
 } from '../datos/resumenesTarjeta';
 import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
 import { cargarFamiliaConfig, resolverNombreMiembro } from '../familia';
-import type { CardStatement, MovimientoParseado, FamiliaConfig, Movement } from '../types';
+import type { AjusteConsolidado, CardStatement, MovimientoParseado, FamiliaConfig, Movement } from '../types';
 import EditarMovimiento from './EditarMovimiento';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import { Icon } from '../design-system/Icon';
@@ -31,6 +34,16 @@ function fmtMonto(n: number, moneda: 'ARS' | 'USD'): string {
     // F9.172 §3 — espacio duro: el monto no se parte entre signo y numero.
     ? `U$S ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// F9.180.1 §3.1 — los dos montos distintos de 0 de un ajuste. Antes se mostraba uno solo (ARS si
+// había, si no USD), y el ajuste del 05/10 se veía como "$ −149,96" con los U$S −14,69 escondidos.
+function montosAjuste(a: AjusteConsolidado): string {
+  const partes = [
+    a.montoARS !== 0 ? fmtMonto(a.montoARS, 'ARS') : null,
+    a.montoUSD !== 0 ? fmtMonto(a.montoUSD, 'USD') : null,
+  ].filter((p): p is string => p !== null);
+  return partes.length > 0 ? partes.join(' / ') : fmtMonto(0, 'ARS');
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -134,12 +147,17 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
   // Sacarlo dejaría resúmenes imposibles de confirmar (el escape hace falta de verdad); una
   // advertencia más es lo que ya falló cuatro veces. Escribir el motivo cuesta más que mirar qué
   // sección no cierra, que es exactamente el incentivo que faltaba.
-  async function cerrarDiferencia() {
-    const umbralARS = Math.min(5000, resumen.totalARS * 0.02);
-    const esGrande  = cuadre.diffARS > umbralARS || cuadre.diffUSD > 2;
+  //
+  // F9.180.1 §1 y §2 — una moneda por vez, y el texto muestra el MISMO residuo, con signo, que se va
+  // a guardar (residuoCuadre). Antes mostraba `diff*`, que es un valor absoluto, y guardaba las dos
+  // monedas contra el total del PDF.
+  async function cerrarDiferencia(moneda: 'ARS' | 'USD') {
+    const residuo  = residuoCuadre(cuadre, moneda);
+    const esGrande = moneda === 'ARS'
+      ? Math.abs(residuo) > Math.min(5000, Math.abs(resumen.totalARS) * 0.02)
+      : Math.abs(residuo) > 2;
     const motivo = window.prompt(
-      `Diferencia de ${cuadre.diffARS > 0 ? fmtMonto(cuadre.diffARS, 'ARS') : ''}` +
-      `${cuadre.diffUSD > 0 ? ` U$S ${cuadre.diffUSD.toFixed(2)}` : ''}.\n\n` +
+      `Diferencia ${moneda}: se va a guardar un ajuste de ${fmtMonto(residuo, moneda)}.\n\n` +
       (esGrande
         ? 'Es GRANDE: casi seguro es una línea real no leída, no un redondeo.\n\n'
         : '') +
@@ -150,7 +168,23 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
     if (motivo === null) return;                       // cancelar no escribe nada
     setAjustando(true);
     setErrorLocal(null);
-    const res = await agregarAjusteCuadreManual(resumen, lineas, memberId, motivo);
+    const res = await agregarAjusteCuadreManual(resumen, lineas, memberId, motivo, moneda);
+    setAjustando(false);
+    if (!res.ok) setErrorLocal(res.error.message);
+  }
+
+  // F9.180.1 §3.2 — quitar un ajuste manual, con los montos y el motivo a la vista antes de confirmar.
+  // La función vuelve a chequear todo (manual, sin movimientos, exactamente uno) dentro de una
+  // transacción: el botón solo decide si se muestra.
+  async function quitarAjuste(a: AjusteConsolidado) {
+    const confirma = window.confirm(
+      `¿Quitar el ajuste "${a.concepto}" de ${fmtMonto(a.montoARS, 'ARS')} / ${fmtMonto(a.montoUSD, 'USD')}?` +
+      (a.motivo ? `\n\nMotivo: ${a.motivo}` : ''),
+    );
+    if (!confirma) return;
+    setAjustando(true);
+    setErrorLocal(null);
+    const res = await quitarAjusteManual(resumen, a);
     setAjustando(false);
     if (!res.ok) setErrorLocal(res.error.message);
   }
@@ -334,7 +368,18 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
             Ajustes consolidado:{' '}
             {resumen.ajustesConsolidado.map((a, i) => (
               <span key={i} className="rt-cuadre-ajuste-item">
-                {a.concepto} {a.montoARS !== 0 ? fmtMonto(a.montoARS, 'ARS') : fmtMonto(a.montoUSD, 'USD')}
+                {a.concepto} {montosAjuste(a)}
+                {/* F9.180.1 §3.2 — solo los manuales, y solo mientras el resumen no generó
+                    movimientos (con `yaGenero` todavía cargando no se ofrece). */}
+                {a.origen === 'manual' && yaGenero?.total === 0 && (
+                  <button
+                    className="rt-btn rt-btn--sm rt-cuadre-ajuste-quitar"
+                    onClick={() => quitarAjuste(a)}
+                    disabled={ajustando || guardando}
+                  >
+                    Quitar
+                  </button>
+                )}
               </span>
             ))}
           </div>
@@ -342,13 +387,19 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
         {!cuadreOk && (
           <div className="rt-cuadre-warn">
             <p>El detalle no cuadra con el total a pagar — revisá las líneas antes de confirmar.</p>
-            <button
-              className="rt-btn rt-btn--sm"
-              onClick={cerrarDiferencia}
-              disabled={ajustando || guardando}
-            >
-              {ajustando ? 'Ajustando…' : 'Cerrar diferencia (pide motivo)'}
-            </button>
+            {/* F9.180.1 §2 — un botón por moneda que no cuadra: un ajuste cierra una sola. */}
+            <div className="rt-cuadre-warn-botones">
+              {monedasSinCuadrar(cuadre).map(m => (
+                <button
+                  key={m}
+                  className="rt-btn rt-btn--sm"
+                  onClick={() => cerrarDiferencia(m)}
+                  disabled={ajustando || guardando}
+                >
+                  {ajustando ? 'Ajustando…' : `Cerrar diferencia ${m} (pide motivo)`}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

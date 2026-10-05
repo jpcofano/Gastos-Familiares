@@ -1,0 +1,245 @@
+F9.180.1 — "Cerrar diferencia" cierra contra el objetivo, una moneda por vez, y el ajuste manual se
+puede sacar
+
+Base: origin/main @ 1de7c40 (F9.180), confirmada al abrir. Prompt en
+docs/prompts/F9.180.1-cerrar-diferencia-por-moneda-y-quitar-ajuste.md.
+
+════════════════════════════════════════════════════════════════════════════════
+0.1 — CIERRE DE F9.180: NO COINCIDE
+════════════════════════════════════════════════════════════════════════════════
+
+  2a0f81f8 (GAL-VISA 2026-10) sigue en 'parseado' y no tiene movimientos: no se confirmó.
+  · El --aplicar de F9.180 §4 sí corrió: no quedan ajustes.
+  · Lo deployado es F9.180. El ruleset activo es de las 17:26 y trae la excepción de §2. El bundle
+    publicado (index-6NhRgZED.js, 17:26) trae la UI nueva.
+  · Entonces la confirmación no se hizo, o se intentó y falló. Un batch rechazado no deja rastro,
+    así que desde los datos no se puede distinguir un caso del otro.
+  · Con lo deployado y los datos de ahora la confirmación debería pasar: es el mismo batch que
+    F9.180 probó en el emulador (46 ops, OK con las reglas nuevas). F9.180.1 no cambia nada de lo que
+    usa: sus objetivos son ARS 751.813,57 y USD 0,29, y §4 solo toca el caso con objetivo 0.
+
+  Lo que falta: borrar los datos del sitio en el celu, abrir el resumen y confirmar. El preview tiene
+  que mostrar el USD cuadrado ("U$S 0,29 calculado · U$S 0,29 neto ✓") y el saldo anterior a favor
+  U$S −14,69. Si la confirmación falla, el texto del error es el dato que falta.
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  §0.2 Gate de §4: pasa. Ningún resumen cuadra solo por la rama `=== 0`: los únicos con objetivo 0
+       son 17e51e81 y 879eb89a, en USD, y con suma 0.
+  §0.3 Hay 5 ajustes manuales en producción, todos con el texto "Diferencia no identificada
+       (ajuste manual)", el formato de antes de F9.161, y ninguno con las dos monedas.
+  §1   El residuo es objetivo − suma (residuoCuadre). La guarda usa balance*, y el texto del prompt
+       muestra el mismo residuo con signo que se guarda.
+  §2   Un ajuste cierra una sola moneda. Hay un botón por cada moneda que no cuadra, y la que cuadra
+       no muestra botón.
+  §3   La lista muestra los dos montos de cada ajuste. quitarAjusteManual saca un ajuste: solo
+       manuales, solo sin movimientos, en una transacción y con un botón "Quitar".
+  §4   Se sacó el atajo `objetivo === 0`. De los 31 resúmenes guardados no cambia ninguno.
+  Verificación: escenarios A, B, C (y C'), quitar con movimientos y §4. Todo OK.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas contra 1de7c40 antes de tocar)
+════════════════════════════════════════════════════════════════════════════════
+
+  Se sostienen todas:
+  · resumenesTarjeta.ts: agregarAjusteCuadreManual en :756-796 (el prompt dice :793). El residuo
+    total − suma está en :774-775. calcularCuadre tiene balance* con `=== 0 ||` en :288-289 y el
+    umbral en :285.
+  · ResumenesTarjeta.tsx: cerrarDiferencia en :137-156. La lista "Ajustes consolidado" (:337)
+    muestra un solo monto, ARS si es distinto de 0 y si no USD.
+  · No había forma de sacar un ajuste manual desde la UI.
+
+════════════════════════════════════════════════════════════════════════════════
+§0 — corrido ANTES de tocar código (gate de §4)
+
+  npx tsx scripts/verificarF91801.ts --s0
+  (esta corrida todavía no traía los chequeos de deploy de 0.1; están en la de abajo)
+════════════════════════════════════════════════════════════════════════════════
+
+F9.180.1 — "Cerrar diferencia" por moneda contra el objetivo, y quitar ajustes manuales: verificación
+corrido: 2026-10-05 18:03:50 (AR) · viejo = 1de7c40 (git) · nuevo = árbol de trabajo · SOLO LECTURA (escrituras simuladas)
+modo: §0 solo (antes de tocar código)
+
+=== §0.1 Post-deploy de F9.180: 2a0f81f8 (GAL-VISA 2026-10) ===
+  CIERRE DE F9.180: >>> NO COINCIDE: estado=parseado · movimientos=0 · total USD no es 0/confirmado/pagadoEn · checklist USD=pendiente · checklist ARS=pendiente
+  estado=parseado · confirmadoEn=(ausente) · confirmadoPor=(ausente) · actualizadoEn=2026-10-05 13:09:55
+  ajustesConsolidado: 0 (esperado 0)
+  movimientos con su clave: 0 (esperado 45) · totales: 0
+  líneas guardadas: 43 · incluir=43 · reverso 149,96 incluir=true · USD 0,29 incluir=true
+  checklist 2026-10 · GAL-VISA USD: pendiente · matches: —
+  checklist 2026-10 · GAL-VISA ARS: pendiente · matches: —
+  (esperado: USD pagado; ARS por_confirmar, salvo que ya se haya confirmado el débito)
+
+=== §0.2 Resúmenes que hoy cuadran SOLO por la rama `objetivo === 0` (calcularCuadre de 1de7c40) ===
+  criterio: objetivo === 0 y |suma| > umbral (ARS: piso de $10, porque con objetivo 0 el umbral es 10; USD: 1)
+  con objetivo 0 en alguna moneda: 17e51e81 USD (suma 0,00) · 879eb89a USD (suma 0,00)
+  confirmados: 0
+  no confirmados: 0
+  GATE §4: se aplica — ningún confirmado cuadra solo por la rama === 0
+
+=== §0.3 Ajustes origen manual en producción (solo para dimensionar: no se toca ninguno) ===
+  68c7a1ea BBVA-VISA-SIG  2026-05 confirmado ARS=340.932,00 USD=0,00 · motivo="Diferencia no identificada (ajuste manual)"
+  fc31ca48 GAL-VISA       2026-07 confirmado ARS=0,00 USD=-29,98 · motivo="Diferencia no identificada (ajuste manual)"
+  fc31ca48 GAL-VISA       2026-07 confirmado ARS=0,00 USD=14,99 · motivo="Diferencia no identificada (ajuste manual)"
+  08a697e0 BBVA-VISA-SIG  2026-08 confirmado ARS=337.084,00 USD=0,00 · motivo="Diferencia no identificada (ajuste manual)"
+  f9d9b308 GAL-VISA       2026-08 confirmado ARS=0,00 USD=-14,99 · motivo="Diferencia no identificada (ajuste manual)"
+  total: 5 · con las dos monedas distintas de 0: 0
+
+════════════════════════════════════════════════════════════════════════════════
+§0 + VERIFICACIÓN, después del código
+
+  npx tsx scripts/verificarF91801.ts
+════════════════════════════════════════════════════════════════════════════════
+
+F9.180.1 — "Cerrar diferencia" por moneda contra el objetivo, y quitar ajustes manuales: verificación
+corrido: 2026-10-05 18:09:12 (AR) · viejo = 1de7c40 (git) · nuevo = árbol de trabajo · SOLO LECTURA (escrituras simuladas)
+modo: §0 + verificación
+
+=== §0.1 Post-deploy de F9.180: 2a0f81f8 (GAL-VISA 2026-10) ===
+  CIERRE DE F9.180: >>> NO COINCIDE: estado=parseado · movimientos=0 · total USD no es 0/confirmado/pagadoEn · checklist USD=pendiente · checklist ARS=pendiente
+  estado=parseado · confirmadoEn=(ausente) · confirmadoPor=(ausente) · actualizadoEn=2026-10-05 13:09:55
+  ajustesConsolidado: 0 (esperado 0)
+  movimientos con su clave: 0 (esperado 45) · totales: 0
+  líneas guardadas: 43 · incluir=43 · reverso 149,96 incluir=true · USD 0,29 incluir=true
+  checklist 2026-10 · GAL-VISA USD: pendiente · matches: —
+  checklist 2026-10 · GAL-VISA ARS: pendiente · matches: —
+  (esperado: USD pagado; ARS por_confirmar, salvo que ya se haya confirmado el débito)
+  deploy de F9.180 · reglas activas: ruleset a2aa9cac creado 2026-10-05 17:26:10 (AR) · trae la excepción de F9.180 §2: sí
+  deploy de F9.180 · cliente publicado: assets/index-6NhRgZED.js (Last-Modified Mon, 05 Oct 2026 20:26:13 GMT) · trae la UI de F9.180: sí
+  lectura: el --aplicar de §4 corrió (no quedan ajustes) y lo deployado es F9.180, pero el resumen no se
+  confirmó. Un batch rechazado no deja rastro: desde los datos no se distingue "no se intentó" de "falló".
+
+=== §0.2 Resúmenes que hoy cuadran SOLO por la rama `objetivo === 0` (calcularCuadre de 1de7c40) ===
+  criterio: objetivo === 0 y |suma| > umbral (ARS: piso de $10, porque con objetivo 0 el umbral es 10; USD: 1)
+  con objetivo 0 en alguna moneda: 17e51e81 USD (suma 0,00) · 879eb89a USD (suma 0,00)
+  confirmados: 0
+  no confirmados: 0
+  GATE §4: se aplica — ningún confirmado cuadra solo por la rama === 0
+
+=== §0.3 Ajustes origen manual en producción (solo para dimensionar: no se toca ninguno) ===
+  68c7a1ea BBVA-VISA-SIG  2026-05 confirmado ARS=340.932,00 USD=0,00 · motivo="Diferencia no identificada (ajuste manual)"
+  fc31ca48 GAL-VISA       2026-07 confirmado ARS=0,00 USD=-29,98 · motivo="Diferencia no identificada (ajuste manual)"
+  fc31ca48 GAL-VISA       2026-07 confirmado ARS=0,00 USD=14,99 · motivo="Diferencia no identificada (ajuste manual)"
+  08a697e0 BBVA-VISA-SIG  2026-08 confirmado ARS=337.084,00 USD=0,00 · motivo="Diferencia no identificada (ajuste manual)"
+  f9d9b308 GAL-VISA       2026-08 confirmado ARS=0,00 USD=-14,99 · motivo="Diferencia no identificada (ajuste manual)"
+  total: 5 · con las dos monedas distintas de 0: 0
+
+=== Verificación sobre las líneas guardadas de 2a0f81f8, código nuevo, escrituras simuladas ===
+  Los escenarios usan una copia con id "sim-…": así la consulta de movimientos da 0, como en un resumen sin confirmar.
+
+  Escenario A — reverso destildado, sin ajustes:
+    ARS: objetivo=751.813,57 suma=751.963,53 residuo=-149,96 balance=false
+    USD: objetivo=0,29 suma=0,29 residuo=0,00 balance=true
+    OK no cuadra ARS, residuo −149,96 — residuo -149,96
+    OK cuadra USD, residuo 0 con objetivo 0,29 (arrastre) — objetivo 0,29 residuo 0,00
+    OK solo se ofrece el botón ARS — monedasSinCuadrar = ["ARS"]
+    OK el ajuste ARS se guarda con montoARS −149,96 / montoUSD 0 — updateDoc resumenesTarjeta/sim-2a0f81f8 → ARS -149.96 / USD 0 · origen manual
+    OK pedir el ajuste en USD se rechaza (USD ya cuadra) y no escribe nada — USD ya cuadra: no hay diferencia para ajustar
+    (código viejo, mismo escenario: guardaba ARS -149.96 / USD -14.69 — las dos monedas, y el USD con el arrastre adentro)
+
+  Escenario B — A más el ajuste ARS:
+    ARS: objetivo=751.813,57 suma=751.813,57 residuo=0,00 balance=true
+    USD: objetivo=0,29 suma=0,29 residuo=0,00 balance=true
+    OK cuadra en las dos monedas
+    OK no se ofrece ningún botón
+    OK quitarAjusteManual lo encuentra exactamente 1 vez y lo saca — runTransaction: update resumenesTarjeta/sim-2a0f81f8 ajustes=0 actualizadoEn=serverTimestamp()
+    OK después vuelve al estado de A — ARS suma 751.963,53 balance false · USD suma 0,29 balance true
+    OK (extra) si el ajuste aparece 2 veces, aborta sin escribir — El ajuste aparece 2 veces en el resumen (se esperaba 1): no se tocó nada.
+
+  Escenario C — reverso tildado, la línea USD de 0,29 destildada, sin ajustes:
+    ARS: objetivo=751.813,57 suma=751.813,57 residuo=0,00 balance=true
+    USD: objetivo=0,29 suma=0,00 residuo=0,29 balance=true
+    OK residuo USD +0,29 (no −14,40 ni −14,69) — residuo 0,29; el código viejo tomaba total − suma = -14,40
+    OK con 0,29 de diferencia el USD cuadra por tolerancia: no se ofrece botón — []
+    OK y la función también lo rechaza, sin escribir — USD ya cuadra: no hay diferencia para ajustar
+
+  Escenario C' (extra) — reverso tildado, la línea USD leída como 3,29 en vez de 0,29:
+    ARS: objetivo=751.813,57 suma=751.813,57 residuo=0,00 balance=true
+    USD: objetivo=0,29 suma=3,29 residuo=-3,00 balance=false
+    OK residuo USD −3,00 y solo se ofrece el botón USD — residuo -3,00 · monedasSinCuadrar = ["USD"]
+    OK el ajuste USD se guarda con montoARS 0 / montoUSD −3,00 — ARS 0 / USD -3
+    OK con ese ajuste cuadra en las dos monedas — USD suma 0,29 vs objetivo 0,29
+    OK pedir el ajuste en ARS se rechaza (ARS cuadra) — ARS ya cuadra: no hay diferencia para ajustar
+
+  quitarAjusteManual sobre f9d9b308 (GAL-VISA 2026-08, confirmado), su ajuste manual real USD -14,99:
+    OK se rechaza, sin escribir — Este resumen ya generó 69 movimientos: quitar el ajuste cambiaría el cuadre sin cambiar los movimientos.
+    OK (extra) un ajuste de PDF no se quita — Solo se pueden quitar ajustes manuales: los del PDF son datos del resumen.
+
+  §4 — balance sin la rama `objetivo === 0`:
+    OK objetivo USD 0 con una línea USD de 5: balanceUSD false — nuevo balanceUSD=false (objetivo 0,00, suma 5,00) · viejo balanceUSD=true
+    OK sobre los 31 resúmenes guardados, ningún confirmado cambia de balance — cambian 0, confirmados 0
+
+resultado de la verificación: todo OK
+
+════════════════════════════════════════════════════════════════════════════════
+QUÉ CAMBIÓ
+════════════════════════════════════════════════════════════════════════════════
+
+  src/datos/resumenesTarjeta.ts
+  · residuoCuadre(cuadre, moneda) = objetivo − suma, con signo (§1). Es una sola cuenta: la usan la
+    función que guarda y el texto que se muestra antes de guardar.
+  · monedasSinCuadrar(cuadre): las monedas con balance false (§2). La pantalla arma un botón por cada
+    una, y la verificación usa la misma función.
+  · agregarAjusteCuadreManual(…, moneda): si esa moneda ya cuadra, rechaza ("ARS ya cuadra: no hay
+    diferencia para ajustar"). Si no, guarda el residuo de esa moneda y 0 en la otra (§1, §2).
+  · quitarAjusteManual(resumen, ajuste), nueva (§3.2):
+    - solo para ajustes origen 'manual';
+    - solo si la consulta de movimientos da 0;
+    - en una runTransaction: relee el resumen, aborta si está 'confirmado', busca el ajuste por
+      creadoEn + concepto + montos, y si no aparece exactamente una vez no toca nada;
+    - escribe el array sin ese ajuste, más actualizadoEn.
+  · calcularCuadre: balance* = diff <= umbral, sin `objetivo === 0 ||` (§4). El umbral ARS con
+    objetivo 0 sigue siendo el piso de $10.
+  src/vistas/ResumenesTarjeta.tsx y .css
+  · cerrarDiferencia(moneda): el prompt dice "Diferencia ARS: se va a guardar un ajuste de $ −149,96".
+  · Un botón "Cerrar diferencia ARS/USD (pide motivo)" por cada moneda que no cuadra.
+  · La lista de ajustes muestra los dos montos distintos de 0 ("$ … / U$S …").
+  · "Quitar" al lado de cada ajuste manual, solo con yaGenero cargado y en 0. Antes de quitar,
+    window.confirm muestra el concepto, los dos montos y el motivo.
+  scripts/simConfirmarResumen.ts: updateDoc y runTransaction se anotan en `escrituras` (antes
+  tiraban error), y getDoc/tx.get leen primero `docs`, un mapa de documentos simulados. Nada llega a
+  Firestore.
+  scripts/verificarF91801.ts: §0 y la verificación.
+
+════════════════════════════════════════════════════════════════════════════════
+DECISIONES Y DESVÍOS
+════════════════════════════════════════════════════════════════════════════════
+
+  1. Escenario C: el residuo da +0,29, como pide el prompt. Pero 0,29 está dentro de la tolerancia
+     USD (≤ 1), así que la moneda cuadra: no se ofrece botón y la función rechaza, que es el mismo
+     criterio en las dos puntas (§1). Para ejercitar el ajuste USD se agregó C', con la línea leída
+     como 3,29: residuo −3,00, botón solo USD, ajuste ARS 0 / USD −3,00, y con él cuadra.
+  2. "Quitar con movimientos" se probó sobre f9d9b308 (GAL-VISA 2026-08, confirmado, 69
+     movimientos) con su ajuste manual real de USD −14,99, porque 2a0f81f8 todavía no tiene
+     movimientos (ver 0.1). Se rechaza sin escribir nada.
+  3. quitarAjusteManual también mira, dentro de la transacción, que el resumen no esté 'confirmado'.
+     Las transacciones del cliente no admiten consultas, así que la consulta de movimientos va
+     antes. La confirmación escribe el estado y los movimientos en el mismo batch, de modo que mirar
+     el estado cierra la ventana entre la consulta y la escritura.
+  4. "Es GRANDE" en ARS compara contra |total| × 2 %: con un total negativo, el umbral daba negativo.
+  5. El concepto sigue siendo "Ajuste manual: <motivo>", sin la moneda: la lista ya muestra los
+     montos.
+
+════════════════════════════════════════════════════════════════════════════════
+DEPLOY (lo hace Juan)
+════════════════════════════════════════════════════════════════════════════════
+
+  npm run build
+  firebase deploy --only hosting            (sin cambios en reglas ni en functions)
+
+  La confirmación pendiente de 2a0f81f8 (ver 0.1) no depende de este deploy: se puede hacer antes
+  o después.
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  Base 1de7c40 = origin/main al abrir. Producción solo se leyó, y todas las escrituras de la
+  verificación se simularon. Lo único que salió a la red fue la lectura del ruleset activo (Admin
+  SDK) y un GET del bundle público.
+  Sin cambios en firestore.rules ni en functions/.
+  tsc cliente: 41 al abrir, 41 al cerrar (la misma lista). tsc functions: 0 y 0.
+  vite build: OK (el aviso de chunks > 500 kB es previo).
+  Fuera de alcance, sin tocar: el total USD del seed de GAL-VISA 2025-05 (−6,88, pagado false).

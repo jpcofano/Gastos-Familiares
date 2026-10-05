@@ -1,5 +1,5 @@
 import {
-  collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where,
+  collection, doc, getDoc, getDocs, onSnapshot, query, updateDoc, where, runTransaction,
   serverTimestamp, writeBatch, Timestamp, type DocumentData, type Unsubscribe,
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
@@ -285,11 +285,34 @@ export function calcularCuadre(
   const umbralARS = totalARS > 0 ? Math.max(10, totalARS * 0.0001) : 10;
   return {
     sumaARS, sumaUSD, diffARS, diffUSD,
-    balanceARS: totalARS === 0 || diffARS <= umbralARS,
-    balanceUSD: totalUSD === 0 || diffUSD <= 1,
+    // F9.180.1 §4 — sin el atajo `objetivo === 0 || …`. Con el arrastre de F9.180 el objetivo puede
+    // dar 0 aunque el PDF tenga total (saldo a favor = total sin consumos), y ahí cualquier suma
+    // cuadraba sin mirarla. Con objetivo 0 y suma 0 da true igual: solo cambia si la suma no es 0.
+    // Medido antes de sacarlo (F9.180.1 §0.2): ningún resumen guardado cuadraba solo por esa rama.
+    balanceARS: diffARS <= umbralARS,
+    balanceUSD: diffUSD <= 1,
     ...netos,
     decisionAjustes,
   };
+}
+
+/**
+ * F9.180.1 §1 — lo que falta para cuadrar una moneda, con signo: objetivo − suma. `suma` ya incluye
+ * los ajustes existentes. Es lo que guarda "Cerrar diferencia" y lo que la pantalla muestra antes de
+ * guardarlo: una sola cuenta para las dos puntas.
+ */
+export function residuoCuadre(cuadre: CuadreResult, moneda: MovimientoParseado['moneda']): number {
+  return moneda === 'ARS'
+    ? +(cuadre.objetivoARS - cuadre.sumaARS).toFixed(2)
+    : +(cuadre.objetivoUSD - cuadre.sumaUSD).toFixed(2);
+}
+
+/** F9.180.1 §2 — las monedas que no cuadran. La pantalla ofrece un "Cerrar diferencia" por cada una. */
+export function monedasSinCuadrar(cuadre: CuadreResult): Array<MovimientoParseado['moneda']> {
+  const out: Array<MovimientoParseado['moneda']> = [];
+  if (!cuadre.balanceARS) out.push('ARS');
+  if (!cuadre.balanceUSD) out.push('USD');
+  return out;
 }
 
 // F9.139 §3 — `resumen.banco` es TEXTO LIBRE: lo escribe el modelo leyendo la carátula del PDF
@@ -750,6 +773,14 @@ export async function asignarTarjetaResumen(
  * descuadre real tapado por este botón, de 33.035,55 a 2.878.033,12, y ninguno se podía diagnosticar
  * después. El escape sigue existiendo —bloquearlo dejaría resúmenes imposibles de confirmar— pero
  * ahora enterrar cuesta más que diagnosticar, que era el arreglo de fondo.
+ *
+ * F9.180.1 — dos cambios más:
+ *   §1 El residuo es `objetivo − suma` (residuoCuadre), no `total del PDF − suma`. El total ignora
+ *      el arrastre del mes anterior (F9.180 §1) y lo marcado `noDebitado` (F9.161 §4): con saldo a
+ *      favor, cerrar la diferencia volvía a meter el arrastre y dejaba la moneda rota.
+ *   §2 Un ajuste cierra UNA moneda: guarda el residuo de esa y 0 en la otra. Con las dos juntas
+ *      entró el ARS −149,96 del 05/10, en un ajuste cuyo motivo hablaba de dólares.
+ *   La guarda mira `balance*`, el mismo criterio con el que la pantalla decide si ofrece el botón.
  */
 export const MOTIVO_AJUSTE_MIN = 15;
 
@@ -758,6 +789,7 @@ export async function agregarAjusteCuadreManual(
   lineas: MovimientoParseado[],
   memberId: string,
   motivo: string,
+  moneda: MovimientoParseado['moneda'],
 ): Promise<Resultado<void>> {
   try {
     const motivoLimpio = motivo.trim();
@@ -771,15 +803,14 @@ export async function agregarAjusteCuadreManual(
       };
     }
     const cuadre = calcularCuadre(lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado, resumen);
-    const residuoARS = +(resumen.totalARS - cuadre.sumaARS).toFixed(2);
-    const residuoUSD = +(resumen.totalUSD - cuadre.sumaUSD).toFixed(2);
-    if (Math.abs(residuoARS) <= 1 && Math.abs(residuoUSD) <= 1) {
-      return { ok: false, error: new Error('No hay diferencia para ajustar') };
+    if (moneda === 'ARS' ? cuadre.balanceARS : cuadre.balanceUSD) {
+      return { ok: false, error: new Error(`${moneda} ya cuadra: no hay diferencia para ajustar`) };
     }
+    const residuo = residuoCuadre(cuadre, moneda);
     const entrada: AjusteConsolidado = {
       concepto:  `Ajuste manual: ${motivoLimpio}`,
-      montoARS:  residuoARS,
-      montoUSD:  residuoUSD,
+      montoARS:  moneda === 'ARS' ? residuo : 0,
+      montoUSD:  moneda === 'USD' ? residuo : 0,
       origen:    'manual',
       motivo:    motivoLimpio,
       creadoPor: memberId,
@@ -793,6 +824,68 @@ export async function agregarAjusteCuadreManual(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
   }
+}
+
+/**
+ * F9.180.1 §3.2 — sacar un ajuste manual desde la pantalla. Hasta acá corregir uno necesitaba un
+ * script por Admin SDK (ejecutarF9180s4.ts, el del 05/10).
+ *
+ * · Solo `origen: 'manual'`: los del PDF son datos del resumen.
+ * · Solo si el resumen no generó movimientos: en uno confirmado, sacar el ajuste cambiaría el cuadre
+ *   sin cambiar los movimientos. Se mira la consulta de movimientos y, adentro de la transacción,
+ *   que el resumen no esté `confirmado` (la confirmación escribe el estado y los movimientos en el
+ *   mismo batch, así que eso cierra la ventana entre la consulta y la escritura).
+ * · En una transacción, como el --aplicar de ejecutarF9180s4.ts: se relee el resumen y se busca el
+ *   ajuste por creadoEn + concepto + montos. Si no aparece exactamente una vez, no se toca nada.
+ */
+export async function quitarAjusteManual(
+  resumen: CardStatement,
+  ajuste: AjusteConsolidado,
+): Promise<Resultado<void>> {
+  try {
+    if (ajuste.origen !== 'manual') {
+      return { ok: false, error: new Error('Solo se pueden quitar ajustes manuales: los del PDF son datos del resumen.') };
+    }
+    const { total } = await resumenYaGeneroMovimientos(resumen);
+    if (total > 0) {
+      return {
+        ok: false,
+        error: new Error(
+          `Este resumen ya generó ${total} movimiento${total !== 1 ? 's' : ''}: quitar el ajuste cambiaría ` +
+          'el cuadre sin cambiar los movimientos.',
+        ),
+      };
+    }
+    const ref = doc(db, 'resumenesTarjeta', resumen.id);
+    await runTransaction(db, async tx => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('El resumen ya no existe.');
+      const data = snap.data();
+      if (data.estado === 'confirmado') {
+        throw new Error('El resumen se confirmó mientras tanto: el ajuste ya no se puede quitar.');
+      }
+      const actuales = Array.isArray(data.ajustesConsolidado) ? (data.ajustesConsolidado as AjusteConsolidado[]) : [];
+      const iguales = actuales.filter(a => mismoAjusteManual(a, ajuste)).length;
+      if (iguales !== 1) {
+        throw new Error(`El ajuste aparece ${iguales} veces en el resumen (se esperaba 1): no se tocó nada.`);
+      }
+      tx.update(ref, {
+        ajustesConsolidado: actuales.filter(a => !mismoAjusteManual(a, ajuste)),
+        actualizadoEn:      serverTimestamp(),
+      });
+    });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
+}
+
+function mismoAjusteManual(a: AjusteConsolidado, b: AjusteConsolidado): boolean {
+  return a.origen === 'manual'
+    && a.creadoEn === b.creadoEn
+    && a.concepto === b.concepto
+    && a.montoARS === b.montoARS
+    && a.montoUSD === b.montoUSD;
 }
 
 // ── Reintento (F9.99.5) ───────────────────────────────────────────────────────
