@@ -50,6 +50,8 @@ service cloud.firestore {
     }
 
     // Movimientos — lectura scoped, create validado campo a campo, update/delete cerrado
+    // F9.180 §2 — monto 0 solo para el movimiento-total de un resumen de tarjeta (saldo a favor, o mes
+    // sin consumos en esa moneda), y solo admin. Las líneas de consumo nunca salen en 0.
     match /movimientos/{id} {
       allow read: if esAdmin() || (esMiembro() && resource.data.persona == miMemberId());
       allow create: if esMiembro()
@@ -58,7 +60,12 @@ service cloud.firestore {
         && request.resource.data.tipo in ['Gasto', 'Ingreso']
         && request.resource.data.moneda in ['ARS', 'USD']
         && request.resource.data.monto is number
-        && request.resource.data.monto > 0
+        && (request.resource.data.monto > 0
+            || (request.resource.data.monto == 0
+                && esAdmin()
+                && request.resource.data.categoria == 'Tarjetas'
+                && request.resource.data.resumenTarjetaId is string
+                && request.resource.data.excluirDash == true))
         && request.resource.data.fecha is timestamp
         && request.resource.data.mes is string
         && request.resource.data.mes.matches('^[0-9]{4}-[0-9]{2}$')

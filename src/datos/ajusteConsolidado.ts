@@ -37,6 +37,10 @@ export const TOLERANCIA_IDENTIDAD_ARS = 1;
 export interface ConsolidadoResumen {
   saldoAnteriorARS?: number | null;
   pagosDelPeriodoARS?: number | null;
+  // F9.180 §1 — el arrastre del cuadre se calcula en las dos monedas (totalesNetos). La identidad
+  // de esta decisión sigue siendo solo ARS: es la que se midió en F9.162.
+  saldoAnteriorUSD?: number | null;
+  pagosDelPeriodoUSD?: number | null;
 }
 
 export type DecisionAjustes =
@@ -87,6 +91,10 @@ export function decidirAjustesConsolidado(
  * Los ajustes que efectivamente entran al cuadre.
  *
  * `sin_decidir` computa igual que hoy — abstenerse significa no cambiar nada, no descartar.
+ *
+ * F9.180 §1 — `calcularCuadre` ya no la usa: los ajustes entran siempre y el arrastre del mes
+ * anterior (saldoAnterior + pagosDelPeriodo) baja el objetivo, que en `ignora` da lo mismo. Queda
+ * exportada y sin cambios para quien necesite la vista de F9.163.
  */
 export function ajustesComputables(
   ajustes: AjusteConsolidado[],

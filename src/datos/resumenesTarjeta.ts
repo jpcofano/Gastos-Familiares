@@ -9,7 +9,9 @@ import type { CardStatement, MovimientoParseado, AjusteConsolidado, FamiliaConfi
 import { docAMovimiento } from './movimientos';
 import { resolverNombreMiembro } from '../familia';
 import { medioPorDefecto, ALIAS_NOMBRE_MEDIO } from './medios';
-import { ajustesComputables, type ConsolidadoResumen, type DecisionAjustes } from './ajusteConsolidado';
+import {
+  decidirAjustesConsolidado, TOLERANCIA_IDENTIDAD_ARS, type ConsolidadoResumen, type DecisionAjustes,
+} from './ajusteConsolidado';
 
 type Resultado<T> = { ok: true; data: T } | { ok: false; error: Error };
 
@@ -167,34 +169,62 @@ function tipoDeLinea(linea: MovimientoParseado): 'Gasto' | 'Ingreso' {
   return tiposIngreso.includes(linea.tipoLinea) ? 'Ingreso' : 'Gasto';
 }
 
-export interface CuadreResult {
+export interface TotalesNetos {
+  // F9.161 §4 — lo marcado como no debitado. Sin nada marcado, 0.
+  noDebitadoARS: number;
+  noDebitadoUSD: number;
+  // Lo que el banco cobra este mes: total del PDF − noDebitado. De acá sale el movimiento-total.
+  netoARS: number;
+  netoUSD: number;
+  // F9.180 §1 — el arrastre del mes anterior, A = saldoAnterior + pagosDelPeriodo. 0 si el resumen
+  // no trae los dos campos en esa moneda.
+  arrastreARS: number;
+  arrastreUSD: number;
+  // Contra qué cuadran las líneas: neto − arrastre. Sin noDebitado ni arrastre, `objetivo* ===
+  // total*`, o sea idéntico a antes de F9.161.
+  objetivoARS: number;
+  objetivoUSD: number;
+}
+
+export interface CuadreResult extends TotalesNetos {
   sumaARS: number;
   sumaUSD: number;
   diffARS: number;
   diffUSD: number;
   balanceARS: boolean;
   balanceUSD: boolean;
-  // F9.161 §4 — lo marcado como no debitado, y el objetivo neto contra el que se cuadra.
-  // Sin nada marcado: `noDebitado*` en 0 y `objetivo* === total*`, o sea idéntico a antes.
-  noDebitadoARS: number;
-  noDebitadoUSD: number;
-  objetivoARS: number;
-  objetivoUSD: number;
-  // F9.163 §2 — qué se decidió con los ajustes del consolidado y por qué. Sin el bloque
-  // consolidado en el resumen la decisión es `sin_decidir` y el cuadre queda igual que antes.
+  // F9.163 §2 — qué decide la identidad con los ajustes del consolidado y por qué. Desde F9.180 §1
+  // ya no filtra nada: es el diagnóstico que muestra el banner.
   decisionAjustes: DecisionAjustes;
 }
+
+/** F9.180 §1 — desde dónde el banner muestra el arrastre. ARS: la misma tolerancia de la identidad. */
+export const TOLERANCIA_ARRASTRE = { ARS: TOLERANCIA_IDENTIDAD_ARS, USD: 0.01 } as const;
+
+const arrastre = (saldo: number | null | undefined, pagos: number | null | undefined): number =>
+  typeof saldo === 'number' && typeof pagos === 'number' ? +(saldo + pagos).toFixed(2) : 0;
 
 /**
  * F9.161 §4 — el total que el banco realmente cobra: el del PDF menos lo marcado `noDebitado`.
  * Única fuente de ese número: lo usan el cuadre, el movimiento-total y el banner de la UI, así que
  * las tres puntas no pueden divergir.
+ *
+ * F9.180 §1 — y el ARRASTRE del mes anterior, en las dos monedas. El total del PDF ya lo trae
+ * adentro (total = A + ajustes + líneas del período, medido en los 5 resúmenes con los campos):
+ * con el saldo anterior pagado completo A = 0, y con saldo a favor A es negativo y el total puede
+ * quedar debajo de cero (GAL-VISA 2026-10: U$S −14,40 = −14,69 + 0,29). Las líneas del período no
+ * traen A, así que el cuadre compara contra `objetivo = neto − A`. Sin `saldoAnterior*` o
+ * `pagosDelPeriodo*` en una moneda (resúmenes extraídos antes de F9.163) A = 0 y nada cambia.
+ *
+ * El arrastre explica el total, no lo cambia: el movimiento-total sale por el NETO, nunca por el
+ * objetivo.
  */
 export function totalesNetos(
   lineas: MovimientoParseado[],
   totalARS: number,
   totalUSD: number,
-): { noDebitadoARS: number; noDebitadoUSD: number; objetivoARS: number; objetivoUSD: number } {
+  consolidado?: ConsolidadoResumen | null,
+): TotalesNetos {
   let noDebitadoARS = 0;
   let noDebitadoUSD = 0;
   for (const l of lineas) {
@@ -203,10 +233,14 @@ export function totalesNetos(
     if (l.moneda === 'ARS') noDebitadoARS += signo * l.monto;
     else noDebitadoUSD += signo * l.monto;
   }
+  const netoARS = +(totalARS - noDebitadoARS).toFixed(2);
+  const netoUSD = +(totalUSD - noDebitadoUSD).toFixed(2);
+  const arrastreARS = arrastre(consolidado?.saldoAnteriorARS, consolidado?.pagosDelPeriodoARS);
+  const arrastreUSD = arrastre(consolidado?.saldoAnteriorUSD, consolidado?.pagosDelPeriodoUSD);
   return {
-    noDebitadoARS, noDebitadoUSD,
-    objetivoARS: +(totalARS - noDebitadoARS).toFixed(2),
-    objetivoUSD: +(totalUSD - noDebitadoUSD).toFixed(2),
+    noDebitadoARS, noDebitadoUSD, netoARS, netoUSD, arrastreARS, arrastreUSD,
+    objetivoARS: +(netoARS - arrastreARS).toFixed(2),
+    objetivoUSD: +(netoUSD - arrastreUSD).toFixed(2),
   };
 }
 
@@ -217,14 +251,16 @@ export function calcularCuadre(
   ajustes: AjusteConsolidado[] = [],
   consolidado?: ConsolidadoResumen | null,
 ): CuadreResult {
-  // F9.163 §2 — un ajuste del consolidado que el banco usó para terminar de saldar el mes ANTERIOR
-  // ya está contado y no va en el cuadre de éste. Sin `consolidado` la regla se abstiene y los
-  // ajustes entran como siempre: el parámetro es opcional justamente para que nada cambie sin él.
-  const { ajustes: ajustesUsados, decision: decisionAjustes } = ajustesComputables(ajustes, consolidado);
-  ajustes = ajustesUsados;
+  // F9.180 §1 — los ajustes del consolidado entran SIEMPRE, y el arrastre del mes anterior baja el
+  // objetivo (totalesNetos). Es lo mismo que F9.163 en sus dos ramas decididas: en `computa` A ≈ 0 y
+  // no cambia nada; en `ignora` A ≈ −Σajustes, así que restar A y sumar los ajustes se cancela, que
+  // es exactamente ignorarlos. En `sin_decidir` sí cambia: el objetivo baja A. Y además cubre la
+  // moneda que F9.163 no miraba: el saldo a favor en USD no tenía dónde entrar. La decisión de
+  // F9.163 queda como diagnóstico del banner, no filtra nada.
+  const decisionAjustes = decidirAjustesConsolidado(ajustes, consolidado);
   // F9.161 §4 — las dos puntas se mueven juntas: la línea no debitada sale de la suma Y baja el
   // objetivo. Mover una sola dejaría una diferencia igual al monto marcado.
-  const netos = totalesNetos(lineas, totalARS, totalUSD);
+  const netos = totalesNetos(lineas, totalARS, totalUSD, consolidado);
   totalARS = netos.objetivoARS;
   totalUSD = netos.objetivoUSD;
   let sumaARS = 0;
@@ -237,7 +273,7 @@ export function calcularCuadre(
   }
   // Los ajustes del consolidado (DEV PER, etc.) ya están restados del total PDF
   // pero NO están en movimientosParseados → sumamos su monto (negativo) para llegar al neto.
-  for (const a of ajustes) {
+  for (const a of ajustes ?? []) {
     sumaARS += a.montoARS;
     sumaUSD += a.montoUSD;
   }
@@ -391,24 +427,24 @@ export async function resumenYaGeneroMovimientos(
 /**
  * F9.167 §1 — LA RAMA `reemplazar` DE ESTA FUNCIÓN ES INALCANZABLE DESDE EL CLIENTE.
  *
- * `firestore.rules:74` tiene `allow delete: if false` en `movimientos`: nadie borra un movimiento,
+ * `firestore.rules:80` tiene `allow delete: if false` en `movimientos`: nadie borra un movimiento,
  * ni siquiera admin. El reemplazo borra y recrea en el MISMO batch, así que Firestore rechaza el
  * batch entero — "Missing or insufficient permissions". F9.158 §1 verificó la lógica contra los
  * datos y nunca contra las reglas, y por eso el bug sobrevivió a su propia verificación.
  *
- * Hay una segunda barrera detrás, por si la primera se levanta: `firestore.rules:62` exige
- * `monto > 0` en el create, y los movimientos-total en cero que F9.156 introdujo para las tarjetas
- * sin consumo en dólares no pasan esa validación desde el cliente. Los cuatro que existen entraron
- * por Admin SDK, que se saltea las reglas.
+ * Había una segunda barrera detrás: `monto > 0` en el create rechazaba los movimientos-total en
+ * cero que F9.156 introdujo para las tarjetas sin consumo o con saldo a favor (los cuatro que
+ * existían entraron por Admin SDK). F9.180 §2 la LEVANTÓ para los totales: `firestore.rules:62-68`
+ * admite monto 0 solo para admin, con `categoria: 'Tarjetas'`, `resumenTarjetaId` y
+ * `excluirDash: true`. Era la que rechazaba la confirmación de GAL-VISA 2026-10 (F9.179-pre),
+ * incluso sin reemplazo.
  *
  * NO SE BORRA porque la lógica de reemplazo es correcta y el día que se decida habilitarla se
- * reusa. Para habilitarla harían falta las dos cosas:
- *   1. permitir el delete acotado — por ejemplo solo para admin y solo si
- *      `resource.data.resumenTarjetaId == request.resource.data.resumenTarjetaId`;
- *   2. contemplar el monto cero en el create, o dejar de crear los totales en cero.
+ * reusa. Para habilitarla falta solo la primera barrera: permitir el delete acotado — por ejemplo
+ * solo para admin y solo si `resource.data.resumenTarjetaId == request.resource.data.resumenTarjetaId`.
  *
  * Mientras tanto el camino que sí funciona es editar el movimiento suelto (F9.167 §2): son updates
- * puros, que `firestore.rules:70` sí permite para admin.
+ * puros, que `firestore.rules:76` sí permite para admin.
  */
 // Firestore admite 500 operaciones por batch. Pasarse obligaría a partirlo, y partirlo rompe la
 // atomicidad justo en la operación que borra y recrea. Se rechaza con un mensaje claro en vez de
@@ -552,9 +588,20 @@ export async function confirmarResumenTarjeta(
     // F9.161 §4 — y sale por el NETO: el total del PDF menos lo marcado como no debitado. Es la
     // otra punta del cuadre; si solo se moviera el objetivo, la pantalla cuadraría en verde
     // mientras el movimiento sigue cargando plata que no se paga.
+    //
+    // F9.180 §1 — el neto, NO el objetivo del cuadre: el arrastre del mes anterior explica el total
+    // del PDF, no cambia lo que el banco cobra este mes.
     const netos = totalesNetos(lineasEditadas, resumen.totalARS, resumen.totalUSD);
-    const totalARSMov = Math.max(netos.objetivoARS, 0);
-    const totalUSDMov = Math.max(netos.objetivoUSD, 0);
+    const totalARSMov = Math.max(netos.netoARS, 0);
+    const totalUSDMov = Math.max(netos.netoUSD, 0);
+
+    // F9.180 §3 — un total en 0 está saldado por el propio resumen (docs/CLAUDE.md, "Un total de
+    // resumen en 0"): nace confirmado, sin esperar un vencimiento ni un comprobante que no va a
+    // llegar porque no hay débito. Cumple F9.140 (confirmadoPago ⇒ pagado): el total ya sale con
+    // `pagado: true`. Con monto > 0 nada cambia: se confirma por fecha y no se escribe `pagadoEn`.
+    const pagoDelTotal = (monto: number) => (monto === 0
+      ? { confirmadoPago: true, pagadoEn: serverTimestamp() }
+      : { confirmadoPago: confirmadoPagoTotal });
 
     // ── Total ARS ─────────────────────────────────────────────────────────────
     {
@@ -584,7 +631,7 @@ export async function confirmarResumenTarjeta(
         incluirResumenMes:   true,
         resumenTarjetaId:    resumen.id,
         itemEsperadoId:      itemARS?.id ?? null,
-        confirmadoPago:      confirmadoPagoTotal,
+        ...pagoDelTotal(totalARSMov),
         hashPdf:             resumen.hashPdf,
         refStoragePdf:       resumen.refStoragePdf,
         padreId:             null,
@@ -622,7 +669,7 @@ export async function confirmarResumenTarjeta(
         incluirResumenMes:   true,
         resumenTarjetaId:    resumen.id,
         itemEsperadoId:      itemUSD?.id ?? null,
-        confirmadoPago:      confirmadoPagoTotal,
+        ...pagoDelTotal(totalUSDMov),
         hashPdf:             resumen.hashPdf,
         refStoragePdf:       resumen.refStoragePdf,
         padreId:             null,

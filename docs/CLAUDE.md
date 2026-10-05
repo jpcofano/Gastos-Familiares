@@ -2684,7 +2684,9 @@ Derivada en vivo, NO materializada. Nueve estados (F5.5):
 
 - `pagado`: mes cerrado con match(es), O mes en curso con al menos un match confirmado y monto >= 99%.
 - `por_confirmar`: mes en curso/futuro con match(es) detectados pero ninguno con `confirmadoPago=true`.
-- `parcial`: mes en curso/futuro con confirmados pero monto confirmado < 99% esperado.
+- `parcial`: mes en curso/futuro con confirmados pero monto confirmado < 99% esperado. No aplica si
+  todo lo confirmado son movimientos-total de resumen (`resumenTarjetaId` + `categoria: 'Tarjetas'`):
+  el total es lo que se cobra ese mes, y puede ser 0 (F9.180 §3).
 - `automatico`: mes en curso, sin match, `pagoAutomatico=true` y `diaVencimiento` aún no llegó (o sin diaVencimiento). Cubierto sin conciliar.
 - `pendiente`: mes en curso, sin match, diaVencimiento no alcanzado (o sin diaVencimiento).
 - `vencido`: mes en curso y **fecha efectiva** anterior a hoy sin cobertura (`pagado || confirmadoPago`).

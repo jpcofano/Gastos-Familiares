@@ -111,6 +111,12 @@ function estaVencido(item: ExpectedItem, matches: Movement[], mes: string, hoyIs
   return fe != null && fe < hoyIso && !tieneCobertura(matches);
 }
 
+// F9.180 §3 — el movimiento-total que crea `confirmarResumenTarjeta`: lo distingue de los consumos
+// del mismo resumen la categoría, que en los consumos es la del gasto.
+function esTotalDeResumen(m: Movement): boolean {
+  return !!m.resumenTarjetaId && m.categoria === 'Tarjetas';
+}
+
 function isoDeHoy(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -128,7 +134,13 @@ export function estadoItem(item: ExpectedItem, matches: Movement[], mesActualStr
     const confirmados = matches.filter(m => m.confirmadoPago);
     if (confirmados.length > 0) {
       const montoConf = confirmados.reduce((s, m) => s + Math.abs(m.monto), 0);
-      if (item.montoEsperado != null && montoConf < item.montoEsperado * 0.99) return 'parcial';
+      // F9.180 §3 — si todo lo confirmado son movimientos-total de resumen, no se compara contra
+      // montoEsperado. El total ES lo que se cobra ese mes (puede ser 0, con saldo a favor), y
+      // F9.165 §3 midió que para tarjeta ese control no detecta nada real, y los 8 ítems de tarjeta
+      // todavía tienen el total de su resumen de 2026-08 (F9.180 §0.2): solo marcaba `parcial` por
+      // desfasaje.
+      const soloTotalesDeResumen = confirmados.every(esTotalDeResumen);
+      if (!soloTotalesDeResumen && item.montoEsperado != null && montoConf < item.montoEsperado * 0.99) return 'parcial';
       return 'pagado';
     }
     // F9.132.2 §4 — un ítem con movimiento cargado pero sin cobertura (ni pagado ni confirmado)

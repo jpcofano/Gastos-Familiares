@@ -1143,7 +1143,7 @@ function ComprobanteCard({
       )}
       {/* F9.152 §2 — un comprobante en error era terminal: no había reintento en ningún lado y
           re-subir el archivo es un no-op (subirEntrante deduplica por hash). Espejo del botón de
-          ResumenesTarjeta.tsx:346-355. Admin-only: firestore.rules:99 solo deja updatear a admin. */}
+          ResumenesTarjeta.tsx:346-355. Admin-only: firestore.rules:106 solo deja updatear a admin. */}
       {comp.estado === 'error' && esAdmin && (
         <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
           <Button variant="primary" size="sm" disabled={reintentando} onClick={handleReintentar}>

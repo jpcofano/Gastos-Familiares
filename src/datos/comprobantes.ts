@@ -273,7 +273,7 @@ export async function confirmarSueltoDesdeComprobante(
 
 // ── Reintento (F9.152 §2) ─────────────────────────────────────────────────────
 // Espejo de `reintentarResumen` (src/datos/resumenesTarjeta.ts:484-494). `error → subido` dispara
-// la CF `reintentarComprobante`. Admin-only por reglas (firestore.rules:99, update solo admin).
+// la CF `reintentarComprobante`. Admin-only por reglas (firestore.rules:106, update solo admin).
 export async function reintentarComprobante(comprobanteId: string): Promise<Resultado<void>> {
   try {
     await updateDoc(doc(db, 'comprobantes', comprobanteId), {

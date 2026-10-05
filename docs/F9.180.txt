@@ -1,0 +1,596 @@
+F9.180 — Saldo a favor en el resumen de tarjeta: el cuadre lo entiende, la regla lo deja pasar
+y el total en 0 figura pagado
+
+Base: origin/main @ 8834356 (F9.179-pre), confirmada al abrir. Prompt en
+docs/prompts/F9.180-saldo-a-favor-resumen-tarjeta.md.
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  §0  Gate PASA. Los 5 resúmenes que traen saldoAnterior/pagosDelPeriodo cierran la identidad
+      en las dos monedas con residuo 0,00. Los otros 26 no traen los campos: son del seed o se
+      extrajeron antes de F9.163. Sus residuos grandes, con A tomado como 0, no entran al gate, y
+      §1 no los cambia (A = 0). Los 8 ítems de tarjeta tienen montoEsperado no nulo: en USD, dos
+      están en 0 y dos no (BBVA-VISA-SIG 73,55 y BBVA-MASTER-BLK 91,44).
+  §1  El cuadre descuenta el arrastre del mes anterior (A = saldoAnterior + pagosDelPeriodo) en
+      ARS y en USD, y los ajustes del PDF entran siempre. Ningún resumen confirmado pasa de cuadrar
+      a no cuadrar. 2a0f81f8, con el reverso tildado y sin el ajuste manual, cuadra con diff 0 en
+      las dos monedas.
+  §2  La regla acepta monto 0 solo para el total de un resumen y solo para un admin. Emulador
+      13/13 en verde, incluido el batch real de 2a0f81f8: se rechaza con las reglas viejas y
+      entra entero con las nuevas.
+  §3  El total en 0 nace con confirmadoPago y pagadoEn. Con la semántica escrita antes del código
+      (commit e68828c), el ítem USD de GAL-VISA da "pagado" en 2026-10 confirmando hoy, antes del
+      vencimiento. Con montoEsperado no nulo, estadoItem ya no compara los totales de resumen:
+      4 ítems de 2026-07/08 que figuraban "parcial" por desfasaje pasan a "pagado".
+  §4  Dry-run: encuentra exactamente el ajuste, y sin él el cuadre da diff 0 en las dos monedas.
+      No se escribió nada. El --aplicar lo corre Juan después del deploy.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas contra 8834356 antes de tocar)
+════════════════════════════════════════════════════════════════════════════════
+
+  Se sostienen todas:
+  · resumenesTarjeta.ts: calcularCuadre :213-257, totalesNetos :193, filtro de líneas :472,
+    confirmadoPagoTotal :452 (usado en :587 y :625), comentarios desfasados :394/:399 (citaban
+    :74/:62, eran :73/:61), F9.167 §1 en :391-412.
+  · ajusteConsolidado.ts:53-84 (decidirAjustesConsolidado). Banner sin_decidir en
+    ResumenesTarjeta.tsx:298. checklist.ts:128-138 (por_confirmar) y :130-131 (parcial).
+  · firestore.rules:60-61 (monto is number && monto > 0).
+  · ejecutarF9158s2.ts:79 copia confirmadoPago del total ARS.
+
+  Dos matices que aparecieron al medir:
+  · §0.3: de los 5 confirmados con objetivo USD <= 0, ejecutarF9158s2 creó 4. El quinto (GAL-VISA
+    2025-05) es del seed: id HIS_…, monto −6,88 (negativo), pagado false, sin itemEsperadoId. En el
+    checklist lo reclama el ítem USD por la heurística, y como es anterior al corte da "pagado".
+  · El banner del cuadre mostraba la línea de una moneda solo si su total era > 0. Con saldo a
+    favor (total negativo) el USD de 2a0f81f8 ni se veía. Ver "Decisiones".
+
+════════════════════════════════════════════════════════════════════════════════
+§0 — MEDICIÓN (GATE), corrida ANTES de tocar código
+
+  npx tsx scripts/verificarF9180.ts --s0
+════════════════════════════════════════════════════════════════════════════════
+
+F9.180 — Saldo a favor en el resumen de tarjeta: verificación
+corrido: 2026-10-05 16:47:36 (AR) · viejo = 8834356 (git) · nuevo = árbol de trabajo · SOLO LECTURA (commit() simulado)
+modo: §0 solo (gate, antes de tocar código)
+
+=== §0.1 Identidad: total == saldoAnterior + pagosDelPeriodo + Σ ajustes(pdf) + Σ líneas incluidas ===
+tolerancia: ARS 1 · USD 0.01 · líneas con el signo de tipoDeLinea (las no debitadas cuentan: están en el total del PDF)
+A = saldoAnterior + pagosDelPeriodo · resid = total − (A + Σaj + Σlín) · "s/c" = sin campos, A tomado como 0 solo para mostrar
+
+  GAL-VISA GAL-VISA       2025-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.439.062,19 A=s/c Σaj=0,00 Σlín=1.433.822,19 resid=5.240,00 (s/c)
+      USD: total=-6,88 A=s/c Σaj=0,00 Σlín=0,00 resid=-6,88 (s/c)
+  BBVA-VIS BBVA-VISA-SIG  2025-12  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=3.737.693,68 A=s/c Σaj=0,00 Σlín=1.693.966,27 resid=2.043.727,41 (s/c)
+      USD: total=4.672,77 A=s/c Σaj=0,00 Σlín=4.672,41 resid=0,36 (s/c)
+  GAL-VISA GAL-VISA       2025-12  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=560.402,36 A=s/c Σaj=0,00 Σlín=937.144,00 resid=-376.741,64 (s/c)
+      USD: total=158,54 A=s/c Σaj=0,00 Σlín=317,08 resid=-158,54 (s/c)
+  GAL-VISA GAL-VISA       2026-01  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.068.362,15 A=s/c Σaj=0,00 Σlín=2.067.802,56 resid=-999.440,41 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=29,98 resid=-14,99 (s/c)
+  GAL-VISA GAL-VISA       2026-02  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=673.904,26 A=s/c Σaj=0,00 Σlín=604.345,14 resid=69.559,12 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=14,99 resid=0,00 (s/c)
+  GAL-VISA GAL-VISA       2026-03  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=965.433,19 A=s/c Σaj=0,00 Σlín=441.205,85 resid=524.227,34 (s/c)
+      USD: total=906,54 A=s/c Σaj=0,00 Σlín=906,54 resid=0,00 (s/c)
+  BBVA-MAS BBVA-MASTER-BLK 2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=609.948,08 A=s/c Σaj=0,00 Σlín=755.420,61 resid=-145.472,53 (s/c)
+      USD: total=20,97 A=s/c Σaj=0,00 Σlín=20,97 resid=0,00 (s/c)
+  BBVA-VIS BBVA-VISA-SIG  2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=2.076.697,11 A=s/c Σaj=0,00 Σlín=2.058.740,78 resid=17.956,33 (s/c)
+      USD: total=19,76 A=s/c Σaj=0,00 Σlín=19,76 resid=0,00 (s/c)
+  GAL-MAST GAL-MASTER-BLK 2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=424.627,92 A=s/c Σaj=0,00 Σlín=1.697.734,76 resid=-1.273.106,84 (s/c)
+      USD: total=0,94 A=s/c Σaj=0,00 Σlín=3,76 resid=-2,82 (s/c)
+  GAL-VISA GAL-VISA       2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=2.454.132,24 A=s/c Σaj=0,00 Σlín=5.357.331,53 resid=-2.903.199,29 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=29,98 resid=-14,99 (s/c)
+  BBVA-MAS BBVA-MASTER-BLK 2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=427.274,27 A=s/c Σaj=0,00 Σlín=374.080,54 resid=53.193,73 (s/c)
+      USD: total=22,99 A=s/c Σaj=0,00 Σlín=17,99 resid=5,00 (s/c)
+  68c7a1ea BBVA-VISA-SIG  2026-05  confirmado F9.163=sin_decidir · manuales=1
+      ARS: total=1.720.234,78 A=s/c Σaj=-14.477,16 Σlín=1.393.779,94 resid=340.932,00 (s/c)
+      USD: total=19,79 A=s/c Σaj=0,00 Σlín=19,79 resid=0,00 (s/c)
+  BBVA-VIS BBVA-VISA-SIG  2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=2.018.435,94 A=s/c Σaj=0,00 Σlín=1.905.890,42 resid=112.545,52 (s/c)
+      USD: total=34,68 A=s/c Σaj=0,00 Σlín=34,68 resid=0,00 (s/c)
+  GAL-MAST GAL-MASTER-BLK 2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.084.566,80 A=s/c Σaj=0,00 Σlín=837.107,05 resid=247.459,75 (s/c)
+      USD: total=4,96 A=s/c Σaj=0,00 Σlín=4,96 resid=0,00 (s/c)
+  GAL-VISA GAL-VISA       2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.403.704,23 A=s/c Σaj=0,00 Σlín=1.155.257,23 resid=248.447,00 (s/c)
+      USD: total=49,99 A=s/c Σaj=0,00 Σlín=44,99 resid=5,00 (s/c)
+  BBVA-MAS BBVA-MASTER-BLK 2026-06  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.160.758,61 A=s/c Σaj=0,00 Σlín=927.977,80 resid=232.780,81 (s/c)
+      USD: total=77,96 A=s/c Σaj=0,00 Σlín=77,96 resid=0,00 (s/c)
+  GAL-MAST GAL-MASTER-BLK 2026-06  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=802.989,99 A=s/c Σaj=0,00 Σlín=590.071,77 resid=212.918,22 (s/c)
+      USD: total=20,00 A=s/c Σaj=0,00 Σlín=20,00 resid=0,00 (s/c)
+  GAL-VISA GAL-VISA       2026-06  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.094.786,88 A=s/c Σaj=0,00 Σlín=3.379.238,92 resid=-2.284.452,04 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=59,96 resid=-44,97 (s/c)
+  5d948f9a BBVA-MASTER-BLK 2026-07  confirmado F9.163=ignora (a=109.635,37 b=0,00)
+      ARS: total=1.567.446,41 A=109.635,37 Σaj=-109.635,37 Σlín=1.567.446,41 resid=0,00 OK
+      USD: total=530,95 A=0,00 Σaj=0,00 Σlín=530,95 resid=0,00 OK
+  c7222865 BBVA-MASTER-BLK 2026-07  confirmado F9.163=ignora (a=33.035,55 b=0,00)
+      ARS: total=761.861,97 A=33.035,55 Σaj=-33.035,55 Σlín=761.861,97 resid=0,00 OK
+      USD: total=124,74 A=0,00 Σaj=0,00 Σlín=124,74 resid=0,00 OK
+  b553ddf1 BBVA-VISA-SIG  2026-07  confirmado F9.163=ignora (a=8.386,01 b=0,00)
+      ARS: total=2.751.363,32 A=8.386,01 Σaj=-8.386,01 Σlín=2.751.363,32 resid=0,00 OK
+      USD: total=18,99 A=0,00 Σaj=0,00 Σlín=18,99 resid=0,00 OK
+  f3e9e4f3 BBVA-VISA-SIG  2026-07  confirmado F9.163=ignora (a=8.460,49 b=-0,00)
+      ARS: total=4.313.337,28 A=8.460,49 Σaj=-8.460,49 Σlín=4.313.337,28 resid=0,00 OK
+      USD: total=1.983,64 A=0,00 Σaj=0,00 Σlín=1.983,64 resid=0,00 OK
+  17e51e81 GAL-MASTER-BLK 2026-07  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=228.208,53 A=s/c Σaj=0,00 Σlín=228.208,53 resid=0,00 (s/c)
+      USD: total=0,00 A=s/c Σaj=0,00 Σlín=0,00 resid=0,00 (s/c)
+  1a5eaf81 GAL-MASTER-BLK 2026-07  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=531.490,81 A=s/c Σaj=0,00 Σlín=531.490,81 resid=0,00 (s/c)
+      USD: total=20,00 A=s/c Σaj=0,00 Σlín=20,00 resid=0,00 (s/c)
+  f9dcc286 GAL-VISA       2026-07  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.118.426,80 A=s/c Σaj=0,00 Σlín=1.118.426,80 resid=0,00 (s/c)
+      USD: total=15,04 A=s/c Σaj=0,00 Σlín=15,04 resid=0,00 (s/c)
+  fc31ca48 GAL-VISA       2026-07  confirmado F9.163=sin_decidir · manuales=2
+      ARS: total=965.344,91 A=s/c Σaj=-11.885,26 Σlín=977.230,17 resid=0,00 (s/c)
+      USD: total=-14,99 A=s/c Σaj=0,00 Σlín=0,00 resid=-14,99 (s/c)
+  cba1d7be BBVA-MASTER-BLK 2026-08  confirmado F9.163=sin_decidir
+      ARS: total=534.471,55 A=s/c Σaj=-238.290,36 Σlín=772.761,91 resid=0,00 (s/c)
+      USD: total=91,44 A=s/c Σaj=0,00 Σlín=91,44 resid=0,00 (s/c)
+  08a697e0 BBVA-VISA-SIG  2026-08  confirmado F9.163=sin_decidir · manuales=1
+      ARS: total=1.403.821,10 A=s/c Σaj=-890.257,63 Σlín=1.956.994,73 resid=337.084,00 (s/c)
+      USD: total=73,55 A=s/c Σaj=0,00 Σlín=73,55 resid=0,00 (s/c)
+  879eb89a GAL-MASTER-BLK 2026-08  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=264.292,38 A=s/c Σaj=0,00 Σlín=264.292,38 resid=0,00 (s/c)
+      USD: total=0,00 A=s/c Σaj=0,00 Σlín=0,00 resid=0,00 (s/c)
+  f9d9b308 GAL-VISA       2026-08  confirmado F9.163=computa (a=0,00 b=0,00) · manuales=1
+      ARS: total=1.328.762,43 A=s/c Σaj=0,00 Σlín=1.328.762,43 resid=0,00 (s/c)
+      USD: total=-14,69 A=s/c Σaj=0,00 Σlín=0,30 resid=-14,99 (s/c)
+  2a0f81f8 GAL-VISA       2026-10  parseado   F9.163=computa (a=0,00 b=0,00) · manuales=1
+      ARS: total=751.813,57 A=0,00 Σaj=0,00 Σlín=751.813,57 resid=0,00 OK
+      USD: total=-14,40 A=-14,69 Σaj=0,00 Σlín=0,29 resid=0,00 OK
+
+  resúmenes: 31 · sin saldoAnterior*/pagosDelPeriodo* en alguna moneda: 26
+  con campos en ARS: 5 · la identidad cierra en 5
+  con campos en USD: 5 · la identidad cierra en 5
+  líneas noDebitado con incluir=false (cuentan igual, por el objetivo): 0
+  no cierran: ninguno
+  A de ARS lejos de 0 en resúmenes que no son 'ignora': ninguno
+  GATE §1: PASA — la identidad cierra en todos los que tienen los campos
+
+=== §0.2 Ítems esperados con tarjetaCodigo ===
+  10ef6a27 GAL-VISA       USD montoEsperado=0          activo=true
+  1a8c199f BBVA-VISA-SIG  ARS montoEsperado=1403821.1  activo=true
+  20f02d6d BBVA-VISA-SIG  USD montoEsperado=73.55      activo=true
+  292256d3 BBVA-MASTER-BLK USD montoEsperado=91.44      activo=true
+  7c02a5b7 GAL-VISA       ARS montoEsperado=1328762.43 activo=true
+  8b2a1e71 BBVA-MASTER-BLK ARS montoEsperado=534471.55  activo=true
+  acc1caba GAL-MASTER-BLK USD montoEsperado=0          activo=true
+  db9cbf89 GAL-MASTER-BLK ARS montoEsperado=264292.38  activo=true
+  total: 8 · con montoEsperado no nulo: 8 (GAL-VISA USD=0, BBVA-VISA-SIG ARS=1403821.1, BBVA-VISA-SIG USD=73.55, BBVA-MASTER-BLK USD=91.44, GAL-VISA ARS=1328762.43, BBVA-MASTER-BLK ARS=534471.55, GAL-MASTER-BLK USD=0, GAL-MASTER-BLK ARS=264292.38)
+  ítems USD de tarjeta con montoEsperado no nulo: 4 — con un total en 0, montoConf 0 < montoEsperado·0,99 solo si montoEsperado > 0
+
+=== §0.3 Movimientos-total USD de los resúmenes confirmados con objetivo USD <= 0 ===
+  GAL-VISA GAL-VISA       periodo=2025-05 objetivoUSD=-6,88 · movimientos del resumen: 50 · totales USD: 1
+      mov HIS_d5b7 monto=-6.88 pagado=false confirmadoPago=(ausente) pagadoEn=(ausente) itemEsperadoId=- mes=2025-05 creadoEn=2026-04-20 14:03:55
+      calcularChecklist(2025-05) → ítem (no encontrado): —
+  17e51e81 GAL-MASTER-BLK periodo=2026-07 objetivoUSD=0,00 · movimientos del resumen: 6 · totales USD: 1
+      mov 5dW83MeT monto=0 pagado=true confirmadoPago=true pagadoEn=(ausente) itemEsperadoId=acc1caba mes=2026-08 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-08) → ítem GAL-MASTER-BLK USD: pagado (matches: 1)
+  fc31ca48 GAL-VISA       periodo=2026-07 objetivoUSD=-14,99 · movimientos del resumen: 51 · totales USD: 1
+      mov h6nKGGC7 monto=0 pagado=true confirmadoPago=true pagadoEn=(ausente) itemEsperadoId=10ef6a27 mes=2026-08 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-08) → ítem GAL-VISA USD: pagado (matches: 1)
+  879eb89a GAL-MASTER-BLK periodo=2026-08 objetivoUSD=0,00 · movimientos del resumen: 5 · totales USD: 1
+      mov yHbWlcjR monto=0 pagado=true confirmadoPago=true pagadoEn=2026-09-16 13:32:41 itemEsperadoId=acc1caba mes=2026-09 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-09) → ítem GAL-MASTER-BLK USD: pagado (matches: 1)
+  f9d9b308 GAL-VISA       periodo=2026-08 objetivoUSD=-14,69 · movimientos del resumen: 69 · totales USD: 1
+      mov faJZWFOF monto=0 pagado=true confirmadoPago=true pagadoEn=2026-09-16 13:32:33 itemEsperadoId=10ef6a27 mes=2026-09 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-09) → ítem GAL-VISA USD: pagado (matches: 1)
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN COMPLETA, después del código: §0 de nuevo + §1 + §3
+
+  npx tsx scripts/verificarF9180.ts --fixture <scratchpad>/lote-2a0f81f8.json
+  (el §0.3 de acá nombra el ítem que reclama cada total en el checklist; el de arriba buscaba solo
+  por itemEsperadoId. Los datos son los mismos.)
+════════════════════════════════════════════════════════════════════════════════
+
+F9.180 — Saldo a favor en el resumen de tarjeta: verificación
+corrido: 2026-10-05 16:58:24 (AR) · viejo = 8834356 (git) · nuevo = árbol de trabajo · SOLO LECTURA (commit() simulado)
+modo: §0 + §1 + §3
+
+=== §0.1 Identidad: total == saldoAnterior + pagosDelPeriodo + Σ ajustes(pdf) + Σ líneas incluidas ===
+tolerancia: ARS 1 · USD 0.01 · líneas con el signo de tipoDeLinea (las no debitadas cuentan: están en el total del PDF)
+A = saldoAnterior + pagosDelPeriodo · resid = total − (A + Σaj + Σlín) · "s/c" = sin campos, A tomado como 0 solo para mostrar
+
+  GAL-VISA GAL-VISA       2025-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.439.062,19 A=s/c Σaj=0,00 Σlín=1.433.822,19 resid=5.240,00 (s/c)
+      USD: total=-6,88 A=s/c Σaj=0,00 Σlín=0,00 resid=-6,88 (s/c)
+  BBVA-VIS BBVA-VISA-SIG  2025-12  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=3.737.693,68 A=s/c Σaj=0,00 Σlín=1.693.966,27 resid=2.043.727,41 (s/c)
+      USD: total=4.672,77 A=s/c Σaj=0,00 Σlín=4.672,41 resid=0,36 (s/c)
+  GAL-VISA GAL-VISA       2025-12  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=560.402,36 A=s/c Σaj=0,00 Σlín=937.144,00 resid=-376.741,64 (s/c)
+      USD: total=158,54 A=s/c Σaj=0,00 Σlín=317,08 resid=-158,54 (s/c)
+  GAL-VISA GAL-VISA       2026-01  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.068.362,15 A=s/c Σaj=0,00 Σlín=2.067.802,56 resid=-999.440,41 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=29,98 resid=-14,99 (s/c)
+  GAL-VISA GAL-VISA       2026-02  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=673.904,26 A=s/c Σaj=0,00 Σlín=604.345,14 resid=69.559,12 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=14,99 resid=0,00 (s/c)
+  GAL-VISA GAL-VISA       2026-03  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=965.433,19 A=s/c Σaj=0,00 Σlín=441.205,85 resid=524.227,34 (s/c)
+      USD: total=906,54 A=s/c Σaj=0,00 Σlín=906,54 resid=0,00 (s/c)
+  BBVA-MAS BBVA-MASTER-BLK 2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=609.948,08 A=s/c Σaj=0,00 Σlín=755.420,61 resid=-145.472,53 (s/c)
+      USD: total=20,97 A=s/c Σaj=0,00 Σlín=20,97 resid=0,00 (s/c)
+  BBVA-VIS BBVA-VISA-SIG  2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=2.076.697,11 A=s/c Σaj=0,00 Σlín=2.058.740,78 resid=17.956,33 (s/c)
+      USD: total=19,76 A=s/c Σaj=0,00 Σlín=19,76 resid=0,00 (s/c)
+  GAL-MAST GAL-MASTER-BLK 2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=424.627,92 A=s/c Σaj=0,00 Σlín=1.697.734,76 resid=-1.273.106,84 (s/c)
+      USD: total=0,94 A=s/c Σaj=0,00 Σlín=3,76 resid=-2,82 (s/c)
+  GAL-VISA GAL-VISA       2026-04  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=2.454.132,24 A=s/c Σaj=0,00 Σlín=5.357.331,53 resid=-2.903.199,29 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=29,98 resid=-14,99 (s/c)
+  BBVA-MAS BBVA-MASTER-BLK 2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=427.274,27 A=s/c Σaj=0,00 Σlín=374.080,54 resid=53.193,73 (s/c)
+      USD: total=22,99 A=s/c Σaj=0,00 Σlín=17,99 resid=5,00 (s/c)
+  68c7a1ea BBVA-VISA-SIG  2026-05  confirmado F9.163=sin_decidir · manuales=1
+      ARS: total=1.720.234,78 A=s/c Σaj=-14.477,16 Σlín=1.393.779,94 resid=340.932,00 (s/c)
+      USD: total=19,79 A=s/c Σaj=0,00 Σlín=19,79 resid=0,00 (s/c)
+  BBVA-VIS BBVA-VISA-SIG  2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=2.018.435,94 A=s/c Σaj=0,00 Σlín=1.905.890,42 resid=112.545,52 (s/c)
+      USD: total=34,68 A=s/c Σaj=0,00 Σlín=34,68 resid=0,00 (s/c)
+  GAL-MAST GAL-MASTER-BLK 2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.084.566,80 A=s/c Σaj=0,00 Σlín=837.107,05 resid=247.459,75 (s/c)
+      USD: total=4,96 A=s/c Σaj=0,00 Σlín=4,96 resid=0,00 (s/c)
+  GAL-VISA GAL-VISA       2026-05  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.403.704,23 A=s/c Σaj=0,00 Σlín=1.155.257,23 resid=248.447,00 (s/c)
+      USD: total=49,99 A=s/c Σaj=0,00 Σlín=44,99 resid=5,00 (s/c)
+  BBVA-MAS BBVA-MASTER-BLK 2026-06  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.160.758,61 A=s/c Σaj=0,00 Σlín=927.977,80 resid=232.780,81 (s/c)
+      USD: total=77,96 A=s/c Σaj=0,00 Σlín=77,96 resid=0,00 (s/c)
+  GAL-MAST GAL-MASTER-BLK 2026-06  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=802.989,99 A=s/c Σaj=0,00 Σlín=590.071,77 resid=212.918,22 (s/c)
+      USD: total=20,00 A=s/c Σaj=0,00 Σlín=20,00 resid=0,00 (s/c)
+  GAL-VISA GAL-VISA       2026-06  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.094.786,88 A=s/c Σaj=0,00 Σlín=3.379.238,92 resid=-2.284.452,04 (s/c)
+      USD: total=14,99 A=s/c Σaj=0,00 Σlín=59,96 resid=-44,97 (s/c)
+  5d948f9a BBVA-MASTER-BLK 2026-07  confirmado F9.163=ignora (a=109.635,37 b=0,00)
+      ARS: total=1.567.446,41 A=109.635,37 Σaj=-109.635,37 Σlín=1.567.446,41 resid=0,00 OK
+      USD: total=530,95 A=0,00 Σaj=0,00 Σlín=530,95 resid=0,00 OK
+  c7222865 BBVA-MASTER-BLK 2026-07  confirmado F9.163=ignora (a=33.035,55 b=0,00)
+      ARS: total=761.861,97 A=33.035,55 Σaj=-33.035,55 Σlín=761.861,97 resid=0,00 OK
+      USD: total=124,74 A=0,00 Σaj=0,00 Σlín=124,74 resid=0,00 OK
+  b553ddf1 BBVA-VISA-SIG  2026-07  confirmado F9.163=ignora (a=8.386,01 b=0,00)
+      ARS: total=2.751.363,32 A=8.386,01 Σaj=-8.386,01 Σlín=2.751.363,32 resid=0,00 OK
+      USD: total=18,99 A=0,00 Σaj=0,00 Σlín=18,99 resid=0,00 OK
+  f3e9e4f3 BBVA-VISA-SIG  2026-07  confirmado F9.163=ignora (a=8.460,49 b=-0,00)
+      ARS: total=4.313.337,28 A=8.460,49 Σaj=-8.460,49 Σlín=4.313.337,28 resid=0,00 OK
+      USD: total=1.983,64 A=0,00 Σaj=0,00 Σlín=1.983,64 resid=0,00 OK
+  17e51e81 GAL-MASTER-BLK 2026-07  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=228.208,53 A=s/c Σaj=0,00 Σlín=228.208,53 resid=0,00 (s/c)
+      USD: total=0,00 A=s/c Σaj=0,00 Σlín=0,00 resid=0,00 (s/c)
+  1a5eaf81 GAL-MASTER-BLK 2026-07  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=531.490,81 A=s/c Σaj=0,00 Σlín=531.490,81 resid=0,00 (s/c)
+      USD: total=20,00 A=s/c Σaj=0,00 Σlín=20,00 resid=0,00 (s/c)
+  f9dcc286 GAL-VISA       2026-07  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=1.118.426,80 A=s/c Σaj=0,00 Σlín=1.118.426,80 resid=0,00 (s/c)
+      USD: total=15,04 A=s/c Σaj=0,00 Σlín=15,04 resid=0,00 (s/c)
+  fc31ca48 GAL-VISA       2026-07  confirmado F9.163=sin_decidir · manuales=2
+      ARS: total=965.344,91 A=s/c Σaj=-11.885,26 Σlín=977.230,17 resid=0,00 (s/c)
+      USD: total=-14,99 A=s/c Σaj=0,00 Σlín=0,00 resid=-14,99 (s/c)
+  cba1d7be BBVA-MASTER-BLK 2026-08  confirmado F9.163=sin_decidir
+      ARS: total=534.471,55 A=s/c Σaj=-238.290,36 Σlín=772.761,91 resid=0,00 (s/c)
+      USD: total=91,44 A=s/c Σaj=0,00 Σlín=91,44 resid=0,00 (s/c)
+  08a697e0 BBVA-VISA-SIG  2026-08  confirmado F9.163=sin_decidir · manuales=1
+      ARS: total=1.403.821,10 A=s/c Σaj=-890.257,63 Σlín=1.956.994,73 resid=337.084,00 (s/c)
+      USD: total=73,55 A=s/c Σaj=0,00 Σlín=73,55 resid=0,00 (s/c)
+  879eb89a GAL-MASTER-BLK 2026-08  confirmado F9.163=computa (a=0,00 b=0,00)
+      ARS: total=264.292,38 A=s/c Σaj=0,00 Σlín=264.292,38 resid=0,00 (s/c)
+      USD: total=0,00 A=s/c Σaj=0,00 Σlín=0,00 resid=0,00 (s/c)
+  f9d9b308 GAL-VISA       2026-08  confirmado F9.163=computa (a=0,00 b=0,00) · manuales=1
+      ARS: total=1.328.762,43 A=s/c Σaj=0,00 Σlín=1.328.762,43 resid=0,00 (s/c)
+      USD: total=-14,69 A=s/c Σaj=0,00 Σlín=0,30 resid=-14,99 (s/c)
+  2a0f81f8 GAL-VISA       2026-10  parseado   F9.163=computa (a=0,00 b=0,00) · manuales=1
+      ARS: total=751.813,57 A=0,00 Σaj=0,00 Σlín=751.813,57 resid=0,00 OK
+      USD: total=-14,40 A=-14,69 Σaj=0,00 Σlín=0,29 resid=0,00 OK
+
+  resúmenes: 31 · sin saldoAnterior*/pagosDelPeriodo* en alguna moneda: 26
+  con campos en ARS: 5 · la identidad cierra en 5
+  con campos en USD: 5 · la identidad cierra en 5
+  líneas noDebitado con incluir=false (cuentan igual, por el objetivo): 0
+  no cierran: ninguno
+  A de ARS lejos de 0 en resúmenes que no son 'ignora': ninguno
+  GATE §1: PASA — la identidad cierra en todos los que tienen los campos
+
+=== §0.2 Ítems esperados con tarjetaCodigo ===
+  10ef6a27 GAL-VISA       USD montoEsperado=0          activo=true
+  1a8c199f BBVA-VISA-SIG  ARS montoEsperado=1403821.1  activo=true
+  20f02d6d BBVA-VISA-SIG  USD montoEsperado=73.55      activo=true
+  292256d3 BBVA-MASTER-BLK USD montoEsperado=91.44      activo=true
+  7c02a5b7 GAL-VISA       ARS montoEsperado=1328762.43 activo=true
+  8b2a1e71 BBVA-MASTER-BLK ARS montoEsperado=534471.55  activo=true
+  acc1caba GAL-MASTER-BLK USD montoEsperado=0          activo=true
+  db9cbf89 GAL-MASTER-BLK ARS montoEsperado=264292.38  activo=true
+  total: 8 · con montoEsperado no nulo: 8 (GAL-VISA USD=0, BBVA-VISA-SIG ARS=1403821.1, BBVA-VISA-SIG USD=73.55, BBVA-MASTER-BLK USD=91.44, GAL-VISA ARS=1328762.43, BBVA-MASTER-BLK ARS=534471.55, GAL-MASTER-BLK USD=0, GAL-MASTER-BLK ARS=264292.38)
+  ítems USD de tarjeta con montoEsperado no nulo: 4 — con un total en 0, montoConf 0 < montoEsperado·0,99 solo si montoEsperado > 0
+
+=== §0.3 Movimientos-total USD de los resúmenes confirmados con objetivo USD <= 0 ===
+  GAL-VISA GAL-VISA       periodo=2025-05 objetivoUSD=-6,88 · movimientos del resumen: 50 · totales USD: 1
+      mov HIS_d5b7 monto=-6.88 pagado=false confirmadoPago=(ausente) pagadoEn=(ausente) itemEsperadoId=- mes=2025-05 creadoEn=2026-04-20 14:03:55
+      calcularChecklist(2025-05) → ítem GAL-VISA USD: pagado (matches: 1)
+  17e51e81 GAL-MASTER-BLK periodo=2026-07 objetivoUSD=0,00 · movimientos del resumen: 6 · totales USD: 1
+      mov 5dW83MeT monto=0 pagado=true confirmadoPago=true pagadoEn=(ausente) itemEsperadoId=acc1caba mes=2026-08 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-08) → ítem GAL-MASTER-BLK USD: pagado (matches: 1)
+  fc31ca48 GAL-VISA       periodo=2026-07 objetivoUSD=-14,99 · movimientos del resumen: 51 · totales USD: 1
+      mov h6nKGGC7 monto=0 pagado=true confirmadoPago=true pagadoEn=(ausente) itemEsperadoId=10ef6a27 mes=2026-08 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-08) → ítem GAL-VISA USD: pagado (matches: 1)
+  879eb89a GAL-MASTER-BLK periodo=2026-08 objetivoUSD=0,00 · movimientos del resumen: 5 · totales USD: 1
+      mov yHbWlcjR monto=0 pagado=true confirmadoPago=true pagadoEn=2026-09-16 13:32:41 itemEsperadoId=acc1caba mes=2026-09 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-09) → ítem GAL-MASTER-BLK USD: pagado (matches: 1)
+  f9d9b308 GAL-VISA       periodo=2026-08 objetivoUSD=-14,69 · movimientos del resumen: 69 · totales USD: 1
+      mov faJZWFOF monto=0 pagado=true confirmadoPago=true pagadoEn=2026-09-16 13:32:33 itemEsperadoId=10ef6a27 mes=2026-09 creadoEn=2026-09-05 12:28:02
+      calcularChecklist(2026-09) → ítem GAL-VISA USD: pagado (matches: 1)
+
+=== §1 calcularCuadre viejo (base) vs nuevo (árbol), sobre lo guardado (líneas y ajustes, incluidos los manuales) ===
+  68c7a1ea BBVA-VISA-SIG  2026-05 confirmado F9.163=sin_decidir
+      ARS: viejo objetivo=1.720.234,78 suma=1.720.234,78 diff=0,00 balance=true  →  nuevo objetivo=1.720.234,78 suma=1.720.234,78 diff=0,00 balance=true
+      USD: viejo objetivo=19,79 suma=19,79 diff=0,00 balance=true  →  nuevo objetivo=19,79 suma=19,79 diff=0,00 balance=true
+  fc31ca48 GAL-VISA       2026-07 confirmado F9.163=sin_decidir
+      ARS: viejo objetivo=965.344,91 suma=965.344,91 diff=0,00 balance=true  →  nuevo objetivo=965.344,91 suma=965.344,91 diff=0,00 balance=true
+      USD: viejo objetivo=-14,99 suma=-14,99 diff=0,00 balance=true  →  nuevo objetivo=-14,99 suma=-14,99 diff=0,00 balance=true
+  cba1d7be BBVA-MASTER-BLK 2026-08 confirmado F9.163=sin_decidir
+      ARS: viejo objetivo=534.471,55 suma=534.471,55 diff=0,00 balance=true  →  nuevo objetivo=534.471,55 suma=534.471,55 diff=0,00 balance=true
+      USD: viejo objetivo=91,44 suma=91,44 diff=0,00 balance=true  →  nuevo objetivo=91,44 suma=91,44 diff=0,00 balance=true
+  08a697e0 BBVA-VISA-SIG  2026-08 confirmado F9.163=sin_decidir
+      ARS: viejo objetivo=1.403.821,10 suma=1.403.821,10 diff=0,00 balance=true  →  nuevo objetivo=1.403.821,10 suma=1.403.821,10 diff=0,00 balance=true
+      USD: viejo objetivo=73,55 suma=73,55 diff=0,00 balance=true  →  nuevo objetivo=73,55 suma=73,55 diff=0,00 balance=true
+  2a0f81f8 GAL-VISA       2026-10 parseado   F9.163=computa · CAMBIA
+      ARS: viejo objetivo=751.813,57 suma=751.663,61 diff=149,96 balance=false  →  nuevo objetivo=751.813,57 suma=751.663,61 diff=149,96 balance=false
+      USD: viejo objetivo=-14,40 suma=-14,40 diff=0,00 balance=true  →  nuevo objetivo=0,29 suma=-14,40 diff=14,69 balance=false
+  cambian de balance: 1 · confirmados que pasan de cuadrar a no cuadrar: 0 (esperado 0) OK
+
+  esperado: 2a0f81f8 con el reverso tildado (lo guardado) y SIN el ajuste manual, cuadre nuevo:
+      ARS objetivo=751.813,57 suma=751.813,57 diff=0,00 balance=true
+      USD objetivo=0,29 suma=0,29 diff=0,00 balance=true
+      → cuadra en las dos monedas con diff 0 OK
+
+=== §3 Confirmar 2a0f81f8 HOY (antes del vencimiento), sin el ajuste manual, y el checklist de 2026-10 ===
+  código viejo: cortó antes del commit — Cuadre fallido (USD dif $14.69) — revisá las líneas antes de confirmar
+  código nuevo: commit alcanzado · 45 create + 1 update + 0 delete
+      total ARS: monto=751813.57 pagado=true confirmadoPago=false pagadoEn=(no se escribe) mes=2026-10 itemEsperadoId=7c02a5b7
+      total USD: monto=0 pagado=true confirmadoPago=true pagadoEn=serverTimestamp() mes=2026-10 itemEsperadoId=10ef6a27
+      invariante F9.140 (confirmadoPago ⇒ pagado) en los 45 creates: OK
+  checklist 2026-10 · ítem GAL-VISA ARS (7c02a5b7, montoEsperado=1328762.43): por_confirmar · matches: nuevo-44 ARS 751813.57 conf=false
+  checklist 2026-10 · ítem GAL-VISA USD (10ef6a27, montoEsperado=0): pagado · matches: nuevo-45 USD 0 conf=true
+  → ítem USD de GAL-VISA en 2026-10: pagado (esperado: pagado) OK
+
+  estadoItem viejo vs nuevo sobre los movimientos reales (sin simular nada), ítems de tarjeta:
+    2026-07 GAL-VISA       USD montoEsperado=0          confirmado=15,04 → viejo pagado / nuevo pagado
+    2026-07 BBVA-VISA-SIG  ARS montoEsperado=1403821.1  confirmado=2.751.363,32 → viejo pagado / nuevo pagado
+    2026-07 BBVA-VISA-SIG  USD montoEsperado=73.55      confirmado=18,99 → viejo parcial / nuevo pagado · CAMBIA
+    2026-07 BBVA-MASTER-BLK USD montoEsperado=91.44      confirmado=124,74 → viejo pagado / nuevo pagado
+    2026-07 GAL-VISA       ARS montoEsperado=1328762.43 confirmado=1.118.426,80 → viejo parcial / nuevo pagado · CAMBIA
+    2026-07 BBVA-MASTER-BLK ARS montoEsperado=534471.55  confirmado=761.861,97 → viejo pagado / nuevo pagado
+    2026-07 GAL-MASTER-BLK USD montoEsperado=0          confirmado=20,00 → viejo pagado / nuevo pagado
+    2026-07 GAL-MASTER-BLK ARS montoEsperado=264292.38  confirmado=531.490,81 → viejo pagado / nuevo pagado
+    2026-08 GAL-VISA       USD montoEsperado=0          confirmado=0,00 → viejo pagado / nuevo pagado
+    2026-08 BBVA-VISA-SIG  ARS montoEsperado=1403821.1  confirmado=4.313.337,28 → viejo pagado / nuevo pagado
+    2026-08 BBVA-VISA-SIG  USD montoEsperado=73.55      confirmado=1.983,64 → viejo pagado / nuevo pagado
+    2026-08 BBVA-MASTER-BLK USD montoEsperado=91.44      confirmado=530,95 → viejo pagado / nuevo pagado
+    2026-08 GAL-VISA       ARS montoEsperado=1328762.43 confirmado=965.344,91 → viejo parcial / nuevo pagado · CAMBIA
+    2026-08 BBVA-MASTER-BLK ARS montoEsperado=534471.55  confirmado=1.567.446,41 → viejo pagado / nuevo pagado
+    2026-08 GAL-MASTER-BLK USD montoEsperado=0          confirmado=0,00 → viejo pagado / nuevo pagado
+    2026-08 GAL-MASTER-BLK ARS montoEsperado=264292.38  confirmado=228.208,53 → viejo parcial / nuevo pagado · CAMBIA
+    2026-09 GAL-VISA       USD montoEsperado=0          confirmado=0,00 → viejo pagado / nuevo pagado
+    2026-09 BBVA-VISA-SIG  ARS montoEsperado=1403821.1  confirmado=1.403.821,10 → viejo pagado / nuevo pagado
+    2026-09 BBVA-VISA-SIG  USD montoEsperado=73.55      confirmado=73,55 → viejo pagado / nuevo pagado
+    2026-09 BBVA-MASTER-BLK USD montoEsperado=91.44      confirmado=91,44 → viejo pagado / nuevo pagado
+    2026-09 GAL-VISA       ARS montoEsperado=1328762.43 confirmado=1.328.762,43 → viejo pagado / nuevo pagado
+    2026-09 BBVA-MASTER-BLK ARS montoEsperado=534471.55  confirmado=534.471,55 → viejo pagado / nuevo pagado
+    2026-09 GAL-MASTER-BLK USD montoEsperado=0          confirmado=0,00 → viejo pagado / nuevo pagado
+    2026-09 GAL-MASTER-BLK ARS montoEsperado=264292.38  confirmado=264.292,38 → viejo pagado / nuevo pagado
+    2026-10 GAL-VISA       USD montoEsperado=0          confirmado=0,00 → viejo pendiente / nuevo pendiente
+    2026-10 BBVA-VISA-SIG  ARS montoEsperado=1403821.1  confirmado=0,00 → viejo pendiente / nuevo pendiente
+    2026-10 BBVA-VISA-SIG  USD montoEsperado=73.55      confirmado=0,00 → viejo pendiente / nuevo pendiente
+    2026-10 BBVA-MASTER-BLK USD montoEsperado=91.44      confirmado=0,00 → viejo pendiente / nuevo pendiente
+    2026-10 GAL-VISA       ARS montoEsperado=1328762.43 confirmado=0,00 → viejo pendiente / nuevo pendiente
+    2026-10 BBVA-MASTER-BLK ARS montoEsperado=534471.55  confirmado=0,00 → viejo pendiente / nuevo pendiente
+    2026-10 GAL-MASTER-BLK USD montoEsperado=0          confirmado=0,00 → viejo pendiente / nuevo pendiente
+    2026-10 GAL-MASTER-BLK ARS montoEsperado=264292.38  confirmado=0,00 → viejo pendiente / nuevo pendiente
+    ítems de tarjeta que cambian de estado: 4
+
+  fixture del batch → <scratchpad>/lote-2a0f81f8.json (46 ops; no se commitea: tiene descripciones reales)
+
+════════════════════════════════════════════════════════════════════════════════
+§2 — TEST DE REGLAS EN EL EMULADOR (rules-unit-testing)
+
+  npx firebase emulators:exec --only firestore --project demo-f9180 \
+    "npx tsx scripts/testReglasF9180.ts <scratchpad>/lote-2a0f81f8.json"
+
+  Las líneas "@firebase/firestore … PERMISSION_DENIED" son el log del SDK en cada rechazo, con el
+  diagnóstico del emulador (L57 = allow create de movimientos en las reglas nuevas, L55 en las
+  viejas). Recortadas a 220 caracteres.
+════════════════════════════════════════════════════════════════════════════════
+
+i  emulators: Starting emulators: firestore
+i  emulators: Detected demo project ID "demo-f9180", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+i  firestore: Firestore Emulator logging to firestore-debug.log
++  firestore: Firestore Emulator was started in standard edition.
++  firestore: Firestore Emulator UI websocket is running on 9150.
+i  Running script: npx tsx scripts/testReglasF9180.ts <scratchpad>/lote-2a0f81f8.json
+F9.180 §2 — firestore.rules en el emulador (rules-unit-testing)
+emulador: 127.0.0.1:8080 · proyecto demo-f9180 · batch real: 46 ops de 2a0f81f8
+
+=== Reglas VIEJAS (8834356) ===
+[2026-10-05T19:59:12.239Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e923f error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L55:24 for 'create' @ L55, evaluation error at L69:24 for 'update' @ L69, false for 'create' @ L55
+  OK   admin + total en 0: esperado RECHAZA → RECHAZA
+  OK   admin + línea normal monto > 0: esperado OK → OK
+[2026-10-05T19:59:13.081Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e9240 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L55:24 for 'create' @ L55, evaluation error at L69:24 for 'update' @ L69, evaluation error at L55:24 for 'create' @ L55, evaluation error at L69:24 for 'update' @ L69, evaluation error at L55:24 for ' … (recortado: 5133 caracteres)
+  OK   batch real de 2a0f81f8 (46 ops): esperado RECHAZA → RECHAZA
+
+=== Reglas NUEVAS (árbol de trabajo) ===
+  OK   1. admin + total en 0: esperado OK → OK
+[2026-10-05T19:59:13.418Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e9242 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L57:24 for 'create' @ L57, evaluation error at L76:24 for 'update' @ L76, false for 'create' @ L57
+  OK   2. admin + monto 0 con resumenTarjetaId null: esperado RECHAZA → RECHAZA
+[2026-10-05T19:59:13.440Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e9243 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L57:24 for 'create' @ L57, evaluation error at L76:24 for 'update' @ L76, Property resumenTarjetaId is undefined on object. for 'create' @ L57
+  OK   2. admin + monto 0 sin resumenTarjetaId (campo ausente): esperado RECHAZA → RECHAZA
+[2026-10-05T19:59:13.486Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e9244 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L57:24 for 'create' @ L57, evaluation error at L76:24 for 'update' @ L76, false for 'create' @ L57
+  OK   3. miembro no admin + total en 0 (persona y creadoPor propios): esperado RECHAZA → RECHAZA
+  OK      control de 3: el mismo miembro con monto 10: esperado OK → OK
+[2026-10-05T19:59:13.545Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e9246 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L57:24 for 'create' @ L57, evaluation error at L76:24 for 'update' @ L76, false for 'create' @ L57
+  OK   4. admin + monto negativo (−14,40): esperado RECHAZA → RECHAZA
+  OK   5. admin + línea normal monto > 0: esperado OK → OK
+[2026-10-05T19:59:13.582Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e9247 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L57:24 for 'create' @ L57, evaluation error at L76:24 for 'update' @ L76, false for 'create' @ L57
+  OK      control: admin + monto 0 con categoría distinta de Tarjetas: esperado RECHAZA → RECHAZA
+[2026-10-05T19:59:13.602Z]  @firebase/firestore: Firestore (10.14.1): GrpcConnection RPC 'Write' stream 0x2f4e9248 error. Code: 7 Message: 7 PERMISSION_DENIED: 
+evaluation error at L57:24 for 'create' @ L57, evaluation error at L76:24 for 'update' @ L76, false for 'create' @ L57
+  OK      control: admin + monto 0 con excluirDash false: esperado RECHAZA → RECHAZA
+  OK   batch real de 2a0f81f8 (46 ops): esperado OK → OK
+
+resultado: 13 OK, 0 FALLA — todo en verde
++  Script exited successfully (code 0)
+i  emulators: Shutting down emulators.
+i  firestore: Stopping Firestore Emulator
+!  Firestore Emulator has exited upon receiving signal: SIGINT
+i  hub: Stopping emulator hub
+i  logging: Stopping Logging Emulator
+
+════════════════════════════════════════════════════════════════════════════════
+§4 — DRY-RUN
+
+  npx tsx scripts/ejecutarF9180s4.ts
+════════════════════════════════════════════════════════════════════════════════
+
+F9.180 §4 — dry-run (sin --aplicar: no escribe nada)
+
+resumen 2a0f81f8 · GAL-VISA 2026-10 · estado=parseado · líneas=43 (incluir=43) · reverso 149,96 tildado: sí
+
+--- ANTES ---
+  ajustesConsolidado: 1
+    [0] origen=manual ARS=-149.96 USD=-14.69 creadoPor=Juan creadoEn=2026-10-05 13:09:54 concepto="Ajuste manual: dolares que estan en negativo"
+  cuadre ARS: objetivo=751.813,57 suma=751.663,61 diff=149,96 balance=false
+  cuadre USD: objetivo=0,29 (neto -14,40 − arrastre -14,69) suma=-14,40 diff=14,69 balance=false
+
+--- DESPUÉS (sin el ajuste [0]) ---
+  ajustesConsolidado: 0
+  cuadre ARS: objetivo=751.813,57 suma=751.813,57 diff=0,00 balance=true
+  cuadre USD: objetivo=0,29 (neto -14,40 − arrastre -14,69) suma=0,29 diff=0,00 balance=true
+
+  el después cuadra en las dos monedas: sí
+
+(dry-run: no se escribió nada. Para escribir, después del deploy: --aplicar)
+
+════════════════════════════════════════════════════════════════════════════════
+QUÉ CAMBIÓ
+════════════════════════════════════════════════════════════════════════════════
+
+  §1  src/datos/resumenesTarjeta.ts
+      · totalesNetos(lineas, totalARS, totalUSD, consolidado?) devuelve además neto* (total −
+        noDebitado), arrastre* (A, en 0 si faltan los dos campos de esa moneda) y objetivo* = neto −
+        arrastre. Sigue siendo la única fuente: la usan el cuadre, el movimiento-total y el banner.
+      · calcularCuadre: los ajustes entran siempre, cuadra contra el objetivo con arrastre, y
+        decidirAjustesConsolidado queda como diagnóstico (decisionAjustes) para el banner.
+      · confirmarResumenTarjeta: el movimiento-total sale por neto* (total − noDebitado), NO por el
+        objetivo. El arrastre explica el total, no lo cambia.
+      src/datos/ajusteConsolidado.ts: ConsolidadoResumen suma saldoAnteriorUSD/pagosDelPeriodoUSD
+      (solo el tipo). ajustesComputables queda exportada y sin uso, con nota.
+      src/vistas/ResumenesTarjeta.tsx: el arrastre va en el bloque del neto ("saldo anterior a
+      favor U$S −14,69 — las líneas del mes tienen que dar U$S 0,29").
+
+  §2  firestore.rules:62-68: la condición del prompt, textual, más un comentario de dos líneas.
+      Comentarios corregidos con los números nuevos: resumenesTarjeta.ts (delete :80, update :76,
+      monto :62-68, y la nota de F9.167 §1 dice que la segunda barrera se levantó para los totales),
+      ResumenesTarjeta.tsx (:80), comprobantes.ts y Comprobantes.tsx (update de comprobantes: :106).
+
+  §3  docs/CLAUDE.md, ANTES del código (commit e68828c): "Un total de resumen en 0 está saldado
+      por el propio resumen…", más la excepción anotada en "Ciclo factura → obligación → pago".
+      confirmarResumenTarjeta: el total con monto 0 se escribe con confirmadoPago: true y
+      pagadoEn: serverTimestamp(). Con monto > 0 no cambia nada.
+      checklist.ts (estadoItem): si todos los confirmados son totales de resumen (resumenTarjetaId
+      + categoria 'Tarjetas'), no se compara contra montoEsperado. La definición de "parcial" en
+      docs/CLAUDE.md quedó actualizada.
+
+  §4  scripts/ejecutarF9180s4.ts: dry-run por defecto; con --aplicar escribe en una transacción y
+      solo si el array no cambió desde la lectura. Aborta si no encuentra exactamente 1 ajuste, o
+      si el después no cuadra.
+
+  Scripts: verificarF9180.ts (§0, §1, §3 y el fixture del emulador) y testReglasF9180.ts (§2). La
+  reconstrucción de F9.179-pre se movió a scripts/simConfirmarResumen.ts: carga el código viejo
+  (de git) y el nuevo lado a lado.
+
+════════════════════════════════════════════════════════════════════════════════
+DECISIONES Y DESVÍOS
+════════════════════════════════════════════════════════════════════════════════
+
+  1. @firebase/rules-unit-testing no estaba instalado. Entró como devDependency exacta 3.0.4, la
+     última que acepta firebase ^10. npm reordenó alfabéticamente "dependencies" (pdfmake) y en el
+     lock sumó 4 paquetes, sin cambiar ninguna versión.
+  2. Banner: la línea de cada moneda se muestra con total != 0 (antes > 0), para que el USD de un
+     mes con saldo a favor se vea y se pueda cuadrar.
+  3. Bloque "ignora" del banner: decía "el ajuste no entra", y desde §1 sí entra (lo compensa el
+     arrastre). Texto nuevo: "es del período anterior… en el cuadre se compensa con ese saldo".
+  4. Test de §2: además de los 5 casos, 3 de control y el batch real de 2a0f81f8. El caso 3 usa
+     persona y creadoPor propios del miembro, así lo único que falla es la excepción de monto 0, y
+     el control con monto 10 lo prueba.
+  5. Verificación de §3: también se midió estadoItem viejo contra nuevo en 2026-07..10 sobre los
+     datos reales. Cambian 4 ítems, todos de "parcial" a "pagado", por desfasaje del montoEsperado
+     (el total de 2026-08 comparado contra otro mes).
+
+════════════════════════════════════════════════════════════════════════════════
+PARA DECIDIR (fuera de alcance, no se tocó)
+════════════════════════════════════════════════════════════════════════════════
+
+  1. agregarAjusteCuadreManual (resumenesTarjeta.ts:773-775) calcula el residuo contra
+     resumen.total*, no contra el objetivo del cuadre. Con §1, en un resumen con arrastre que no
+     cuadre, "Cerrar diferencia" vuelve a meter el arrastre. Ejemplo con los números de 2a0f81f8:
+     si el reverso se destilda, el residuo USD sale −14,40 − 0,29 = −14,69, y eso sobra porque el
+     objetivo ya lo descuenta: el USD queda roto, sin forma de sacar el ajuste desde la UI. Es la
+     misma raíz que el pendiente anotado de las dos monedas juntas, y hoy afecta a GAL-VISA
+     mientras arrastre saldo a favor.
+  2. El total USD del seed de GAL-VISA 2025-05 está en −6,88 con pagado false. Es histórico y no se
+     tocó.
+
+════════════════════════════════════════════════════════════════════════════════
+DEPLOY Y ORDEN (lo hace Juan)
+════════════════════════════════════════════════════════════════════════════════
+
+  npm run build
+  firebase deploy --only firestore:rules,hosting          (sin cambios en functions)
+
+  Después del deploy:
+    1. npx tsx scripts/ejecutarF9180s4.ts --aplicar
+    2. borrar datos del sitio en el celu
+    3. tildar el reverso. Lo guardado ya lo tiene tildado (incluir: true), así que el preview
+       debería abrirlo tildado: solo verificar.
+    4. confirmar 2a0f81f8: "Confirmar 43 líneas + 2 totales"
+    5. el ítem USD de GAL-VISA tiene que figurar "pagado" en el Resumen de octubre. El ARS va a
+       quedar "por confirmar" hasta que se confirme el débito, como cualquier total > 0
+       confirmado antes del vencimiento.
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  Base 8834356 = origin/main al abrir. Producción solo se leyó: el --aplicar de §4 no se corrió.
+  Cambios: src/ (6 archivos; en comprobantes.ts y Comprobantes.tsx solo un número de línea en un
+  comentario), firestore.rules, docs/CLAUDE.md, package.json/package-lock.json (devDependency).
+  functions/: sin cambios.
+  tsc cliente: 41 al abrir, 41 al cerrar (la misma lista). tsc functions: 0 y 0.
+  vite build: OK (el aviso de chunks > 500 kB es previo).
+  Privacidad: ids a 8 caracteres y descripciones recortadas. El fixture del emulador tiene
+  descripciones reales y no se commitea.

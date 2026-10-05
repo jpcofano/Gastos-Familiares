@@ -12,6 +12,7 @@ import {
   MOTIVO_AJUSTE_MIN,
   calcularCuadre,
   reintentarResumen,
+  TOLERANCIA_ARRASTRE,
   type CuadreResult,
 } from '../datos/resumenesTarjeta';
 import { cargarSubcategorias, type SubcategoriaItem } from '../datos/catalogos';
@@ -173,7 +174,7 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
 
   async function confirmar() {
     // F9.167 §1 — el camino de RE-CONFIRMAR se sacó de la UI porque no puede funcionar nunca:
-    // `firestore.rules:74` tiene `allow delete: if false` en `movimientos`, y el reemplazo borra y
+    // `firestore.rules:80` tiene `allow delete: if false` en `movimientos`, y el reemplazo borra y
     // recrea en el mismo batch, así que Firestore rechaza el batch entero con "Missing or
     // insufficient permissions". F9.158 §1 lo verificó contra la lógica y contra los datos, nunca
     // contra las reglas.
@@ -204,6 +205,10 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
   const cuadre: CuadreResult = calcularCuadre(
     lineas, resumen.totalARS, resumen.totalUSD, resumen.ajustesConsolidado, resumen);
   const cuadreOk = cuadre.balanceARS && cuadre.balanceUSD;
+  // F9.180 §1 — el arrastre del mes anterior se muestra solo cuando mueve el objetivo de verdad.
+  const muestraArrastreARS = Math.abs(cuadre.arrastreARS) > TOLERANCIA_ARRASTRE.ARS;
+  const muestraArrastreUSD = Math.abs(cuadre.arrastreUSD) > TOLERANCIA_ARRASTRE.USD;
+  const hayNoDebitado = cuadre.noDebitadoARS !== 0 || cuadre.noDebitadoUSD !== 0;
 
   // F9.166 §1.a — un preview de resumen YA CONFIRMADO no puede parecer una carga pendiente.
   // Quien lo abre para mirar no tiene que re-confirmar por inercia creyendo que está completando
@@ -245,53 +250,75 @@ function PreviewResumen({ resumen, config, subcats, memberId, onConfirmado, onCe
 
       <div className={`rt-cuadre ${cuadreOk ? 'rt-cuadre--ok' : 'rt-cuadre--error'}`}>
         <div className="rt-cuadre-lineas">
-          {resumen.totalARS > 0 && (
+          {/* F9.180 §1 — `!== 0` y no `> 0`: con saldo a favor el total del PDF es negativo, y esa
+              moneda también se cuadra (GAL-VISA 2026-10: U$S −14,40). */}
+          {(resumen.totalARS !== 0 || cuadre.sumaARS !== 0) && (
             <span className="rt-cuadre-item">
               ARS: {fmtMonto(cuadre.sumaARS, 'ARS')} calculado · {fmtMonto(cuadre.objetivoARS, 'ARS')}{' '}
-              {cuadre.noDebitadoARS !== 0 ? 'neto' : 'PDF'}
+              {cuadre.noDebitadoARS !== 0 || muestraArrastreARS ? 'neto' : 'PDF'}
               {cuadre.balanceARS ? ' ✓' : ` ⚠ dif ${fmtMonto(cuadre.diffARS, 'ARS')}`}
             </span>
           )}
-          {resumen.totalUSD > 0 && (
+          {(resumen.totalUSD !== 0 || cuadre.sumaUSD !== 0) && (
             <span className="rt-cuadre-item">
               USD: {fmtMonto(cuadre.sumaUSD, 'USD')} calculado · {fmtMonto(cuadre.objetivoUSD, 'USD')}{' '}
-              {cuadre.noDebitadoUSD !== 0 ? 'neto' : 'PDF'}
+              {cuadre.noDebitadoUSD !== 0 || muestraArrastreUSD ? 'neto' : 'PDF'}
               {cuadre.balanceUSD ? ' ✓' : ` ⚠ dif ${fmtMonto(cuadre.diffUSD, 'USD')}`}
             </span>
           )}
         </div>
-        {(cuadre.noDebitadoARS !== 0 || cuadre.noDebitadoUSD !== 0) && (
+        {(hayNoDebitado || muestraArrastreARS || muestraArrastreUSD) && (
           /* F9.161 §4 — con el objetivo movido hay que mostrar las TRES cifras. Un cuadre en verde
              porque alguien bajó el objetivo no puede verse igual que uno en verde porque las
-             cuentas dan: es la lección de "cerrar diferencia". */
+             cuentas dan: es la lección de "cerrar diferencia".
+             F9.180 §1 — el arrastre del mes anterior también mueve el objetivo, así que va en el
+             mismo bloque y con el número a la vista. */
           <div className="rt-cuadre-neto">
             <strong>Se cuadra contra el neto, no contra el total del PDF.</strong>
             {cuadre.noDebitadoARS !== 0 && (
               <span className="rt-cuadre-item">
                 ARS: {fmtMonto(resumen.totalARS, 'ARS')} PDF − {fmtMonto(cuadre.noDebitadoARS, 'ARS')} no
-                debitado = {fmtMonto(cuadre.objetivoARS, 'ARS')} neto
+                debitado = {fmtMonto(cuadre.netoARS, 'ARS')} neto
               </span>
             )}
             {cuadre.noDebitadoUSD !== 0 && (
               <span className="rt-cuadre-item">
                 USD: {fmtMonto(resumen.totalUSD, 'USD')} PDF − {fmtMonto(cuadre.noDebitadoUSD, 'USD')} no
-                debitado = {fmtMonto(cuadre.objetivoUSD, 'USD')} neto
+                debitado = {fmtMonto(cuadre.netoUSD, 'USD')} neto
               </span>
             )}
-            <span className="rt-cuadre-item">El movimiento de pago de la tarjeta sale por el neto.</span>
+            {muestraArrastreARS && (
+              <span className="rt-cuadre-item">
+                ARS: saldo anterior {cuadre.arrastreARS < 0 ? 'a favor' : 'impago'} {fmtMonto(cuadre.arrastreARS, 'ARS')} —
+                las líneas del mes tienen que dar {fmtMonto(cuadre.objetivoARS, 'ARS')}
+              </span>
+            )}
+            {muestraArrastreUSD && (
+              <span className="rt-cuadre-item">
+                USD: saldo anterior {cuadre.arrastreUSD < 0 ? 'a favor' : 'impago'} {fmtMonto(cuadre.arrastreUSD, 'USD')} —
+                las líneas del mes tienen que dar {fmtMonto(cuadre.objetivoUSD, 'USD')}
+              </span>
+            )}
+            <span className="rt-cuadre-item">
+              {muestraArrastreARS || muestraArrastreUSD
+                ? `El saldo anterior explica el total, no lo cambia: el pago de la tarjeta sale por el total del PDF${hayNoDebitado ? ' menos lo no debitado' : ''}, y en 0 si da negativo.`
+                : 'El movimiento de pago de la tarjeta sale por el neto.'}
+            </span>
           </div>
         )}
         {cuadre.decisionAjustes.decision === 'ignora' && (
-          /* F9.163 §2 — el ajuste del consolidado quedó FUERA del cuadre porque el banco lo usó
-             para terminar de saldar el mes anterior. Se dice en pantalla con la aritmética a la
-             vista: una decisión automática que no se ve es la misma clase de problema que
-             "cerrar diferencia". */
+          /* F9.163 §2 — el banco usó el ajuste del consolidado para terminar de saldar el mes
+             anterior. Se dice en pantalla con la aritmética a la vista: una decisión automática que
+             no se ve es la misma clase de problema que "cerrar diferencia".
+             F9.180 §1 — el ajuste ya no se saca del cuadre: entra, y lo compensa el arrastre (A ≈
+             −ajuste). Da lo mismo que ignorarlo, y por eso este bloque queda como diagnóstico. */
           <div className="rt-cuadre-neto">
-            <strong>El ajuste del consolidado no entra: es del período anterior.</strong>
+            <strong>El ajuste del consolidado es del período anterior.</strong>
             <span className="rt-cuadre-item">
               saldo anterior {fmtMonto(resumen.saldoAnteriorARS ?? 0, 'ARS')} + pagos{' '}
               {fmtMonto(resumen.pagosDelPeriodoARS ?? 0, 'ARS')} ={' '}
-              {fmtMonto(cuadre.decisionAjustes.a, 'ARS')} — el crédito completó ese pago.
+              {fmtMonto(cuadre.decisionAjustes.a, 'ARS')} — el crédito completó ese pago, y en el cuadre
+              se compensa con ese saldo.
             </span>
           </div>
         )}
