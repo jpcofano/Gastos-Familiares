@@ -1225,10 +1225,11 @@ descripcionRaw (string): descripción limpia del comercio o concepto.
          el monto USD aparece como número en la misma línea)
   • No modificar el resto de la descripción; preservar mayúsculas como están
 
-nroCupon (string): número de cupón/comprobante. Vacío si no hay.
+nroCupon (string): número de cupón/comprobante. Si no hay, OMITÍ el campo.
 
 cuotaActual (number): número de cuota actual. 0 si no aplica, 1 si es un solo pago.
 cuotaTotal (number): total de cuotas. 0 si no aplica, 1 si es un solo pago.
+  Cuando valen 1, OMITÍ el campo (cada uno por separado): ausente se lee como 1.
   DETECCIÓN DE CUOTAS:
   • BBVA: el sufijo " C.XX/YY" en la descripción indica cuotaActual=XX, cuotaTotal=YY
   • Galicia Visa: columna CUOTA explícita con formato "XX/YY"
@@ -1242,7 +1243,7 @@ moneda (string): "ARS" o "USD".
 
 monto (number): monto en la moneda indicada. SIEMPRE positivo.
   (para bonificaciones y reversos el monto también es positivo;
-   el carácter negativo lo indica tipoLinea/esBonificacion/esReverso)
+   el carácter negativo lo indica tipoLinea)
   CONVERSIÓN: los números argentinos usan punto como miles y coma como decimal.
 
 montoFirmado (number): EL MISMO IMPORTE, PERO CON EL SIGNO TAL CUAL FIGURA EN EL PDF.
@@ -1263,7 +1264,7 @@ seccion (string|null): el TÍTULO DEL BLOQUE del PDF donde aparece el renglón, 
   preferible null a una sección inventada.
   "1.447,94" → 1447.94   "301.393,73" → 301393.73   "9,99" → 9.99
 
-personaDetectada (string): nombre canónico (ver mapeos arriba). Vacío si no se puede determinar.
+personaDetectada (string): nombre canónico (ver mapeos arriba). Si no se puede determinar, OMITÍ el campo.
   DETECCIÓN POR FORMATO:
 
   BBVA (Visa y Mastercard):
@@ -1286,12 +1287,7 @@ personaDetectada (string): nombre canónico (ver mapeos arriba). Vacío si no se
   Ejemplo: movimientos antes de "TOTAL ADICIONAL DE COFANO,JUAN" → personaDetectada="Juan".
   Los movimientos del titular principal son los del bloque inicial.
 
-  PERCEPCIONES E IMPUESTOS: dejar personaDetectada = "" (vacío).
-
-esBonificacion (boolean): true solo si es un descuento explícito (BONIF. CONSUMO)
-esReverso (boolean): true solo si anula/revierte un consumo previo (monto negativo en consumos)
-esImpuesto (boolean): true si tipoLinea = "impuesto"
-esPagoAnterior (boolean): false siempre (los pagos no se incluyen)
+  PERCEPCIONES E IMPUESTOS: sin personaDetectada (omitir el campo).
 
 ═══════════════════════════════════════════════════════════
 DUPLICACIONES A EVITAR
@@ -1336,7 +1332,7 @@ DEV PER RG 4815 en Galicia Master, FUERA del consolidado:
 
 PERCEPCIONES EN GALICIA MASTER (aparecen en el CONSOLIDADO, no en el detalle):
   "PERCEPCION IVA DTO 354/18", "PERCEP.AFIP RG 4815 30%", "PERC IIBB SERV DIG CABA"
-  → tipoLinea="impuesto", esImpuesto=true
+  → tipoLinea="impuesto"
   → fechaConsumo = fechaCierre del resumen
 
 CAJA SEG-PROMO en BBVA (aparece en la sección de consumos con monto POSITIVO):
@@ -1346,11 +1342,11 @@ CAJA SEG-PROMO en BBVA (aparece en la sección de consumos con monto POSITIVO):
   el doble del monto. El signo manda sobre el nombre — ver "EL SIGNO DECIDE, NO EL NOMBRE" arriba.
 
 4F SOLUCIONES y similares (monto negativo en consumos, cancela una compra previa):
-  → tipoLinea="reverso", esReverso=true, monto positivo (valor absoluto)
+  → tipoLinea="reverso", monto positivo (valor absoluto)
   → montoFirmado NEGATIVO: es el dato que distingue este caso de un cargo con nombre parecido.
 
 BONIF. CONSUMO CABIFY y similares:
-  → tipoLinea="bonificacion", esBonificacion=true, monto positivo (valor absoluto)
+  → tipoLinea="bonificacion", monto positivo (valor absoluto)
   → montoFirmado NEGATIVO, por lo mismo.
 
 ═══════════════════════════════════════════════════════════
@@ -1359,6 +1355,12 @@ FORMATO DE RESPUESTA REQUERIDO
 
 Devolvé ÚNICAMENTE el JSON en un bloque \`\`\`json ... \`\`\`.
 No incluyas texto antes ni después del bloque.
+
+"movimientos" va COMPACTO: cada movimiento en UN SOLO renglón, JSON minificado (sin espacios ni
+saltos de línea dentro del objeto), como en el ejemplo. Un resumen puede tener más de 250 líneas y
+el formato indentado no entra en la respuesta.
+  · OMITÍ nroCupon y personaDetectada cuando no tienen valor, y cuotaActual/cuotaTotal cuando valen 1.
+  · montoFirmado y seccion van SIEMPRE, en todas las líneas (seccion = null si no hay encabezado).
 
 \`\`\`json
 {
@@ -1384,24 +1386,9 @@ No incluyas texto antes ni después del bloque.
     ]
   },
   "movimientos": [
-    {
-      "seq": 1,
-      "tipoLinea": "consumo",
-      "fechaConsumo": "YYYY-MM-DD",
-      "descripcionRaw": "...",
-      "nroCupon": "...",
-      "cuotaActual": 1,
-      "cuotaTotal": 1,
-      "moneda": "ARS",
-      "monto": 0.00,
-      "montoFirmado": 0.00,
-      "seccion": "Consumos Maria Lascano",
-      "personaDetectada": "",
-      "esBonificacion": false,
-      "esReverso": false,
-      "esImpuesto": false,
-      "esPagoAnterior": false
-    }
+{"seq":1,"tipoLinea":"cuota","fechaConsumo":"YYYY-MM-DD","descripcionRaw":"...","nroCupon":"...","cuotaActual":4,"cuotaTotal":6,"moneda":"ARS","monto":0.00,"montoFirmado":0.00,"seccion":"Consumos Maria Lascano","personaDetectada":"María"},
+{"seq":2,"tipoLinea":"consumo","fechaConsumo":"YYYY-MM-DD","descripcionRaw":"...","moneda":"USD","monto":0.00,"montoFirmado":0.00,"seccion":"Consumos Maria Lascano","personaDetectada":"María"},
+{"seq":3,"tipoLinea":"impuesto","fechaConsumo":"YYYY-MM-DD","descripcionRaw":"...","moneda":"ARS","monto":0.00,"montoFirmado":0.00,"seccion":"Impuestos, cargos e intereses"}
   ]
 }
 \`\`\``;
@@ -1420,9 +1407,6 @@ type MovimientoRaw = {
   montoFirmado?: number;
   seccion?: string | null;
   personaDetectada?: string;
-  esBonificacion?: boolean;
-  esReverso?: boolean;
-  esImpuesto?: boolean;
 };
 
 function sanitizarJson(raw: string): string {
@@ -1452,6 +1436,59 @@ const TIPOLINEA_VALIDOS = new Set([
   'consumo', 'cuota', 'impuesto', 'reintegro_percepcion', 'bonificacion', 'reverso',
 ]);
 
+function parsearRespuestaResumen(rawText: string): { resumen: Record<string, unknown>; movimientos: MovimientoRaw[] } {
+  const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
+  const rawMatch = rawText.match(/(\{[\s\S]*\})/);
+  const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
+  if (!jsonStr) throw new Error(`Sin JSON en la respuesta (500c): ${rawText.slice(0, 500)}`);
+
+  let parsed: { resumen: Record<string, unknown>; movimientos: MovimientoRaw[] };
+  try {
+    parsed = JSON.parse(sanitizarJson(jsonStr));
+  } catch {
+    throw new Error(`JSON inválido (500c): ${jsonStr.slice(0, 500)}`);
+  }
+
+  if (!parsed.resumen || !Array.isArray(parsed.movimientos)) {
+    throw new Error('Estructura incompleta: falta resumen o movimientos');
+  }
+  return parsed;
+}
+
+// F9.181 §1 — el modelo ya no emite esBonificacion/esReverso/esImpuesto (eran espejos de tipoLinea y
+// costaban tokens de salida en cada línea) ni los campos vacíos o en 1: se derivan y defaultean acá,
+// con el mismo shape de siempre, así que el cliente y signoLineas.ts no cambian.
+function armarMovimientosCrudos(movsBrutos: MovimientoRaw[]) {
+  return movsBrutos.map((m, i) => {
+    const tipoLinea = TIPOLINEA_VALIDOS.has(m.tipoLinea ?? '') ? m.tipoLinea as string : 'consumo';
+    return {
+      seq:               typeof m.seq === 'number' ? m.seq : i + 1,
+      tipoLinea,
+      fechaConsumo:      m.fechaConsumo  ?? null,
+      descripcionRaw:    m.descripcionRaw ?? '',
+      nroCupon:          m.nroCupon      ?? '',
+      cuotaActual:       m.cuotaActual   ?? 1,
+      cuotaTotal:        m.cuotaTotal    ?? 1,
+      moneda:            m.moneda === 'USD' ? 'USD' : 'ARS',
+      monto:             Math.abs(m.monto ?? 0),
+      // F9.161 §1 — el signo del papel, sin normalizar. `null` cuando el modelo no lo emitió:
+      // defaultear a `monto` (positivo) convertiría un crédito no emitido en un cargo silencioso,
+      // y el guard de §2 no actúa sin este dato, que es la conducta correcta ante la duda.
+      montoFirmado:      typeof m.montoFirmado === 'number' ? m.montoFirmado : null,
+      seccion:           m.seccion ?? null,
+      noDebitado:        false,
+      personaDetectada:  m.personaDetectada ?? '',
+      esBonificacion:    tipoLinea === 'bonificacion',
+      esReverso:         tipoLinea === 'reverso',
+      esImpuesto:        tipoLinea === 'impuesto',
+      personaConfirmada: null,
+      categoria:         null,
+      subcategoria:      null,
+      incluir:           true,
+    };
+  });
+}
+
 // F9.99.5 — infra = fallos de red/API/Storage; parsing = respuesta malformada del modelo.
 function clasificarTipoError(msg: string): 'infra' | 'parsing' {
   if (
@@ -1462,6 +1499,13 @@ function clasificarTipoError(msg: string): 'infra' | 'parsing' {
   ) return 'parsing';
   return 'infra';
 }
+
+// F9.181 §2 — margen, no el arreglo (el arreglo es el formato compacto). La doc publica 128K de salida
+// para claude-sonnet-4-6 (platform.claude.com/docs/en/models/sonnet-4-6/overview), pero el techo real
+// es el tiempo: a ~106 tok/s medidos, 128K son ~20 min y un trigger de Firestore corta a los 540 s.
+// Si la función muere por timeout el resumen queda en 'subido' sin error y sin "Reintentar"; con
+// 48.000 (~455 s) el peor caso sigue terminando en un max_tokens con mensaje.
+const MAX_TOKENS_RESUMEN = 48000;
 
 async function procesarResumenTarjeta(
   snapId: string,
@@ -1483,7 +1527,7 @@ async function procesarResumenTarjeta(
     const client = new Anthropic({ apiKey: anthropicKey.value() });
     const stream = client.messages.stream({
       model:      'claude-sonnet-4-6',
-      max_tokens: 32000,
+      max_tokens: MAX_TOKENS_RESUMEN,
       messages: [{
         role: 'user',
         content: [
@@ -1494,6 +1538,16 @@ async function procesarResumenTarjeta(
     });
 
     const finalMessage = await stream.finalMessage();
+    // F9.181 §3 — `max_tokens` no es un error transitorio: el mismo PDF con el mismo prompt da el mismo
+    // corte, y cada reintento vuelve a gastar toda la salida. El texto conserva "stop_reason" porque
+    // clasificarTipoError lo busca para marcarlo como 'parsing'.
+    if (finalMessage.stop_reason === 'max_tokens') {
+      throw new Error(
+        `El resumen tiene más líneas de las que entran en una extracción ` +
+        `(${finalMessage.usage?.output_tokens ?? '?'} tokens de salida). Reintentar da el mismo ` +
+        `resultado; hace falta un cambio de código. (stop_reason: max_tokens)`,
+      );
+    }
     if (finalMessage.stop_reason !== 'end_turn') {
       throw new Error(
         `Respuesta incompleta (stop_reason: ${finalMessage.stop_reason}) — JSON truncado; ` +
@@ -1507,22 +1561,7 @@ async function procesarResumenTarjeta(
       .join('')
       .trim();
 
-    const mdMatch  = rawText.match(/```json\s*([\s\S]*?)\s*```/);
-    const rawMatch = rawText.match(/(\{[\s\S]*\})/);
-    const jsonStr  = mdMatch ? mdMatch[1] : (rawMatch ? rawMatch[1] : null);
-    if (!jsonStr) throw new Error(`Sin JSON en la respuesta (500c): ${rawText.slice(0, 500)}`);
-
-    let parsed: { resumen: Record<string, unknown>; movimientos: MovimientoRaw[] };
-    try {
-      parsed = JSON.parse(sanitizarJson(jsonStr));
-    } catch {
-      throw new Error(`JSON inválido (500c): ${jsonStr.slice(0, 500)}`);
-    }
-
-    if (!parsed.resumen || !Array.isArray(parsed.movimientos)) {
-      throw new Error('Estructura incompleta: falta resumen o movimientos');
-    }
-
+    const parsed     = parsearRespuestaResumen(rawText);
     const resumen    = parsed.resumen;
     const movsBrutos = parsed.movimientos;
 
@@ -1567,31 +1606,7 @@ async function procesarResumenTarjeta(
 
     const estadoFinal = tarjetaCodigoResuelto ? 'parseado' : 'requiere_tarjeta';
 
-    const movimientosCrudos = movsBrutos.map((m, i) => ({
-      seq:               typeof m.seq === 'number' ? m.seq : i + 1,
-      tipoLinea:         TIPOLINEA_VALIDOS.has(m.tipoLinea ?? '') ? m.tipoLinea : 'consumo',
-      fechaConsumo:      m.fechaConsumo  ?? null,
-      descripcionRaw:    m.descripcionRaw ?? '',
-      nroCupon:          m.nroCupon      ?? '',
-      cuotaActual:       m.cuotaActual   ?? 1,
-      cuotaTotal:        m.cuotaTotal    ?? 1,
-      moneda:            m.moneda === 'USD' ? 'USD' : 'ARS',
-      monto:             Math.abs(m.monto ?? 0),
-      // F9.161 §1 — el signo del papel, sin normalizar. `null` cuando el modelo no lo emitió:
-      // defaultear a `monto` (positivo) convertiría un crédito no emitido en un cargo silencioso,
-      // y el guard de §2 no actúa sin este dato, que es la conducta correcta ante la duda.
-      montoFirmado:      typeof m.montoFirmado === 'number' ? m.montoFirmado : null,
-      seccion:           m.seccion ?? null,
-      noDebitado:        false,
-      personaDetectada:  m.personaDetectada ?? '',
-      esBonificacion:    m.esBonificacion   ?? false,
-      esReverso:         m.esReverso         ?? false,
-      esImpuesto:        m.esImpuesto        ?? false,
-      personaConfirmada: null,
-      categoria:         null,
-      subcategoria:      null,
-      incluir:           true,
-    }));
+    const movimientosCrudos = armarMovimientosCrudos(movsBrutos);
 
     // F9.161 §2 — guard del signo. El prompt mejora la probabilidad; esto garantiza el resultado.
     const { lineas: movimientosParseados, correcciones } = corregirSignoConsumos(movimientosCrudos);
@@ -1682,7 +1697,11 @@ async function procesarResumenTarjeta(
       actualizadoEn:       FieldValue.serverTimestamp(),
     });
 
-    console.log(`[procesarResumenTarjeta] ${snapId} → ${estadoFinal} (${movimientosParseados.length} movs)`);
+    // F9.181 §3 — el consumo queda registrado: sin esto el techo de salida no se ve venir.
+    console.log(
+      `[procesarResumenTarjeta] ${snapId} → ${estadoFinal} (${movimientosParseados.length} movs) ` +
+      `tokens in=${finalMessage.usage?.input_tokens ?? '?'} out=${finalMessage.usage?.output_tokens ?? '?'}`,
+    );
 
   } catch (e) {
     const mensaje = e instanceof Error ? e.message : String(e);
@@ -1702,7 +1721,7 @@ export const extraerResumenTarjeta = onDocumentCreated(
   {
     document:       'resumenesTarjeta/{id}',
     secrets:        [anthropicKey],
-    timeoutSeconds: 300,
+    timeoutSeconds: 540,  // F9.181 §2 — el máximo de un trigger de Firestore; ver MAX_TOKENS_RESUMEN
     memory:         '1GiB',
   },
   async (event) => {
@@ -1720,7 +1739,7 @@ export const reintentarResumenTarjeta = onDocumentUpdated(
   {
     document:       'resumenesTarjeta/{id}',
     secrets:        [anthropicKey],
-    timeoutSeconds: 300,
+    timeoutSeconds: 540,  // F9.181 §2 — el máximo de un trigger de Firestore; ver MAX_TOKENS_RESUMEN
     memory:         '1GiB',
   },
   async (event) => {
