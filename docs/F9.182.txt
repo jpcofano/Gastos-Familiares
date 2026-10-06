@@ -1,0 +1,239 @@
+F9.182 — Agenda de pagos: una captura con varias boletas se parte en un comprobante por fila
+
+Base: origin/main @ 6ec25cd (F9.181), confirmada al abrir. Prompt en
+docs/prompts/F9.182-agenda-de-pagos-captura-en-comprobantes-hijos.md.
+
+════════════════════════════════════════════════════════════════════════════════
+RESULTADO: GATE NO PASA — PARADO EN §0. NO SE TOCÓ CÓDIGO.
+════════════════════════════════════════════════════════════════════════════════
+
+  0.1  PASA. Los 8 recortes de imagen de AGIP / Edenor / Metrogas llegaron a su ítem correcto, todos
+       con la confirmación de Juan (ninguno por alta silenciosa).
+  0.3  NO PASA. Una factura de Edenor que llega después de una obligación nacida de un recorte (que
+       tiene la misma forma que un hijo) NO sale por rama 1 en ningún momento: antes, el día o
+       después del vencimiento. La card propone crear otra obligación, y eso es un DUPLICADO.
+       Además, el mismo mecanismo duplica en la otra dirección, con datos reales de hoy: las filas de
+       Edenor y Metrogas de la agenda probablemente son las boletas que Juan YA subió como recorte
+       (2824a147 y 1f5087af). Sus hijos saldrían "crear obligación".
+  0.4  No coincide con lo esperado. Las 5 de ABL salen rama 2 con esAdicional=false: ninguna como
+       adicional. Y en el checklist, pagar solo la del mes deja el ítem en 'pagado' con las 4 cuotas
+       atrasadas impagas.
+
+  Según el gate ("Si 0.3 duplica, PARAR y reportar") no se avanzó a §1. Partir la agenda hoy
+  multiplicaría el duplicado: cada fila de un servicio ya cargado, y cada factura que llegue después
+  de la agenda, propone una obligación nueva. Abajo, las tres decisiones que destraban la fase.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas contra 6ec25cd)
+════════════════════════════════════════════════════════════════════════════════
+
+  Se sostienen, con números de línea corridos unas pocas posiciones:
+  · procesarComprobante empieza en :164 (el prompt dice :188, que es donde arma el cliente de la
+    API). La llamada es una sola, con max_tokens 1536 en :192, y deja 'extraido' en :284-289.
+  · extraerComprobante en :304, que solo procesa 'subido' (:318).
+  · matchComprobante en :365. La guarda está en :378: solo corre en la TRANSICIÓN a 'extraido'.
+    Un doc que nace en 'extraido' no se matchea nunca. Confirmado.
+  · Rama 0 (dedup) en :386-390. Busca movimientos con hashPdf == ID DEL DOC del comprobante (:384).
+  · buildSystemPrompt en :67. corregirAnioVencimientos se importa (:35) y se usa en :263-274.
+  · UMBRAL_AUTO en :620 (el prompt dice :619). esCargoAdicional se llama en :816.
+  · El prompt no menciona algo que decide el gate: matchPorDestino tiene ANTES de :816 la regla
+    del dueño de F9.169 §2.5 (:757, esObligacionFutura) y el guard de F9.168/F9.175
+    (:792, obligacionSaldable). Las dos deciden antes que esCargoAdicional (ver 0.3 y 0.4).
+
+════════════════════════════════════════════════════════════════════════════════
+0.1 — LOS RECORTES YA SUBIDOS: PASA
+════════════════════════════════════════════════════════════════════════════════
+
+  Las 8 imágenes (2 AGIP de julio y octubre/noviembre, 3 Edenor, 3 Metrogas) tienen la forma que
+  tendrían los hijos: recibo_servicio, emisor como destinoNombre, sin CUIT ni CBU, numeroCliente y
+  un vencimiento.
+  · 8 de 8 CREARON su obligación en el ítem propuesto: ABL, Luz o Gas. Se mide por
+    origenComprobanteId, no por hashPdf, porque el pago posterior por rama 1 (confirmarRama1)
+    pisa el hashPdf de la obligación con el suyo. Por eso a 3 recortes "no les aparece" movimiento
+    por hashPdf.
+  · Las 6 posteriores a F9.106 tienen requiereConfirmacion=true y confianza 0,8. Ninguna fue alta
+    silenciosa: el destino aprendido de estos emisores está por debajo de UMBRAL_AUTO (0,9).
+  · De referencia, no es imagen: 13c1b187, un PAGO de Metrogas, propuso "Casa › Internet"
+    adicional y terminó saldando Gas. Es el único desvío, y no tiene la forma de un hijo.
+
+════════════════════════════════════════════════════════════════════════════════
+0.2 — EL ALTA SILENCIOSA (lectura de código)
+════════════════════════════════════════════════════════════════════════════════
+
+  · El servidor NO crea el movimiento. matchComprobante solo escribe propuestaMatch, con
+    requiereConfirmacion = confianza < UMBRAL_AUTO (:730).
+  · El alta la hace el CLIENTE, cuando se renderiza la card en Carga:
+      src/vistas/Comprobantes.tsx:498-506  useEffect: rama 2 con requiereConfirmacion === false
+                                            → abre el alta sin tap
+      src/vistas/Comprobantes.tsx:865      modoAuto → AltaMovimiento con autoConfirmar (:1056)
+      src/datos/movimientos.ts:145         addDoc(collection(db, 'movimientos'), …)
+  · hashPdf del movimiento = comp.hashPdf, el CAMPO del doc (Comprobantes.tsx:639).
+    origenComprobanteId = comp.id (:665). Rama 0 busca por el ID del doc (index.ts:384-388).
+  Consecuencias para el diseño:
+  · El hijo tiene que llevar el campo hashPdf = SU PROPIO ID, no el de la imagen. Con el de la
+    imagen, el segundo hijo encontraría en rama 0 el movimiento del primero y se marcaría "ya
+    cargado" sin serlo (§3.3 del prompt). Con su id, rama 0 lo frena al reintentar.
+  · procesarMatch dos veces sobre el mismo hijo no puede duplicar del lado del servidor, porque el
+    servidor no crea movimientos: solo reescribe la propuesta. El riesgo de duplicar está en el
+    cliente (dos altas).
+  · Matiz: después de un pago por rama 1, el hashPdf de la obligación pasa a ser el del pago. Desde
+    ahí, rama 0 ya no reconoce al hijo por hashPdf, y para un reproceso tardío el dedup tendría que
+    mirar también origenComprobanteId.
+  · "No depender de que el usuario se quede en la pantalla" se cumple para división y match, que
+    corren en el servidor. El ALTA de cada hijo, aun la silenciosa, sigue ocurriendo cuando alguien
+    abre Carga. Es lo mismo que hoy con cualquier comprobante, y es lo que dice §3.4.
+
+════════════════════════════════════════════════════════════════════════════════
+0.3 — FACTURA REAL DESPUÉS DE LA OBLIGACIÓN DEL HIJO: DUPLICA → PARAR
+════════════════════════════════════════════════════════════════════════════════
+
+  Dato real: la obligación de Edenor de 2026-10 es AAXFutUe (137.509,91, impaga), CREADA por el
+  recorte 2824a147. Es exactamente lo que crearía el hijo de la fila de Edenor. Sobre eso, con el
+  matchPorDestino REAL (recortado de index.ts, contra los destinos y movimientos de producción),
+  llega la factura PDF de Edenor del mismo período: recibo_servicio, vence 2026-10-07, mismo monto,
+  con CUIT y razón social completa.
+    subida el 2026-10-02 (antes del vencimiento) → rama 2, esAdicional=false: "crear obligación"
+    subida el 2026-10-07 (el día)               → rama 2, esAdicional=true:  "pago adicional"
+    subida el 2026-10-08 (después)              → rama 2, esAdicional=true:  "pago adicional"
+  Ninguno es rama 1. Por qué:
+  · Antes del vencimiento manda la regla del dueño de F9.169 §2.5 (:757): una obligación que no
+    venció "nunca rama 1". Cortocircuita antes de mirar si ya existe la obligación.
+  · El día del vencimiento o después manda el guard de F9.168/F9.175 (:792, obligacionSaldable): una
+    obligación que entra no puede saldar otra que nació de un comprobante (origenComprobanteId).
+    La del hijo nació de un comprobante.
+  · Medido en F9.169: los 22 documentos de obligación de producción se subieron ANTES de su primer
+    vencimiento. El caso normal es la primera fila: crear otra obligación.
+
+  En la otra dirección, con los datos de hoy: un hijo de la agenda (Edenor 137.509,91, vence
+  2026-10-07, subido 2026-10-06) con AAXFutUe ya creada → rama 2, esAdicional=false, "crear". Pasa
+  lo mismo con Metrogas: 1f5087af ya creó yDRdmaTb, 5.291,83, vence 2026-10-08. El id del hijo sale
+  del contenido y el del recorte del hash de la imagen, así que rama 0 tampoco los une.
+
+════════════════════════════════════════════════════════════════════════════════
+0.4 — ABL CON 5 OBLIGACIONES EN 2026-10
+════════════════════════════════════════════════════════════════════════════════
+
+  (a) matchPorDestino real, hijo por hijo (subidos 2026-10-06), cada uno viendo las obligaciones
+      que crearon los anteriores: las 5 salen rama 2, esAdicional=false, requiereConfirmacion=true.
+      Todas son futuras (vencen el 07 y el 31) y la regla de :757 decide antes que :816.
+      esCargoAdicional no se llega a llamar.
+  (b) esCargoAdicional, si se llamara (como en la reasignación), sobre el conjunto ya creado: true
+      para las 5, incluida la del mes. Las otras 4 nacieron de un comprobante y no son saldables
+      por una obligación.
+  (c) calcularChecklist real da UN estado por ítem y no marca adicionales:
+        las 5 impagas            → por_confirmar (5 matches)
+        pagada solo la del mes   → pagado        (5 matches, 4 impagas)
+      montoEsperado de ABL es null, así que un solo pago confirmado cubre el ítem
+      (checklist.ts:134-144). Las 4 cuotas atrasadas desaparecen de la vista de pendientes en
+      cuanto se paga la del mes.
+  Además, hoy ABL ya tiene en 2026-10 a 49519Jkr (86.899,19, vence 31/10, del recorte e9089013),
+  que no está entre las 5 filas de la captura según el prompt. Con la agenda serían 6 obligaciones
+  de ABL en octubre.
+
+════════════════════════════════════════════════════════════════════════════════
+LO QUE HACE FALTA DECIDIR (dueño) PARA DESTRABAR
+════════════════════════════════════════════════════════════════════════════════
+
+  1. Identidad de una obligación entre fuentes. Hoy "es la misma" significa "nació de otro
+     comprobante → es otra" (F9.168) o "no venció → es nueva" (F9.169). Hay que definir cuándo una
+     fila de agenda, un recorte y una factura son LA MISMA boleta. Por ejemplo: mismo ítem +
+     numeroCliente + vencimiento + monto (exacto, o con la tolerancia que se defina). Y qué rama
+     sale: rama 0 "ya cargada" o rama 1 sin pago. F9.168 descartó comparar por monto a propósito,
+     así que esto reabre esa decisión.
+  2. Qué hace una factura que llega después: ¿reemplaza la evidencia de la obligación del hijo
+     (hashPdf/refStoragePdf, como rama 1 sin pago), o queda vinculada sin crear nada?
+  3. Cuotas atrasadas de ABL. El matcher no puede marcarlas adicionales mientras no vencieron (regla
+     del dueño), y el checklist da ABL por 'pagado' con un solo pago. Opciones: que la agenda marque
+     esAdicional por regla propia (varias filas del mismo numeroCliente en la misma captura), que
+     las atrasadas vayan al mes en que se originaron, o que el checklist cuente la deuda por
+     obligación y no por ítem.
+  Con 1 y 2 resueltas, 0.3 y la dirección agenda-después-de-recorte dejan de duplicar. §1, §2 y §3
+  del prompt (división atómica, id por contenido, procesarMatch, reintento) siguen siendo válidos
+  tal como están: no hubo nada en la medición que los contradiga.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  Sin cambios de código ni de docs/CLAUDE.md: la semántica de agenda_pagos depende de las
+  decisiones de arriba. tsc no aplica (no se tocó src ni functions/src).
+  La captura de referencia no se encontró en Descargas ni en comprobantes, y la verificación no
+  llegó a correr. Para la próxima vuelta hace falta la imagen.
+  Script: scripts/verificarF9182.ts (solo lectura).
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA COMPLETA — npx tsx scripts/verificarF9182.ts
+════════════════════════════════════════════════════════════════════════════════
+
+F9.182 §0 — SOLO LECTURA. Nada se escribe.
+
+── 0.1 recortes de AGIP / Edenor / Metrogas (imagen) y, como referencia, los PDF del mismo emisor
+  811a6b00 pdf    subido 2026-07-01 | recibo_servicio | Empresa Distribuidora y Comercializadora Norte S.A. (Edenor) | nº cliente 7497140070 | 269778.85 | venc ["2026-07-08","2026-07-13"]
+           propuesta: rama 2 anterior a F9.106 (sin requiereConfirmacion), item=1d186f3b Casa › Luz | estado vinculado
+           movimiento: creado 03Vbpjjx mes 2026-07 item=1d186f3b Casa › Luz confirmadoPago=true origenComprobanteId=811a6b00 → llegó a su ítem
+  aac68ac9 IMAGEN subido 2026-07-01 | recibo_servicio | AGIP Inmobiliario/ABL | nº cliente 0070031265481 | 71427.65 | venc ["2026-07-07"]
+           propuesta: rama 2 anterior a F9.106 (sin requiereConfirmacion), item=62a96fc8 Casa › ABL | estado vinculado
+           movimiento: creado z5WrWHzk mes 2026-07 item=62a96fc8 Casa › ABL confirmadoPago=false origenComprobanteId=aac68ac9 → llegó a su ítem
+  d779a9de pdf    subido 2026-07-04 | comprobante_pago | Edenor | nº cliente 007497140070 | 269778.85 | venc []
+           propuesta: rama 1, item=- | estado vinculado
+           movimiento: vinculado 03Vbpjjx mes 2026-07 item=1d186f3b Casa › Luz confirmadoPago=true origenComprobanteId=811a6b00
+  9c77b6fc IMAGEN subido 2026-07-14 | recibo_servicio | Metrogas | nº cliente 010372743000 | 5303.18 | venc ["2026-07-20"]
+           propuesta: rama 2 anterior a F9.106 (sin requiereConfirmacion), item=eb8e59f2 Casa › Gas | estado vinculado
+           movimiento: creado bfREmHyi mes 2026-07 item=eb8e59f2 Casa › Gas confirmadoPago=true origenComprobanteId=9c77b6fc → llegó a su ítem
+  2472c965 pdf    subido 2026-07-21 | comprobante_pago | Metrogas | nº cliente 010372743000 | 5303.18 | venc []
+           propuesta: rama 1, item=- | estado vinculado
+           movimiento: vinculado bfREmHyi mes 2026-07 item=eb8e59f2 Casa › Gas confirmadoPago=true origenComprobanteId=9c77b6fc
+  3be2e9fd pdf    subido 2026-07-29 | recibo_servicio | Empresa Distribuidora y Comercializadora Norte S.A. (Edenor) | nº cliente 7497140070 | 136533.05 | venc ["2026-08-07","2026-08-12"]
+           propuesta: con confirmación (confianza 0.8), item=1d186f3b Casa › Luz | estado vinculado
+           movimiento: creado bMaWyVS8 mes 2026-08 item=1d186f3b Casa › Luz confirmadoPago=true origenComprobanteId=3be2e9fd → llegó a su ítem
+  a650c026 IMAGEN subido 2026-09-03 | recibo_servicio | Metrogas | nº cliente 010372743000 | 5291.83 | venc ["2026-09-14"]
+           propuesta: con confirmación (confianza 0.8), item=eb8e59f2 Casa › Gas | estado vinculado
+           movimiento: creado yR4NiHeW mes 2026-09 item=eb8e59f2 Casa › Gas confirmadoPago=true origenComprobanteId=a650c026 → llegó a su ítem
+  0c5d5e5a IMAGEN subido 2026-09-03 | recibo_servicio | Edenor | nº cliente 007497140070 | 283024.45 | venc ["2026-09-08"]
+           propuesta: con confirmación (confianza 0.8), item=1d186f3b Casa › Luz | estado vinculado
+           movimiento: creado rwfmBgh6 mes 2026-09 item=1d186f3b Casa › Luz confirmadoPago=true origenComprobanteId=0c5d5e5a → llegó a su ítem
+  e4b6b7a3 pdf    subido 2026-09-08 | comprobante_pago | Edenor | nº cliente 007497140070 | 283024.45 | venc []
+           propuesta: rama 1, item=- | estado vinculado
+           movimiento: vinculado rwfmBgh6 mes 2026-09 item=1d186f3b Casa › Luz confirmadoPago=true origenComprobanteId=0c5d5e5a
+  13c1b187 pdf    subido 2026-09-15 | comprobante_pago | Metrogas | nº cliente 010372743000 | 5555.59 | venc []
+           propuesta: con confirmación (confianza 0.8), item=90b30edc Casa › Internet, esAdicional=true | estado vinculado
+           movimiento: vinculado yR4NiHeW mes 2026-09 item=eb8e59f2 Casa › Gas confirmadoPago=true origenComprobanteId=a650c026 → ✗ NO llegó al ítem propuesto
+  2824a147 IMAGEN subido 2026-09-29 | recibo_servicio | Edenor | nº cliente 007497140070 | 137509.91 | venc ["2026-10-07"]
+           propuesta: con confirmación (confianza 0.8), item=1d186f3b Casa › Luz, esAdicional=false | estado vinculado
+           movimiento: creado AAXFutUe mes 2026-10 item=1d186f3b Casa › Luz confirmadoPago=false origenComprobanteId=2824a147 → llegó a su ítem
+  1f5087af IMAGEN subido 2026-09-30 | recibo_servicio | Metrogas | nº cliente 010372743000 | 5291.83 | venc ["2026-10-08"]
+           propuesta: con confirmación (confianza 0.8), item=eb8e59f2 Casa › Gas, esAdicional=false | estado vinculado
+           movimiento: creado yDRdmaTb mes 2026-10 item=eb8e59f2 Casa › Gas confirmadoPago=false origenComprobanteId=1f5087af → llegó a su ítem
+  e9089013 IMAGEN subido 2026-10-01 | recibo_servicio | AGIP Inmobiliario/ABL | nº cliente 0070031265481 | 86899.19 | venc ["2026-10-31"]
+           propuesta: con confirmación (confianza 0.8), item=62a96fc8 Casa › ABL, esAdicional=false | estado vinculado
+           movimiento: creado 49519Jkr mes 2026-10 item=62a96fc8 Casa › ABL confirmadoPago=false origenComprobanteId=e9089013 → llegó a su ítem
+  9b76f1b9 IMAGEN subido 2026-10-01 | recibo_servicio | AGIP Inmobiliario/ABL | nº cliente 0070031265481 | 77586.82 | venc ["2026-11-06"]
+           propuesta: con confirmación (confianza 0.8), item=62a96fc8 Casa › ABL, esAdicional=false | estado vinculado
+           movimiento: creado 7Mpi3e2W mes 2026-11 item=62a96fc8 Casa › ABL confirmadoPago=false origenComprobanteId=9b76f1b9 → llegó a su ítem
+  IMÁGENES: 8 | llegaron al ítem propuesto: 8 | altas silenciosas: 0
+
+── 0.3 factura real de Edenor DESPUÉS de la obligación nacida de un recorte (= forma de un hijo)
+  obligaciones reales de Edenor en 2026-10: AAXFutUe 137509.91 confirmadoPago=false origenComprobanteId=2824a147
+  factura subida ANTES del vencimiento (2026-10-02): rama 2 item=1d186f3b esAdicional=false requiereConfirmacion=true → ✗ NO es rama 1: la card propone crear otra obligación (DUPLICADO)
+  factura subida el día del vencimiento (2026-10-07): rama 2 item=1d186f3b esAdicional=true requiereConfirmacion=true → ✗ NO es rama 1: la card propone crear otra obligación (DUPLICADO)
+  factura subida DESPUÉS del vencimiento (2026-10-08): rama 2 item=1d186f3b esAdicional=true requiereConfirmacion=true → ✗ NO es rama 1: la card propone crear otra obligación (DUPLICADO)
+  y al revés — hijo de la agenda (Edenor 137.509,91, vence 2026-10-07, subido 2026-10-06) con esa obligación ya creada: rama 2 item=1d186f3b esAdicional=false requiereConfirmacion=true
+
+── 0.4 ABL en 2026-10 con 5 obligaciones abiertas de la partida 0070031265481
+  ítem: 62a96fc8 Casa › ABL | montoEsperado=null | activo=true
+  obligaciones REALES de ABL en 2026-10 hoy: 49519Jkr 86899.19 confirmadoPago=false origen=e9089013
+  (a) matchPorDestino real, hijo por hijo (subidos 2026-10-06), cada uno con las obligaciones que crearon los anteriores:
+      1. 76228.21 vence 2026-10-07 → rama 2 item=62a96fc8 esAdicional=false requiereConfirmacion=true  [esObligacionFutura = true]
+      2. 92479.04 vence 2026-10-31 → rama 2 item=62a96fc8 esAdicional=false requiereConfirmacion=true  [esObligacionFutura = true]
+      3. 89605.43 vence 2026-10-31 → rama 2 item=62a96fc8 esAdicional=false requiereConfirmacion=true  [esObligacionFutura = true]
+      4. 88081.49 vence 2026-10-31 → rama 2 item=62a96fc8 esAdicional=false requiereConfirmacion=true  [esObligacionFutura = true]
+      5. 87084.97 vence 2026-10-31 → rama 2 item=62a96fc8 esAdicional=false requiereConfirmacion=true  [esObligacionFutura = true]
+  (b) esCargoAdicional(las 5, excluyendo a cada una, entra recibo_servicio):
+      1. 76228.21 → esCargoAdicional=true
+      2. 92479.04 → esCargoAdicional=true
+      3. 89605.43 → esCargoAdicional=true
+      4. 88081.49 → esCargoAdicional=true
+      5. 87084.97 → esCargoAdicional=true
+  (c) calcularChecklist real, ítem ABL, 2026-10 (el checklist da UN estado por ítem; no marca adicionales):
+      las 5 impagas: estado=por_confirmar | matches=5 [76228.21, 92479.04, 89605.43, 88081.49, 87084.97]
+      pagada solo la del mes:     estado=pagado | matches=5 [76228.21 pagada, 92479.04, 89605.43, 88081.49, 87084.97]
