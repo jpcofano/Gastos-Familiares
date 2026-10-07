@@ -1,0 +1,155 @@
+F9.183 — Agenda de pagos: un comprobante por fila nueva, y lo que ya está cargado no se repite
+
+Base: origin/main @ d556542 (F9.184; el prompt audita contra fb5cc92, y F9.184 no tocó
+functions/src ni nada de lo que cita este prompt). Prompt en
+docs/prompts/F9.183-agenda-de-pagos-dedup-contra-lo-cargado.md (reemplaza a F9.182).
+
+════════════════════════════════════════════════════════════════════════════════
+RESULTADO: GATE §0 NO PASA — FALTA LA CAPTURA. NO SE TOCÓ CÓDIGO.
+════════════════════════════════════════════════════════════════════════════════
+
+  §0 dice: "Juan la deja en Descargas como agenda-2026-10-06.png … Si no está, PARAR y pedirla."
+  No está. No aparece en C:\Users\Usuario\Downloads (tiene 101 archivos; los tres más nuevos son
+  F9.184.md, F9.183.md y F9.182.md) ni en ningún otro lado del perfil (búsqueda por nombre,
+  profundidad 5, incluido OneDrive). Sin la captura no se puede escribir ni verificar §1, que es la
+  extracción.
+
+  Lo que se pudo adelantar sin la captura y sin escribir nada (scripts/verificarF9183.ts):
+  · Verificación 2 (dedup contra producción con las 7 filas de la tabla de §0): 7/7, exactamente la
+    tabla. 4 hijos y 3 ya cargadas.
+  · Verificación 3 (re-subida): la misma agenda de nuevo da 0 hijos, OK. Pero "un mes después" con
+    el desempate que pide el prompt da 2 hijos y no 1. Es un DUPLICADO, y un hallazgo de diseño
+    (abajo). Con una asignación de costo total mínimo da 1, como se espera.
+  · Universo de 2.0 y descarte: auditados, con un riesgo para el diseño heredado de F9.182 (abajo).
+
+  Para seguir: dejar agenda-2026-10-06.png en Descargas, y decidir el punto 1 de abajo.
+
+════════════════════════════════════════════════════════════════════════════════
+HALLAZGOS QUE CAMBIAN EL DISEÑO (para decidir antes de la próxima vuelta)
+════════════════════════════════════════════════════════════════════════════════
+
+  1. EL DESEMPATE "GANA LA MENOR DIFERENCIA" DUPLICA AL MES SIGUIENTE.
+     Las 4 cuotas del 31/10 están a 1,1-1,7 % una de otra (87.084,97 / 88.081,49 / 89.605,43 /
+     92.479,04). Si suben +1,2 % al mes siguiente, la cuota nueva queda más cerca de su VECINA
+     vieja que de sí misma: 88.129,99 (la de 87.084,97 más intereses) está a 0,06 % de 88.081,49 y
+     a 1,42 % de su versión anterior. El apareo de a pares por menor diferencia toma eso primero, se
+     corre una posición en cadena, y la última cuota se queda sin pareja dentro del 3 % → hijo
+     nuevo duplicado. La premisa del prompt ("entre ellas hay más de 1 % de diferencia") no alcanza:
+     el aumento de un mes es del mismo orden que la separación entre cuotas.
+     Alternativa medida: dentro de cada grupo (numeroCliente + vencimiento), la asignación uno a uno
+     que maximiza los pares dentro del 3 % y, entre ésas, minimiza la suma de diferencias. Los grupos
+     son chicos, así que alcanza con fuerza bruta. Resultado: 1 hijo (la Edenor nueva), y sigue dando
+     7/7 en la verificación 2 y 0 hijos al re-subir la misma agenda. Es determinística.
+  2. SI LA APP CORRE EL VENCIMIENTO DE LA CUOTA ATRASADA, LA LLAVE NO APAREA.
+     La llave incluye el primer vencimiento. Con las mismas 4 cuotas pero vencimiento 30/11 en vez de
+     31/10, salen 5 hijos y 0 ya cargadas. No está medido qué muestra la app real para una cuota que
+     ya pasó su 31/10: la tabla y la simulación de "un mes después" suponen que conserva el 31/10. La
+     captura del mes que viene lo dice. Si lo corre, la llave de AGIP tiene que ser otra (por
+     ejemplo, numeroCliente sin vencimiento, solo para obligaciones ya vencidas).
+  3. DESCARTAR UN HIJO BORRARÍA LA IMAGEN DE TODOS.
+     descartarEntrada (functions/src/index.ts:2052) BORRA el comprobante (:2100) y SU BLOB DE STORAGE
+     (refStoragePdf, :2120-2123), sin mirar si otro doc lo usa. F9.182 §2.3 hace que cada hijo lleve
+     refStoragePdf = el del padre (la misma imagen). Descartar un solo hijo dejaría sin imagen al
+     padre y a todos sus hermanos. La implementación tiene que cubrirlo: no borrar el blob si el doc
+     tiene padreHash, o si otro doc referencia el mismo refStoragePdf.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas sin tocar código)
+════════════════════════════════════════════════════════════════════════════════
+
+  · normalizarClaveDesambiguacion en functions/src/index.ts:652: trim, mayúsculas, sin ceros a la
+    izquierda. Hace que "007497140070" (recorte) y "7497140070" (PDF) sean la misma clave.
+  · Las líneas de F9.182 que este prompt hereda siguen donde las dejó docs/F9.182.txt: F9.184 no
+    tocó functions/src.
+  · Universo de 2.0: hay 191 comprobantes, todos 'vinculado'; 34 tienen numeroCliente y primer
+    vencimiento. "Que NO estén descartados": NO EXISTE un estado descartado, porque descartarEntrada
+    borra el doc. No hay nada que revivir: el universo es todo comprobante que existe.
+  · hashPdf del hijo = su propio id: sigue siendo necesario (docs/F9.182.txt 0.2). La rama 0 busca
+    por el id del doc y el alta copia el campo hashPdf del comprobante.
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN ADELANTADA (solo lectura)
+════════════════════════════════════════════════════════════════════════════════
+
+  2. Dedup contra producción, con las filas de la tabla de §0 (no de la captura):
+       Edenor   137.509,91 · 07/10 → ya cargada, 2824a147 (Δ 0,00 %)
+       Metrogas   5.291,83 · 08/10 → ya cargada, 1f5087af (Δ 0,00 %)
+       AGIP      87.084,97 · 31/10 → ya cargada, e9089013 86.899,19 (Δ 0,21 %)
+       AGIP 76.228,21 · 07/10 / 92.479,04 / 89.605,43 / 88.081,49 · 31/10 → NUEVAS
+     7/7 con la tabla. Contra e9089013 también competían 88.081,49 (1,36 %, dentro del 3 %) y
+     89.605,43 (3,11 %, fuera); gana 87.084,97, uno a uno.
+  3. Re-subida (en memoria, con los 4 hijos de la 2 agregados):
+       misma agenda de nuevo                          → 0 hijos  OK
+       un mes después, desempate del prompt           → 2 hijos  ✗ (esperado 1; ver hallazgo 1)
+       un mes después, asignación de costo mínimo     → 1 hijo   OK
+       un mes después con vencimiento corrido a 30/11 → 5 hijos  (ver hallazgo 2)
+  1, 4, 5 y 6 no corrieron: necesitan la captura, el código de §1/§2 o el emulador con ese código.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  Sin cambios de código ni de docs/CLAUDE.md (la semántica depende del hallazgo 1). tsc no aplica.
+  La captura NO se copia al repo (números de cliente reales): cuando aparezca, se lee desde
+  Descargas o se copia al scratchpad.
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA COMPLETA — npx tsx scripts/verificarF9183.ts
+════════════════════════════════════════════════════════════════════════════════
+
+F9.183 §0 — SOLO LECTURA.
+
+── la captura de referencia: C:\Users\Usuario\Downloads\agenda-2026-10-06.png → NO ESTÁ
+   GATE §0: PARAR y pedirla. Sin captura no se puede escribir ni verificar §1 (extracción).
+
+── universo de 2.0: 191 comprobantes, por estado {"vinculado":191}
+   con numeroCliente y 1er vencimiento: 34. No hay estado 'descartado': descartarEntrada BORRA el doc (index.ts:2100) y su blob (:2120-2123).
+
+── dedup contra producción (verificación 2), filas de la tabla de §0
+  agenda 2026-10-06:
+    Edenor    137.509,91 · vence 2026-10-07 → ya cargada (2824a147 Edenor 137.509,91 · subido 2026-09-29, Δ 0.00 %)
+    Metrogas    5.291,83 · vence 2026-10-08 → ya cargada (1f5087af Metrogas 5.291,83 · subido 2026-09-30, Δ 0.00 %)
+    AGIP       87.084,97 · vence 2026-10-31 → ya cargada (e9089013 AGIP Inmobiliario/ABL 86.899,19 · subido 2026-10-01, Δ 0.21 %)
+    AGIP       76.228,21 · vence 2026-10-07 → NUEVA
+    AGIP       92.479,04 · vence 2026-10-31 → NUEVA
+    AGIP       89.605,43 · vence 2026-10-31 → NUEVA
+    AGIP       88.081,49 · vence 2026-10-31 → NUEVA
+    → 4 hijos, 3 ya cargadas
+    coincide con la tabla de §0: 7/7 OK
+    candidato de e9089013 (86.899,19): 87.084,97 a 0.21 %
+    candidato de e9089013 (86.899,19): 92.479,04 a 6.42 %
+    candidato de e9089013 (86.899,19): 89.605,43 a 3.11 %
+    candidato de e9089013 (86.899,19): 88.081,49 a 1.36 %
+
+── re-subida (verificación 3), en memoria sobre el estado que deja la 2
+  misma agenda de nuevo:
+    Edenor    137.509,91 · vence 2026-10-07 → ya cargada (2824a147 Edenor 137.509,91 · subido 2026-09-29, Δ 0.00 %)
+    Metrogas    5.291,83 · vence 2026-10-08 → ya cargada (1f5087af Metrogas 5.291,83 · subido 2026-09-30, Δ 0.00 %)
+    AGIP       87.084,97 · vence 2026-10-31 → ya cargada (e9089013 AGIP Inmobiliario/ABL 86.899,19 · subido 2026-10-01, Δ 0.21 %)
+    AGIP       76.228,21 · vence 2026-10-07 → ya cargada (SIM-hijo AGIP 76.228,21 · subido 2026-10-06, Δ 0.00 %)
+    AGIP       92.479,04 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 92.479,04 · subido 2026-10-06, Δ 0.00 %)
+    AGIP       89.605,43 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 89.605,43 · subido 2026-10-06, Δ 0.00 %)
+    AGIP       88.081,49 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 88.081,49 · subido 2026-10-06, Δ 0.00 %)
+    → 0 hijos, 7 ya cargadas
+  "un mes después", las 4 cuotas atrasadas +1,2 % con el MISMO vencimiento 31/10 + Edenor 07/11 — desempate del PROMPT (menor diferencia gana):
+    AGIP       88.129,99 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 88.081,49 · subido 2026-10-06, Δ 0.06 %)
+    AGIP       93.588,79 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 92.479,04 · subido 2026-10-06, Δ 1.20 %)
+    AGIP       90.680,70 · vence 2026-10-31 → NUEVA
+    AGIP       89.138,47 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 89.605,43 · subido 2026-10-06, Δ 0.52 %)
+    Edenor    121.345,67 · vence 2026-11-07 → NUEVA
+    → 2 hijos, 3 ya cargadas
+  lo mismo con la ALTERNATIVA (asignación de costo total mínimo dentro del grupo):
+    AGIP       88.129,99 · vence 2026-10-31 → ya cargada (e9089013 AGIP Inmobiliario/ABL 86.899,19 · subido 2026-10-01, Δ 1.42 %)
+    AGIP       93.588,79 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 92.479,04 · subido 2026-10-06, Δ 1.20 %)
+    AGIP       90.680,70 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 89.605,43 · subido 2026-10-06, Δ 1.20 %)
+    AGIP       89.138,47 · vence 2026-10-31 → ya cargada (SIM-hijo AGIP 88.081,49 · subido 2026-10-06, Δ 1.20 %)
+    Edenor    121.345,67 · vence 2026-11-07 → NUEVA
+    → 1 hijos, 4 ya cargadas
+    la alternativa sobre la verificación 2: 7/7 OK · sobre "misma agenda de nuevo": 0 hijos OK
+  variante: las mismas 4 cuotas +1,2 % pero con vencimiento CORRIDO a 30/11 (no medido en la app real):
+    AGIP       88.129,99 · vence 2026-11-30 → NUEVA
+    AGIP       93.588,79 · vence 2026-11-30 → NUEVA
+    AGIP       90.680,70 · vence 2026-11-30 → NUEVA
+    AGIP       89.138,47 · vence 2026-11-30 → NUEVA
+    Edenor    121.345,67 · vence 2026-11-07 → NUEVA
+    → 5 hijos, 0 ya cargadas
