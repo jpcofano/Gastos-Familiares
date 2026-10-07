@@ -2880,6 +2880,26 @@ Consecuencias:
   más de la mitad y no sirve como filtro). Solo admin: las reglas solo le dejan leer movimientos
   ajenos a un admin.
 
+### `cerradoPor` — cierres masivos con nombre, y por qué existe el de F9.185
+
+> **`cerradoPor` marca un movimiento que un CIERRE MASIVO pasó a `pagado: true`, con el nombre del
+> cierre. `cerradoEn` es cuándo.** Un movimiento sin `cerradoPor` se cerró por el camino normal (un
+> pago, una confirmación, una edición).
+
+- **Por qué existe el de F9.185** (`cerradoPor: 'F9.185-cierre-meses-anteriores'`). Con la regla de
+  F9.184, toda obligación abierta se ve hasta que se paga. Al medirla aparecieron 134 movimientos de
+  Gasto con `pagado: false` de 2025-05 a 2026-07, todos migrados (`HIS_` / `OBL-`) y nunca cerrados:
+  la migración los cargó sin el pago, y antes del corte de semántica de pagos (2026-07) el checklist
+  daba el ítem por pagado con el solo match. No son deuda: deployar F9.184 sin cerrarlos habría
+  mostrado ~ARS 56 M vencidos. Decisión de Juan (2026-10-06): cerrar como pagadas TODAS las
+  obligaciones abiertas con mes anterior a 2026-10; las de 2026-10 y las futuras no se tocan.
+- **Qué escribe**: `pagado: true` + `cerradoPor` + `cerradoEn` + `actualizadoEn`. NO toca
+  `confirmadoPago`: "la plata salió" sin "alguien lo verificó" es un par válido (F9.138 §2) y cumple
+  la invariante de F9.140. Nadie verificó estos pagos, así que no se dice que sí.
+- **Para qué sirve la marca**: para revertir exactamente ese cierre (`--revertir` vuelve a
+  `pagado: false` solo lo que lleva ese `cerradoPor` y borra la marca) y para que un audit posterior
+  distinga "lo cerró el cierre masivo" de "lo pagó alguien". Un cierre masivo futuro usa otro nombre.
+
 Pendiente: periodicidades no-mensuales necesitan mes-ancla cuando se activen. Hoy `aplicaEnMes`
 devuelve `true` para todas como placeholder.
 

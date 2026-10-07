@@ -1,0 +1,187 @@
+F9.185 — Cerrar las obligaciones abiertas de meses anteriores al actual
+
+Base: origin/main @ f8a75c4, confirmada al abrir. Prompt en
+docs/prompts/F9.185-cierre-obligaciones-meses-anteriores-y-F9.183-addendum.md (tarea 1).
+Se entrega SOLO el dry-run. El --aplicar lo corre Juan. Nada escrito en producción.
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  · El dry-run da 134, el número esperado: el mismo conjunto de docs/F9.184.txt §0.1 (a).
+    ARS 55.959.365,91 · USD 9.581,22. HIS_ 56 · OBL- 78. 0 excluidas por confirmadoPago == true.
+  · No se tocan 8 abiertas: 7 de 2026-10 y 1 de 2026-11.
+  · Con F9.184 deployado y el cierre aplicado, en el Resumen de octubre:
+      card de vencidos  134 · 55.968.947,13  →  0
+      banner            61.353.737,95 (134 vencidos)  →  5.384.790,82 (0 vencidos)
+      campana           140 (134 vencidas)  →  6 (1 hoy, 5 próximas)
+  · Probado en el emulador sobre una copia de los 2176 movimientos reales: aplicar, idempotencia,
+    revertir y que ningún otro campo cambie. TODO OK.
+  · Pares de cierre de tarjeta duplicados por la migración: 13. En los 13, los dos movimientos tienen
+    excluirDash (el Dashboard no los suma) y los dos tienen incluirResumenMes (el Resumen de esos
+    meses suma el pago de tarjeta DOS veces). Solo reporte, sin arreglar.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas contra f8a75c4)
+════════════════════════════════════════════════════════════════════════════════
+
+  · esObligacionAbierta (src/datos/obligaciones.ts) = tipo 'Gasto' && !movimientoCubierto
+    (pagado || confirmadoPago). El universo del script es su traducción a Firestore: pagado == false
+    + tipo 'Gasto' + mes < '2026-10' + confirmadoPago !== true. Ninguno tiene confirmadoPago true con
+    pagado false: el par imposible de F9.140 no aparece.
+  · Todo movimiento tiene el campo pagado (F9.184 §0.2), así que where('pagado','==',false) no pierde
+    ninguno.
+  · Dashboard suma `!excluirDash` (src/datos/agregados.ts:184, :310). El Resumen suma
+    `incluirResumenMes` (cajaMov en src/vistas/Resumen.tsx).
+
+════════════════════════════════════════════════════════════════════════════════
+LO QUE SE HIZO
+════════════════════════════════════════════════════════════════════════════════
+
+  docs/CLAUDE.md — ANTES del script: "`cerradoPor` — cierres masivos con nombre, y por qué existe el
+    de F9.185". Explica qué marca, por qué existe este cierre, qué escribe (y que NO toca
+    confirmadoPago) y para qué sirve la marca.
+  scripts/ejecutarF9185.ts:
+    · por defecto, dry-run contra producción (no escribe);
+    · --aplicar escribe pagado: true + cerradoPor 'F9.185-cierre-meses-anteriores' + cerradoEn +
+      actualizadoEn, en batches de 400 (134 = 1 batch). Un batch que falla aborta y lista lo
+      escrito y lo pendiente. No aplica si el universo no da 134;
+    · --revertir pone pagado: false en los que tienen ese cerradoPor y borra cerradoPor y cerradoEn;
+    · --exportar y --probar-emulador son para la prueba (el fixture tiene datos reales y queda en el
+      scratchpad).
+    · Si el número no diera 134, compara uno por uno contra la lista de docs/F9.184.txt.
+
+════════════════════════════════════════════════════════════════════════════════
+QUÉ QUEDA DESPUÉS DEL CIERRE Y POR QUÉ
+════════════════════════════════════════════════════════════════════════════════
+
+  Calculado con las funciones reales de src/datos/obligaciones.ts (vencidasParaResumen,
+  pendienteMes, obligacionesParaCampana) sobre los datos de hoy (2026-10-06):
+  · Card de vencidos: vacía. Las 134 eran todas de meses anteriores, y las de octubre todavía no
+    vencieron.
+  · Banner: 5.384.790,82. Son las 7 obligaciones abiertas de octubre (3.446.267,16: Personal,
+    Edenor, Metrogas, Colegio Guadalupe, ITPA, expensas, ABL) más 5 ítems sin nada cargado a su
+    montoEsperado (1.938.523,66). 0 vencidos.
+  · Campana: 6. Personal vence hoy; Edenor (07/10), Metrogas (08/10), Colegio Guadalupe e ITPA
+    (10/10) y expensas (15/10) están dentro de los 14 días. ABL (31/10) y la de noviembre (06/11)
+    quedan afuera de la ventana hasta que se acerquen.
+
+════════════════════════════════════════════════════════════════════════════════
+PRUEBA EN EL EMULADOR (copia de los 2176 movimientos de producción)
+════════════════════════════════════════════════════════════════════════════════
+
+  dry-run 134 → --aplicar escribe 134 en 1 batch → los 134 con pagado=true + cerradoPor +
+  cerradoEn + actualizadoEn → ningún otro campo cambió, confirmadoPago intacto y nada fuera del
+  universo tocado → dry-run 0 (idempotente) → las 8 de octubre y futuras siguen abiertas →
+  --revertir deshace 134 → todo igual al original salvo actualizadoEn → dry-run 134 de nuevo.
+  TODO OK.
+  Nota: revertir no recupera el actualizadoEn anterior (aplicar lo pisa). El prompt solo pide
+  pagado y la marca. El camino de "batch fallido" no se ejercitó: con 134 docs hay un solo batch.
+
+════════════════════════════════════════════════════════════════════════════════
+PARES DE CIERRE DE TARJETA DUPLICADOS POR LA MIGRACIÓN (solo reporte)
+════════════════════════════════════════════════════════════════════════════════
+
+  Criterio: un HIS_ "Pago Visa/Mastercard …" (el pago del resumen) y un OBL- del mismo mes, moneda y
+  monto (hasta $1 de diferencia: dos difieren en centavos). 13 pares, de 2026-01 a 2026-04. Por
+  ejemplo, HIS_430d y OBL-9F85 en 2026-01 (1.068.362,15).
+  · ¿Entran en los totales? DASHBOARD: NO. Los 26 tienen excluirDash, así que el Dashboard cuenta los
+    consumos y no los pagos de tarjeta. RESUMEN: SÍ, los DOS. Los 26 tienen incluirResumenMes, así
+    que el "gastado" y "Gastos por día" de 2026-01 a 2026-04 cuentan cada pago de tarjeta dos veces.
+  · Los 26 están en el cierre de F9.185 (los dos estaban abiertos). Después del cierre siguen
+    duplicados, ahora como "Pagado".
+  · Al filtrar por monto aparecían también falsos pares (AMAZON PRIME 14,99 y MERPAGO 100.000 contra
+    obligaciones del mismo monto). Se descartaron exigiendo que el HIS_ sea un "Pago Visa/Mastercard".
+  Lista completa en la salida, abajo.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  tsc cliente: 41 al abrir y 41 al cerrar, misma lista. tsc functions: 0 y 0.
+  Para Juan, en este orden:
+    1. npx tsx scripts/ejecutarF9185.ts             (dry-run: tiene que dar 134)
+    2. npx tsx scripts/ejecutarF9185.ts --aplicar
+    3. recién después, el deploy de F9.184
+  Si hiciera falta deshacer: npx tsx scripts/ejecutarF9185.ts --revertir
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA — dry-run contra producción (npx tsx scripts/ejecutarF9185.ts)
+════════════════════════════════════════════════════════════════════════════════
+
+F9.185 — DRY-RUN (no escribe nada) · PRODUCCIÓN
+
+── universo: pagado == false · tipo Gasto · mes < 2026-10 · sin confirmadoPago → 134 (esperado 134)
+   suma: ARS 55.959.365,91 · USD 9.581,22
+   por mes: 2025-05: 2 · 2025-06: 2 · 2025-12: 4 · 2026-01: 20 · 2026-02: 19 · 2026-03: 25 · 2026-04: 29 · 2026-05: 19 · 2026-06: 13 · 2026-07: 1
+   prefijos: HIS_ 56 · OBL- 78 · otros 0
+   excluidas por confirmadoPago == true (ya cubiertas, par imposible de F9.140): 0
+
+── lo abierto que NO se toca (mes >= 2026-10): 8
+    NpYakACM | 2026-10 | vence 2026-10-06 | ARS    109.561,80 | Personal
+    AAXFutUe | 2026-10 | vence 2026-10-07 | ARS    137.509,91 | Edenor
+    yDRdmaTb | 2026-10 | vence 2026-10-08 | ARS      5.291,83 | Metrogas
+    9v8LbAZB | 2026-10 | vence 2026-10-10 | ARS    823.535,00 | Colegio Guadalupe
+    kjTdovgf | 2026-10 | vence 2026-10-10 | ARS  2.017.000,00 | ITPA SA
+    zLLTqj7D | 2026-10 | vence 2026-10-15 | ARS    266.469,43 | Cons. Prop. Pje del Signo 4032…
+    49519Jkr | 2026-10 | vence 2026-10-31 | ARS     86.899,19 | AGIP Inmobiliario/ABL
+    7Mpi3e2W | 2026-11 | vence 2026-11-06 | ARS     77.586,82 | AGIP Inmobiliario/ABL
+
+── Resumen de 2026-10, hoy 2026-10-06 (funciones reales de src/datos/obligaciones.ts), con F9.184 deployado:
+   card de vencidos:  sin el cierre 134 · 55.968.947,13  →  con el cierre 0 · 0,00
+   banner pendiente:  61.353.737,95 (134 vencidos)  →  5.384.790,82 (0 vencidos, 7 obligaciones)
+   campana:           140 (134 vencidas)  →  6 (0 vencidas, 1 hoy, 5 próximas)
+     en la campana: NpYakACM 2026-10 Personal 109.561,80 · hoy (2026-10-06)
+     en la campana: AAXFutUe 2026-10 Edenor 137.509,91 · proxima (2026-10-07)
+     en la campana: yDRdmaTb 2026-10 Metrogas 5.291,83 · proxima (2026-10-08)
+     en la campana: 9v8LbAZB 2026-10 Colegio Guadalupe 823.535,00 · proxima (2026-10-10)
+     en la campana: kjTdovgf 2026-10 ITPA SA 2.017.000,00 · proxima (2026-10-10)
+     en la campana: zLLTqj7D 2026-10 Cons. Prop. Pje del Signo 4032… 266.469,43 · proxima (2026-10-15)
+   el banner después = 7 obligaciones abiertas de octubre 3.446.267,16 + 5 ítems sin nada cargado a su montoEsperado 1.938.523,66
+
+── pares HIS_ / OBL- con el mismo mes, moneda y monto (duplicados de la migración; solo reporte)
+   2026-04 USD         20,97 | HIS_0482 "Pago Mastercard Black BBVA…" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-0AE8 "Frances Master" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-04 USD          0,94 | HIS_2245 "Pago Mastercard Black Gali…" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-19B5 "Galicia Master" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-01 ARS  1.068.362,15 | HIS_430d "Pago Visa Galicia ARS" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-9F85 "Galicia Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-04 ARS    609.948,08 (≠ 609.948,48) | HIS_4927 "Pago Mastercard Black BBVA…" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-0AE8 "Frances Master" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-02 ARS    673.904,26 | HIS_4d49 "Pago Visa Galicia ARS" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-9F85 "Galicia Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-04 ARS  2.076.697,11 | HIS_5dec "Pago Visa Signature BBVA A…" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-2836 "Frances Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-02 USD         14,99 | HIS_7696 "Pago Visa Galicia USD" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-9F85 "Galicia Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-04 ARS    424.627,92 | HIS_949d "Pago Mastercard Black Gali…" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-19B5 "Galicia Master" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-04 USD         19,76 (≠ 19,79) | HIS_a6aa "Pago Visa Signature BBVA U…" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-2836 "Frances Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-04 ARS  2.454.132,24 | HIS_bec6 "Pago Visa Galicia ARS" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-9F85 "Galicia Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-01 USD         14,99 | HIS_d375 "Pago Visa Galicia USD" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-9F85 "Galicia Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-04 USD         14,99 | HIS_d5e4 "Pago Visa Galicia USD" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-9F85 "Galicia Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   2026-03 USD        906,54 | HIS_e3a0 "Pago Visa Galicia USD" [Dashboard NO (excluirDash) · Resumen SÍ, de resumen, pagado=false]
+                             | OBL-9F85 "Galicia Visa" [Dashboard NO (excluirDash) · Resumen SÍ, con ítem, pagado=false] · HIS_ se cierra / OBL- se cierra
+   13 pares
+
+DRY-RUN: listo para --aplicar
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA — prueba en el emulador
+════════════════════════════════════════════════════════════════════════════════
+
+emulador: 2176 movimientos sembrados
+  OK dry-run: 134 (esperado 134)
+  OK --aplicar escribió 134 en 1 batch(es)
+  OK 134 con pagado=true + cerradoPor + cerradoEn + actualizadoEn
+  OK ningún otro campo cambió (0), confirmadoPago intacto (0 cambios), nada fuera del universo se tocó
+  OK dry-run después de aplicar: 0 (esperado 0: idempotente)
+  OK las de 2026-10 y futuras siguen abiertas: 8
+  OK --revertir deshizo 134
+  OK después de revertir, todo igual al original salvo actualizadoEn (134 con actualizadoEn nuevo, 0 con otra diferencia)
+  OK dry-run después de revertir: 134 (vuelven a ser 134)
+PRUEBA EN EMULADOR: TODO OK
