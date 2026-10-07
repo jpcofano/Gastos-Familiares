@@ -1,5 +1,260 @@
 F9.183 — Agenda de pagos: un comprobante por fila nueva, y lo que ya está cargado no se repite
 
+Base: origin/main @ 989549d (F9.183 §0, primera vuelta). El prompt audita contra fb5cc92; F9.184
+no tocó nada de lo que cita. Prompt en docs/prompts/F9.183-agenda-de-pagos-dedup-contra-lo-cargado.md
+(reemplaza a F9.182; lo que no repite sale de docs/prompts/F9.182-agenda-de-pagos-captura-en-comprobantes-hijos.md).
+NO deployado.
+
+La primera vuelta paró en §0 porque faltaba la captura (abajo de todo, "PRIMERA VUELTA"). Juan la
+dejó en Descargas como agenda-2026-10-06.png y esta vuelta la completa. La captura NO se copió al
+repo: se leyó desde Descargas.
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  §0   La captura coincide con la tabla: 7 filas, mismos montos. "Vence mañana" con subida el
+       06/10 da 07/10. Ojo: se llama .png pero es WebP. Producción lo maneja sola, porque
+       procesarComprobante manda el tipo de los bytes (F9.152).
+  §1   buildSystemPrompt suma "agenda_pagos" con su regla, y no cambia nada más.
+       procesarComprobante, si la primera llamada da agenda_pagos, hace una segunda con
+       buildAgendaPrompt(subida) (max_tokens 4096, ~40 filas). Pasa los vencimientos por
+       corregirAnioVencimientos y valida cada fila (monto > 0, ISO válido, numeroCliente y emisor no
+       vacíos; inválida → filasInvalidas con motivo).
+  §2   dividirAgenda (functions/src/agendaDivision.ts) hace todo en UNA transacción: lee el
+       universo y los hijos, decide, crea solo los que no existen y pasa el padre a 'dividido'. El
+       dedup 2.0 se hace con la ASIGNACIÓN DE COSTO MÍNIMO y no con "gana la menor diferencia": ver
+       DESVÍO. El id del hijo sale del contenido (|2, |3 si se repite en la misma captura) y su
+       hashPdf es su propio id. El cuerpo de matchComprobante se movió sin cambios a procesarMatch,
+       que llaman matchComprobante, matchComprobanteHijo (nuevo, onCreate) y reprocesarHijoAgenda
+       (callable nueva, admin).
+  §3   La card del padre dice "Agenda de pagos · 7 filas: 4 nuevas, 3 ya cargadas". Cada fila
+       muestra el estado de su hijo (propuesta / vinculado / error / sin procesar, este último a los
+       2 minutos y con "Procesar de nuevo"). Las ya cargadas muestran con qué comprobante se
+       aparearon (emisor, monto, fecha de subida, % de diferencia). Las inválidas y descartadas van
+       con su motivo.
+  Más: descartarEntrada ya no borra la imagen si otro comprobante la usa, y descartarEntranteCompleto
+       rechaza una agenda 'dividido' (hallazgo 3 de la primera vuelta).
+  Verificación: las 6 dan OK, en producción (solo lectura + API) y con las functions REALES en el
+       emulador.
+
+════════════════════════════════════════════════════════════════════════════════
+DESVÍO DEL PROMPT (decidido, para que Juan lo vea)
+════════════════════════════════════════════════════════════════════════════════
+
+  El prompt pide desempatar el apareo con "gana la de menor diferencia". Con eso, su propia
+  verificación 3 ("un mes después": cuotas +1,2 %, Edenor 07/11 → 1 hijo) da 2 hijos: un
+  duplicado. Las 4 cuotas del 31/10 están a 1,1-1,7 % una de otra, y un mes de intereses deja
+  cada una más cerca de su vecina vieja que de sí misma (medido en la primera vuelta). Se implementó
+  la asignación de costo total mínimo: dentro de cada llave, máximos pares dentro del 3 % y, entre
+  ésas, mínima suma de diferencias. Cumple la tabla de §0 (7/7) y la verificación 3 (0 y 1 hijo).
+  Está escrito en docs/CLAUDE.md.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas antes de tocar)
+════════════════════════════════════════════════════════════════════════════════
+
+  · normalizarClaveDesambiguacion en index.ts:652 (sin cambios).
+  · Las de F9.182 siguen en su lugar: extraerComprobante solo procesa 'subido'; matchComprobante
+    solo corre en la TRANSICIÓN a 'extraido' (un doc que nace extraído no se matcheaba nunca); el
+    servidor no crea movimientos (el alta es del cliente, Comprobantes.tsx:498-506 y 865);
+    el hashPdf del movimiento es el CAMPO del comprobante (Comprobantes.tsx:639).
+  · Universo de 2.0: no existe un estado "descartado". descartarEntrada BORRA el doc (index.ts, :2100
+    antes del cambio), así que no hay nada que revivir. El universo es todo comprobante con
+    numeroCliente, salvo el propio padre y sus hijos.
+  · Con el blob compartido entre padre e hijos, descartar un hijo borraba la imagen de todos
+    (hallazgo 3 de la primera vuelta). Se arregló.
+
+════════════════════════════════════════════════════════════════════════════════
+LO QUE CAMBIÓ
+════════════════════════════════════════════════════════════════════════════════
+
+  docs/CLAUDE.md — antes del código: "Agenda de pagos: una captura, un comprobante por fila nueva
+    (F9.183)". Qué es agenda_pagos, el padre y el hijo, el id por contenido y por qué, el dedup 2.0
+    (llave, costo mínimo, 3 % y por qué), la atomicidad, "nada trabado", la imagen compartida y la
+    regla de uso "cada boleta por UNA sola fuente".
+  functions/src/agendaPagos.ts (nuevo, puro): buildAgendaPrompt, validarFilas, idsDeHijos,
+    aparearConExistentes, datosDeHijo.
+  functions/src/agendaDivision.ts (nuevo): dividirAgenda(db, …), aExistente. Recibe el Firestore
+    por parámetro para correr igual en el emulador.
+  functions/src/index.ts:
+    · buildSystemPrompt: "agenda_pagos" en los valores y la regla de §1.1.
+    · procesarComprobante: la rama agenda_pagos, antes de las validaciones de moneda y
+      numeroOperacion (que para la agenda vienen en null). Un error cae al catch de siempre → 'error'.
+    · procesarMatch: el cuerpo de matchComprobante movido sin cambiar una línea (git diff -w lo
+      muestra: solo cambian la cabecera y el cierre).
+    · matchComprobanteHijo (onDocumentCreated, guarda estado 'extraido' && padreHash) y
+      reprocesarHijoAgenda (onCall admin; rechaza lo que no es hijo o no está en 'extraido').
+    · descartarEntrada: no borra el blob si otro comprobante tiene el mismo refStoragePdf.
+    · descartarEntranteCompleto: 'dividido' se protege como 'vinculado'/'confirmado'.
+  src/types/index.ts, src/datos/comprobantes.ts: el estado 'dividido'; padreHash, creadoEn,
+    filasAgenda, filasInvalidas y filasDescartadas; y el wrapper reprocesarHijoAgenda.
+  src/vistas/Comprobantes.tsx: AgendaPadreDetalle (la card del padre), sin "0 KB" para un hijo
+    (tamano 0). En la bandeja, 'dividido' cuenta como terminado; en la pantalla de compartir, como
+    fase 4.
+  scripts/probarF9183.ts (nuevo): la verificación. scripts/verificarF9183.ts: el §0 de la primera
+    vuelta.
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  Parte 1 — producción solo lectura + API (npx tsx scripts/probarF9183.ts --api <fixture>):
+  1. Extracción: la primera llamada da agenda_pagos y la segunda 7 filas (end_turn, 690 tokens), con
+     los montos exactos y los vencimientos de la tabla. 0 inválidas, 0 descartadas. OK.
+  2. Dedup contra producción con las filas EXTRAÍDAS: 7/7 con la tabla. Edenor = 2824a147,
+     Metrogas = 1f5087af, AGIP 87.084,97 = e9089013 (0,21 %), y 4 nuevas. OK.
+  3. Re-subida en memoria: la misma agenda da 0 hijos; "un mes después" da 1 hijo (la Edenor
+     nueva). OK.
+  5. No regresión de la clasificación con el prompt nuevo: 2824a147, 1f5087af y e9089013 (recortes
+     JPEG) y 3be2e9fd (factura PDF de Edenor) siguen recibo_servicio. OK.
+  Fixture con datos reales en el scratchpad, NO commiteado.
+
+  Parte 2 — EMULADOR con las functions REALES (firebase emulators:exec --only
+  firestore,functions,storage,auth --project demo-f9183; siembra de 467 docs de producción con los
+  triggers apagados durante la siembra):
+  E2E: la captura entra como comprobante 'subido' → extraerComprobante (2 llamadas a la API) →
+     'dividido' con las 7 filas = tabla (7/7) → 4 hijos con hashPdf = su id, la imagen del padre,
+     padreHash, recibo_servicio. OK.
+  6. matchComprobanteHijo: los 4 hijos de AGIP salen rama 2, ítem ABL, requiereConfirmacion=true
+     (como los recortes) y esAdicional=false (la regla de F9.169 para obligaciones futuras). OK.
+  4. (a) La división dos veces sobre el mismo padre da 0 nuevos, los 4 hijos nuevo=false y siguen
+     4 docs. OK.
+     (b) Excepción inyectada antes del commit: tira, 0 hijos y el padre sin tocar. En el flujo real
+     el catch de procesarComprobante lo deja en 'error'. OK.
+     (c) Segunda captura con 3 filas en común: 2 hijos nuevos, y las 3 compartidas quedan "ya
+     cargadas" contra los hijos de la primera. OK.
+  §3.2 "Procesar de nuevo" (callable) dos veces sobre el mismo hijo: ok/ok, movimientos 90 → 90, la
+     propuesta sigue. Sobre el padre lo rechaza ("No es un hijo de una agenda"). OK.
+  Blob compartido: descartarEntrada de un hijo borra el doc y la imagen SIGUE en Storage. OK.
+  Nota: al apagar, el emulador loguea un TypeError de routearEntrante. Es el trigger de Storage de
+  'entrantes/', que se disparó porque la prueba subió la imagen ahí SIN crear el doc entrantes/{hash}
+  (se salteó el router a propósito para crear el comprobante directo). No es parte del cambio.
+
+════════════════════════════════════════════════════════════════════════════════
+FUERA DE ALCANCE (como dice el prompt) Y RIESGO ABIERTO
+════════════════════════════════════════════════════════════════════════════════
+
+  · Una factura PDF que llega DESPUÉS de una obligación cargada por agenda o recorte la sigue
+    duplicando (F9.182 0.3). Regla de uso: cada boleta por UNA sola fuente.
+  · F9.184 ya cubre lo del checklist: las 4 cuotas de ABL se ven como "+N a pagar" aunque el ítem
+    figure pagado.
+  · Riesgo abierto: si la app de pagos le CORRE el vencimiento a una cuota atrasada (31/10 → 30/11),
+    la llave no aparea y se crean hijos de nuevo (primera vuelta, hallazgo 2). La agenda del mes que
+    viene lo dice.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  tsc functions: 0 al abrir y 0 al cerrar. tsc cliente: 41 al abrir y 41 al cerrar, misma lista
+  (diff vacío). Medido con grep "error TS".
+  Deploy (lo hace Juan): npm run build y firebase deploy --only functions,hosting. Hay dos funciones
+  NUEVAS: matchComprobanteHijo (trigger de Firestore) y reprocesarHijoAgenda (callable). Después del
+  deploy:
+  · la callable necesita allUsers → roles/run.invoker. Si firebase functions:log no muestra
+    "Callable request verification passed", hay que correr gcloud run services
+    add-iam-policy-binding;
+  · el trigger necesita el binding del agente de Eventarc, no allUsers (infra-and-data-sources).
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDAS — parte 1 (API)
+════════════════════════════════════════════════════════════════════════════════
+
+F9.183 — PARTE 1: producción (solo lectura) + API
+
+captura: 50726 bytes, tipo real image/webp (nombre .png)
+
+── 1. extracción de la captura (subida 2026-10-06)
+  OK primera llamada: tipoDocumento = agenda_pagos
+  segunda llamada: stop_reason=end_turn · output_tokens=690
+    AGIP Inmobiliario/ABL  0070031265481    76.228,21 ARS · 2026-10-07 · "Vence mañana"
+    Edenor                 007497140070    137.509,91 ARS · 2026-10-07 · "Vence mañana"
+    Metrogas               010372743000      5.291,83 ARS · 2026-10-08 · "Vence el 08/10"
+    AGIP Inmobiliario/ABL  0070031265481    92.479,04 ARS · 2026-10-31 · "Vence el 31/10"
+    AGIP Inmobiliario/ABL  0070031265481    89.605,43 ARS · 2026-10-31 · "Vence el 31/10"
+    AGIP Inmobiliario/ABL  0070031265481    88.081,49 ARS · 2026-10-31 · "Vence el 31/10"
+    AGIP Inmobiliario/ABL  0070031265481    87.084,97 ARS · 2026-10-31 · "Vence el 31/10"
+  OK 7 filas válidas, 0 inválidas, 0 descartadas
+  OK montos exactos y vencimientos de la tabla (Vence mañana → 2026-10-07; 08/10; 31/10)
+
+── 2. dedup contra producción, con las filas EXTRAÍDAS
+    OK AGIP Inmobiliario/ABL    76.228,21 · 2026-10-07 → NUEVA
+    OK Edenor                  137.509,91 · 2026-10-07 → ya cargada (2824a147, Δ 0.00 %)
+    OK Metrogas                  5.291,83 · 2026-10-08 → ya cargada (1f5087af, Δ 0.00 %)
+    OK AGIP Inmobiliario/ABL    92.479,04 · 2026-10-31 → NUEVA
+    OK AGIP Inmobiliario/ABL    89.605,43 · 2026-10-31 → NUEVA
+    OK AGIP Inmobiliario/ABL    88.081,49 · 2026-10-31 → NUEVA
+    OK AGIP Inmobiliario/ABL    87.084,97 · 2026-10-31 → ya cargada (e9089013, Δ 0.21 %)
+  OK coincide con la tabla de §0: 7/7 (4 hijos, 3 ya cargadas)
+
+── 3. re-subida (en memoria, sobre el estado que deja la 2)
+  OK misma agenda de nuevo → 0 hijos (esperado 0)
+  OK "un mes después" (cuotas +1,2 %, Edenor 07/11) → 1 hijo(s) (esperado 1: la Edenor nueva)
+
+── 5. no regresión: 3 recortes y una factura PDF siguen con su tipoDocumento
+  OK 2824a147 (image/jpeg) Edenor: antes recibo_servicio → ahora recibo_servicio
+  OK 1f5087af (image/jpeg) Metrogas: antes recibo_servicio → ahora recibo_servicio
+  OK e9089013 (image/jpeg) AGIP Inmobiliario/ABL: antes recibo_servicio → ahora recibo_servicio
+  OK 3be2e9fd (application/pdf) Empresa Distribuidora y Comercializadora Norte S.A. (Edenor): antes recibo_servicio → ahora recibo_servicio
+
+fixture: <scratchpad>/f9183_fixture.json (191 comprobantes, 161 destinos, 24 ítems, 90 movimientos de 2026-09…2027-01)
+
+PARTE 1: TODO OK
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDAS — parte 2 (emulador; líneas del script y de las functions, sin el ruido del emulador)
+════════════════════════════════════════════════════════════════════════════════
+
++  functions: Loaded functions definitions from source: extraerComprobante, reintentarComprobante, matchComprobante, matchComprobanteHijo, reprocesarHijoAgenda, aprenderMovimientoCreado, aprenderMovimientoActualizado, extraerResumenTarjeta, reintentarResumenTarjeta, routearEntrante, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto, cargarMovimientoDesdeComprobante, actualizarTCDiario, actualizarPreciosDiarios, actualizarMediosPago, actualizarTCManual, backfillTcDiario, actualizarMiPerfil, guardarMiembro, guardarTaxonomia, guardarTarjeta, sincronizarRecordatoriosCalendar, sincronizarCalendarAhora, setCalendarSync, editarMovimiento, eliminarMovimiento, guardarReglaNormalizacion, upsertDestino, desvincularDestinoItem, reasignarItemDeComprobante, desvincularObligacion, eliminarDestino, analizarConIA, sincronizarCafci, importarCafciManual, obtenerSeriesPrecios, generarPromptIA, importarAnalisisIA.
++  functions[southamerica-east1-routearEntrante]: firestore function initialized.
+F9.183 — PARTE 2: emulador, functions reales
+i  functions[routearEntrante]: function temporarily disabled.
++  functions: Loaded functions definitions from source: extraerComprobante, reintentarComprobante, matchComprobante, matchComprobanteHijo, reprocesarHijoAgenda, aprenderMovimientoCreado, aprenderMovimientoActualizado, extraerResumenTarjeta, reintentarResumenTarjeta, routearEntrante, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto, cargarMovimientoDesdeComprobante, actualizarTCDiario, actualizarPreciosDiarios, actualizarMediosPago, actualizarTCManual, backfillTcDiario, actualizarMiPerfil, guardarMiembro, guardarTaxonomia, guardarTarjeta, sincronizarRecordatoriosCalendar, sincronizarCalendarAhora, setCalendarSync, editarMovimiento, eliminarMovimiento, guardarReglaNormalizacion, upsertDestino, desvincularDestinoItem, reasignarItemDeComprobante, desvincularObligacion, eliminarDestino, analizarConIA, sincronizarCafci, importarCafciManual, obtenerSeriesPrecios, generarPromptIA, importarAnalisisIA.
++  functions[southamerica-east1-routearEntrante]: firestore function initialized.
+sembrados 467 docs (triggers apagados durante la siembra)
+── E2E: extraerComprobante → dividido → matchComprobanteHijo
+>  [procesarComprobante] 8fc1f9311e880ad067c8e0b174a2ee7a026577f2a6f7be68333e4d4a75a2bcc2 — contentType declarado "image/png" != bytes reales "image/webp"; mando "image/webp"
+>  [procesarComprobante] 8fc1f9311e880ad067c8e0b174a2ee7a026577f2a6f7be68333e4d4a75a2bcc2 → dividido (agenda: 7 filas, 4 hijos nuevos, 0 ya existían, 3 ya cargadas, 0 inválidas, 0 descartadas)
+  OK padre 8fc1f931 → dividido
+    AGIP Inmobiliario/ABL    76.228,21 · 2026-10-07 → hijo 3c921c17 (nuevo=true)
+    Edenor                  137.509,91 · 2026-10-07 → ya cargada = 2824a147 (Δ 0.00 %)
+    Metrogas                  5.291,83 · 2026-10-08 → ya cargada = 1f5087af (Δ 0.00 %)
+    AGIP Inmobiliario/ABL    92.479,04 · 2026-10-31 → hijo 52a4244c (nuevo=true)
+    AGIP Inmobiliario/ABL    89.605,43 · 2026-10-31 → hijo c4fffe2c (nuevo=true)
+    AGIP Inmobiliario/ABL    88.081,49 · 2026-10-31 → hijo aa05b969 (nuevo=true)
+    AGIP Inmobiliario/ABL    87.084,97 · 2026-10-31 → ya cargada = e9089013 (Δ 0.21 %)
+  OK filas del padre = tabla de §0: 7/7
+  OK 4 hijos creados (esperado 4)
+  OK hijo 3c921c17: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+  OK hijo 52a4244c: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+  OK hijo aa05b969: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+  OK hijo c4fffe2c: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+── 6. match de los hijos
+  OK hijo 3c921c17 76.228,21 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+  OK hijo 52a4244c 92.479,04 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+  OK hijo aa05b969 88.081,49 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+  OK hijo c4fffe2c 89.605,43 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+── 4. atomicidad e idempotencia (dividirAgenda real contra el emulador)
+  OK (a) segunda división del mismo padre: 0 nuevos, 4 hijos todos nuevo=false, siguen 4 docs
+  OK (b) excepción antes del commit: tiró=true, 0 hijos creados, el padre sigue sin tocar (en el flujo real, el catch lo deja en 'error')
+  OK (c) segunda captura con 3 filas en común: 2 hijos nuevos (esperado 2), 3 ya cargadas como hijos de la primera (esperado 3)
+── §3.2 "Procesar de nuevo" dos veces sobre el mismo hijo
+  OK dos llamadas: ok / ok · movimientos 90 → 90 · propuesta rama 2
+  OK sobre el padre lo rechaza: No es un hijo de una agenda
+── descartar un hijo con la imagen compartida
+  OK descartarEntrada(hijo 52a4244c): ok · doc borrado · la imagen SIGUE en Storage
+PARTE 2: TODO OK
+i  functions: Beginning execution of "southamerica-east1-routearEntrante"
+!  functions: TypeError: Cannot read properties of undefined (reading 'estado')
+
+
+════════════════════════════════════════════════════════════════════════════════
+PRIMERA VUELTA (989549d) — parada en §0 por falta de la captura
+════════════════════════════════════════════════════════════════════════════════
+
+F9.183 — Agenda de pagos: un comprobante por fila nueva, y lo que ya está cargado no se repite
+
 Base: origin/main @ d556542 (F9.184; el prompt audita contra fb5cc92, y F9.184 no tocó
 functions/src ni nada de lo que cita este prompt). Prompt en
 docs/prompts/F9.183-agenda-de-pagos-dedup-contra-lo-cargado.md (reemplaza a F9.182).

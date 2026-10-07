@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useMiembroCtx } from '../contexto/MiembroContext';
-import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, reasignarItemDeComprobante, desvincularObligacion, type ObligacionAbierta } from '../datos/comprobantes';
+import { confirmarRama1, cargarMovimientoDesdeComprobante, confirmarSueltoDesdeComprobante, buscarObligacionesAbiertas, confirmadoPagoPorFecha, esObligacionDoc, reintentarComprobante, reprocesarHijoAgenda, reasignarItemDeComprobante, desvincularObligacion, type ObligacionAbierta } from '../datos/comprobantes';
 import { subirEntrante, suscribirEntrantes, resolverEntranteAmbiguo, descartarEntrada, descartarEntranteCompleto } from '../datos/entrantes';
 import { leerYBorrarArchivosCompartidos } from '../datos/shareTargetIdb';
 import { useComprobantes } from '../hooks/useComprobantes';
@@ -66,7 +66,7 @@ function ajustarFechaAlMes(fechaISO: string, mesDestino: string): string {
 // F9.170 §2 — `vinculado` baja de verde a gris. Había dos verdes distintos compitiendo en la
 // misma tarjeta: el estado del archivo y el resultado del match. El estado es contexto, el
 // resultado es la noticia. Los otros tres no se tocan.
-const ESTADO_COMP_TONE = { subido: 'info', extraido: 'warning', vinculado: 'neutral', error: 'danger' } as const;
+const ESTADO_COMP_TONE = { subido: 'info', extraido: 'warning', vinculado: 'neutral', error: 'danger', dividido: 'neutral' } as const;
 const ESTADO_ENTR_TONE = { pendiente: 'neutral', ruteado: 'success', ambiguo: 'warning', error: 'danger' } as const;
 
 function BadgeEstado({ estado }: { estado: string }) {
@@ -1078,10 +1078,99 @@ function PropuestaCard({ comp, items, agenda, memberId, miembro, esAdmin, config
 
 // ── Tarjeta de comprobante ────────────────────────────────────────────────────
 
+// ── F9.183 §3 — Agenda de pagos: la card del padre ───────────────────────────
+// "Agenda de pagos · 7 filas: 4 nuevas, 3 ya cargadas", y debajo cada fila con su estado LEÍDO DEL
+// HIJO (propuesta, vinculado, error o sin procesar). Las ya cargadas dicen con qué comprobante se
+// aparearon, para revisarlas de un vistazo. Nada trabado sin que se vea: un hijo en 'extraido' sin
+// propuesta a los 2 minutos de creado sale "sin procesar", con "Procesar de nuevo" (admin).
+const MS_SIN_PROCESAR = 2 * 60 * 1000;
+
+function AgendaPadreDetalle({ comp, comprobantes, esAdmin }: { comp: Comprobante; comprobantes: Comprobante[]; esAdmin: boolean }) {
+  const filas = comp.filasAgenda ?? [];
+  const nuevas = filas.filter(f => f.resultado === 'hijo').length;
+  const cargadas = filas.filter(f => f.resultado === 'yaCargada').length;
+  // El umbral de 2 minutos depende del reloj, no de un dato: un tic cada 30 s alcanza para que
+  // "calculando…" pase a "sin procesar" sin recargar.
+  const [ahora, setAhora] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setAhora(Date.now()), 30000); return () => clearInterval(t); }, []);
+  const [reprocesando, setReprocesando] = useState<string | null>(null);
+  const [errRep, setErrRep] = useState<string | null>(null);
+
+  async function reprocesar(id: string) {
+    setReprocesando(id);
+    setErrRep(null);
+    const res = await reprocesarHijoAgenda(id);
+    setReprocesando(null);
+    if (!res.ok) setErrRep(res.error.message);
+  }
+
+  const estadoHijo = (id: string): { texto: string; tono: 'neutral' | 'info' | 'warning' | 'danger' | 'success'; trabado: boolean } => {
+    const h = comprobantes.find(c => c.id === id);
+    if (!h) return { texto: 'creando…', tono: 'neutral', trabado: false };
+    if (h.estado === 'vinculado') return { texto: 'vinculado', tono: 'success', trabado: false };
+    if (h.estado === 'error')     return { texto: 'error', tono: 'danger', trabado: false };
+    if (h.propuestaMatch)         return { texto: 'propuesta', tono: 'info', trabado: false };
+    const desde = (h.creadoEn ?? h.subidoEn).getTime();
+    return ahora - desde > MS_SIN_PROCESAR
+      ? { texto: 'sin procesar', tono: 'warning', trabado: true }
+      : { texto: 'calculando…', tono: 'neutral', trabado: false };
+  };
+
+  return (
+    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ fontSize: 13, fontWeight: 700 }}>
+        Agenda de pagos · {filas.length} fila{filas.length === 1 ? '' : 's'}: {nuevas} nueva{nuevas === 1 ? '' : 's'}, {cargadas} ya cargada{cargadas === 1 ? '' : 's'}
+      </span>
+      {filas.map((f, i) => {
+        const est = f.resultado === 'hijo' && f.hijo ? estadoHijo(f.hijo) : null;
+        return (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 0', borderTop: i ? '1px solid var(--gf-gray-100)' : 'none' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {f.emisor} · {fmtMonto(f.monto, f.moneda)} · vence {fmtFechaIso(f.vencimiento)}
+              </span>
+              {est
+                ? <Badge tone={est.tono}>{est.texto}</Badge>
+                : <Badge tone="neutral">ya cargada</Badge>}
+            </div>
+            {f.resultado === 'yaCargada' && f.yaCargada && (
+              <span style={{ fontSize: 11.5, color: 'var(--color-text-sec)' }}>
+                = {f.yaCargada.emisor || 'comprobante'} · {fmtMonto(f.yaCargada.monto, f.moneda)}
+                {f.yaCargada.subidoEn ? ` · subido ${fmtFechaIso(f.yaCargada.subidoEn)}` : ''}
+                {f.yaCargada.diferencia > 0 ? ` · ${(f.yaCargada.diferencia * 100).toFixed(2).replace('.', ',')} % de diferencia` : ''}
+              </span>
+            )}
+            {est?.trabado && esAdmin && f.hijo && (
+              <div>
+                <Button variant="secondary" size="sm" disabled={reprocesando === f.hijo} onClick={() => reprocesar(f.hijo!)}>
+                  {reprocesando === f.hijo ? 'Procesando…' : 'Procesar de nuevo'}
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {(comp.filasInvalidas ?? []).map((f, i) => (
+        <span key={`inv-${i}`} style={{ fontSize: 12, color: 'var(--gf-warn-text)' }}>
+          Fila inválida{typeof f.fila.emisor === 'string' ? ` (${f.fila.emisor})` : ''}: {f.motivo}
+        </span>
+      ))}
+      {(comp.filasDescartadas ?? []).map((f, i) => (
+        <span key={`des-${i}`} style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>
+          Renglón no leído{f.texto ? ` (${f.texto})` : ''}: {f.motivo}
+        </span>
+      ))}
+      {errRep && <span style={{ fontSize: 12, color: 'var(--gf-err-text)' }}>{errRep}</span>}
+    </div>
+  );
+}
+
 function ComprobanteCard({
-  comp, items, agenda, memberId, miembro, esAdmin, config, autoAbrir,
+  comp, comprobantes, items, agenda, memberId, miembro, esAdmin, config, autoAbrir,
 }: {
   comp:     Comprobante;
+  /** F9.183 — la lista completa, para que el padre de una agenda lea el estado de sus hijos. */
+  comprobantes: Comprobante[];
   items:    ExpectedItem[];
   agenda:   GrupoAgenda[];
   memberId: string;
@@ -1123,7 +1212,8 @@ function ComprobanteCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <BadgeEstado estado={comp.estado} />
         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(comp.datosExtraidos && payeeDeDatos(comp.datosExtraidos)) || comp.nombreArchivo}</span>
-        <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', flexShrink: 0 }}>{(comp.tamano / 1024).toFixed(0)} KB</span>
+        {/* F9.183 — un hijo de agenda no tiene archivo propio (tamano 0): no se imprime "0 KB". */}
+        {comp.tamano > 0 && <span style={{ fontSize: 11, color: 'var(--gf-gray-400)', flexShrink: 0 }}>{(comp.tamano / 1024).toFixed(0)} KB</span>}
         {esAdmin && (
           <button
             onClick={handleDescartar}
@@ -1137,7 +1227,8 @@ function ComprobanteCard({
       </div>
       {advertencia  && <p style={{ fontSize: 12, color: 'var(--gf-warn-text)', marginTop: 6 }}>{advertencia}</p>}
       {errDescartar && <p style={{ fontSize: 12, color: 'var(--gf-err-text)', marginTop: 6 }}>{errDescartar}</p>}
-      {comp.datosExtraidos && <DatosResumen d={comp.datosExtraidos} />}
+      {comp.datosExtraidos && comp.estado !== 'dividido' && <DatosResumen d={comp.datosExtraidos} />}
+      {comp.estado === 'dividido' && <AgendaPadreDetalle comp={comp} comprobantes={comprobantes} esAdmin={esAdmin} />}
       {comp.estado === 'error' && comp.errorExtraccion && (
         <p style={{ fontSize: 12, color: 'var(--gf-err-text)', marginTop: 6 }}>{comp.errorExtraccion}</p>
       )}
@@ -1190,7 +1281,9 @@ function estadoDelDestino(
   if (e.estado !== 'ruteado' || !e.destino) return 'abierto';
   if (e.destino.coleccion === 'comprobantes') {
     const c = comprobantes.find(c => c.id === e.destino!.id);
-    return !c ? 'desconocido' : (c.estado === 'vinculado' ? 'terminado' : 'abierto');
+    // F9.183 — una agenda 'dividido' terminó como entrante: lo que queda pendiente son sus hijos,
+    // que viven en el historial. Y no se puede descartar entera (descartarEntranteCompleto la rechaza).
+    return !c ? 'desconocido' : (c.estado === 'vinculado' || c.estado === 'dividido' ? 'terminado' : 'abierto');
   }
   if (e.destino.coleccion === 'resumenesTarjeta') {
     const r = resumenes.find(r => r.id === e.destino!.id);
@@ -1344,6 +1437,8 @@ function calcularFaseCompartido(
     if (comp.estado === 'error') {
       return { fase: 3, tipo, error: comp.errorExtraccion ?? 'No pudimos extraer los datos del comprobante.', comp };
     }
+    // F9.183 — una agenda no tiene propuesta propia (la tienen sus hijos): dividida, está lista.
+    if (comp.estado === 'dividido') return { fase: 4, tipo, error: null, comp };
     if (!comp.datosExtraidos || !comp.propuestaMatch) return { fase: 3, tipo, error: null, comp };
     return { fase: 4, tipo, error: null, comp };
   }
@@ -1649,6 +1744,7 @@ export default function Comprobantes() {
                     <ComprobanteCard
                       key={comp.id}
                       comp={comp}
+                      comprobantes={comprobantes}
                       items={items}
                       agenda={agendaPicker}
                       memberId={memberId}

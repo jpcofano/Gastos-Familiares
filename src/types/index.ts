@@ -280,10 +280,32 @@ export interface Comprobante {
   refStoragePdf: string;
   subidoPor: string;  // memberId
   subidoEn: Date;
-  estado: 'subido' | 'extraido' | 'vinculado' | 'error';
+  // F9.183 — 'dividido': una agenda de pagos ya partida en hijos. Nunca pasa por el match.
+  estado: 'subido' | 'extraido' | 'vinculado' | 'error' | 'dividido';
   errorExtraccion?: string;
   datosExtraidos?: DatosExtraidos;
   propuestaMatch?: PropuestaMatch;
+  // F9.183 — hijo de una agenda: el id del padre (la captura).
+  padreHash?: string;
+  creadoEn?: Date;
+  // F9.183 — padre de una agenda: cada fila con su resultado, y las que no entraron.
+  filasAgenda?: FilaAgendaResultado[];
+  filasInvalidas?: Array<{ fila: Record<string, unknown>; motivo: string }>;
+  filasDescartadas?: Array<{ texto: string; motivo: string }>;
+}
+
+// F9.183 — una fila de la agenda, con lo que pasó con ella (docs/CLAUDE.md, "Agenda de pagos").
+export interface FilaAgendaResultado {
+  emisor: string;
+  numeroCliente: string;
+  monto: number;
+  moneda: 'ARS' | 'USD';
+  vencimiento: string;
+  vencimientoTexto: string;
+  resultado: 'hijo' | 'yaCargada';
+  hijo?: string;
+  nuevo?: boolean;
+  yaCargada?: { comprobanteId: string; emisor: string; monto: number; subidoEn: string | null; diferencia: number };
 }
 
 export interface FamiliaMiembro {

@@ -49,7 +49,25 @@ export function docAComprobante(id: string, data: DocumentData): Comprobante {
       reconciliacionDebil:  (pm.reconciliacionDebil  as boolean | undefined),
       origenSuelto:         (pm.origenSuelto         as boolean | undefined),
     } : undefined,
+    // F9.183 — agenda de pagos: el hijo apunta a su padre; el padre trae sus filas.
+    padreHash:        (data.padreHash as string | undefined) ?? undefined,
+    creadoEn:         data.creadoEn?.toDate?.() ?? undefined,
+    filasAgenda:      Array.isArray(data.filas) ? data.filas : undefined,
+    filasInvalidas:   Array.isArray(data.filasInvalidas) ? data.filasInvalidas : undefined,
+    filasDescartadas: Array.isArray(data.filasDescartadas) ? data.filasDescartadas : undefined,
   };
+}
+
+// F9.183 §3.2 — "Procesar de nuevo" de un hijo de agenda trabado (sin propuesta a los 2 minutos).
+// Callable admin: corre el match en el servidor y responde cuando termina; no es un update del cliente.
+export async function reprocesarHijoAgenda(id: string): Promise<Resultado<void>> {
+  try {
+    const fn = httpsCallable(functions, 'reprocesarHijoAgenda');
+    await fn({ id });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+  }
 }
 
 type ResultadoSubida =

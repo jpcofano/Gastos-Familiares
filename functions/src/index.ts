@@ -33,6 +33,9 @@ import { normalizar, type NormRule } from './normalizador';
 import { detectarTipoReal, motivoFormatoNoSoportado } from './tipoArchivo';
 // F9.154 §1.b — piso determinístico para el año de los vencimientos. Ver el encabezado del módulo.
 import { corregirAnioVencimientos, type Vencimiento } from './fechasVencimiento';
+// F9.183 — agenda de pagos: módulo puro (prompt, validación, ids, dedup) + la transacción.
+import { buildAgendaPrompt, validarFilas, MAX_TOKENS_AGENDA, type FilaCruda } from './agendaPagos';
+import { dividirAgenda } from './agendaDivision';
 import { corregirSignoConsumos } from './signoLineas';
 // F9.155 §2 — el CUIT de la contraparte en una acreditación viene pelado y el modelo lo archivaba
 // en numeroOperacion. El dígito verificador permite rescatarlo sin depender de etiquetas.
@@ -73,7 +76,8 @@ Hoy es ${hoy} (zona horaria America/Argentina/Buenos_Aires).
 Devolvés EXCLUSIVAMENTE un objeto JSON válido. Sin markdown, sin \`\`\`json, sin texto antes ni después.
 
 PASO 1 — Clasificá tipoDocumento ANTES que nada. Esto decide dónde están los demás campos.
-Valores: "factura_a" | "factura_b" | "factura_c" | "ticket" | "comprobante_pago" | "transferencia" | "resumen_tarjeta" | "recibo_servicio" | "otro".
+Valores: "factura_a" | "factura_b" | "factura_c" | "ticket" | "comprobante_pago" | "transferencia" | "resumen_tarjeta" | "recibo_servicio" | "agenda_pagos" | "otro".
+Si la imagen es una LISTA de varias boletas o servicios pendientes de distintos montos o vencimientos (agenda de pagos, servicios a pagar), tipoDocumento = agenda_pagos y el resto de los campos en null.
 
 PASO 2 — Extraé los campos según el tipo.
 
@@ -244,6 +248,62 @@ async function procesarComprobante(
       if (!tipoDocumento || typeof tipoDocumento !== 'string' || tipoDocumento.trim() === '') {
         throw new Error(`tipoDocumento ausente — raw (500c): ${raw.slice(0, 500)}`);
       }
+
+      // F9.183 §1.2 — una agenda de pagos no es un comprobante: es una lista de boletas. Va ANTES de
+      // las validaciones de abajo porque el prompt le pide el resto de los campos en null (moneda y
+      // numeroOperacion incluidos). Una segunda llamada extrae las filas y la división crea un hijo por
+      // fila nueva, en una transacción (agendaDivision.ts). Si algo tira, cae al catch de abajo y el
+      // padre queda en 'error', con "Reintentar".
+      if (tipoDocumento === 'agenda_pagos') {
+        const subidoEnAgenda = (comp.subidoEn as Timestamp | undefined)?.toDate() ?? new Date();
+        const subidaISO = subidoEnAgenda.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+        const resp = await client.messages.create({
+          model:      'claude-sonnet-4-6',
+          max_tokens: MAX_TOKENS_AGENDA,
+          system:     buildAgendaPrompt(subidaISO),
+          messages: [{
+            role: 'user',
+            content: tipoReal === 'application/pdf'
+              ? [{ type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: base64 } },
+                 { type: 'text' as const, text: 'Extraé las filas de esta agenda de pagos.' }]
+              : [{ type: 'image' as const, source: { type: 'base64' as const, media_type: tipoReal, data: base64 } },
+                 { type: 'text' as const, text: 'Extraé las filas de esta agenda de pagos.' }],
+          }],
+        });
+        if (resp.stop_reason !== 'end_turn') {
+          throw new Error(`Agenda: respuesta incompleta (stop_reason: ${resp.stop_reason}) — tokens de salida: ${resp.usage?.output_tokens ?? '?'}`);
+        }
+        const rawAgenda = resp.content
+          .filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('').trim();
+        const mdA  = rawAgenda.match(/```json\s*([\s\S]*?)\s*```/);
+        const rawA = rawAgenda.match(/(\{[\s\S]*\})/);
+        const jsonA = mdA ? mdA[1] : (rawA ? rawA[1] : null);
+        if (!jsonA) throw new Error(`Agenda: sin JSON en la respuesta (500c): ${rawAgenda.slice(0, 500)}`);
+        let agenda: { filas?: unknown; filasDescartadas?: unknown };
+        try { agenda = JSON.parse(sanitizarJson(jsonA)); }
+        catch { throw new Error(`Agenda: JSON inválido (500c): ${rawAgenda.slice(0, 500)}`); }
+        if (!Array.isArray(agenda.filas)) throw new Error('Agenda: falta el array "filas"');
+
+        // §1.2 — el mismo piso determinístico del año que los vencimientos de cualquier comprobante,
+        // anclado a la subida (F9.154).
+        const crudas = agenda.filas as FilaCruda[];
+        const vencs = crudas.map(f => ({ fecha: typeof f.vencimiento === 'string' ? f.vencimiento : null, monto: typeof f.monto === 'number' ? f.monto : null }));
+        const { vencimientos: vCorregidos, correcciones } = corregirAnioVencimientos(vencs as Vencimiento[], subidoEnAgenda);
+        for (const c of correcciones) {
+          console.warn(`[procesarComprobante] ${compId} → agenda fila ${c.indice}: vencimiento corregido ${c.antes} → ${c.despues}`);
+          crudas[c.indice] = { ...crudas[c.indice], vencimiento: vCorregidos[c.indice].fecha };
+        }
+        const { validas, invalidas } = validarFilas(crudas);
+        const descartadas = (Array.isArray(agenda.filasDescartadas) ? agenda.filasDescartadas : [])
+          .map(d => ({ texto: String((d as { texto?: unknown }).texto ?? ''), motivo: String((d as { motivo?: unknown }).motivo ?? '') }));
+
+        const r = await dividirAgenda(db, ref, comp, { filas: validas, invalidas, descartadas, primera: parsed }, normalizarClaveDesambiguacion);
+        console.log(
+          `[procesarComprobante] ${compId} → dividido (agenda: ${crudas.length} filas, ${r.nuevos} hijos nuevos, ` +
+          `${r.hijos.length - r.nuevos} ya existían, ${r.yaCargadas} ya cargadas, ${invalidas.length} inválidas, ${descartadas.length} descartadas)`,
+        );
+        return;
+      }
       if (moneda !== 'ARS' && moneda !== 'USD') {
         throw new Error(`moneda inválida: "${String(moneda)}" — raw (500c): ${raw.slice(0, 500)}`);
       }
@@ -377,11 +437,64 @@ export const matchComprobante = onDocumentUpdated(
     // Guard anti-loop: solo cuando estado transiciona a 'extraido'
     if (before.estado === 'extraido' || after.estado !== 'extraido') return;
 
+    await procesarMatch(db.collection('comprobantes').doc(event.data.after.id), after);
+  },
+);
+
+// F9.183 §2.4 — un hijo de una agenda NACE en 'extraido', y `matchComprobante` solo corre en la
+// TRANSICIÓN a 'extraido': sin este trigger no se matchearía nunca. Mismo `procesarMatch`. El padre
+// nunca pasa por acá: termina en 'dividido'.
+export const matchComprobanteHijo = onDocumentCreated(
+  {
+    document:       'comprobantes/{hash}',
+    timeoutSeconds: 60,
+    memory:         '256MiB',
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const comp = snap.data();
+    if (comp.estado !== 'extraido' || !comp.padreHash) return;
+    await procesarMatch(db.collection('comprobantes').doc(snap.id), comp);
+  },
+);
+
+// F9.183 §3.2 — "Procesar de nuevo" de un hijo trabado: la red para el único punto no atómico, que es
+// el match de cada hijo. No es un update desde el cliente: corre `procesarMatch` en el servidor y
+// responde cuando termina. `procesarMatch` no crea movimientos (solo escribe la propuesta), así que
+// correrlo dos veces no duplica nada.
+export const reprocesarHijoAgenda = onCall(
+  { region: 'southamerica-east1', timeoutSeconds: 60 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (!email) throw new HttpsError('unauthenticated', 'Email no disponible');
+    const autSnap = await db.collection('autorizados').doc(email).get();
+    if (!autSnap.exists || autSnap.data()?.rol !== 'admin') {
+      throw new HttpsError('permission-denied', 'Se requiere rol admin');
+    }
+    const { id } = request.data as { id?: string };
+    if (!id) throw new HttpsError('invalid-argument', 'id requerido');
+    const ref  = db.collection('comprobantes').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) throw new HttpsError('not-found', 'Comprobante no encontrado');
+    const comp = snap.data()!;
+    if (!comp.padreHash) throw new HttpsError('failed-precondition', 'No es un hijo de una agenda');
+    if (comp.estado !== 'extraido') throw new HttpsError('failed-precondition', `Estado inválido: ${String(comp.estado)}`);
+    await procesarMatch(ref, comp);
+    console.log(`[reprocesarHijoAgenda] ${id} (por ${email})`);
+    return { ok: true };
+  },
+);
+
+// F9.183 §2.4 — el cuerpo de `matchComprobante`, movido sin cambiar una línea de lógica para que lo
+// compartan los tres disparadores (transición a 'extraido', hijo creado ya extraído, reproceso manual).
+async function procesarMatch(ref: FirebaseFirestore.DocumentReference, after: FirebaseFirestore.DocumentData): Promise<void> {
+  {
     const datos = after.datosExtraidos as DatosExtractosMin | undefined;
     if (!datos) return;
 
-    const ref        = db.collection('comprobantes').doc(event.data.after.id);
-    const hashActual = event.data.after.id;
+    const hashActual = ref.id;
 
     // Rama 0: dedup — ¿ya existe un movimiento con este hashPdf?
     const dedupSnap = await db.collection('movimientos')
@@ -606,8 +719,8 @@ export const matchComprobante = onDocumentUpdated(
     });
 
     console.log(`[matchComprobante] ${hashActual} → rama ${propuestaFinal.rama}${(propuestaFinal as { origenDestino?: boolean }).origenDestino && propuestaFinal.rama === 3 ? ' (cat. de destino)' : ''}`);
-  },
-);
+  }
+}
 
 // ── F6.4.5 — Aprendizaje del diccionario (trigger on movimientos) ─────────────
 
@@ -2117,9 +2230,19 @@ export const descartarEntrada = onCall(
       borrados = movs.size;
     }
 
-    if (refStorage) {
+    // F9.183 — la imagen de una agenda la comparten el padre y todos sus hijos (refStoragePdf igual).
+    // Descartar UNO no puede dejar sin imagen a los demás: el blob se borra solo si ya no lo
+    // referencia ningún otro comprobante. El doc descartado ya se borró arriba, así que no se cuenta.
+    let blobCompartido = false;
+    if (refStorage && tipo === 'comprobante') {
+      const otros = await db.collection('comprobantes').where('refStoragePdf', '==', refStorage).limit(1).get();
+      blobCompartido = !otros.empty;
+    }
+    if (refStorage && !blobCompartido) {
       try { await getStorage().bucket().file(refStorage).delete(); }
       catch (e) { console.warn(`[descartarEntrada] blob no borrado: ${String(e)}`); }
+    } else if (blobCompartido) {
+      console.log(`[descartarEntrada] ${id} — blob ${refStorage} conservado: lo usan otros comprobantes`);
     }
 
     console.log(`[descartarEntrada] ${tipo} ${id} — borrados:${borrados} revertidos:${revertidos} (por ${email})`);
@@ -2172,7 +2295,8 @@ export const descartarEntranteCompleto = onCall(
         const d = destinoSnap.data()!;
         const estadoDestino = d.estado as string;
         // Guard de seguridad: NUNCA borrar destinos vinculados/confirmados
-        if (estadoDestino === 'vinculado' || estadoDestino === 'confirmado') {
+        // F9.183 — ni una agenda ya dividida: sus hijos usan su imagen y apuntan a ella (padreHash).
+        if (estadoDestino === 'vinculado' || estadoDestino === 'confirmado' || estadoDestino === 'dividido') {
           throw new HttpsError(
             'failed-precondition',
             `El destino (${destino.coleccion}/${destino.id}) ya está ${estadoDestino} — no se puede descartar. Este entrante está vinculado a datos reales.`,

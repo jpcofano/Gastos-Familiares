@@ -2678,6 +2678,56 @@ Prompts: `docs/prompts/F6.5_resumen_tarjeta_base.md` + addendums 1–10 implemen
 
 Changelog: F6.9.1 (anti-autovínculo: calcularPropuesta con movs=[]) · F6.9.2 (factura nace confirmadoPago:false, gateado por esPago) · F6.9.3 (extracción: destinoCuit/destinoNombre = emisor en facturas) · F6.9.4 (preload usa categoriaPrellena del match por destino) · F6.9.5 (el payee para el clasificador se elige por tipo (destinatario en pagos, emisor en facturas) porque billeteras tipo MP llenan comercioRazonSocial con su marca) · F6.9.6 (feedback de match en UI): la card distingue **pagó factura** (rama 1 `origenReconciliacion`), **movimiento nuevo** (rama 2 esperado/adicional · rama 3 libre) y **ya cargado** (dedup rama 0, con mes/monto del `dedupInfo`); re-subida del mismo hash avisa explícito que no se procesa. `origenReconciliacion` tipado en ambos gemelos `PropuestaMatch` (cliente + functions) · F6.9.7 (P2 — destino-sin-item no secuestra el esperado): `matchPorDestino` que devuelve rama 3 (solo categoría, sin `itemEsperadoId`) deja de cortar el flujo; el orquestador prueba `matchConEsperados` por texto y, si engancha, gana la rama 2 del esperado (cierra el ciclo: el movimiento nace con `itemEsperadoId` y `aprenderDestino` lo upsertea sobre el destino). Si los esperados tampoco matchean, cae a rama 3 conservando categoría/subcategoría/etiqueta aprendidas del destino. Destino-con-item (rama 2, incl. adicional) sigue ganando directo. · F6.9.8 (razón persistente post-vinculado): el card resuelto conserva una etiqueta compacta leída de `propuestaMatch` (que sobrevive al estado `vinculado`) — pagó factura (rama 1 `origenReconciliacion`), cumplió esperado / pago adicional (rama 2), cargado como nuevo (rama 3), ya cargado (rama 0). Cierra el hueco de F6.9.6, donde el "por qué" del match desaparecía al pasar de `extraido` a `vinculado`. · F6.9.9 (scoping de lectura de comprobantes): scoping de lectura de comprobantes a `subidoPor == miMemberId()` para no-admin (cierra fuga en regla + query + render del Historial: el dependiente solo ve los que subió); `useComprobantes(memberId, esAdmin)` filtra cliente; índice compuesto `subidoPor` + `subidoEn`. · F6.9.10 (fix lectura `entrantes`: `resource == null`): bug latente (no regresión de F6.9.9) en la regla de `entrantes` — el `getDoc` de dedup en `subirEntrante` sobre un hash nuevo evalúa `resource.data.creadoPor` con `resource` null para un no-admin y revienta ("Null value error"); admin no lo sufre porque `esAdmin()` cortocircuita el `||`. Agregado `resource == null` a la rama no-admin: permite el read de un doc inexistente (dedup limpio) sin aflojar el scoping de docs existentes. · F6.9.11 (callable `cargarMovimientoDesdeComprobante`): el dependiente carga su propio comprobante como su propio movimiento sin aflojar reglas. Reglas sin cambios — `comprobantes:update` y `movimientos` siguen con sus condiciones existentes para el cliente; la callable (Admin SDK) hace batch atómico crear-movimiento + marcar-comprobante-vinculado, owner-scoped (dueño o admin) e idempotente (precondición `estado==='extraido'`: reintento corta en `failed-precondition`); valida no-impersonación (`creadoPor`/`persona` deben ser el caller, salvo admin). Rama 1 (conciliación de obligaciones) queda admin-only por decisión y se gatea en UI (`PropuestaCard` recibe `esAdmin`; no-admin ve mensaje informativo sin acción, no bloquea su camino de movimiento nuevo). `AltaMovimiento` gana `onGuardarPayload` opcional para rutear ramas 2/3 (admin y dependiente) por la callable en vez de `crearMovimiento` client-side; `marcarVinculado` queda removido (huérfano, lo absorbe la callable). `NuevoMovimiento` gana `fechaMs`/`mes` opcionales (los usa solo la callable; `crearMovimiento` los ignora). · F6.9.12 (FAB de alta manual unificado en Carga): alta manual unificada en un único FAB "+" flotante en Carga (`esManual:true`, con `numeroComprobante` + dedup); se retira el FAB del Dashboard (junto con el estado `mostrarAlta`/`exito` y `handleGuardado`, huérfanos) y el botón inline punteado de Carga; el alta manual no se gatea por rol (dato propio, también la usa el dependiente). CSS `.dash-fab` → `.cmp-fab` (mismo estilo, movido a `Comprobantes.css`); `.cmp-btn-manual` removido. · F6.9.13 (cierre de rutas de admin al dependiente + decisión de `itemsEsperados`): (a) decisión `itemsEsperados`: son familiares (sin dato por-persona; solo admin crea/edita), el read se mantiene `esMiembro()` a propósito porque `ItemsEsperadosProvider` los necesita app-wide para el flujo de comprobantes del dependiente — scopearlo a admin rompería esa vista con permission-denied; cierra la decisión de scoping que quedaba abierta. (b) fix real: `/resumen` y `/config-esperados` estaban montadas en `AppShell.tsx` sin gatear (solo el nav estaba detrás de `esAdmin`) — un dependiente llegaba por URL directa y veía el ResumenMes con totales de toda la familia; ahora ambas rutas se montan solo si `esAdmin`, más catch-all `*` → `/` para que la URL no resuelta caiga al Dashboard en vez de pantalla en blanco.
 
+## Agenda de pagos: una captura, un comprobante por fila nueva (F9.183)
+
+Normativo, escrito antes del código. Reemplaza el diseño de F9.182 en lo que el dedup cambia.
+
+- **`agenda_pagos`** es un `tipoDocumento`: una imagen que es una LISTA de varias boletas o servicios
+  pendientes (la "Agenda de pagos" de la app de pagos de Juan: emisor, número de cliente, monto y
+  vencimiento por renglón). La clasifica la primera llamada de `procesarComprobante`; una segunda
+  llamada, con su propio prompt (`buildAgendaPrompt`, `functions/src/agendaPagos.ts`), extrae las filas.
+  Los vencimientos relativos ("Vence mañana") se anclan a la fecha de SUBIDA, como F9.154.
+- **El padre** es el comprobante de la captura. Nunca pasa por el match: termina en `estado: 'dividido'`
+  con `filas[]` (cada una con su resultado: `hijo`, `yaCargada` o `invalida`), `hijos[]`,
+  `filasInvalidas` y `filasDescartadas`.
+- **Un hijo** es un comprobante por fila NUEVA, con forma de boleta (`recibo_servicio`, emisor como
+  `destinoNombre`, `numeroCliente`, un vencimiento). Nace en `estado: 'extraido'` con `padreHash`, la
+  imagen del padre (`refStoragePdf` compartido) y `hashPdf` = SU PROPIO ID: con el de la imagen, la
+  rama 0 del segundo hijo encontraría el movimiento del primero. Lo matchea `matchComprobanteHijo`
+  (onCreate), que corre el MISMO `procesarMatch` que `matchComprobante`.
+- **Id del hijo, por CONTENIDO y no por imagen**: `sha256("agenda|" + numeroCliente normalizado + "|" +
+  vencimiento + "|" + monto con 2 decimales)`. La misma fila en dos capturas que se pisan, o subida de
+  nuevo mañana, da el mismo id. Dos renglones idénticos en la MISMA captura llevan `|2`, `|3`.
+- **Dedup contra lo ya cargado (2.0), antes de crear nada y en la misma transacción.** Universo: todo
+  comprobante con `numeroCliente` (recortes, PDFs, hijos de agendas anteriores, vinculado o no; un
+  descartado no existe, `descartarEntrada` borra el doc). Llave: `numeroCliente` normalizado
+  (`normalizarClaveDesambiguacion`) + primer vencimiento. Apareo uno a uno, con tope de **3 %** de
+  diferencia de monto, y dentro de cada llave **la asignación de costo total mínimo** (máximos pares
+  dentro del tope; entre ésas, mínima suma de diferencias). Una fila apareada no crea hijo: queda en el
+  padre como `yaCargada` con el comprobante con que se apareó.
+  · Por qué funciona: un servicio tiene un vencimiento distinto cada mes, así que no cruza meses; dentro
+    del mismo vencimiento el monto coincide. Una cuota atrasada sube ~0,04 % por día por intereses
+    (86.899,19 → 87.084,97 en 5 días): sigue dentro del 3 %.
+  · Por qué costo mínimo y no "gana la menor diferencia": las 4 cuotas atrasadas de ABL están a
+    1,1-1,7 % una de otra, y un mes de intereses (+1,2 %) deja a cada una más cerca de su VECINA vieja
+    que de sí misma. El apareo de a pares por menor diferencia se corre en cadena y deja una sin pareja
+    → hijo duplicado (medido en F9.183 §0). La asignación de costo mínimo las aparea en orden.
+- **Atómico e idempotente**: leer los hijos y el universo, decidir, crear SOLO los que no existen y
+  pasar el padre a `dividido`, todo en una transacción. Si algo falla antes del commit, el padre queda
+  en `error` y "Reintentar" vuelve a dividir: los ids por contenido y el dedup hacen que no se repita
+  nada. Al re-dividir el mismo padre, sus propios hijos no cuentan como "ya cargados" (quedan
+  `nuevo: false`).
+- **Nada trabado sin verse**: la card del padre muestra cada fila con el estado de su hijo. Un hijo
+  `extraido` sin propuesta a los 2 minutos de creado sale "sin procesar", con "Procesar de nuevo"
+  (callable admin `reprocesarHijoAgenda`, que corre `procesarMatch`). `procesarMatch` no crea
+  movimientos (solo escribe la propuesta), así que correrlo dos veces no duplica nada.
+- **La imagen es compartida**: `descartarEntrada` no borra el blob de Storage si otro comprobante
+  todavía lo referencia (descartar un hijo no puede dejar sin imagen al padre y a sus hermanos).
+- **Regla de uso: cada boleta se carga por UNA sola fuente.** Una factura PDF que llega DESPUÉS de una
+  obligación cargada por agenda o recorte la sigue duplicando (F9.182 0.3, fuera de alcance: el
+  matcher no se toca). Las cuotas atrasadas de ABL entran como obligaciones comunes y las salda la
+  transferencia, como hoy; una que subió por intereses cae en "rama 1 candidatos" y se elige a mano.
+
 ## State machine de esperados (ResumenMes)
 
 Derivada en vivo, NO materializada. Nueve estados (F5.5):
