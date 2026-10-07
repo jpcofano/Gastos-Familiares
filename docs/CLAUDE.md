@@ -2795,6 +2795,41 @@ saber ES el campo.** `pagadosHoy` (Card 2) usa `pagado === true` a propósito �
 hoy?"— y los detectores del par imposible (`limpiarPagadoIncoherente.ts`) usan `pagado !== true`
 literal: si usaran `movimientoCubierto` no podrían ver nunca la incoherencia que buscan.
 
+### La unidad de lo pendiente es la OBLIGACIÓN; el ítem es lo esperado sin cargar (F9.184)
+
+> **Todo gasto cargado que no está cubierto queda "a pagar" hasta que se salda. Si vence, avisa y
+> aparece en el Resumen del mes actual, sea del ítem que sea, del mes que sea, y aunque su ítem ya
+> figure pagado.** (Regla del dueño, 2026-10-06.)
+
+Normativo, escrito antes del código. Definiciones:
+
+- **Obligación abierta** = movimiento `tipo: 'Gasto'` con `!movimientoCubierto(m)`. Una sola
+  definición, en `obligacionesAbiertas()` de `src/datos/obligaciones.ts`. No mira `incluirResumenMes`,
+  ni el ítem, ni el mes: una cuota de viaje sin plantilla, una boleta con su vencimiento y una cuota
+  atrasada de ABL son lo mismo.
+- **Fecha efectiva** = `vencimientos[0].fecha` del movimiento si la tiene, si no `fecha`, a inicio
+  de día (`fechaEfectivaMov`, la de F9.132.2, que vive ahora en `obligaciones.ts`).
+- **Vencida** = fecha efectiva < hoy. `hoy` = fecha efectiva igual a hoy. Si no, **próxima**.
+
+Consecuencias:
+
+- **El ítem sigue siendo el lugar donde se espera algo que todavía no se cargó.** `estadoItem` no
+  cambia: un ítem con UN pago confirmado sigue `pagado`. Lo que cambia es que sus OTRAS obligaciones
+  abiertas ya no desaparecen detrás de ese estado: suman al pendiente, cuentan como vencidas y la
+  fila del ítem las muestra ("pagado · +4 a pagar · $X").
+- **El pendiente se suma por obligación, no por ítem**: cada obligación abierta del mes a su monto
+  (más, en el mes actual, las vencidas de meses anteriores), y cada ítem que todavía no tiene NADA
+  cargado a su `montoEsperado`. Un ítem con obligaciones no se cuenta además por su esperado.
+- **Lo vencido no se queda en su mes.** Una obligación de septiembre impaga sigue en la card de
+  vencidos del mes actual, con su mes como etiqueta. Mirando un mes cerrado no hay card de vencidos.
+- **La campana avisa por obligación** (vencidas, de hoy y de los próximos `DIAS_VENTANA` días). El
+  aviso por `diaVencimiento` del ítem queda solo para el ítem que no tiene ninguna obligación abierta
+  cargada en el mes.
+- La consulta que las trae de todos los meses es `where('pagado', '==', false)` + el filtro del
+  cliente (medido en F9.184 §0.2: todo movimiento tiene el campo `pagado`; `confirmadoPago` falta en
+  más de la mitad y no sirve como filtro). Solo admin: las reglas solo le dejan leer movimientos
+  ajenos a un admin.
+
 Pendiente: periodicidades no-mensuales necesitan mes-ancla cuando se activen. Hoy `aplicaEnMes`
 devuelve `true` para todas como placeholder.
 

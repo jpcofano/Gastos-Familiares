@@ -1,0 +1,658 @@
+F9.184 — Toda obligación abierta se ve hasta que se paga, y si vence, avisa
+
+Base: origin/main @ fb5cc92, confirmada al abrir. Prompt en
+docs/prompts/F9.184-obligaciones-abiertas-visibles-hasta-pagarse.md. NO deployado.
+
+════════════════════════════════════════════════════════════════════════════════
+PARA REVISAR ANTES DEL DEPLOY — LO QUE VA A APARECER DE GOLPE (§0.1 (a) y (b))
+════════════════════════════════════════════════════════════════════════════════
+
+  Al deployar, la card de vencidos del Resumen de octubre, el banner y la campana pasan de 0
+  vencidos a 134. Son 134 movimientos de Gasto con pagado=false, de 2025-05 a 2026-07, por
+  ~ARS 55,96 M (suma cruda con 32 en USD: 55.968.947,13).
+  · Todos son datos migrados: 56 HIS_ y 78 OBL-. 133 son de meses ANTERIORES al corte de
+    semántica de pagos (MES_CORTE_SEMANTICA_PAGOS = 2026-07), donde el checklist daba el ítem por
+    pagado con el solo match, sin mirar el movimiento. Por eso nunca se cerraron.
+  · (b) está entera dentro de (a): 105 de las 134 están en un ítem que en su mes figura PAGADO.
+    Son casi seguro pagos hechos que nunca se marcaron. Ejemplos: 33 son "Pago Visa/Mastercard ..."
+    "de resumen", y están las cuotas de colegio, expensas, ABL, luz, gas y agua de enero a junio.
+  · Las 29 restantes de (a) son sueltas, sin ítem que las reclame. Van en la lista de (c), abajo.
+  · Por mes: 2025-05: 2 · 2025-06: 2 · 2025-12: 4 · 2026-01: 20 · 2026-02: 19 · 2026-03: 25 ·
+    2026-04: 29 · 2026-05: 19 · 2026-06: 13 · 2026-07: 1.
+  Si son basura, hay que cerrarlas ANTES del deploy (pagado=true, que es "la plata salió"), o la
+  primera pantalla va a decir que se deben 56 millones. Este trabajo no escribe nada: el cierre
+  masivo es decisión de Juan, y puede salir con un script en dry-run sobre esta misma lista.
+
+  Lista completa (a). Las marcadas [b: …] son además (b), abiertas dentro de un ítem pagado.
+  Formato: id (8) | mes | vence | moneda monto | descripción | ítem que la reclama.
+
+  HIS_d5b7 | 2025-05 | vence 2025-05-09 | USD          6,88 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2025-05] | de resumen
+  HIS_eba0 | 2025-05 | vence 2025-05-09 | ARS  1.439.062,19 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2025-05] | de resumen
+  HIS_1cfc | 2025-06 | vence 2025-06-05 | ARS     69.908,63 | ABL Inmobiliario - Cuota v… | ítem Casa › ABL [b: ítem pagado en 2025-06]
+  HIS_fe32 | 2025-06 | vence 2025-06-17 | ARS     10.085,16 | Metrogas - Factura de gas   | ítem Casa › Gas [b: ítem pagado en 2025-06]
+  HIS_7170 | 2025-12 | vence 2025-12-05 | USD        158,54 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2025-12] | de resumen
+  HIS_d6a5 | 2025-12 | vence 2025-12-05 | ARS    560.402,36 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2025-12] | de resumen
+  HIS_73cf | 2025-12 | vence 2025-12-09 | ARS  3.737.693,68 | Pago Visa Signature BBVA A… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2025-12] | de resumen
+  HIS_84c5 | 2025-12 | vence 2025-12-09 | USD      4.672,77 | Pago Visa Signature BBVA U… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2025-12] | de resumen
+  OBL-9AB6 | 2026-01 | vence 2026-01-01 | ARS     60.000,00 | Mucama                      | suelta | incluirResumenMes=false
+  OBL-84D8 | 2026-01 | vence 2026-01-02 | ARS     19.749,14 | Agua                        | suelta | incluirResumenMes=false
+  OBL-84D8 | 2026-01 | vence 2026-01-02 | ARS     43.793,92 | Agua2                       | ítem Auto › Agua [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  HIS_430d | 2026-01 | vence 2026-01-09 | ARS  1.068.362,15 | Pago Visa Galicia ARS       | suelta | de resumen
+  HIS_d375 | 2026-01 | vence 2026-01-09 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+  OBL-0AE8 | 2026-01 | vence 2026-01-09 | ARS  1.162.671,06 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-0AE8 | 2026-01 | vence 2026-01-09 | USD        116,70 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-11BB | 2026-01 | vence 2026-01-09 | ARS    800.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  OBL-19B5 | 2026-01 | vence 2026-01-09 | ARS  1.256.077,71 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-19B5 | 2026-01 | vence 2026-01-09 | USD        154,41 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-2836 | 2026-01 | vence 2026-01-09 | ARS  2.512.790,84 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-2836 | 2026-01 | vence 2026-01-09 | USD        559,94 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-4618 | 2026-01 | vence 2026-01-09 | ARS     14.245,36 | Metrogas                    | ítem Casa › Gas [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  OBL-9F85 | 2026-01 | vence 2026-01-09 | ARS  1.068.362,15 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-9F85 | 2026-01 | vence 2026-01-09 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-01]
+  OBL-A6FA | 2026-01 | vence 2026-01-09 | ARS    500.000,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  OBL-C500 | 2026-01 | vence 2026-01-09 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  OBL-C52C | 2026-01 | vence 2026-01-12 | ARS    106.876,54 | Edenor                      | ítem Casa › Luz [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  OBL-597A | 2026-01 | vence 2026-01-20 | ARS     89.714,31 | Monotributo                 | ítem Impuestos y finanzas › Monotributo [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  OBL-76EE | 2026-01 | vence 2026-01-31 | ARS     73.696,54 | Abl Del Signo               | ítem Casa › ABL [b: ítem pagado en 2026-01] | incluirResumenMes=false
+  OBL-4618 | 2026-02 | vence 2026-02-01 | ARS      9.501,30 | Metrogas                    | ítem Casa › Gas [b: ítem pagado en 2026-02] | incluirResumenMes=false
+  OBL-84D8 | 2026-02 | vence 2026-02-03 | ARS     40.182,08 | Agua Del Signo              | ítem Casa › Agua [b: ítem pagado en 2026-02] | incluirResumenMes=false
+  OBL-5773 | 2026-02 | vence 2026-02-04 | ARS    125.486,00 | Internet                    | ítem Casa › Internet [b: ítem pagado en 2026-02] | incluirResumenMes=false
+  OBL-9AB6 | 2026-02 | vence 2026-02-04 | ARS    700.000,00 | Baños albañil               | suelta
+  HIS_4d49 | 2026-02 | vence 2026-02-06 | ARS    673.904,26 | Pago Visa Galicia ARS       | suelta | de resumen
+  HIS_7696 | 2026-02 | vence 2026-02-06 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+  OBL-0AE8 | 2026-02 | vence 2026-02-06 | ARS    947.949,17 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-0AE8 | 2026-02 | vence 2026-02-06 | USD        140,63 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-19B5 | 2026-02 | vence 2026-02-06 | ARS    877.314,41 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-19B5 | 2026-02 | vence 2026-02-06 | USD          0,92 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-2836 | 2026-02 | vence 2026-02-06 | ARS  1.623.645,38 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-2836 | 2026-02 | vence 2026-02-06 | USD         19,31 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-84D8 | 2026-02 | vence 2026-02-06 | ARS     18.054,69 | Agua Cochera                | suelta | incluirResumenMes=false
+  OBL-9F85 | 2026-02 | vence 2026-02-06 | ARS    673.904,26 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-9F85 | 2026-02 | vence 2026-02-06 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-02]
+  OBL-C500 | 2026-02 | vence 2026-02-10 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas [b: ítem pagado en 2026-02]
+  OBL-C52C | 2026-02 | vence 2026-02-11 | ARS    165.532,46 | Edenor                      | ítem Casa › Luz [b: ítem pagado en 2026-02] | incluirResumenMes=false
+  OBL-4618 | 2026-02 | vence 2026-02-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo [b: ítem pagado en 2026-02] | incluirResumenMes=false
+  OBL-76EE | 2026-02 | vence 2026-02-28 | ARS     76.017,90 | Abl Del Signo               | ítem Casa › ABL [b: ítem pagado en 2026-02] | incluirResumenMes=false
+  OBL-4618 | 2026-03 | vence 2026-03-01 | ARS    100.000,00 | Canto Sofi                  | suelta
+  OBL-9AB6 | 2026-03 | vence 2026-03-01 | ARS    400.000,00 | Baños albañil               | suelta
+  OBL-84D8 | 2026-03 | vence 2026-03-03 | ARS     19.306,14 | Agua Cochera                | suelta
+  HIS_0c92 | 2026-03 | vence 2026-03-06 | ARS    965.433,19 | Pago Visa Galicia ARS       | suelta | de resumen
+  HIS_e3a0 | 2026-03 | vence 2026-03-06 | USD        906,54 | Pago Visa Galicia USD       | suelta | de resumen
+  OBL-0AE8 | 2026-03 | vence 2026-03-06 | ARS    429.293,57 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-0AE8 | 2026-03 | vence 2026-03-06 | USD        622,96 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-19B5 | 2026-03 | vence 2026-03-06 | ARS    666.323,20 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-19B5 | 2026-03 | vence 2026-03-06 | USD        547,33 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-2836 | 2026-03 | vence 2026-03-06 | ARS  1.716.337,24 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-2836 | 2026-03 | vence 2026-03-06 | USD        383,86 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-597A | 2026-03 | vence 2026-03-06 | ARS    400.000,00 | Baños Albañil               | suelta
+  OBL-84D8 | 2026-03 | vence 2026-03-06 | ARS     42.811,48 | Agua Del Signo              | ítem Casa › Agua [b: ítem pagado en 2026-03]
+  OBL-9F85 | 2026-03 | vence 2026-03-06 | ARS    584.958,36 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-9F85 | 2026-03 | vence 2026-03-06 | USD        906,54 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-03]
+  OBL-4618 | 2026-03 | vence 2026-03-07 | ARS      4.501,74 | Metrogas                    | ítem Casa › Gas [b: ítem pagado en 2026-03]
+  OBL-5773 | 2026-03 | vence 2026-03-09 | ARS    129.349,00 | Internet                    | ítem Casa › Internet [b: ítem pagado en 2026-03]
+  OBL-A6FA | 2026-03 | vence 2026-03-09 | ARS    561.035,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi [b: ítem pagado en 2026-03]
+  OBL-C500 | 2026-03 | vence 2026-03-09 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas [b: ítem pagado en 2026-03]
+  OBL-11BB | 2026-03 | vence 2026-03-10 | ARS  1.177.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede [b: ítem pagado en 2026-03]
+  OBL-C52C | 2026-03 | vence 2026-03-11 | ARS     92.842,18 | Edenor                      | ítem Casa › Luz [b: ítem pagado en 2026-03]
+  OBL-4618 | 2026-03 | vence 2026-03-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo [b: ítem pagado en 2026-03]
+  OBL-9AB6 | 2026-03 | vence 2026-03-30 | ARS    350.000,00 | Mucama                      | suelta
+  OBL-76EE | 2026-03 | vence 2026-03-31 | ARS     64.857,05 | Abl Del Signo               | ítem Casa › ABL [b: ítem pagado en 2026-03]
+  OBL-76EE | 2026-03 | vence 2026-03-31 | ARS     45.161,98 | Abl Cochera                 | suelta
+  OBL-9AB6 | 2026-04 | vence 2026-04-01 | ARS     45.000,00 | Micro Rugby                 | ítem Educación y chicos › Actividades extracurriculares [b: ítem pagado en 2026-04]
+  HIS_2245 | 2026-04 | vence 2026-04-06 | USD          0,94 | Pago Mastercard Black Gali… | suelta | de resumen
+  HIS_949d | 2026-04 | vence 2026-04-06 | ARS    424.627,92 | Pago Mastercard Black Gali… | suelta | de resumen
+  HIS_bec6 | 2026-04 | vence 2026-04-06 | ARS  2.454.132,24 | Pago Visa Galicia ARS       | suelta | de resumen
+  HIS_d5e4 | 2026-04 | vence 2026-04-06 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+  OBL-19B5 | 2026-04 | vence 2026-04-06 | ARS    424.627,92 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-19B5 | 2026-04 | vence 2026-04-06 | USD          0,94 | Galicia Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-9F85 | 2026-04 | vence 2026-04-06 | ARS  2.454.132,24 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-9F85 | 2026-04 | vence 2026-04-06 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-5773 | 2026-04 | vence 2026-04-07 | ARS    137.678,67 | Internet                    | ítem Casa › Internet [b: ítem pagado en 2026-04]
+  OBL-84D8 | 2026-04 | vence 2026-04-07 | ARS     20.093,31 | Agua Cochera                | ítem Auto › Agua [b: ítem pagado en 2026-04]
+  HIS_0482 | 2026-04 | vence 2026-04-09 | USD         20,97 | Pago Mastercard Black BBVA… | suelta | de resumen
+  HIS_4927 | 2026-04 | vence 2026-04-09 | ARS    609.948,08 | Pago Mastercard Black BBVA… | suelta | de resumen
+  HIS_5dec | 2026-04 | vence 2026-04-09 | ARS  2.076.697,11 | Pago Visa Signature BBVA A… | suelta | de resumen
+  HIS_a6aa | 2026-04 | vence 2026-04-09 | USD         19,76 | Pago Visa Signature BBVA U… | suelta | de resumen
+  OBL-0AE8 | 2026-04 | vence 2026-04-09 | ARS    609.948,48 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-0AE8 | 2026-04 | vence 2026-04-09 | USD         20,97 | Frances Master              | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-2836 | 2026-04 | vence 2026-04-09 | ARS  2.076.697,11 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-2836 | 2026-04 | vence 2026-04-09 | USD         19,79 | Frances Visa                | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-04]
+  OBL-C500 | 2026-04 | vence 2026-04-09 | ARS    154.873,43 | Expensas                    | ítem Casa › Expensas [b: ítem pagado en 2026-04]
+  OBL-C52C | 2026-04 | vence 2026-04-09 | ARS     90.529,30 | Edenor                      | ítem Casa › Luz [b: ítem pagado en 2026-04]
+  OBL-84D8 | 2026-04 | vence 2026-04-10 | ARS     46.557,04 | Agua Del Signo              | ítem Casa › Agua [b: ítem pagado en 2026-04]
+  OBL-A6FA | 2026-04 | vence 2026-04-10 | ARS    587.356,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi [b: ítem pagado en 2026-04]
+  OBL-11BB | 2026-04 | vence 2026-04-13 | ARS  1.202.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede [b: ítem pagado en 2026-04]
+  OBL-4618 | 2026-04 | vence 2026-04-15 | ARS      9.267,06 | Metrogas                    | ítem Casa › Gas [b: ítem pagado en 2026-04]
+  OBL-4618 | 2026-04 | vence 2026-04-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo [b: ítem pagado en 2026-04]
+  OBL-76EE | 2026-04 | vence 2026-04-21 | ARS     66.797,63 | Abl Del Signo               | ítem Casa › ABL [b: ítem pagado en 2026-04]
+  HIS_c857 | 2026-04 | vence 2026-04-30 | ARS     47.000,00 | Travel Rock - Tasas, impue… | suelta
+  OBL-76EE | 2026-04 | vence 2026-04-30 | ARS     46.661,14 | Abl Cochera                 | suelta
+  HIS_ce9c | 2026-05 | vence 2026-05-06 | ARS    138.805,49 | Personal - Internet 600MB … | ítem Casa › Internet [b: ítem pagado en 2026-05]
+  HIS_024f | 2026-05 | vence 2026-05-07 | ARS     68.246,71 | ABL Del Signo 4032 P.01 D.… | ítem Casa › ABL [b: ítem pagado en 2026-05]
+  HIS_0756 | 2026-05 | vence 2026-05-08 | USD          4,96 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_0abe | 2026-05 | vence 2026-05-08 | ARS  2.018.435,94 | Pago Visa Signature BBVA A… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_43d6 | 2026-05 | vence 2026-05-08 | ARS     45.365,16 | AySA - Agua y Saneamiento … | ítem Casa › Agua [b: ítem pagado en 2026-05]
+  HIS_4c11 | 2026-05 | vence 2026-05-08 | ARS  1.382.835,91 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_5fd1 | 2026-05 | vence 2026-05-08 | USD         49,99 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_626e | 2026-05 | vence 2026-05-08 | USD         34,68 | Pago Visa Signature BBVA U… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_6452 | 2026-05 | vence 2026-05-08 | USD         22,99 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_702c | 2026-05 | vence 2026-05-08 | ARS  1.082.496,25 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_a845 | 2026-05 | vence 2026-05-08 | ARS    427.274,27 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-05] | de resumen
+  HIS_0871 | 2026-05 | vence 2026-05-10 | ARS     47.000,00 | Travel Rock - Viaje Guadal… | ítem Educación y chicos › Colegio Sofi [b: ítem pagado en 2026-05]
+  HIS_a0a6 | 2026-05 | vence 2026-05-10 | ARS    767.356,00 | Colegio Guadalupe - Sofía … | ítem Educación y chicos › Colegio Sofi [b: ítem pagado en 2026-05]
+  HIS_03d3 | 2026-05 | vence 2026-05-11 | ARS  1.202.000,00 | Escuela Philips ITPA SA - … | ítem Educación y chicos › Colegio Fede [b: ítem pagado en 2026-05]
+  HIS_46ab | 2026-05 | vence 2026-05-11 | ARS     60.000,00 | ITPA SA (Escuela Philips) … | ítem Educación y chicos › Colegio Fede [b: ítem pagado en 2026-05]
+  HIS_69ac | 2026-05 | vence 2026-05-11 | ARS    104.989,58 | Edenor - Luz Del Signo 403… | ítem Casa › Luz [b: ítem pagado en 2026-05]
+  HIS_1d5e | 2026-05 | vence 2026-05-15 | ARS    159.519,43 | Expensas Cons. Prop. Pje d… | suelta
+  HIS_d0b3 | 2026-05 | vence 2026-05-19 | ARS      9.992,84 | MetroGAS - Gas natural - D… | ítem Casa › Gas [b: ítem pagado en 2026-05]
+  HIS_7214 | 2026-05 | vence 2026-05-27 | ARS     20.309,02 | AySA - Agua y Saneamiento … | ítem Auto › Agua [b: ítem pagado en 2026-05]
+  HIS_4d01 | 2026-06 | vence 2026-06-05 | ARS  1.160.758,61 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-06] | de resumen
+  HIS_8955 | 2026-06 | vence 2026-06-05 | USD         77,96 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-06] | de resumen
+  HIS_9460 | 2026-06 | vence 2026-06-05 | USD         20,00 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-06] | de resumen
+  HIS_abfe | 2026-06 | vence 2026-06-05 | ARS  1.094.786,88 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-06] | de resumen
+  HIS_b633 | 2026-06 | vence 2026-06-05 | ARS    794.514,99 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta [b: ítem pagado en 2026-06] | de resumen
+  HIS_0ef3 | 2026-06 | vence 2026-06-10 | ARS     47.000,00 | Travel Rock - Guadalupe - … | ítem Educación y chicos › Colegio Sofi [b: ítem pagado en 2026-06]
+  HIS_2a99 | 2026-06 | vence 2026-06-10 | ARS  1.271.500,00 | Escuela Philips (ITPA SA) … | ítem Educación y chicos › Colegio Fede [b: ítem pagado en 2026-06]
+  HIS_6e2a | 2026-06 | vence 2026-06-10 | ARS    135.122,93 | Edenor - Electricidad - De… | ítem Casa › Luz [b: ítem pagado en 2026-06]
+  HIS_97ea | 2026-06 | vence 2026-06-10 | ARS    823.468,00 | Colegio Guadalupe - Sofía … | ítem Educación y chicos › Colegio Sofi [b: ítem pagado en 2026-06]
+  HIS_77c2 | 2026-06 | vence 2026-06-15 | ARS    387.604,43 | Expensas Cons. Prop. Pje d… | suelta
+  HIS_1d86 | 2026-06 | vence 2026-06-22 | ARS     72.414,10 | AFIP Monotributo - Próximo… | ítem Impuestos y finanzas › Monotributo [b: ítem pagado en 2026-06]
+  HIS_82cd | 2026-06 | vence 2026-06-24 | ARS     21.191,33 | AySA - Agua del Signo 2 - … | ítem Casa › Agua [b: ítem pagado en 2026-06]
+  HIS_4af7 | 2026-06 | vence 2026-06-29 | ARS     46.991,99 | AySA - agua del signo 1 - … | ítem Casa › Agua [b: ítem pagado en 2026-06]
+  HIS_fc82 | 2026-07 | vence 2026-07-16 | ARS     50.830,00 | Travel Rock - Viaje Guadal… | suelta
+
+  Ojo al revisar: en 2026-01 a 2026-04 varios pagos de tarjeta están DOS veces, una como OBL-…
+  del ítem "Pago Tarjeta" y otra como HIS_… "de resumen" suelta, con el mismo monto. Ejemplo:
+  2026-01 Galicia Visa 1.068.362,15 = OBL-9F85 y HIS_430d. Es la migración que cargó las dos
+  fuentes; las dos están abiertas.
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  §0   0.1 hay 142 obligaciones abiertas: 134 vencidas de meses anteriores (a), 105 dentro de un
+       ítem pagado (b, todas dentro de a), 29 sueltas vencidas (c, todas de meses anteriores) y 8
+       del mes o futuras (7 de 2026-10, 1 de 2026-11). 0.2 GATE PASA: where('pagado','==',false)
+       más el filtro del cliente da exactamente las 142. Sin índice nuevo.
+  §1   src/datos/obligaciones.ts (nuevo) es la única fuente: fechaEfectivaMov (movida sin
+       cambios desde Resumen.tsx), obligacionesAbiertas, y el pendiente, los vencidos y la campana
+       derivados de ahí. src/hooks/useObligacionesAbiertas.ts trae todos los meses (solo admin).
+  §2   Resumen. Card de vencidos de cualquier mes, con el mes en el pie (H3). Banner, contador y
+       "Pendiente" de Gastos Fijos por obligación (H1). Fila del ítem "+N a pagar · $X", y el chip
+       las abre (H1). Sueltos vencidos del mes y movimientoCubierto (H2).
+  §3   La campana tiene el tipo 'obligacion', y el aviso del ítem se reemplaza si tiene obligación
+       abierta (H4).
+  Verificación: 1 (cuotas de viaje), 2 (ABL +4 · $357.250,93) y 4 dan OK. 3 (producción hoy):
+       el banner pasa de 6,16 M a 61,35 M y la card de 0 a 134, explicado entero por (a) y por
+       2 matches pagados sin confirmar que dejan de contarse.
+       2026-07 no es un mes "sin extras": su Δ también se explica entero.
+  NO deployado. Ver la lista de arriba antes de hacerlo.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas contra fb5cc92 antes de tocar): SE SOSTIENEN TODAS
+════════════════════════════════════════════════════════════════════════════════
+
+  · movimientoCubierto en checklist.ts:98 = pagado || confirmadoPago.
+  · H1: estadoItem (checklist.ts:125-169). Con UN confirmado y montoEsperado null da 'pagado'
+    (:134-144). pendienteDeEntrada (agenda.ts:55-62) y el contador del banner (Resumen.tsx:601)
+    miran el estado del ítem.
+  · H2: sueltosFuturosDelMes (agenda.ts:19-25) filtra `!m.pagado` y `fecha >= hoy`. Además, el
+    picker de conciliación (Comprobantes.tsx:1415-1416) usa la misma función, así que el suelto
+    vencido también se caía de ahí. Y agendaCubierto (:35) preguntaba `confirmadoPago === true`,
+    una tercera definición de "cubierto".
+  · H3: la card de vencidos (Resumen.tsx:551-553) sale de cajaMov, que es el mes de
+    useMovimientosDelMes (where mes ==).
+  · H4: useRecordatorios (Notificaciones.tsx:185) solo arma 'esperado' | 'tarjeta' (:30).
+    diaVencimiento está en 1 de 22 ítems activos (medido: "activos 22, con diaVencimiento 1").
+  · Alta manual con fecha futura: pagado = confirmadoPago = fecha <= hoy (AltaMovimiento.tsx:269-289).
+  · Lectura de movimientos ajenos: solo admin (firestore.rules:56). Resumen ya es admin-only
+    (Resumen.tsx:1518-1521).
+
+════════════════════════════════════════════════════════════════════════════════
+§0 — MEDICIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  0.1  Abiertas por mes (tabla completa en la salida, abajo): 142. Con ítem 113, sueltas 29.
+       Sin itemEsperadoId 67 (el checklist reclama a varias por heurística). 32 en USD. 17 con
+       incluirResumenMes=false, todas de 2026-01/02. (a) 134 · (b) 105 · (c) 29.
+       Las de 2026-10 (7) y 2026-11 (1) no están vencidas y no figuran en ningún grupo.
+  0.2  pagado: true 2022 · false 154, sin docs sin el campo. confirmadoPago: true 191 ·
+       false 851 · SIN CAMPO 1134.
+         where('pagado','==',false)                  → 154 leídos → 142, exacto
+         where('confirmadoPago','==',false)          → 851 leídos → 8, faltan 134
+         where('pagado','==',false)+tipo=='Gasto'    → 142 leídos → 142, exacto
+       Se usa el primero: un solo campo, no necesita índice compuesto. firestore.indexes.json no
+       cambia. El filtro por tipo queda en el cliente (esObligacionAbierta).
+  GATE: PASA.
+
+════════════════════════════════════════════════════════════════════════════════
+LO QUE CAMBIÓ
+════════════════════════════════════════════════════════════════════════════════
+
+  docs/CLAUDE.md — antes del código, en "State machine de esperados": "La unidad de lo pendiente es
+    la OBLIGACIÓN; el ítem es lo esperado sin cargar (F9.184)". Trae la regla del dueño, las
+    definiciones de obligación abierta, fecha efectiva y vencida, sus consecuencias y la consulta.
+  src/datos/obligaciones.ts (nuevo, puro):
+    fechaEfectivaMov · esObligacionAbierta · obligacionesAbiertas(movs, hoy) → {mov, fechaEfectiva,
+    estado: vencida|hoy|proxima} · vencidasAnteriores · vencidasParaResumen · abiertasDelItem ·
+    pendienteMes · obligacionesParaCampana · itemTieneObligacionAbierta.
+    El tipo se llama `Obligacion`: `ObligacionAbierta` ya existe en comprobantes.ts y es el
+    candidato del picker.
+  src/hooks/useObligacionesAbiertas.ts (nuevo): onSnapshot de where('pagado','==',false), filtrado
+    con esObligacionAbierta. Con habilitado=false no abre listener.
+  src/vistas/Resumen.tsx:
+    · §2.1 la card de vencidos sale de vencidasParaResumen. Son las vencidas del mes en pantalla
+      más las de meses anteriores (que vienen del hook), sin duplicar. El pie lleva el mes si es
+      de otro ("Venció 9/1 · enero"; el año solo si no es el actual). Mes cerrado: sin card, como
+      antes. Ya no filtra incluirResumenMes (regla del dueño).
+    · §2.2 el banner y el "Pendiente" de Gastos Fijos usan pendienteMes. El contador de vencidos es
+      pm.vencidos. "Todo confirmado" exige además 0 obligaciones abiertas. El sufijo "a confirmar"
+      pasa a "a pagar", porque el monto ahora es plata sin salir.
+    · §2.3 en ItemChecklistCard, un ítem cubierto con obligaciones abiertas muestra el chip
+      "+N a pagar · $X", que despliega esas obligaciones con FilaAPagar (tocar una la edita).
+      estadoItem no se tocó: diff vacío en checklist.ts.
+  src/datos/agenda.ts — §2.4 sueltosFuturosDelMes pasa a sueltosAbiertosDelMes(movs, checklist),
+    sin el filtro de fecha y con movimientoCubierto. agendaCubierto usa movimientoCubierto (no cambia
+    resultados: los sueltos ya llegan sin cubrir). Callers: Resumen.tsx, Comprobantes.tsx:1415-1416
+    (el picker) y scripts/verificarF9155.ts (solo el nombre, para el baseline de tsc).
+  src/vistas/perfil/Notificaciones.tsx — §3 tipo 'obligacion' (icono reloj, "de <mes>" si no es del
+    actual), vía useObligacionesAbiertas(esAdmin). El aviso del ítem se saltea si
+    itemTieneObligacionAbierta. Un ítem con el pago cargado PERO cubierto (pagado sin confirmar)
+    conserva su "falta confirmar". contarVencProximos no cambia y cuenta vencidas + hoy.
+
+  Decisiones mías que conviene que Juan mire:
+  · Las vencidas de meses anteriores entran en el banner y en la card SOLO mirando el mes actual.
+    Mirando noviembre o un mes cerrado no se repiten.
+  · Un match pagado sin confirmar (pagado=true, confirmadoPago=false) ya no suma al pendiente:
+    con la definición de cubierto de F9.140, no es "a pagar". El ítem sigue por_confirmar y su botón
+    "Confirmar pago" sigue. Hoy son 2 en octubre (773.431,43).
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN (solo lectura; casos simulados con las funciones reales)
+════════════════════════════════════════════════════════════════════════════════
+
+  1. Cuotas de viaje (2026-11-15 y 2026-12-15, Gasto sin ítem, sin pagar):
+     · en noviembre y diciembre están en la agenda como sueltos a pagar, y el pendiente de cada
+       mes sube 450.000. OK.
+     · campana: no entran el 06/10 ni el 31/10 (15 días). Entran el 01/11 (14 días) y el 15/11
+       ("hoy"). OK.
+     · hoy = 20/11 sin pagarla: card de vencidos de noviembre. OK. hoy = 05/12: sigue en la card
+       de diciembre con el pie "· noviembre". OK. Mirando noviembre ya cerrado no hay card. OK.
+  2. ABL con las 5 de F9.182 0.4, la del mes pagada:
+     · estadoItem 'pagado' y fila "+4 a pagar · $357.250,93". OK.
+     · banner del 06/10: 357.250,93. OK.
+     · al 01/11 sin pagarlas: 4 en la card de vencidos de noviembre, 4 vencidas en la campana y
+       4 en el contador. OK. El aviso por diaVencimiento del ítem queda reemplazado por las 4.
+  3. Producción hoy (2026-10-06), Resumen de octubre, ANTES (código de fb5cc92) y DESPUÉS:
+       banner pendiente   6.158.222,25 → 61.353.737,95   (Δ +55.195.515,70)
+       contador vencidos  0 → 134
+       card de vencidos   0 → 134 (todas de meses anteriores)
+       campana            +140 obligaciones (134 vencidas, 1 hoy, 5 próximas)
+     Δ explicado entero: +55.968.947,13 de (a), las 134 de meses anteriores, y −773.431,43 de
+     2 matches pagados sin confirmar que antes sumaban. (b) y (c) no aportan en octubre: las
+     105 de (b) y las 29 de (c) son de meses anteriores y entran por (a).
+  4. No regresión: 2026-08 (0 = 0) y 2026-09 (45.000 = 45.000) OK. 2026-07 cambia
+     71.427,65 → 50.830,00, y el Δ está explicado entero: +50.830 de Travel Rock (HIS_fc82, suelta
+     abierta vencida que H2 soltaba) y −71.427,65 del ABL z5WrWHzk (pagado sin confirmar). No es un
+     mes "sin obligaciones extra". checklist.ts: diff vacío.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  tsc cliente: 41 al abrir y 41 al cerrar, misma lista (diff vacío). tsc functions: 0 y 0 (no se
+  tocó). Medido con grep "error TS".
+  Deploy (lo hace Juan): npm run build y firebase deploy --only hosting. Sin índices nuevos y sin
+  functions. ANTES: decidir qué hacer con las 134 de arriba.
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA COMPLETA — npx tsx scripts/verificarF9184.ts --verif
+════════════════════════════════════════════════════════════════════════════════
+
+F9.184 §0 — SOLO LECTURA. hoy=2026-10-06 mesActual=2026-10 | movimientos: 2176 | itemsEsperados: 24 (activos 22, con diaVencimiento 1)
+
+── 0.1 obligaciones abiertas (tipo Gasto, !movimientoCubierto): 142
+  mes      | abiertas | con ítem* | sueltas | incluirResumenMes=false | vencidas (fecha efectiva < hoy) | monto
+  2025-05  |        2 |         2 |       0 |                       0 |                               2 | 1.439.069,07
+  2025-06  |        2 |         2 |       0 |                       0 |                               2 | 79.993,79
+  2025-12  |        4 |         4 |       0 |                       0 |                               4 | 4.302.927,35
+  2026-01  |       20 |        16 |       4 |                      10 |                              20 | 8.924.699,18
+  2026-02  |       19 |        15 |       4 |                       7 |                              19 | 6.151.595,28
+  2026-03  |       25 |        17 |       8 |                       0 |                              25 | 7.972.489,89
+  2026-04  |       29 |        19 |      10 |                       0 |                              29 | 13.657.152,13
+  2026-05  |       19 |        18 |       1 |                       0 |                              19 | 7.534.739,22
+  2026-06  |       13 |        12 |       1 |                       0 |                              13 | 5.855.451,22
+  2026-07  |        1 |         0 |       1 |                       0 |                               1 | 50.830,00
+  2026-10  |        7 |         7 |       0 |                       0 |                               0 | 3.446.267,16
+  2026-11  |        1 |         1 |       0 |                       0 |                               0 | 77.586,82
+  * con ítem = la reclama un ítem en el checklist de su mes (pase 1 por itemEsperadoId o heurística); el resto son sueltas.
+  sin itemEsperadoId: 67 | USD: 32
+
+  (a) VENCIDAS DE MESES ANTERIORES (las esconde H3): 134 · ARS 55.959.365,91
+    HIS_d5b7 | 2025-05 | vence 2025-05-09 | USD          6,88 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta (pagado en 2025-05) | de resumen
+    HIS_eba0 | 2025-05 | vence 2025-05-09 | ARS  1.439.062,19 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta (pagado en 2025-05) | de resumen
+    HIS_1cfc | 2025-06 | vence 2025-06-05 | ARS     69.908,63 | ABL Inmobiliario - Cuota v… | ítem Casa › ABL (pagado en 2025-06)
+    HIS_fe32 | 2025-06 | vence 2025-06-17 | ARS     10.085,16 | Metrogas - Factura de gas   | ítem Casa › Gas (pagado en 2025-06)
+    HIS_7170 | 2025-12 | vence 2025-12-05 | USD        158,54 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta (pagado en 2025-12) | de resumen
+    HIS_d6a5 | 2025-12 | vence 2025-12-05 | ARS    560.402,36 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta (pagado en 2025-12) | de resumen
+    HIS_73cf | 2025-12 | vence 2025-12-09 | ARS  3.737.693,68 | Pago Visa Signature BBVA A… | ítem Tarjetas › Pago Tarjeta (pagado en 2025-12) | de resumen
+    HIS_84c5 | 2025-12 | vence 2025-12-09 | USD      4.672,77 | Pago Visa Signature BBVA U… | ítem Tarjetas › Pago Tarjeta (pagado en 2025-12) | de resumen
+    OBL-9AB6 | 2026-01 | vence 2026-01-01 | ARS     60.000,00 | Mucama                      | suelta | incluirResumenMes=false
+    OBL-84D8 | 2026-01 | vence 2026-01-02 | ARS     19.749,14 | Agua                        | suelta | incluirResumenMes=false
+    OBL-84D8 | 2026-01 | vence 2026-01-02 | ARS     43.793,92 | Agua2                       | ítem Auto › Agua (pagado en 2026-01) | incluirResumenMes=false
+    HIS_430d | 2026-01 | vence 2026-01-09 | ARS  1.068.362,15 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_d375 | 2026-01 | vence 2026-01-09 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+    OBL-0AE8 | 2026-01 | vence 2026-01-09 | ARS  1.162.671,06 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-0AE8 | 2026-01 | vence 2026-01-09 | USD        116,70 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-11BB | 2026-01 | vence 2026-01-09 | ARS    800.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede (pagado en 2026-01) | incluirResumenMes=false
+    OBL-19B5 | 2026-01 | vence 2026-01-09 | ARS  1.256.077,71 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-19B5 | 2026-01 | vence 2026-01-09 | USD        154,41 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-2836 | 2026-01 | vence 2026-01-09 | ARS  2.512.790,84 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-2836 | 2026-01 | vence 2026-01-09 | USD        559,94 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-4618 | 2026-01 | vence 2026-01-09 | ARS     14.245,36 | Metrogas                    | ítem Casa › Gas (pagado en 2026-01) | incluirResumenMes=false
+    OBL-9F85 | 2026-01 | vence 2026-01-09 | ARS  1.068.362,15 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-9F85 | 2026-01 | vence 2026-01-09 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-01)
+    OBL-A6FA | 2026-01 | vence 2026-01-09 | ARS    500.000,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi (pagado en 2026-01) | incluirResumenMes=false
+    OBL-C500 | 2026-01 | vence 2026-01-09 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas (pagado en 2026-01) | incluirResumenMes=false
+    OBL-C52C | 2026-01 | vence 2026-01-12 | ARS    106.876,54 | Edenor                      | ítem Casa › Luz (pagado en 2026-01) | incluirResumenMes=false
+    OBL-597A | 2026-01 | vence 2026-01-20 | ARS     89.714,31 | Monotributo                 | ítem Impuestos y finanzas › Monotributo (pagado en 2026-01) | incluirResumenMes=false
+    OBL-76EE | 2026-01 | vence 2026-01-31 | ARS     73.696,54 | Abl Del Signo               | ítem Casa › ABL (pagado en 2026-01) | incluirResumenMes=false
+    OBL-4618 | 2026-02 | vence 2026-02-01 | ARS      9.501,30 | Metrogas                    | ítem Casa › Gas (pagado en 2026-02) | incluirResumenMes=false
+    OBL-84D8 | 2026-02 | vence 2026-02-03 | ARS     40.182,08 | Agua Del Signo              | ítem Casa › Agua (pagado en 2026-02) | incluirResumenMes=false
+    OBL-5773 | 2026-02 | vence 2026-02-04 | ARS    125.486,00 | Internet                    | ítem Casa › Internet (pagado en 2026-02) | incluirResumenMes=false
+    OBL-9AB6 | 2026-02 | vence 2026-02-04 | ARS    700.000,00 | Baños albañil               | suelta
+    HIS_4d49 | 2026-02 | vence 2026-02-06 | ARS    673.904,26 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_7696 | 2026-02 | vence 2026-02-06 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+    OBL-0AE8 | 2026-02 | vence 2026-02-06 | ARS    947.949,17 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-0AE8 | 2026-02 | vence 2026-02-06 | USD        140,63 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-19B5 | 2026-02 | vence 2026-02-06 | ARS    877.314,41 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-19B5 | 2026-02 | vence 2026-02-06 | USD          0,92 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-2836 | 2026-02 | vence 2026-02-06 | ARS  1.623.645,38 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-2836 | 2026-02 | vence 2026-02-06 | USD         19,31 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-84D8 | 2026-02 | vence 2026-02-06 | ARS     18.054,69 | Agua Cochera                | suelta | incluirResumenMes=false
+    OBL-9F85 | 2026-02 | vence 2026-02-06 | ARS    673.904,26 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-9F85 | 2026-02 | vence 2026-02-06 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-02)
+    OBL-C500 | 2026-02 | vence 2026-02-10 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas (pagado en 2026-02)
+    OBL-C52C | 2026-02 | vence 2026-02-11 | ARS    165.532,46 | Edenor                      | ítem Casa › Luz (pagado en 2026-02) | incluirResumenMes=false
+    OBL-4618 | 2026-02 | vence 2026-02-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo (pagado en 2026-02) | incluirResumenMes=false
+    OBL-76EE | 2026-02 | vence 2026-02-28 | ARS     76.017,90 | Abl Del Signo               | ítem Casa › ABL (pagado en 2026-02) | incluirResumenMes=false
+    OBL-4618 | 2026-03 | vence 2026-03-01 | ARS    100.000,00 | Canto Sofi                  | suelta
+    OBL-9AB6 | 2026-03 | vence 2026-03-01 | ARS    400.000,00 | Baños albañil               | suelta
+    OBL-84D8 | 2026-03 | vence 2026-03-03 | ARS     19.306,14 | Agua Cochera                | suelta
+    HIS_0c92 | 2026-03 | vence 2026-03-06 | ARS    965.433,19 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_e3a0 | 2026-03 | vence 2026-03-06 | USD        906,54 | Pago Visa Galicia USD       | suelta | de resumen
+    OBL-0AE8 | 2026-03 | vence 2026-03-06 | ARS    429.293,57 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-0AE8 | 2026-03 | vence 2026-03-06 | USD        622,96 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-19B5 | 2026-03 | vence 2026-03-06 | ARS    666.323,20 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-19B5 | 2026-03 | vence 2026-03-06 | USD        547,33 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-2836 | 2026-03 | vence 2026-03-06 | ARS  1.716.337,24 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-2836 | 2026-03 | vence 2026-03-06 | USD        383,86 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-597A | 2026-03 | vence 2026-03-06 | ARS    400.000,00 | Baños Albañil               | suelta
+    OBL-84D8 | 2026-03 | vence 2026-03-06 | ARS     42.811,48 | Agua Del Signo              | ítem Casa › Agua (pagado en 2026-03)
+    OBL-9F85 | 2026-03 | vence 2026-03-06 | ARS    584.958,36 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-9F85 | 2026-03 | vence 2026-03-06 | USD        906,54 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-03)
+    OBL-4618 | 2026-03 | vence 2026-03-07 | ARS      4.501,74 | Metrogas                    | ítem Casa › Gas (pagado en 2026-03)
+    OBL-5773 | 2026-03 | vence 2026-03-09 | ARS    129.349,00 | Internet                    | ítem Casa › Internet (pagado en 2026-03)
+    OBL-A6FA | 2026-03 | vence 2026-03-09 | ARS    561.035,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi (pagado en 2026-03)
+    OBL-C500 | 2026-03 | vence 2026-03-09 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas (pagado en 2026-03)
+    OBL-11BB | 2026-03 | vence 2026-03-10 | ARS  1.177.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede (pagado en 2026-03)
+    OBL-C52C | 2026-03 | vence 2026-03-11 | ARS     92.842,18 | Edenor                      | ítem Casa › Luz (pagado en 2026-03)
+    OBL-4618 | 2026-03 | vence 2026-03-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo (pagado en 2026-03)
+    OBL-9AB6 | 2026-03 | vence 2026-03-30 | ARS    350.000,00 | Mucama                      | suelta
+    OBL-76EE | 2026-03 | vence 2026-03-31 | ARS     64.857,05 | Abl Del Signo               | ítem Casa › ABL (pagado en 2026-03)
+    OBL-76EE | 2026-03 | vence 2026-03-31 | ARS     45.161,98 | Abl Cochera                 | suelta
+    OBL-9AB6 | 2026-04 | vence 2026-04-01 | ARS     45.000,00 | Micro Rugby                 | ítem Educación y chicos › Actividades extracurriculares (pagado en 2026-04)
+    HIS_2245 | 2026-04 | vence 2026-04-06 | USD          0,94 | Pago Mastercard Black Gali… | suelta | de resumen
+    HIS_949d | 2026-04 | vence 2026-04-06 | ARS    424.627,92 | Pago Mastercard Black Gali… | suelta | de resumen
+    HIS_bec6 | 2026-04 | vence 2026-04-06 | ARS  2.454.132,24 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_d5e4 | 2026-04 | vence 2026-04-06 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+    OBL-19B5 | 2026-04 | vence 2026-04-06 | ARS    424.627,92 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-19B5 | 2026-04 | vence 2026-04-06 | USD          0,94 | Galicia Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-9F85 | 2026-04 | vence 2026-04-06 | ARS  2.454.132,24 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-9F85 | 2026-04 | vence 2026-04-06 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-5773 | 2026-04 | vence 2026-04-07 | ARS    137.678,67 | Internet                    | ítem Casa › Internet (pagado en 2026-04)
+    OBL-84D8 | 2026-04 | vence 2026-04-07 | ARS     20.093,31 | Agua Cochera                | ítem Auto › Agua (pagado en 2026-04)
+    HIS_0482 | 2026-04 | vence 2026-04-09 | USD         20,97 | Pago Mastercard Black BBVA… | suelta | de resumen
+    HIS_4927 | 2026-04 | vence 2026-04-09 | ARS    609.948,08 | Pago Mastercard Black BBVA… | suelta | de resumen
+    HIS_5dec | 2026-04 | vence 2026-04-09 | ARS  2.076.697,11 | Pago Visa Signature BBVA A… | suelta | de resumen
+    HIS_a6aa | 2026-04 | vence 2026-04-09 | USD         19,76 | Pago Visa Signature BBVA U… | suelta | de resumen
+    OBL-0AE8 | 2026-04 | vence 2026-04-09 | ARS    609.948,48 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-0AE8 | 2026-04 | vence 2026-04-09 | USD         20,97 | Frances Master              | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-2836 | 2026-04 | vence 2026-04-09 | ARS  2.076.697,11 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-2836 | 2026-04 | vence 2026-04-09 | USD         19,79 | Frances Visa                | ítem Tarjetas › Pago Tarjeta (pagado en 2026-04)
+    OBL-C500 | 2026-04 | vence 2026-04-09 | ARS    154.873,43 | Expensas                    | ítem Casa › Expensas (pagado en 2026-04)
+    OBL-C52C | 2026-04 | vence 2026-04-09 | ARS     90.529,30 | Edenor                      | ítem Casa › Luz (pagado en 2026-04)
+    OBL-84D8 | 2026-04 | vence 2026-04-10 | ARS     46.557,04 | Agua Del Signo              | ítem Casa › Agua (pagado en 2026-04)
+    OBL-A6FA | 2026-04 | vence 2026-04-10 | ARS    587.356,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi (pagado en 2026-04)
+    OBL-11BB | 2026-04 | vence 2026-04-13 | ARS  1.202.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede (pagado en 2026-04)
+    OBL-4618 | 2026-04 | vence 2026-04-15 | ARS      9.267,06 | Metrogas                    | ítem Casa › Gas (pagado en 2026-04)
+    OBL-4618 | 2026-04 | vence 2026-04-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo (pagado en 2026-04)
+    OBL-76EE | 2026-04 | vence 2026-04-21 | ARS     66.797,63 | Abl Del Signo               | ítem Casa › ABL (pagado en 2026-04)
+    HIS_c857 | 2026-04 | vence 2026-04-30 | ARS     47.000,00 | Travel Rock - Tasas, impue… | suelta
+    OBL-76EE | 2026-04 | vence 2026-04-30 | ARS     46.661,14 | Abl Cochera                 | suelta
+    HIS_ce9c | 2026-05 | vence 2026-05-06 | ARS    138.805,49 | Personal - Internet 600MB … | ítem Casa › Internet (pagado en 2026-05)
+    HIS_024f | 2026-05 | vence 2026-05-07 | ARS     68.246,71 | ABL Del Signo 4032 P.01 D.… | ítem Casa › ABL (pagado en 2026-05)
+    HIS_0756 | 2026-05 | vence 2026-05-08 | USD          4,96 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_0abe | 2026-05 | vence 2026-05-08 | ARS  2.018.435,94 | Pago Visa Signature BBVA A… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_43d6 | 2026-05 | vence 2026-05-08 | ARS     45.365,16 | AySA - Agua y Saneamiento … | ítem Casa › Agua (pagado en 2026-05)
+    HIS_4c11 | 2026-05 | vence 2026-05-08 | ARS  1.382.835,91 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_5fd1 | 2026-05 | vence 2026-05-08 | USD         49,99 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_626e | 2026-05 | vence 2026-05-08 | USD         34,68 | Pago Visa Signature BBVA U… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_6452 | 2026-05 | vence 2026-05-08 | USD         22,99 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_702c | 2026-05 | vence 2026-05-08 | ARS  1.082.496,25 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_a845 | 2026-05 | vence 2026-05-08 | ARS    427.274,27 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-05) | de resumen
+    HIS_0871 | 2026-05 | vence 2026-05-10 | ARS     47.000,00 | Travel Rock - Viaje Guadal… | ítem Educación y chicos › Colegio Sofi (pagado en 2026-05)
+    HIS_a0a6 | 2026-05 | vence 2026-05-10 | ARS    767.356,00 | Colegio Guadalupe - Sofía … | ítem Educación y chicos › Colegio Sofi (pagado en 2026-05)
+    HIS_03d3 | 2026-05 | vence 2026-05-11 | ARS  1.202.000,00 | Escuela Philips ITPA SA - … | ítem Educación y chicos › Colegio Fede (pagado en 2026-05)
+    HIS_46ab | 2026-05 | vence 2026-05-11 | ARS     60.000,00 | ITPA SA (Escuela Philips) … | ítem Educación y chicos › Colegio Fede (pagado en 2026-05)
+    HIS_69ac | 2026-05 | vence 2026-05-11 | ARS    104.989,58 | Edenor - Luz Del Signo 403… | ítem Casa › Luz (pagado en 2026-05)
+    HIS_1d5e | 2026-05 | vence 2026-05-15 | ARS    159.519,43 | Expensas Cons. Prop. Pje d… | suelta
+    HIS_d0b3 | 2026-05 | vence 2026-05-19 | ARS      9.992,84 | MetroGAS - Gas natural - D… | ítem Casa › Gas (pagado en 2026-05)
+    HIS_7214 | 2026-05 | vence 2026-05-27 | ARS     20.309,02 | AySA - Agua y Saneamiento … | ítem Auto › Agua (pagado en 2026-05)
+    HIS_4d01 | 2026-06 | vence 2026-06-05 | ARS  1.160.758,61 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-06) | de resumen
+    HIS_8955 | 2026-06 | vence 2026-06-05 | USD         77,96 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-06) | de resumen
+    HIS_9460 | 2026-06 | vence 2026-06-05 | USD         20,00 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-06) | de resumen
+    HIS_abfe | 2026-06 | vence 2026-06-05 | ARS  1.094.786,88 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta (pagado en 2026-06) | de resumen
+    HIS_b633 | 2026-06 | vence 2026-06-05 | ARS    794.514,99 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta (pagado en 2026-06) | de resumen
+    HIS_0ef3 | 2026-06 | vence 2026-06-10 | ARS     47.000,00 | Travel Rock - Guadalupe - … | ítem Educación y chicos › Colegio Sofi (pagado en 2026-06)
+    HIS_2a99 | 2026-06 | vence 2026-06-10 | ARS  1.271.500,00 | Escuela Philips (ITPA SA) … | ítem Educación y chicos › Colegio Fede (pagado en 2026-06)
+    HIS_6e2a | 2026-06 | vence 2026-06-10 | ARS    135.122,93 | Edenor - Electricidad - De… | ítem Casa › Luz (pagado en 2026-06)
+    HIS_97ea | 2026-06 | vence 2026-06-10 | ARS    823.468,00 | Colegio Guadalupe - Sofía … | ítem Educación y chicos › Colegio Sofi (pagado en 2026-06)
+    HIS_77c2 | 2026-06 | vence 2026-06-15 | ARS    387.604,43 | Expensas Cons. Prop. Pje d… | suelta
+    HIS_1d86 | 2026-06 | vence 2026-06-22 | ARS     72.414,10 | AFIP Monotributo - Próximo… | ítem Impuestos y finanzas › Monotributo (pagado en 2026-06)
+    HIS_82cd | 2026-06 | vence 2026-06-24 | ARS     21.191,33 | AySA - Agua del Signo 2 - … | ítem Casa › Agua (pagado en 2026-06)
+    HIS_4af7 | 2026-06 | vence 2026-06-29 | ARS     46.991,99 | AySA - agua del signo 1 - … | ítem Casa › Agua (pagado en 2026-06)
+    HIS_fc82 | 2026-07 | vence 2026-07-16 | ARS     50.830,00 | Travel Rock - Viaje Guadal… | suelta
+
+  (b) ABIERTAS DENTRO DE UN ÍTEM PAGADO/AUTOMÁTICO (las esconde H1): 105 · ARS 44.882.374,01
+    HIS_d5b7 | 2025-05 | vence 2025-05-09 | USD          6,88 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_eba0 | 2025-05 | vence 2025-05-09 | ARS  1.439.062,19 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_1cfc | 2025-06 | vence 2025-06-05 | ARS     69.908,63 | ABL Inmobiliario - Cuota v… | ítem Casa › ABL = pagado
+    HIS_fe32 | 2025-06 | vence 2025-06-17 | ARS     10.085,16 | Metrogas - Factura de gas   | ítem Casa › Gas = pagado
+    HIS_7170 | 2025-12 | vence 2025-12-05 | USD        158,54 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_73cf | 2025-12 | vence 2025-12-09 | ARS  3.737.693,68 | Pago Visa Signature BBVA A… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_84c5 | 2025-12 | vence 2025-12-09 | USD      4.672,77 | Pago Visa Signature BBVA U… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_d6a5 | 2025-12 | vence 2025-12-05 | ARS    560.402,36 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    OBL-0AE8 | 2026-01 | vence 2026-01-09 | ARS  1.162.671,06 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-0AE8 | 2026-01 | vence 2026-01-09 | USD        116,70 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-11BB | 2026-01 | vence 2026-01-09 | ARS    800.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede = pagado | incluirResumenMes=false
+    OBL-19B5 | 2026-01 | vence 2026-01-09 | ARS  1.256.077,71 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-19B5 | 2026-01 | vence 2026-01-09 | USD        154,41 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-01 | vence 2026-01-09 | ARS  2.512.790,84 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-01 | vence 2026-01-09 | USD        559,94 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-4618 | 2026-01 | vence 2026-01-09 | ARS     14.245,36 | Metrogas                    | ítem Casa › Gas = pagado | incluirResumenMes=false
+    OBL-597A | 2026-01 | vence 2026-01-20 | ARS     89.714,31 | Monotributo                 | ítem Impuestos y finanzas › Monotributo = pagado | incluirResumenMes=false
+    OBL-76EE | 2026-01 | vence 2026-01-31 | ARS     73.696,54 | Abl Del Signo               | ítem Casa › ABL = pagado | incluirResumenMes=false
+    OBL-84D8 | 2026-01 | vence 2026-01-02 | ARS     43.793,92 | Agua2                       | ítem Auto › Agua = pagado | incluirResumenMes=false
+    OBL-9F85 | 2026-01 | vence 2026-01-09 | ARS  1.068.362,15 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-9F85 | 2026-01 | vence 2026-01-09 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-A6FA | 2026-01 | vence 2026-01-09 | ARS    500.000,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi = pagado | incluirResumenMes=false
+    OBL-C500 | 2026-01 | vence 2026-01-09 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas = pagado | incluirResumenMes=false
+    OBL-C52C | 2026-01 | vence 2026-01-12 | ARS    106.876,54 | Edenor                      | ítem Casa › Luz = pagado | incluirResumenMes=false
+    OBL-0AE8 | 2026-02 | vence 2026-02-06 | ARS    947.949,17 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-0AE8 | 2026-02 | vence 2026-02-06 | USD        140,63 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-19B5 | 2026-02 | vence 2026-02-06 | ARS    877.314,41 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-19B5 | 2026-02 | vence 2026-02-06 | USD          0,92 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-02 | vence 2026-02-06 | ARS  1.623.645,38 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-02 | vence 2026-02-06 | USD         19,31 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-4618 | 2026-02 | vence 2026-02-01 | ARS      9.501,30 | Metrogas                    | ítem Casa › Gas = pagado | incluirResumenMes=false
+    OBL-4618 | 2026-02 | vence 2026-02-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo = pagado | incluirResumenMes=false
+    OBL-5773 | 2026-02 | vence 2026-02-04 | ARS    125.486,00 | Internet                    | ítem Casa › Internet = pagado | incluirResumenMes=false
+    OBL-76EE | 2026-02 | vence 2026-02-28 | ARS     76.017,90 | Abl Del Signo               | ítem Casa › ABL = pagado | incluirResumenMes=false
+    OBL-84D8 | 2026-02 | vence 2026-02-03 | ARS     40.182,08 | Agua Del Signo              | ítem Casa › Agua = pagado | incluirResumenMes=false
+    OBL-9F85 | 2026-02 | vence 2026-02-06 | ARS    673.904,26 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-9F85 | 2026-02 | vence 2026-02-06 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-C500 | 2026-02 | vence 2026-02-10 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas = pagado
+    OBL-C52C | 2026-02 | vence 2026-02-11 | ARS    165.532,46 | Edenor                      | ítem Casa › Luz = pagado | incluirResumenMes=false
+    OBL-0AE8 | 2026-03 | vence 2026-03-06 | ARS    429.293,57 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-0AE8 | 2026-03 | vence 2026-03-06 | USD        622,96 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-11BB | 2026-03 | vence 2026-03-10 | ARS  1.177.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede = pagado
+    OBL-19B5 | 2026-03 | vence 2026-03-06 | ARS    666.323,20 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-19B5 | 2026-03 | vence 2026-03-06 | USD        547,33 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-03 | vence 2026-03-06 | ARS  1.716.337,24 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-03 | vence 2026-03-06 | USD        383,86 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-4618 | 2026-03 | vence 2026-03-07 | ARS      4.501,74 | Metrogas                    | ítem Casa › Gas = pagado
+    OBL-4618 | 2026-03 | vence 2026-03-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo = pagado
+    OBL-5773 | 2026-03 | vence 2026-03-09 | ARS    129.349,00 | Internet                    | ítem Casa › Internet = pagado
+    OBL-76EE | 2026-03 | vence 2026-03-31 | ARS     64.857,05 | Abl Del Signo               | ítem Casa › ABL = pagado
+    OBL-84D8 | 2026-03 | vence 2026-03-06 | ARS     42.811,48 | Agua Del Signo              | ítem Casa › Agua = pagado
+    OBL-9F85 | 2026-03 | vence 2026-03-06 | ARS    584.958,36 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-9F85 | 2026-03 | vence 2026-03-06 | USD        906,54 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-A6FA | 2026-03 | vence 2026-03-09 | ARS    561.035,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi = pagado
+    OBL-C500 | 2026-03 | vence 2026-03-09 | ARS    147.498,43 | Expensas                    | ítem Casa › Expensas = pagado
+    OBL-C52C | 2026-03 | vence 2026-03-11 | ARS     92.842,18 | Edenor                      | ítem Casa › Luz = pagado
+    OBL-0AE8 | 2026-04 | vence 2026-04-09 | ARS    609.948,48 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-0AE8 | 2026-04 | vence 2026-04-09 | USD         20,97 | Frances Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-11BB | 2026-04 | vence 2026-04-13 | ARS  1.202.000,00 | Colegio Fede                | ítem Educación y chicos › Colegio Fede = pagado
+    OBL-19B5 | 2026-04 | vence 2026-04-06 | ARS    424.627,92 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-19B5 | 2026-04 | vence 2026-04-06 | USD          0,94 | Galicia Master              | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-04 | vence 2026-04-09 | ARS  2.076.697,11 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-2836 | 2026-04 | vence 2026-04-09 | USD         19,79 | Frances Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-4618 | 2026-04 | vence 2026-04-15 | ARS      9.267,06 | Metrogas                    | ítem Casa › Gas = pagado
+    OBL-4618 | 2026-04 | vence 2026-04-20 | ARS     72.414,10 | Monotributo                 | ítem Impuestos y finanzas › Monotributo = pagado
+    OBL-5773 | 2026-04 | vence 2026-04-07 | ARS    137.678,67 | Internet                    | ítem Casa › Internet = pagado
+    OBL-76EE | 2026-04 | vence 2026-04-21 | ARS     66.797,63 | Abl Del Signo               | ítem Casa › ABL = pagado
+    OBL-84D8 | 2026-04 | vence 2026-04-10 | ARS     46.557,04 | Agua Del Signo              | ítem Casa › Agua = pagado
+    OBL-84D8 | 2026-04 | vence 2026-04-07 | ARS     20.093,31 | Agua Cochera                | ítem Auto › Agua = pagado
+    OBL-9AB6 | 2026-04 | vence 2026-04-01 | ARS     45.000,00 | Micro Rugby                 | ítem Educación y chicos › Actividades extracurriculares = pagado
+    OBL-9F85 | 2026-04 | vence 2026-04-06 | ARS  2.454.132,24 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-9F85 | 2026-04 | vence 2026-04-06 | USD         14,99 | Galicia Visa                | ítem Tarjetas › Pago Tarjeta = pagado
+    OBL-A6FA | 2026-04 | vence 2026-04-10 | ARS    587.356,00 | Colegio Sofi                | ítem Educación y chicos › Colegio Sofi = pagado
+    OBL-C500 | 2026-04 | vence 2026-04-09 | ARS    154.873,43 | Expensas                    | ítem Casa › Expensas = pagado
+    OBL-C52C | 2026-04 | vence 2026-04-09 | ARS     90.529,30 | Edenor                      | ítem Casa › Luz = pagado
+    HIS_024f | 2026-05 | vence 2026-05-07 | ARS     68.246,71 | ABL Del Signo 4032 P.01 D.… | ítem Casa › ABL = pagado
+    HIS_03d3 | 2026-05 | vence 2026-05-11 | ARS  1.202.000,00 | Escuela Philips ITPA SA - … | ítem Educación y chicos › Colegio Fede = pagado
+    HIS_0756 | 2026-05 | vence 2026-05-08 | USD          4,96 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_0871 | 2026-05 | vence 2026-05-10 | ARS     47.000,00 | Travel Rock - Viaje Guadal… | ítem Educación y chicos › Colegio Sofi = pagado
+    HIS_0abe | 2026-05 | vence 2026-05-08 | ARS  2.018.435,94 | Pago Visa Signature BBVA A… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_43d6 | 2026-05 | vence 2026-05-08 | ARS     45.365,16 | AySA - Agua y Saneamiento … | ítem Casa › Agua = pagado
+    HIS_46ab | 2026-05 | vence 2026-05-11 | ARS     60.000,00 | ITPA SA (Escuela Philips) … | ítem Educación y chicos › Colegio Fede = pagado
+    HIS_4c11 | 2026-05 | vence 2026-05-08 | ARS  1.382.835,91 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_5fd1 | 2026-05 | vence 2026-05-08 | USD         49,99 | Pago Visa Galicia USD       | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_626e | 2026-05 | vence 2026-05-08 | USD         34,68 | Pago Visa Signature BBVA U… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_6452 | 2026-05 | vence 2026-05-08 | USD         22,99 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_69ac | 2026-05 | vence 2026-05-11 | ARS    104.989,58 | Edenor - Luz Del Signo 403… | ítem Casa › Luz = pagado
+    HIS_702c | 2026-05 | vence 2026-05-08 | ARS  1.082.496,25 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_7214 | 2026-05 | vence 2026-05-27 | ARS     20.309,02 | AySA - Agua y Saneamiento … | ítem Auto › Agua = pagado
+    HIS_a0a6 | 2026-05 | vence 2026-05-10 | ARS    767.356,00 | Colegio Guadalupe - Sofía … | ítem Educación y chicos › Colegio Sofi = pagado
+    HIS_a845 | 2026-05 | vence 2026-05-08 | ARS    427.274,27 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_ce9c | 2026-05 | vence 2026-05-06 | ARS    138.805,49 | Personal - Internet 600MB … | ítem Casa › Internet = pagado
+    HIS_d0b3 | 2026-05 | vence 2026-05-19 | ARS      9.992,84 | MetroGAS - Gas natural - D… | ítem Casa › Gas = pagado
+    HIS_0ef3 | 2026-06 | vence 2026-06-10 | ARS     47.000,00 | Travel Rock - Guadalupe - … | ítem Educación y chicos › Colegio Sofi = pagado
+    HIS_1d86 | 2026-06 | vence 2026-06-22 | ARS     72.414,10 | AFIP Monotributo - Próximo… | ítem Impuestos y finanzas › Monotributo = pagado
+    HIS_2a99 | 2026-06 | vence 2026-06-10 | ARS  1.271.500,00 | Escuela Philips (ITPA SA) … | ítem Educación y chicos › Colegio Fede = pagado
+    HIS_4af7 | 2026-06 | vence 2026-06-29 | ARS     46.991,99 | AySA - agua del signo 1 - … | ítem Casa › Agua = pagado
+    HIS_4d01 | 2026-06 | vence 2026-06-05 | ARS  1.160.758,61 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_6e2a | 2026-06 | vence 2026-06-10 | ARS    135.122,93 | Edenor - Electricidad - De… | ítem Casa › Luz = pagado
+    HIS_82cd | 2026-06 | vence 2026-06-24 | ARS     21.191,33 | AySA - Agua del Signo 2 - … | ítem Casa › Agua = pagado
+    HIS_8955 | 2026-06 | vence 2026-06-05 | USD         77,96 | Pago Mastercard Black BBVA… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_9460 | 2026-06 | vence 2026-06-05 | USD         20,00 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_97ea | 2026-06 | vence 2026-06-10 | ARS    823.468,00 | Colegio Guadalupe - Sofía … | ítem Educación y chicos › Colegio Sofi = pagado
+    HIS_abfe | 2026-06 | vence 2026-06-05 | ARS  1.094.786,88 | Pago Visa Galicia ARS       | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+    HIS_b633 | 2026-06 | vence 2026-06-05 | ARS    794.514,99 | Pago Mastercard Black Gali… | ítem Tarjetas › Pago Tarjeta = pagado | de resumen
+  (a ∩ b: 105)
+
+  (c) SUELTAS CON FECHA EFECTIVA VENCIDA (las esconde H2): 29 (del mes actual: 0)
+    OBL-9AB6 | 2026-01 | vence 2026-01-01 | ARS     60.000,00 | Mucama                      | suelta | incluirResumenMes=false
+    OBL-84D8 | 2026-01 | vence 2026-01-02 | ARS     19.749,14 | Agua                        | suelta | incluirResumenMes=false
+    HIS_430d | 2026-01 | vence 2026-01-09 | ARS  1.068.362,15 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_d375 | 2026-01 | vence 2026-01-09 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+    OBL-9AB6 | 2026-02 | vence 2026-02-04 | ARS    700.000,00 | Baños albañil               | suelta
+    HIS_4d49 | 2026-02 | vence 2026-02-06 | ARS    673.904,26 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_7696 | 2026-02 | vence 2026-02-06 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+    OBL-84D8 | 2026-02 | vence 2026-02-06 | ARS     18.054,69 | Agua Cochera                | suelta | incluirResumenMes=false
+    OBL-4618 | 2026-03 | vence 2026-03-01 | ARS    100.000,00 | Canto Sofi                  | suelta
+    OBL-9AB6 | 2026-03 | vence 2026-03-01 | ARS    400.000,00 | Baños albañil               | suelta
+    OBL-84D8 | 2026-03 | vence 2026-03-03 | ARS     19.306,14 | Agua Cochera                | suelta
+    HIS_0c92 | 2026-03 | vence 2026-03-06 | ARS    965.433,19 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_e3a0 | 2026-03 | vence 2026-03-06 | USD        906,54 | Pago Visa Galicia USD       | suelta | de resumen
+    OBL-597A | 2026-03 | vence 2026-03-06 | ARS    400.000,00 | Baños Albañil               | suelta
+    OBL-9AB6 | 2026-03 | vence 2026-03-30 | ARS    350.000,00 | Mucama                      | suelta
+    OBL-76EE | 2026-03 | vence 2026-03-31 | ARS     45.161,98 | Abl Cochera                 | suelta
+    HIS_2245 | 2026-04 | vence 2026-04-06 | USD          0,94 | Pago Mastercard Black Gali… | suelta | de resumen
+    HIS_949d | 2026-04 | vence 2026-04-06 | ARS    424.627,92 | Pago Mastercard Black Gali… | suelta | de resumen
+    HIS_bec6 | 2026-04 | vence 2026-04-06 | ARS  2.454.132,24 | Pago Visa Galicia ARS       | suelta | de resumen
+    HIS_d5e4 | 2026-04 | vence 2026-04-06 | USD         14,99 | Pago Visa Galicia USD       | suelta | de resumen
+    HIS_0482 | 2026-04 | vence 2026-04-09 | USD         20,97 | Pago Mastercard Black BBVA… | suelta | de resumen
+    HIS_4927 | 2026-04 | vence 2026-04-09 | ARS    609.948,08 | Pago Mastercard Black BBVA… | suelta | de resumen
+    HIS_5dec | 2026-04 | vence 2026-04-09 | ARS  2.076.697,11 | Pago Visa Signature BBVA A… | suelta | de resumen
+    HIS_a6aa | 2026-04 | vence 2026-04-09 | USD         19,76 | Pago Visa Signature BBVA U… | suelta | de resumen
+    HIS_c857 | 2026-04 | vence 2026-04-30 | ARS     47.000,00 | Travel Rock - Tasas, impue… | suelta
+    OBL-76EE | 2026-04 | vence 2026-04-30 | ARS     46.661,14 | Abl Cochera                 | suelta
+    HIS_1d5e | 2026-05 | vence 2026-05-15 | ARS    159.519,43 | Expensas Cons. Prop. Pje d… | suelta
+    HIS_77c2 | 2026-06 | vence 2026-06-15 | ARS    387.604,43 | Expensas Cons. Prop. Pje d… | suelta
+    HIS_fc82 | 2026-07 | vence 2026-07-16 | ARS     50.830,00 | Travel Rock - Viaje Guadal… | suelta
+
+── 0.2 la consulta que trae las abiertas de todos los meses
+  pagado:         {"true":2022,"false":154}
+  confirmadoPago: {"true":191,"false":851,"(sin campo)":1134}
+  tipo:           {"(string)":2176}
+  where('pagado','==',false)                           →  154 docs leídos, 142 tras el filtro del cliente | faltan 0 | sobran 0 ✓ EXACTO
+  where('confirmadoPago','==',false)                   →  851 docs leídos, 8 tras el filtro del cliente | faltan 134 | sobran 0 ✗
+      falta HIS_024f pagado=false confirmadoPago=undefined
+      falta HIS_03d3 pagado=false confirmadoPago=undefined
+      falta HIS_0482 pagado=false confirmadoPago=undefined
+      falta HIS_0756 pagado=false confirmadoPago=undefined
+      falta HIS_0871 pagado=false confirmadoPago=undefined
+  where('pagado','==',false) + where('tipo','==','Gasto') →  142 docs leídos, 142 tras el filtro del cliente | faltan 0 | sobran 0 ✓ EXACTO
+  GATE: PASA — hay un filtro que trae el conjunto completo
+
+════════ VERIFICACIÓN ════════
+
+── 1. dos cuotas de viaje: Gasto sin ítem, alta manual con fecha futura (pagado/confirmadoPago false)
+  2026-11: en la agenda como suelto a pagar OK | el pendiente del mes sube 450.000,00 OK
+  2026-12: en la agenda como suelto a pagar OK | el pendiente del mes sube 450.000,00 OK
+  campana con hoy=2026-10-06: la de noviembre no entra
+  campana con hoy=2026-10-31: la de noviembre no entra
+  campana con hoy=2026-11-01: la de noviembre ENTRA (proxima)
+  campana con hoy=2026-11-15: la de noviembre ENTRA (hoy)
+  hoy=2026-11-20 sin pagarla, Resumen de noviembre: card de vencidos OK (1)
+  hoy=2026-12-05 sin pagarla, Resumen de diciembre: la de noviembre en vencidos OK, etiqueta de mes OK (mes 2026-11 ≠ 2026-12 → pie "· noviembre")
+  mirando noviembre ya cerrado (hoy=2026-12-05): card de vencidos no se muestra OK
+
+── 2. ABL 2026-10 con las 5 obligaciones de docs/F9.182.txt 0.4, la del mes pagada
+  estadoItem = pagado OK | la fila muestra "+4 a pagar · $357.250,93" OK
+  banner (hoy=2026-10-06): pendiente 357.250,93 OK | vencidos 0 | obligaciones 4
+  hoy=2026-11-01 sin pagarlas: card de vencidos de noviembre 4 OK | campana 4 vencidas OK
+  banner de noviembre: vencidos 4 OK, pendiente 357.250,93
+  campana del ítem: itemTieneObligacionAbierta = true → el aviso por diaVencimiento del ítem se reemplaza por las 4
+
+── 3. producción, hoy (2026-10-06), Resumen de 2026-10: banner y card de vencidos ANTES (fb5cc92) y DESPUÉS
+  banner pendiente:  antes 6.158.222,25 → después 61.353.737,95  (Δ 55.195.515,70)
+  contador vencidos: antes 0 → después 134
+  card de vencidos:  antes 0 → después 134
+  descomposición del Δ:
+    + (a) vencidas de meses anteriores: 134 · 55.968.947,13
+    + (b) abiertas del mes dentro de un ítem cubierto: 0 · 0,00
+    + (c) sueltas del mes que antes no entraban (vencidas): 0 · 0,00
+    − matches ya cubiertos (pagado) de ítems sin confirmar, que antes sumaban: 2 · 773.431,43
+  card: entran 134 — de meses anteriores 134, del mes con incluirResumenMes=false 0
+  campana: 140 obligaciones (134 vencidas, 1 hoy, 5 próximas ≤ 14 días)
+
+── 4. no regresión: meses sin obligaciones abiertas extra, banner antes = después
+  2026-07: abiertas 1 | antes 71.427,65 | después 50.830,00 ✗
+      + suelta abierta que el filtro de fecha soltaba (H2): HIS_fc82 Travel Rock - Viaje Guadal… 50.830,00
+      − match pagado sin confirmar, ya no es "a pagar": z5WrWHzk AGIP Inmobiliario/ABL 71.427,65 (pagado=true confirmadoPago=false)
+      explicado: -20.597,65 = Δ -20.597,65 OK — no es un mes "sin obligaciones extra"
+  2026-08: abiertas 0 | antes 0,00 | después 0,00 OK
+  2026-09: abiertas 0 | antes 45.000,00 | después 45.000,00 OK

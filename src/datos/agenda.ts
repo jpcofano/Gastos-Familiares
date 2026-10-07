@@ -1,11 +1,11 @@
 // Agenda unificada de pagos del mes (F9.99.8, extraído a módulo compartido en F9.99.8.1
 // para que F9.99.9 — picker de conciliación con agenda unificada — lo reuse sin duplicar).
 // Esperados: el checklist actual, SIN cambios en su cálculo (calcularChecklist).
-// Futuros sueltos: gastos manuales sin plantilla — tipo='Gasto', pagado=false,
-// fecha >= hoy — que ningún ítem esperado capturó (dedupe: si matchean alguna
-// rama de movimientosDelItem() ya cuentan como esperado, vía ci.matches).
+// Sueltos: movimientos del mes sin cubrir y sin plantilla — que ningún ítem esperado
+// capturó (dedupe: si matchean alguna rama de movimientosDelItem() ya cuentan como
+// esperado, vía ci.matches). Hasta F9.184 eran solo los de fecha >= hoy.
 import type { Movement } from '../types';
-import { cubierto, type CheckItem } from './checklist';
+import { cubierto, movimientoCubierto, type CheckItem } from './checklist';
 
 export type AgendaEntry = { kind: 'esperado'; ci: CheckItem } | { kind: 'suelto'; mov: Movement };
 
@@ -16,12 +16,13 @@ export function inicioDia(d: Date): Date { return new Date(d.getFullYear(), d.ge
 // conciliación: no había forma de asignarle un comprobante. Los esperados de Ingreso ya entraban
 // (calcularChecklist nunca filtró por tipo), así que los sueltos eran la única asimetría.
 // El monto sigue contándose solo para los gastos — ver pendienteDeEntrada.
-export function sueltosFuturosDelMes(movs: Movement[], checklist: CheckItem[], hoy: Date): Movement[] {
+// F9.184 §2.4 — era `sueltosFuturosDelMes` y filtraba `fecha >= hoy`: un suelto impago desaparecía
+// de la agenda y del picker de conciliación el día que vencía, justo cuando más hacía falta verlo.
+// Ahora entra todo suelto del mes sin cubrir, vencido o no. Y la cobertura es `movimientoCubierto`,
+// no `!m.pagado`: era la segunda definición de "cubierto" que F9.140 §1 prohibió.
+export function sueltosAbiertosDelMes(movs: Movement[], checklist: CheckItem[]): Movement[] {
   const matchedIds = new Set(checklist.flatMap(ci => ci.matches.map(m => m.id)));
-  const inicioHoy = inicioDia(hoy);
-  return movs.filter(m =>
-    !m.pagado && !matchedIds.has(m.id) && inicioDia(m.fecha) >= inicioHoy
-  );
+  return movs.filter(m => !movimientoCubierto(m) && !matchedIds.has(m.id));
 }
 
 export function construirAgenda(checklist: CheckItem[], sueltosFuturos: Movement[]): AgendaEntry[] {
@@ -31,8 +32,11 @@ export function construirAgenda(checklist: CheckItem[], sueltosFuturos: Movement
   ];
 }
 
+// F9.184 — el suelto preguntaba `confirmadoPago === true`, una tercera definición de "cubierto".
+// Desde §2.4 los sueltos de la agenda ya llegan sin cubrir, así que esto no cambia ningún resultado:
+// se alinea para que no quede otra copia esperando divergir.
 export function agendaCubierto(e: AgendaEntry): boolean {
-  return e.kind === 'esperado' ? cubierto(e.ci.estado) : e.mov.confirmadoPago === true;
+  return e.kind === 'esperado' ? cubierto(e.ci.estado) : movimientoCubierto(e.mov);
 }
 
 // F9.102 1b — pendiente de UNA entrada, en su moneda nativa (sin conversión ARS-eq):

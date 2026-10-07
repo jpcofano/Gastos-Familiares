@@ -8,7 +8,7 @@ import { execSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { esCuitValido, rescatarCuitContraparte } from '../functions/src/cuit';
 import { reconciliarPorPayee, reconciliarPorNombre, tipoConciliable, type MovimientoMin, type DatosExtractosMin } from '../functions/src/matchLogica';
-import { sueltosFuturosDelMes, construirAgenda, pendienteAgenda, pendientesOrdenados } from '../src/datos/agenda';
+import { sueltosAbiertosDelMes, construirAgenda, pendienteAgenda, pendientesOrdenados } from '../src/datos/agenda';
 
 const req = createRequire(process.cwd() + '/functions/package.json');
 const Anthropic = req('@anthropic-ai/sdk').default ?? req('@anthropic-ai/sdk');
@@ -124,8 +124,8 @@ async function main() {
     id, tipo, monto, moneda: 'ARS' as const, pagado: false,
     fecha: new Date('2026-09-20T12:00:00Z'), descripcion: id,
   });
-  const movs = [mk('gasto-suelto', 'Gasto', 5000), mk('cobro-suelto', 'Ingreso', 90000)] as unknown as Parameters<typeof sueltosFuturosDelMes>[0];
-  const sueltos = sueltosFuturosDelMes(movs, [], hoy);
+  const movs = [mk('gasto-suelto', 'Gasto', 5000), mk('cobro-suelto', 'Ingreso', 90000)] as unknown as Parameters<typeof sueltosAbiertosDelMes>[0];
+  const sueltos = sueltosAbiertosDelMes(movs, []);  // F9.184: renombrada, sin el filtro de fecha
   console.log(`  sueltos en la agenda: [${sueltos.map(m => m.id).join(', ')}]`);
   console.log(`  ${sueltos.some(m => m.id === 'cobro-suelto') ? 'OK ' : '>>> NO'} el ingreso suelto entra (antes se filtraba por tipo === 'Gasto')`);
   const agenda = construirAgenda([], sueltos);

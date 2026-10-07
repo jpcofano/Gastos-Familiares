@@ -6,6 +6,8 @@ import { useMovimientosDelMes } from '../../hooks/useMovimientosDelMes';
 import { useFamiliaConfig } from '../../hooks/useFamiliaConfig';
 import { useResumenesTarjeta } from '../../hooks/useResumenesTarjeta';
 import { calcularChecklist, mesActualStr } from '../../datos/checklist';
+import { obligacionesAbiertas, obligacionesParaCampana, itemTieneObligacionAbierta, type Obligacion } from '../../datos/obligaciones';
+import { useObligacionesAbiertas } from '../../hooks/useObligacionesAbiertas';
 import { setCalendarSync } from '../../datos/configFamilia';
 import { Card, Badge } from '../../design-system/components';
 import { Icon } from '../../design-system/Icon';
@@ -20,6 +22,8 @@ import type { CardStatement, ExpectedItem, Movement, FamiliaConfig } from '../..
 // puede consultar un admin (mismo gate que Resumen › Gastos Fijos), así que
 // un dependiente ve únicamente los recordatorios de tarjetas (visibles para
 // todos los roles, igual que /tarjetas).
+// F9.184 §3 — y desde ahí, las obligaciones abiertas (movimientos de Gasto sin cubrir, de cualquier
+// mes) vía useObligacionesAbiertas, con el mismo gate de admin.
 
 const DIAS_VENTANA = 14;
 
@@ -27,7 +31,7 @@ type EstadoRec = 'vencido' | 'hoy' | 'proximo';
 
 interface Recordatorio {
   id: string;
-  tipo: 'esperado' | 'tarjeta';
+  tipo: 'esperado' | 'tarjeta' | 'obligacion';
   titulo: string;
   sub?: string;
   fecha: Date | null;   // null = sin diaVencimiento (esperado del mes)
@@ -55,9 +59,13 @@ function estadoPorDias(dias: number): EstadoRec {
 function recordatoriosEsperados(items: ExpectedItem[], movs: Movement[], hoy: Date, navigate: NavigateFunction): Recordatorio[] {
   const checklist = calcularChecklist(items, movs, mesActualStr());
   const out: Recordatorio[] = [];
-  for (const { item, estado, matches } of checklist) {
+  for (const ci of checklist) {
+    const { item, estado, matches } = ci;
     if (item.tipo !== 'Gasto') continue;
     if (!ACCIONABLE_NOTIF.includes(estado)) continue;
+    // F9.184 §3 — sin duplicar: con una obligación ABIERTA cargada en el mes, avisan sus
+    // obligaciones (recordatoriosObligaciones) y no el `diaVencimiento` del ítem.
+    if (itemTieneObligacionAbierta(ci)) continue;
     let fecha: Date | null = null;
     let estadoRec: EstadoRec;
     if (item.diaVencimiento != null) {
@@ -86,6 +94,29 @@ function recordatoriosEsperados(items: ExpectedItem[], movs: Movement[], hoy: Da
     });
   }
   return out;
+}
+
+// F9.184 §3 — cada obligación abierta (gasto cargado sin cubrir, de cualquier ítem o sin ítem, de
+// cualquier mes) vencida, de hoy o dentro de la ventana. Antes la campana solo miraba
+// `itemsEsperados.diaVencimiento`, poblado en 1 de 22 ítems: una cuota de viaje, una boleta con su
+// vencimiento o una cuota atrasada nunca avisaban. Regla en docs/CLAUDE.md.
+const mesLargo = (mes: string) => {
+  const [y, m] = mes.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+};
+function recordatoriosObligaciones(obligaciones: Obligacion[], hoy: Date, navigate: NavigateFunction): Recordatorio[] {
+  const mesHoy = mesActualStr();
+  return obligacionesParaCampana(obligaciones, hoy, DIAS_VENTANA).map(o => ({
+    id: `obl-${o.mov.id}`,
+    tipo: 'obligacion' as const,
+    titulo: o.mov.descripcion || '(sin descripción)',
+    // El mes solo si no es el actual: una cuota de septiembre impaga tiene que decir de cuándo es.
+    sub: o.mov.mes !== mesHoy ? `de ${mesLargo(o.mov.mes)}` : undefined,
+    fecha: o.fechaEfectiva,
+    estado: o.estado === 'vencida' ? 'vencido' : o.estado === 'hoy' ? 'hoy' : 'proximo',
+    montos: [{ monto: Math.abs(o.mov.monto), moneda: o.mov.moneda }],
+    onTap: () => navigate('/resumen'),
+  }));
 }
 
 function recordatoriosTarjetas(resumenes: CardStatement[], config: FamiliaConfig | null, hoy: Date, navigate: (to: string) => void): Recordatorio[] {
@@ -136,7 +167,7 @@ const ORDEN_ESTADO_REC: Record<EstadoRec, number> = { vencido: 0, hoy: 1, proxim
 const TINT: Record<EstadoRec, string> = { vencido: 'var(--gf-expense)', hoy: 'var(--gf-emerald)', proximo: 'var(--gf-gray-300)' };
 const LABEL: Record<EstadoRec, string> = { vencido: 'Vencido', hoy: 'Hoy', proximo: 'Próximo' };
 const MES_CORTO = (d: Date) => d.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '');
-const ICONO_REC = (id: string) => id.startsWith('esp-') ? 'receipt' : 'credit-card';
+const ICONO_REC = (id: string) => id.startsWith('esp-') ? 'receipt' : id.startsWith('obl-') ? 'clock' : 'credit-card';
 
 export function contarVencProximos(recordatorios: Recordatorio[]): number {
   return recordatorios.filter(r => r.estado === 'vencido' || r.estado === 'hoy').length;
@@ -192,10 +223,13 @@ export function useRecordatorios(): { recordatorios: Recordatorio[]; esAdmin: bo
   const { items } = useItemsEsperados();
   const { movimientos } = useMovimientosDelMes(mesActualStr(), esAdmin ? undefined : memberId);
   const { resumenes } = useResumenesTarjeta();
+  // F9.184 §3 — solo admin, como los esperados: sin filtro de persona las reglas la rechazan.
+  const { abiertas } = useObligacionesAbiertas(esAdmin);
 
   const recEsperados = esAdmin ? recordatoriosEsperados(items, movimientos, hoy, navigate) : [];
+  const recObligaciones = esAdmin ? recordatoriosObligaciones(obligacionesAbiertas(abiertas, hoy), hoy, navigate) : [];
   const recTarjetas = recordatoriosTarjetas(resumenes, config, hoy, navigate);
-  const recordatorios = [...recEsperados, ...recTarjetas].sort((a, b) => {
+  const recordatorios = [...recEsperados, ...recObligaciones, ...recTarjetas].sort((a, b) => {
     const eOrd = ORDEN_ESTADO_REC[a.estado] - ORDEN_ESTADO_REC[b.estado];
     if (eOrd !== 0) return eOrd;
     // Dentro del mismo estado: con fecha primero (por día), sin fecha al final

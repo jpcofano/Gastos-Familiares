@@ -16,7 +16,9 @@ import { cargarTCRango } from '../datos/patrimonioOptimizacion';
 import { medioCanonico, colorMedio, MEDIOS_FALLBACK } from '../datos/medios';
 import { colorHash } from '../datos/agregados';
 import { calcularChecklist, cubierto, movimientoCubierto, ACCIONABLE, type CheckItem } from '../datos/checklist';
-import { construirAgenda, agendaCubierto, sueltosFuturosDelMes, pendienteAgenda, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
+import { construirAgenda, agendaCubierto, sueltosAbiertosDelMes, diaDeAgenda, inicioDia, type AgendaEntry } from '../datos/agenda';
+import { fechaEfectivaMov, vencidasParaResumen, pendienteMes, abiertasDelItem } from '../datos/obligaciones';
+import { useObligacionesAbiertas } from '../hooks/useObligacionesAbiertas';
 import EditarMovimiento from './EditarMovimiento';
 import type { Movement, ExpectedItem, FamiliaConfig, MedioPago } from '../types';
 import './Resumen.css';
@@ -60,6 +62,13 @@ const MESES_LARGO = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Jul
 function formatMes(mes: string): string {
   const [y, m] = mes.split('-');
   return `${MESES_LARGO[Number(m) - 1]} ${y}`;
+}
+// F9.184 §2.1 — el mes de una obligación que viene de otro mes, en minúscula y sin año: "septiembre".
+// El año solo aparece si no es el actual, para que una deuda de diciembre pasado no se lea como futura.
+function nombreMes(mes: string): string {
+  const [y, m] = mes.split('-');
+  const nombre = MESES_LARGO[Number(m) - 1]?.toLowerCase() ?? mes;
+  return Number(y) === new Date().getFullYear() ? nombre : `${nombre} ${y}`;
 }
 
 const DIA_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
@@ -130,19 +139,7 @@ function agruparReal(movs: Movement[], clave: (m: Movement) => string): Map<stri
 
 function sinTcPropio(m: Movement): boolean { return m.moneda === 'USD' && !m.tcUsdArs; }
 
-// F9.132.2 cambio 1 — fecha con la que un movimiento se considera exigible: la primera de
-// `vencimientos[].fecha` cuando el comprobante la trajo, si no la fecha del movimiento.
-// Medido sobre los impagos del 7/8/2026: AYSA no tiene `vencimientos` (cae a `m.fecha`) y
-// Empresa Distribuidora sí, con `2026-08-07` — el mismo día. Las dos ramas están vivas.
-// Se normaliza a inicio de día para poder comparar contra `inicioHoy` sin arrastrar la hora.
-function fechaEfectivaMov(m: Movement): Date {
-  const venc = m.vencimientos;
-  if (Array.isArray(venc) && venc.length > 0 && venc[0]?.fecha) {
-    const d = new Date(`${String(venc[0].fecha).slice(0, 10)}T00:00:00`);
-    if (!isNaN(d.getTime())) return d;
-  }
-  return inicioDia(m.fecha);
-}
+// F9.184 §1 — `fechaEfectivaMov` vivía acá; se mudó sin cambios a src/datos/obligaciones.ts.
 
 function nombrePersona(memberId: string | null, config: FamiliaConfig | null): string {
   if (!memberId) return '—';
@@ -437,8 +434,10 @@ function BarraRitmo({ gastado, promedio, mes, esMesActual, privado }: {
 
 // ── Sección: Por día ──────────────────────────────────────────────────────────
 
-function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, mapaTc, tcEfectivo, avisoTc, onIrAGastos, promedioGasto6m }: {
+function PorDiaSeccion({ movs, abiertasTodas, porRevisar, config, cur, esAdmin, onEditarMovimiento, checklist, sueltosFuturos, agenda, mes, mapaTc, tcEfectivo, avisoTc, onIrAGastos, promedioGasto6m }: {
   movs: Movement[];
+  /** F9.184 — obligaciones abiertas de TODOS los meses (useObligacionesAbiertas). */
+  abiertasTodas: Movement[];
   porRevisar: number;
   onIrAGastos: () => void;
   config: FamiliaConfig | null;
@@ -548,9 +547,11 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
   // Impagos de dias ANTERIORES. Aca manda la fecha efectiva: un gasto cargado el 4 que vence
   // el 10 no esta vencido. Solo en el mes actual — mirando julio en septiembre todo julio
   // estaria "vencido" y la card no diria nada.
-  const aPagarVencidos = !esMesActual ? [] : cajaMov
-    .filter(m => m.tipo === 'Gasto' && !movimientoCubierto(m) && fechaEfectivaMov(m).getTime() < inicioHoy.getTime())
-    .sort((a, b) => fechaEfectivaMov(a).getTime() - fechaEfectivaMov(b).getTime());
+  // F9.184 §2.1 — salía de `cajaMov`, o sea del mes en pantalla: una obligación de septiembre
+  // impaga dejaba de verse el 1/10. Ahora son las obligaciones abiertas vencidas de CUALQUIER mes
+  // (las anteriores llevan su mes en el pie), y sin el filtro de `incluirResumenMes`: la regla es
+  // que toda obligación abierta se ve hasta que se paga (docs/CLAUDE.md).
+  const aPagarVencidos = vencidasParaResumen(movs, abiertasTodas, mes, hoy, esMesActual).map(o => o.mov);
   const aPagarVencidosTotal: MontoReal = totalReal(aPagarVencidos);
   const vencidosPorBanco = [...agruparReal(aPagarVencidos, m => medioCanonico(m.banco ?? 'Sin medio', config?.bancos)).entries()]
     .sort((a, b) => b[1].ars - a[1].ars);
@@ -594,11 +595,20 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
       {(() => {
         const cubiertos = agenda.filter(agendaCubierto).length;
         const total = agenda.length;
-        const todoConfirmado = porRevisar === 0 && cubiertos === total;
+        // F9.184 §2.2 — el pendiente y los vencidos se cuentan por OBLIGACIÓN, no por ítem: un ítem
+        // `pagado` con otras obligaciones abiertas (las cuotas atrasadas de ABL) ya no las esconde,
+        // y las vencidas de meses anteriores entran en el mes actual. Un ítem sin nada cargado
+        // sigue sumando su `montoEsperado`, como antes. Ver `pendienteMes`.
+        const pm = pendienteMes(checklist, movs, abiertasTodas, mes, hoy, esMesActual);
+        // "Todo confirmado" exige además que no quede ninguna obligación abierta: con el ítem pagado
+        // y 4 cuotas atrasadas, el banner decía que estaba todo al día.
+        const todoConfirmado = porRevisar === 0 && cubiertos === total && pm.obligaciones === 0;
         // F9.136 §1 — "Nada vencido" se apoyaba en `porRevisar`, que por diseño (F9.110) cuenta
         // solo lo SIN CARGAR. Desde F9.132.2 un ítem puede estar vencido CON movimiento cargado,
         // así que no movía el contador y el banner afirmaba "Nada vencido" con uno vencido.
-        const vencidos = agenda.filter(e => e.kind === 'esperado' && e.ci.estado === 'vencido').length;
+        // F9.184 — obligaciones vencidas + ítems vencidos sin cargar; un ítem con obligaciones no
+        // se cuenta dos veces.
+        const vencidos = pm.vencidos;
         return (
           <Card variant="flat" padding="var(--space-3)" onClick={onIrAGastos} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
             {porRevisar > 0 ? (
@@ -612,15 +622,17 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
             )}
             <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: todoConfirmado ? 'var(--gf-income)' : 'var(--color-text)' }}>
               {porRevisar > 0 ? (
-                `Revisar pendientes del mes · ${porRevisar} sin pagar · ${(privado ? fmtPct(pendienteAgenda(agenda), c.ingArsEq) : fmtArs(pendienteAgenda(agenda)))}`
+                `Revisar pendientes del mes · ${porRevisar} sin pagar · ${(privado ? fmtPct(pm.monto, c.ingArsEq) : fmtArs(pm.monto))}`
               ) : todoConfirmado ? (
                 `Todo confirmado · ${cubiertos}/${total}`
               ) : (
                 <>
                   {vencidos > 0 ? `${vencidos} vencido${vencidos > 1 ? 's' : ''} · ` : 'Nada vencido · '}
                   {cubiertos}/{total} confirmados
-                  {pendienteAgenda(agenda) > 0 && (
-                    <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {(privado ? fmtPct(pendienteAgenda(agenda), c.ingArsEq) : fmtArs(pendienteAgenda(agenda)))} a confirmar</span>
+                  {/* F9.184 — "a pagar", no "a confirmar": desde §2.2 el monto son obligaciones sin
+                      cubrir, plata que todavía no salió. */}
+                  {pm.monto > 0 && (
+                    <span style={{ color: 'var(--color-text-sec)', fontWeight: 500 }}> · {(privado ? fmtPct(pm.monto, c.ingArsEq) : fmtArs(pm.monto))} a pagar</span>
                   )}
                 </>
               )}
@@ -741,7 +753,7 @@ function PorDiaSeccion({ movs, porRevisar, config, cur, esAdmin, onEditarMovimie
                   esAdmin={esAdmin}
                   onEditar={onEditarMovimiento}
                   monto={privado ? fmtPct(arsEq(m, tcDeMov), c.ingArsEq) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
-                  pie={`Venció ${fmtDiaCorto(fechaEfectivaMov(m))}`}
+                  pie={`Venció ${fmtDiaCorto(fechaEfectivaMov(m))}${m.mes !== mes ? ` · ${nombreMes(m.mes)}` : ''}`}
                   vencido
                 />
               ))}
@@ -1024,7 +1036,7 @@ function mesDe(d: Date): string {
 
 // F9.99.7 Parte 4.2/4.4 — tarjeta de un ítem del checklist, reutilizada tanto en la lista
 // principal como en la sección "Débitos automáticos" (mismos estados/interacciones).
-function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago, basePriv }: {
+function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago, onEditarMovimiento, basePriv }: {
   ci: CheckItem;
   mes: string;
   config: FamiliaConfig | null;
@@ -1033,9 +1045,22 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
   onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
   onDesmarcar: (matches: Movement[]) => void;
   onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
+  onEditarMovimiento?: (mov: Movement) => void;
 }) {
   const { item, matches, estado } = ci;
   const { privado } = usePrivacidad();
+  // F9.184 §2.3 — `estadoItem` no cambia: con UN pago confirmado el ítem sigue `pagado`. Pero sus
+  // OTRAS obligaciones abiertas (las cuotas atrasadas de ABL) ya no se esconden detrás de ese
+  // estado: la fila las anuncia y el chip las abre. Solo en un ítem cubierto; en uno por confirmar
+  // o vencido todas sus obligaciones ya son el tema de la fila.
+  const abiertasExtra = cubierto(estado) ? abiertasDelItem(ci) : [];
+  const [verAbiertas, setVerAbiertas] = useState(false);
+  const totalAbiertas = (['ARS', 'USD'] as const)
+    .map(mon => ({ mon, total: abiertasExtra.filter(m => m.moneda === mon).reduce((s, m) => s + Math.abs(m.monto), 0) }))
+    .filter(x => x.total > 0);
+  const fmtAbiertas = privado
+    ? fmtPct(abiertasExtra.reduce((s, m) => s + Math.abs(m.monto), 0), basePriv)
+    : totalAbiertas.map(x => fmtMoney(x.total, { from: x.mon, to: x.mon })).join(' · ');
   // F9.111 — total de ítems que disputaron algún movimiento de este ítem (unión de `otros`
   // a través de todas las disputas, no solo la primera).
   const disputaCount = new Set(ci.disputas?.flatMap(d => d.otros) ?? []).size;
@@ -1089,6 +1114,15 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
               {item.persona && <Badge tone="neutral">{nombrePersona(item.persona, config)}</Badge>}
               <StatusBadge state={estado} />
+              {abiertasExtra.length > 0 && (
+                <button
+                  onClick={() => setVerAbiertas(v => !v)}
+                  aria-expanded={verAbiertas}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+                >
+                  <Badge tone="danger">+{abiertasExtra.length} a pagar · {fmtAbiertas}</Badge>
+                </button>
+              )}
               {/* F9.111 — empate arbitrado: la ambigüedad se muestra, no se duplica en silencio.
                   El vínculo directo (pase 1) gana siempre y el empate desaparece al asignar. */}
               {disputaCount > 0 && (
@@ -1119,6 +1153,27 @@ function ItemChecklistCard({ ci, mes, config, esMesActual, onConfirmar, onDesmar
             {estado === 'parcial' && <div style={{ fontSize: 11, color: '#b45309', marginTop: 2 }}>Falta completar</div>}
           </div>
         </div>
+        {verAbiertas && abiertasExtra.length > 0 && (
+          <div style={{ marginTop: 8, borderTop: '1px solid var(--gf-gray-100)', paddingTop: 4 }}>
+            {abiertasExtra.map((m, i) => {
+              const fe = fechaEfectivaMov(m);
+              const vencida = fe.getTime() < inicioDia(new Date()).getTime();
+              return (
+                <FilaAPagar
+                  key={m.id}
+                  m={m}
+                  config={config}
+                  conBorde={i < abiertasExtra.length - 1}
+                  esAdmin={!!onEditarMovimiento}
+                  onEditar={onEditarMovimiento}
+                  monto={privado ? fmtPct(Math.abs(m.monto), basePriv) : fmtMoney(m.monto, { from: m.moneda, to: m.moneda })}
+                  pie={`${vencida ? 'Venció' : 'Vence'} ${fmtDiaCorto(fe)}`}
+                  vencido={vencida}
+                />
+              );
+            })}
+          </div>
+        )}
         {/* F9.136 §1 — EL BLOQUEANTE. Esta rama era `estado === 'por_confirmar'` y la de
             "Registrar pago" es `matches.length === 0`, así que un ítem `'vencido'` CON match
             —posible desde F9.132.2— no entraba en ninguna y quedaba SIN NINGUNA ACCIÓN.
@@ -1238,8 +1293,11 @@ function SueltoAgendaCard({ mov, config, onMarcarPagado, onDeshacer, basePriv }:
   );
 }
 
-function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegistrarPago, onMarcarPagadoSuelto, onDeshacerSuelto, esMesActual, mes, basePriv }: {
+function GastosFijosSeccion({ agenda, checklist, movs, abiertasTodas, config, onConfirmar, onDesmarcar, onRegistrarPago, onMarcarPagadoSuelto, onDeshacerSuelto, onEditarMovimiento, esMesActual, mes, basePriv }: {
   agenda: AgendaEntry[];
+  checklist: CheckItem[];
+  movs: Movement[];
+  abiertasTodas: Movement[];
   config: FamiliaConfig | null;
   basePriv: number;
   onConfirmar: (item: ExpectedItem, matches: Movement[]) => void;
@@ -1247,13 +1305,15 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
   onRegistrarPago: (item: ExpectedItem, monto: number, fecha: Date) => Promise<void>;
   onMarcarPagadoSuelto: (mov: Movement) => Promise<void>;
   onDeshacerSuelto: (mov: Movement) => Promise<void>;
+  onEditarMovimiento: (mov: Movement) => void;
   esMesActual: boolean;
   mes: string;
 }) {
   const alDia = agenda.filter(agendaCubierto).length;
-  // F9.62/F9.99.8 — "pendiente" = pendienteAgenda() compartida con PorDiaSeccion (F9.99.8.1),
-  // ver src/datos/agenda.ts.
-  const pendiente = pendienteAgenda(agenda);
+  // F9.62/F9.99.8 — "pendiente" compartido con el banner de PorDiaSeccion (F9.99.8.1).
+  // F9.184 §2.2 — se suma por obligación (`pendienteMes`, src/datos/obligaciones.ts), el MISMO
+  // cálculo que el banner: dos pendientes distintos en dos solapas fue F9.99.8.1.
+  const pendiente = pendienteMes(checklist, movs, abiertasTodas, mes, new Date(), esMesActual).monto;
   // F9.120 — misma base que la solapa "Por día": % del ingreso del mes.
   const { privado } = usePrivacidad();
   const fmtMonto = (n: number) => privado ? fmtPct(n, basePriv) : fmtArs(n);
@@ -1268,7 +1328,7 @@ function GastosFijosSeccion({ agenda, config, onConfirmar, onDesmarcar, onRegist
     .slice()
     .sort((a, b) => diaDeAgenda(a) - diaDeAgenda(b));
   const automaticos  = agenda.filter((e): e is { kind: 'esperado'; ci: CheckItem } => e.kind === 'esperado' && e.ci.item.pagoAutomatico);
-  const cardProps = { mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago, basePriv };
+  const cardProps = { mes, config, esMesActual, onConfirmar, onDesmarcar, onRegistrarPago, onEditarMovimiento, basePriv };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1354,6 +1414,8 @@ function ResumenVisual() {
   const esAdmin = miembro.rol === 'admin';
   const { config } = useFamiliaConfig();
   const { movimientos, cargando, error } = useMovimientosDelMes(mes);
+  // F9.184 §1 — las obligaciones abiertas de TODOS los meses (solo admin; Resumen ya lo es).
+  const { abiertas: abiertasTodas } = useObligacionesAbiertas(esAdmin);
   // F9.171 §2 — los 6 meses cerrados anteriores, para la base de la barra de ritmo. Un rango
   // acotado y no el hook anual: ver el comentario de useMovimientosRango.
   const { movimientos: movsHist } = useMovimientosRango(desplazarMes(mes, -6), desplazarMes(mes, -1));
@@ -1381,8 +1443,9 @@ function ResumenVisual() {
   // F9.62 — "revisar" cuenta solo lo SIN CARGAR (sin movimiento asociado). por_confirmar
   // tiene match (cargado, falta confirmar) y NO entra en este conteo.
   const porRevisar = checklist.filter(c => c.matches.length === 0 && ACCIONABLE.includes(c.estado)).length;
-  // F9.99.8 — agenda unificada: checklist (sin cambios) ∪ futuros sueltos sin plantilla.
-  const sueltosFuturos = sueltosFuturosDelMes(movimientos, checklist, new Date());
+  // F9.99.8 — agenda unificada: checklist (sin cambios) ∪ sueltos sin plantilla.
+  // F9.184 §2.4 — los sueltos abiertos del mes, vencidos incluidos (antes solo fecha >= hoy).
+  const sueltosFuturos = sueltosAbiertosDelMes(movimientos, checklist);
   const agenda = construirAgenda(checklist, sueltosFuturos);
 
   // F9.120 — base declarada de Resumen: el ingreso del mes en ARS-eq, calculado con el MISMO
@@ -1494,10 +1557,14 @@ function ResumenVisual() {
       ) : error ? (
         <p style={{ textAlign: 'center', color: 'var(--gf-err-text)', padding: '24px 0' }}>Error: {error}</p>
       ) : sec === 'dia' ? (
-        <PorDiaSeccion movs={movimientos} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} agenda={agenda} mes={mes} mapaTc={mapaTc} tcEfectivo={tcEfectivo} avisoTc={avisoTc} onIrAGastos={() => setSec('fijos')} promedioGasto6m={promedioGasto6m} />
+        <PorDiaSeccion movs={movimientos} abiertasTodas={abiertasTodas} porRevisar={porRevisar} config={config} cur={cur} esAdmin={esAdmin} onEditarMovimiento={setEditandoMovimiento} checklist={checklist} sueltosFuturos={sueltosFuturos} agenda={agenda} mes={mes} mapaTc={mapaTc} tcEfectivo={tcEfectivo} avisoTc={avisoTc} onIrAGastos={() => setSec('fijos')} promedioGasto6m={promedioGasto6m} />
       ) : (
         <GastosFijosSeccion
           agenda={agenda}
+          checklist={checklist}
+          movs={movimientos}
+          abiertasTodas={abiertasTodas}
+          onEditarMovimiento={setEditandoMovimiento}
           config={config}
           onConfirmar={handleConfirmar}
           onDesmarcar={handleDesmarcar}

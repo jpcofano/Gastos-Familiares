@@ -12,7 +12,7 @@ import { medioPorDefecto } from '../datos/medios';
 import { useDiccionario } from '../contexto/DiccionarioContext';
 import { CONFIANZA_UMBRAL } from '../datos/clasificador';
 import { calcularChecklist, mesActualStr, fechaEfectivaItem } from '../datos/checklist';
-import { construirAgenda, sueltosFuturosDelMes, pendientesOrdenados, type AgendaEntry, type GrupoAgenda } from '../datos/agenda';
+import { construirAgenda, sueltosAbiertosDelMes, pendientesOrdenados, type AgendaEntry, type GrupoAgenda } from '../datos/agenda';
 import { desvincularDestinoItem } from '../datos/destinos';
 import { actualizarItemEsperado } from '../datos/itemsEsperados';
 import { Icon } from '../design-system/Icon';
@@ -1412,8 +1412,8 @@ export default function Comprobantes() {
   const checklistMesActual = calcularChecklist(items, movsMesActual, mesAct);
   const checklistMesSig    = calcularChecklist(items, movsMesSig, mesSig);
   const agendaPicker: GrupoAgenda[] = [
-    { mes: mesAct, entradas: construirAgenda(checklistMesActual, sueltosFuturosDelMes(movsMesActual, checklistMesActual, new Date())) },
-    { mes: mesSig, entradas: construirAgenda(checklistMesSig,   sueltosFuturosDelMes(movsMesSig,   checklistMesSig,   new Date())) },
+    { mes: mesAct, entradas: construirAgenda(checklistMesActual, sueltosAbiertosDelMes(movsMesActual, checklistMesActual)) },
+    { mes: mesSig, entradas: construirAgenda(checklistMesSig,   sueltosAbiertosDelMes(movsMesSig,   checklistMesSig)) },
   ];
 
   // ── ShareLanding (F9.51) — cubre el arranque en frío cuando llega por
