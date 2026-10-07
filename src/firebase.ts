@@ -6,6 +6,7 @@ import {
 } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+import { instalarReconexion } from './datos/reconexion';
 
 // F9.48 — projectId/storageBucket vivían hardcodeados al id viejo (sin
 // fallback de env, a diferencia del resto de estos campos) — un build de
@@ -40,6 +41,10 @@ try {
   _db = getFirestore(app);
 }
 export const db = _db;
+
+// F9.187 §1 — al volver al frente después de >20 s oculta (o al volver la red), reconecta Firestore
+// para que los listeners no se queden con datos viejos hasta refrescar. Ver src/datos/reconexion.ts.
+instalarReconexion(db);
 
 if (import.meta.env.DEV) {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });

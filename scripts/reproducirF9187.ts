@@ -20,6 +20,9 @@
 //   B  dos pestañas de la app, la 1 (primaria) en segundo plano y congelada, la 2 al frente; cambia el
 //      doc. ¿La 2 lo recibe?
 //   C  como B, y a los 3 min se descongela la 1. ¿La 2 se pone al día?
+//   N  no regresión: la app visible 60 s, 3 cambios. Llegan todos y NO hay ninguna reconexión.
+// Después de A, A2 y B, "sigue vivo": un cambio más tiene que llegar en < 10 s (la reconexión de F9.187
+// §1 no puede dejar el listener muerto).
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -31,7 +34,7 @@ const RAPIDO = process.argv.includes('--rapido');            // 30 s en vez de 3
 const CONGELADO_MS = RAPIDO ? 30_000 : 180_000;
 const ESPERA_MS = 90_000;                                     // cuánto se espera un cambio antes de darlo por perdido
 const arg = (k: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
-const SOLO = (arg('--solo') ?? 'A,A2,B,C').split(',');
+const SOLO = (arg('--solo') ?? 'A,A2,B,C,N').split(',');
 const ETIQUETA = arg('--etiqueta') ?? '';
 const PROYECTO = 'demo-f9187';
 const DOC = 'f9187-prueba';
@@ -123,7 +126,8 @@ async function recibe(t: Tab, n: number, desde: number, espera = ESPERA_MS): Pro
   }
   return null;
 }
-const logsF9187 = async (t: Tab) => { const l = await evaluar<string[]>(t, 'window.__log'); return Array.isArray(l) ? l : []; };
+const logsF9187 = async (t: Tab) => { const l = await evaluar<string[]>(t, 'window.__log'); return Array.isArray(l) ? l.filter(x => x.includes('[F9.187]')) : []; };
+const logsVida = async (t: Tab) => { const l = await evaluar<string[]>(t, 'window.__log'); return Array.isArray(l) ? l.filter(x => x.includes('[vida]')).map(x => x.replace(/^\d+ \[vida\] /, '')) : []; };
 
 async function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'f9187-'));
@@ -159,7 +163,16 @@ async function main() {
       const r = ms == null ? `NO LLEGÓ en ${ESPERA_MS / 1000} s después de volver → REPRODUCE` : `llegó ${(ms / 1000).toFixed(1)} s después de volver (el cambio se hizo ${((tD - cambio) / 1000).toFixed(0)} s antes)`;
       const logs = await logsF9187(p);
       console.log(`(${esc}) ${r} · visibilidad ${await evaluar(p, 'document.visibilityState')} · logs F9.187: ${logs.length ? logs.join(' | ') : '(ninguno)'}`);
+      console.log(`(${esc}) eventos de la página: ${(await logsVida(p)).join(', ') || '(ninguno)'}`);
       resultados.push(`(${esc}) ${r}`);
+      await ref.update({ n: ++n });
+      const vivo = await recibe(p, n, Date.now(), 10_000);
+      console.log(`(${esc}) sigue vivo: ${vivo == null ? 'NO, un cambio posterior no llegó en 10 s' : `un cambio posterior llegó en ${(vivo / 1000).toFixed(1)} s`}`);
+      resultados.push(`(${esc}) sigue vivo: ${vivo == null ? 'NO' : `${(vivo / 1000).toFixed(1)} s`}`);
+      await esperar(5000);
+      const logsFin = await logsF9187(p);
+      console.log(`(${esc}) reconexiones registradas al final (+15 s): ${logsFin.length ? logsFin.map(x => `${x.replace(/^\d+ \[F9\.187\] /, '')} a los ${((Number(x.split(' ')[0]) - tD) / 1000).toFixed(2)} s de volver`).join(' | ') : 'NINGUNA'}`);
+      resultados.push(`(${esc}) reconexión registrada: ${logsFin.length ? logsFin.map(x => x.replace(/^\d+ \[F9\.187\] /, '')).join(' | ') : 'NINGUNA'}`);
       await cerrarTab(otra); await cerrarTab(p); await esperar(1500);
     }
 
@@ -177,6 +190,10 @@ async function main() {
       const rB = msB == null ? `la 2 NO recibió el cambio en ${ESPERA_MS / 1000} s → REPRODUCE` : `la 2 lo recibió en ${(msB / 1000).toFixed(1)} s`;
       console.log(`(B) ${rB} · logs F9.187 de la 2: ${(await logsF9187(p2)).join(' | ') || '(ninguno)'}`);
       resultados.push(`(B) ${rB}`);
+      await ref.update({ n: ++n });
+      const vivoB = await recibe(p2, n, Date.now(), 10_000);
+      console.log(`(B) sigue vivo (la 2): ${vivoB == null ? 'NO' : `${(vivoB / 1000).toFixed(1)} s`}`);
+      resultados.push(`(B) sigue vivo: ${vivoB == null ? 'NO' : `${(vivoB / 1000).toFixed(1)} s`}`);
       if (SOLO.includes('C')) {
         await esperar(Math.max(0, CONGELADO_MS - (Date.now() - cambio)));
         await descongelar(p1, false, false);                  // se descongela la 1, sigue la 2 al frente
@@ -188,6 +205,22 @@ async function main() {
         resultados.push(`(C) ${rC}`);
       }
       await cerrarTab(p2); await cerrarTab(p1);
+    }
+
+    if (SOLO.includes('N')) {
+      const p = await abrirApp();
+      const tiempos: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        await esperar(20_000);
+        await ref.update({ n: ++n });
+        const ms = await recibe(p, n, Date.now(), 10_000);
+        tiempos.push(ms == null ? 'NO' : `${(ms / 1000).toFixed(1)} s`);
+      }
+      const logs = await logsF9187(p);
+      const rN = `app visible 60 s, 3 cambios: ${tiempos.join(' · ')} · reconexiones: ${logs.length ? logs.join(' | ') : '0 (log vacío)'}`;
+      console.log(`(N) ${rN}`);
+      resultados.push(`(N) ${rN}`);
+      await cerrarTab(p);
     }
   } finally {
     console.log(`\nRESUMEN${ETIQUETA ? ` — ${ETIQUETA}` : ''}\n${resultados.map(r => `  ${r}`).join('\n')}`);

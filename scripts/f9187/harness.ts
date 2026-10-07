@@ -14,6 +14,8 @@ import { auth, db } from '../../src/firebase';
 type Ev = { n: unknown; estado: unknown; t: number; deCache: boolean; pendiente: boolean };
 const w = window as unknown as { __ev: Ev[]; __listo: boolean; __log: string[]; __error?: string; __actualizar: () => Promise<unknown> };
 w.__ev = []; w.__listo = false; w.__log = [];
+// Diagnóstico: los cambios de visibilidad y de ciclo de vida, con hora, para ver qué recibió la página.
+for (const ev of ['visibilitychange', 'freeze', 'resume']) document.addEventListener(ev, () => w.__log.push(`${Date.now()} [vida] ${ev} → ${document.visibilityState}`));
 
 const log = console.log.bind(console);
 console.log = (...a: unknown[]) => { if (typeof a[0] === 'string' && a[0].startsWith('[F9.187]')) w.__log.push(`${Date.now()} ${a.join(' ')}`); log(...a); };

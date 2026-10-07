@@ -4,7 +4,8 @@ Base: origin/main @ 6c55c31 (F9.186), confirmada al abrir. Prompt en
 docs/prompts/F9.187-datos-viejos-hasta-refrescar-reconexion.md.
 
 ════════════════════════════════════════════════════════════════════════════════
-RESULTADO: GATE §0 NO PASA — NO SE REPRODUCE. NO SE TOCÓ CÓDIGO.
+RESULTADO: GATE §0 NO PASA — NO SE REPRODUCE. NO SE TOCÓ CÓDIGO EN ESA VUELTA.
+  ACTUALIZACIÓN: después, por decisión de Juan, se aplicó §1 como mitigación. Ver "SEGUNDA VUELTA".
 ════════════════════════════════════════════════════════════════════════════════
 
   Con el código actual (src/firebase.ts REAL, caché persistente multi-pestaña, contra el emulador) y
@@ -163,3 +164,80 @@ RESUMEN — prueba-del-armado
   (A2) llegó 0.0 s después de volver (el cambio se hizo 20 s antes)
   (B) la 2 lo recibió en 0.0 s
   (C) la 2 ya lo tenía (B) · la 1 lo recibió 0.0 s después
+
+
+════════════════════════════════════════════════════════════════════════════════
+SEGUNDA VUELTA — §1 APLICADO COMO MITIGACIÓN (decisión de Juan, 2026-10-07)
+════════════════════════════════════════════════════════════════════════════════
+
+  Juan prefirió probarlo con el uso antes que reproducirlo con el celular conectado: "si" a aplicar §1
+  sabiendo que es un arreglo sin haber visto el problema. Solo §1. §2 (gestor de pestañas), §3
+  (cronómetro y "Actualizar" en "Extrayendo…") y §4 (launch_handler) NO se aplicaron.
+
+  src/datos/reconexion.ts (nuevo) — instalarReconexion(db):
+  · visibilitychange → visible después de estar oculta MÁS DE 20 s, o el evento 'online' →
+    await disableNetwork(db); await enableNetwork(db). Todos los listeners se re-suscriben contra el
+    servidor.
+  · Una reconexión a la vez y 5 s mínimos entre dos. Si el SDK no responde en 15 s, se libera el
+    candado y se registra "reconexión colgada", para que la próxima vuelta al frente pueda reintentar.
+  · Cada una queda en la consola como "[F9.187] reconexión (oculta Xs | volvió la red)" y en
+    localStorage 'f9187-reconexiones' (las últimas 50). Si vuelve a pasar, se pueden mirar con la
+    depuración remota: JSON.parse(localStorage.getItem('f9187-reconexiones')).
+  src/firebase.ts — la instala justo después de crear db (instalarReconexion(db)). Como la página de
+  prueba importa este mismo archivo, la verificación ejercita exactamente el código de la app.
+
+  Verificación (mismo armado de §0, emulador, Chrome headless=new por CDP, 180 s congelada):
+    (A)  el cambio llegó 0,0 s después de volver · reconexión "oculta 181s" registrada a los 0,02 s ·
+         sigue vivo: un cambio posterior llega en 0,0 s
+    (A2) 0,1 s · reconexión "volvió la red" · sigue vivo 0,0 s
+    (B)  la 2 lo recibió en 0,0 s · sigue vivo 0,0 s
+    (C)  la 1 se puso al día en 0,0 s al descongelarse
+    (N)  NO REGRESIÓN: app visible 60 s, 3 cambios, todos en 0,0 s y CERO reconexiones (log vacío): en
+         un uso normal no se dispara.
+  Diagnóstico de paso: en una corrida intermedia la reconexión de (A) "no aparecía". Era el script,
+  que leía el log antes de que terminaran disableNetwork/enableNetwork. Se agregó una lectura al
+  final, y la de los eventos de vida de la página (hidden → freeze → resume → visible), que confirma
+  el orden.
+  Lo que esta verificación NO prueba: que arregle lo del teléfono, porque allá no se pudo reproducir.
+  Prueba que no rompe nada (los listeners siguen vivos, no hay reconexiones en uso normal) y que se
+  dispara cuando debe.
+
+  Cómo saber si funcionó, con el uso: si deja de hacer falta refrescar, era esto. Si vuelve a pasar,
+  conectar el celular (chrome://inspect) y mirar 'f9187-reconexiones': si hay una reconexión al volver
+  y aun así no se actualizó, el problema está en otro lado, y §3 (el botón "Actualizar") es el
+  siguiente paso.
+
+  tsc cliente: 41 y 41, misma lista. Las dos de src/firebase.ts ('env' en ImportMeta, de antes) solo
+  cambiaron de número de línea por el import nuevo. tsc functions: 0 y 0.
+  Deploy (lo hace Juan): npm run build y firebase deploy --only hosting. No cambia el manifest ni el SW,
+  así que no hace falta borrar datos del sitio.
+
+── SALIDA — corrida final con §1 (180 s)
+F9.187 §0 — con-F9.187-1-final · emulador demo-f9187 · Chrome/154.0.8037.95 (headless=new, CDP) · congelado 180 s
+(A) una pestaña: en segundo plano y congelada · responde: 1
+(A) llegó 0.0 s después de volver (el cambio se hizo 170 s antes) · visibilidad visible · logs F9.187: (ninguno)
+(A) eventos de la página: visibilitychange → hidden, freeze → hidden, resume → hidden, visibilitychange → visible
+(A) sigue vivo: un cambio posterior llegó en 0.0 s
+(A) reconexiones registradas al final (+15 s): reconexión (oculta 181s) a los 0.02 s de volver
+(A2) una pestaña: en segundo plano y congelada, sin red · responde: 1
+(A2) llegó 0.1 s después de volver (el cambio se hizo 170 s antes) · visibilidad visible · logs F9.187: 1791391684047 [F9.187] reconexión (volvió la red)
+(A2) eventos de la página: visibilitychange → hidden, freeze → hidden, resume → hidden, visibilitychange → visible
+(A2) sigue vivo: un cambio posterior llegó en 0.0 s
+(A2) reconexiones registradas al final (+15 s): reconexión (volvió la red) a los 0.00 s de volver
+(B) dos pestañas de la app; la 1 (abierta primero, primaria) en segundo plano y congelada, la 2 al frente (visible)
+(B) la 2 lo recibió en 0.0 s · logs F9.187 de la 2: (ninguno)
+(B) sigue vivo (la 2): 0.0 s
+(C) la 2 ya lo tenía (B) · la 1 lo recibió 0.0 s después
+(N) app visible 60 s, 3 cambios: 0.0 s · 0.0 s · 0.0 s · reconexiones: 0 (log vacío)
+RESUMEN — con-F9.187-1-final
+  (A) llegó 0.0 s después de volver (el cambio se hizo 170 s antes)
+  (A) sigue vivo: 0.0 s
+  (A) reconexión registrada: reconexión (oculta 181s)
+  (A2) llegó 0.1 s después de volver (el cambio se hizo 170 s antes)
+  (A2) sigue vivo: 0.0 s
+  (A2) reconexión registrada: reconexión (volvió la red)
+  (B) la 2 lo recibió en 0.0 s
+  (B) sigue vivo: 0.0 s
+  (C) la 2 ya lo tenía (B) · la 1 lo recibió 0.0 s después
+  (N) app visible 60 s, 3 cambios: 0.0 s · 0.0 s · 0.0 s · reconexiones: 0 (log vacío)
+
