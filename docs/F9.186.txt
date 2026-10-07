@@ -1,0 +1,230 @@
+F9.186 — Verificación de la extracción del resumen 37ab6ea1 (BBVA Visa Signature, María, cierre 01-oct-26)
+
+Base: origin/main @ ce3d981. SOLO LECTURA: no se escribió nada en producción y no se cambió código.
+Pedido en docs/prompts/F9.186-verificar-extraccion-37ab6ea1.md.
+Script: scripts/verificarF9186.ts (doc, cuadre y comparación). Logs: firebase functions:log -n 2000.
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  · La extracción está BIEN: 'parseado', 155 líneas, cuadre con diff 0,00 en ARS y en USD, y
+    encabezado, consolidado y sumas idénticos a la verificación de F9.181.
+  · Corrió UNA sola vez, extraerResumenTarjeta, ~172 s (11:01:58 → 11:04:51), con
+    in=33.628 / out=15.278 tokens. No hubo timeout.
+  · NO fue un "Reintentar": ninguna corrida de reintentarResumenTarjeta procesó 37ab6ea1. A las
+    11:01:27 se DESCARTÓ el entrante (descartarEntranteCompleto, desde la bandeja de Carga), lo
+    que borró el resumen en error y su PDF. A las 11:01:47 se volvió a compartir el PDF desde el
+    teléfono, y como era un doc NUEVO lo procesó extraerResumenTarjeta.
+  · Duró ~3 min, no 10. Los ~7 minutos restantes de "procesando" son de la UI: la app no recibió la
+    actualización del listener hasta refrescar. Abajo, dónde y la hipótesis más probable, con el
+    arreglo propuesto.
+
+════════════════════════════════════════════════════════════════════════════════
+1. EL DOC
+════════════════════════════════════════════════════════════════════════════════
+
+  estado 'parseado' · tarjetaCodigo BBVA-VISA-SIG · periodo 2026-10 · cierre 2026-10-01 ·
+  vencimiento 2026-10-09 · nroResumen 1355832 · 155 movimientosParseados (en F9.181, 155)
+  totalARS 3.262.475,80 · totalUSD 141,65 · pagoMinimoARS 255.740
+  saldoAnteriorARS 1.403.821,10 · saldoAnteriorUSD 73,55
+  pagosDelPeriodoARS −1.370.414,69 · pagosDelPeriodoUSD −73,55
+  ajustesConsolidado [CR.RG 5617 30% M, −33.406,41 ARS]
+  subidoEn = creadoEn 2026-10-07 11:01:57 · parseadoEn = actualizadoEn 2026-10-07 11:04:51
+  errorExtraccion, tipoError, intentos: ausentes (el doc es nuevo, no el del 05/10 reintentado)
+
+════════════════════════════════════════════════════════════════════════════════
+2. CUADRE (calcularCuadre real del cliente, sin ediciones)
+════════════════════════════════════════════════════════════════════════════════
+
+  ARS: suma 3.229.069,39 · objetivo 3.229.069,39 · diff 0,00 · balance true
+  USD: suma 141,65 · objetivo 141,65 · diff 0,00 · balance true
+  arrastre (saldo anterior + pagos): ARS 33.406,41 (lo compensa el ajuste del consolidado) · USD 0.
+
+════════════════════════════════════════════════════════════════════════════════
+3. CONTRA LA EXTRACCIÓN DE VERIFICACIÓN DE F9.181
+════════════════════════════════════════════════════════════════════════════════
+
+  Límite: docs/F9.181.txt NO guardó las líneas de esa extracción, solo sus agregados (el script de
+  F9.181 imprimió totales, y el resultado de la API no se persistió). No se puede aparear línea por
+  línea contra ella. Se compara todo lo que sí quedó:
+    líneas 155 = 155 · totalARS, totalUSD, saldoAnterior* y pagosDelPeriodo*: iguales al centavo ·
+    suma del cuadre ARS 3.229.069,39 = 3.229.069,39 y USD 141,65 = 141,65 · ajustesConsolidado igual ·
+    output_tokens 15.281 (F9.181) vs 15.278 (hoy).
+  Perfil de las líneas de hoy, para la próxima comparación:
+    tipoLinea: 143 consumo, 5 cuota, 7 impuesto · sin bonificaciones ni reversos
+    secciones: Maria 30 · Juan Pablo 52 · Sofia 11 · Federico 55 · Impuestos 7 (persona igual a la
+      sección; los 7 impuestos sin persona)
+    moneda: 149 ARS, 6 USD · montoFirmado presente en las 155, ninguno negativo
+    espejos esBonificacion/esReverso/esImpuesto derivados de tipoLinea (F9.181 §1.2): 0 discrepancias
+    3 pares fecha+moneda+monto repetidos (09-08 $9.000, 09-27 $4.500, 09-21 $1.062,70), con seq
+      1..155 distintos: son compras iguales, como en el gate de F9.181 (también 3)
+  Propuesta: que los scripts de verificación que llaman a la API guarden las líneas extraídas en un
+  fixture del scratchpad (como F9.183), para que una comparación así sea posible.
+
+════════════════════════════════════════════════════════════════════════════════
+4. EJECUCIONES DE HOY (firebase functions:log; horas en UTC−3)
+════════════════════════════════════════════════════════════════════════════════
+
+  11:01:20  descartarEntranteCompleto (instancia nueva) sobre el entrante 37ab6ea1, por
+            jpcofano@gmail.com. Borra el resumen en 'error' y su PDF. Después loguea "PDF entrante no
+            borrado: No such object": el entrante y el resumen apuntan al MISMO archivo
+            (entrantes/<hash>) y el primer borrado ya lo había sacado. Es ruido, no una falla.
+  11:01:47  el entrante se crea de nuevo (entrantes/37ab6ea1: origen 'share_target', creadoEn 11:01:47).
+  11:01:58  routearEntrante → resumen (3 marcadores: VENCIMIENTO, CIERRE, PAGO MINIMO).
+  11:01:58  extraerResumenTarjeta: instancia nueva (cold start) y empieza.
+  11:04:51  extraerResumenTarjeta: "[procesarResumenTarjeta] 37ab6ea1… → parseado (155 movs)
+            tokens in=33628 out=15278". Duración ~172 s.
+  11:04:52  reintentarResumenTarjeta levanta una instancia: la dispara el update del doc, pero la
+            guarda (before.estado === 'error' && after.estado === 'subido') la corta sin procesar.
+  · ¿Más de una vez? NO. Es la única extracción de 37ab6ea1 desde el deploy de F9.181 (06/10,
+    10:22 UTC−3; timeout_seconds 540 confirmado en el audit log del deploy).
+  · ¿Timeout de 540 s? NO: 172 s.
+  · El "Reintentar" que recuerda Juan no llegó a correr: tocarlo escribe estado 'subido' en el doc
+    y dispara reintentarResumenTarjeta, y no hay ningún procesarResumenTarjeta de 37ab6ea1 entre el
+    deploy y las 11:01. Lo que corrió fue descartar + volver a compartir.
+  · Contexto: anoche (06/10, 23:08-23:10 UTC−3) hubo un deploy completo de functions, ya
+    con matchComprobanteHijo y reprocesarHijoAgenda.
+
+════════════════════════════════════════════════════════════════════════════════
+5. POR QUÉ LA UI SIGUIÓ "PROCESANDO" ~10 MIN SI LA EXTRACCIÓN DURÓ ~3
+════════════════════════════════════════════════════════════════════════════════
+
+  Qué pantalla. Llegó por compartir, así que se abre Carga (/comprobantes?share=1, redirect 303 del
+  SW, public/sw.js:84) con ShareLanding encima. La fase sale de calcularFaseCompartido
+  (src/vistas/Comprobantes.tsx:1418-1458): con el resumen en estado 'subido' devuelve fase 3, y
+  ShareLanding muestra "Leyendo tu resumen" / "Extrayendo datos…" (ShareLanding.tsx:62 y :274).
+  Abajo, en Tarjetas, la card dice "Extrayendo PDF…" mientras estado === 'subido'
+  (src/vistas/ResumenesTarjeta.tsx:635-637). La app no tiene ningún texto "parseando": es
+  cualquiera de esos dos.
+
+  Con qué listener. useResumenesTarjeta (src/hooks/useResumenesTarjeta.ts) →
+  suscribirResumenesTarjeta (src/datos/resumenesTarjeta.ts, onSnapshot sobre la colección entera
+  resumenesTarjeta). Es en vivo: pasar de 'subido' a 'parseado' a las 11:04:51 tendría que haber
+  movido la pantalla a la fase 4 sola. No hay polling ni timers: si el snapshot no llega, la
+  pantalla queda en fase 3 para siempre.
+
+  Por qué no llegó sin refrescar. Desde el servidor no se puede ver el cliente: el doc se escribió
+  una vez, a las 11:04:51, y nada lo volvió a tocar. Así que el cliente no recibió ese snapshot hasta
+  recargar. Dos causas posibles, por probabilidad:
+  (a) El listener quedó colgado después de que el teléfono suspendió la app (pantalla apagada o
+      cambio de app durante los 3 minutos). Firestore usa un stream de larga duración que en
+      Android se congela con la app en segundo plano y a veces no se recupera al volver hasta que
+      cambia la red o se recarga. Recargar lo recrea, y es lo que lo destrabó.
+  (b) Firestore está inicializado con caché persistente multi-pestaña (src/firebase.ts:
+      persistentLocalCache({ tabManager: persistentMultipleTabManager() })). Con dos instancias de
+      la app vivas (la que ya estaba abierta y la que abrió el share), una sola es "primaria" y
+      tiene la conexión. La otra recibe los cambios por IndexedDB. Si la primaria quedó congelada en
+      segundo plano, la visible no se entera. El manifest no declara launch_handler
+      (public/manifest.webmanifest), así que no está fijado si el share reusa la ventana o abre otra.
+  Las dos se resuelven igual: forzar la reconexión al volver a primer plano.
+
+  Arreglo propuesto (no aplicado):
+  1. En src/firebase.ts (o un hook global en el shell), con document 'visibilitychange' → visible,
+     llamar disableNetwork(db) y después enableNetwork(db). Fuerza a re-suscribir todos los
+     listeners al volver a la app. Es barato y cubre (a) y, en la práctica, (b).
+  2. En ShareLanding, fase 3 de un resumen: avisar que un resumen largo tarda ~3 min, y si a los
+     4-5 min sigue en 'subido', ofrecer "Actualizar" (un getDoc del resumen) en vez de dejar al
+     usuario mirando la animación.
+  3. Opcional, para (b): declarar en el manifest "launch_handler": { "client_mode":
+     "navigate-existing" }, para que compartir reuse la ventana abierta y no deje dos instancias.
+  Para confirmar (a) o (b) en la próxima: si vuelve a pasar, antes de refrescar, ponerla en segundo
+  plano y volver. Si se actualiza sola, es (a).
+
+════════════════════════════════════════════════════════════════════════════════
+OTROS HALLAZGOS (sin cambiar código)
+════════════════════════════════════════════════════════════════════════════════
+
+  · El resumen está 'parseado' y espera que lo confirmen en Tarjetas.
+  · "PDF entrante no borrado: No such object" sale en CADA descarte de un entrante cuyo destino usa el
+    mismo archivo (también el 25/09 y el 01/10 en los logs). Es esperable: descartarEntranteCompleto
+    borra el mismo archivo dos veces (refStoragePdf del destino y rutaStorage del entrante). Se
+    podría saltear el segundo borrado si la ruta es la misma, para limpiar el log.
+  · Por qué Juan descartó en vez de reintentar no se puede saber desde acá. Si fue porque el botón no
+    respondía, conviene mirarlo, pero el log no muestra ningún intento fallido de reintentar.
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA — npx tsx scripts/verificarF9186.ts
+════════════════════════════════════════════════════════════════════════════════
+
+F9.186 — 37ab6ea1, SOLO LECTURA
+
+── 1. el doc
+  estado               parseado
+  banco                BBVA Argentina
+  tarjeta              Visa Signature
+  tarjetaCodigo        BBVA-VISA-SIG
+  periodo              2026-10
+  fechaCierre          2026-10-01
+  fechaVencimiento     2026-10-09
+  nroResumen           1355832
+  totalARS             3262475.8
+  totalUSD             141.65
+  saldoAnteriorARS     1403821.1
+  saldoAnteriorUSD     73.55
+  pagosDelPeriodoARS   -1370414.69
+  pagosDelPeriodoUSD   -73.55
+  pagoMinimoARS        255740
+  errorExtraccion      (ausente)
+  tipoError            (ausente)
+  intentos             (ausente)
+  duplicadoDe          (ausente)
+  ajustesConsolidado   [{"concepto":"CR.RG 5617 30% M","montoARS":-33406.41,"montoUSD":0}]
+  movimientosParseados 155
+  subidoEn             2026-10-07 11:01:57
+  creadoEn             2026-10-07 11:01:57
+  parseadoEn           2026-10-07 11:04:51
+  actualizadoEn        2026-10-07 11:04:51
+  confirmadoEn         (ausente)
+  campos del doc: actualizadoEn, ajustesConsolidado, banco, creadoEn, cuentaDebito, estado, fechaCierre, fechaVencimiento, hashPdf, movimientosParseados, nroResumen, numeroCuenta, pagoMinimoARS, pagosDelPeriodoARS, pagosDelPeriodoUSD, parseadoEn, periodo, refStoragePdf, saldoAnteriorARS, saldoAnteriorUSD, subidoEn, subidoPor, tarjeta, tarjetaCodigo, titular, totalARS, totalUSD, ultimos4
+
+── 2. cuadre (calcularCuadre real del cliente, sin ediciones)
+  ARS: suma 3.229.069,39 · objetivo 3.229.069,39 · diff 0,00 · balance true
+  USD: suma 141,65 · objetivo 141,65 · diff 0,00 · balance true
+  arrastre (saldoAnterior + pagos): ARS 33.406,41 · USD 0,00
+
+── 3. contra la extracción de verificación de F9.181 (agregados: docs/F9.181.txt no guardó las líneas)
+  OK líneas               F9.181 155,00  ·  hoy 155,00
+  OK totalARS             F9.181 3.262.475,80  ·  hoy 3.262.475,80
+  OK totalUSD             F9.181 141,65  ·  hoy 141,65
+  OK saldoAnteriorARS     F9.181 1.403.821,10  ·  hoy 1.403.821,10
+  OK saldoAnteriorUSD     F9.181 73,55  ·  hoy 73,55
+  OK pagosDelPeriodoARS   F9.181 -1.370.414,69  ·  hoy -1.370.414,69
+  OK pagosDelPeriodoUSD   F9.181 -73,55  ·  hoy -73,55
+  OK suma ARS del cuadre  F9.181 3.229.069,39  ·  hoy 3.229.069,39
+  OK suma USD del cuadre  F9.181 141,65  ·  hoy 141,65
+  OK ajustesConsolidado   F9.181 [{"concepto":"CR.RG 5617 30% M","montoARS":-33406.41,"montoUSD":0}]  ·  hoy [{"concepto":"CR.RG 5617 30% M","montoARS":-33406.41,"montoUSD":0}]
+
+  perfil de las líneas de hoy:
+    tipoLinea: {"cuota":5,"consumo":143,"impuesto":7}
+    seccion:   {"Consumos Maria Lascano":30,"Consumos Juan Pablo Cofano":52,"Consumos Sofia Cofano":11,"Consumos Federico N Cofano":55,"Impuestos, cargos e intereses":7}
+    persona:   {"María":30,"Juan":52,"Sofía":11,"Federico":55,"(vacío)":7}
+    moneda:    ARS 149 · USD 6
+    montoFirmado: 0 sin el campo · 0 negativos ()
+    espejos derivados (F9.181 §1.2) ≠ tipoLinea: 0
+    fecha+moneda+monto repetidos: 3 (2026-09-08|ARS|9000 ×2 · 2026-09-27|ARS|4500 ×2 · 2026-09-21|ARS|1062.7 ×2)
+    seq: 1..155, 155 distintos
+
+════════════════════════════════════════════════════════════════════════════════
+LOGS RELEVANTES — firebase functions:log -n 2000 (UTC), filtrado a 37ab6ea1 y al deploy
+════════════════════════════════════════════════════════════════════════════════
+
+2026-10-06T01:39:19.082070Z ? routearentrante: [routearEntrante] 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc → resumen (3 marcadores (decisivo): VENCIMIENTO, CIERRE, PAGO MINIMO)
+2026-10-06T01:44:17.005711Z ? extraerresumentarjeta: [procesarResumenTarjeta] error en 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc (parsing): Respuesta incompleta (stop_reason: max_tokens) — JSON truncado; tokens usad
+2026-10-07T14:01:27.650229Z ? descartarentrantecompleto: [descartarEntranteCompleto] PDF entrante no borrado: Error: No such object: gastos-familiares-e6415.firebasestorage.app/entrantes/37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0
+2026-10-07T14:01:28.205146Z ? descartarentrantecompleto: [descartarEntranteCompleto] entrante 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc descartado (por jpcofano@gmail.com)
+2026-10-07T14:01:58.556230Z ? routearentrante: [routearEntrante] 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc → resumen (3 marcadores (decisivo): VENCIMIENTO, CIERRE, PAGO MINIMO)
+2026-10-07T14:04:51.254974Z ? extraerresumentarjeta: [procesarResumenTarjeta] 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc → parseado (155 movs) tokens in=33628 out=15278
+2026-10-07T14:01:20.681068Z I descartarentrantecompleto: Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current tr
+2026-10-07T14:01:24.272251Z I descartarentrantecompleto: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-10-07T14:01:24.637551Z D descartarentrantecompleto: {"verifications":{"auth":"VALID","app":"MISSING"},"message":"Callable request verification passed"}
+2026-10-07T14:01:27.650229Z ? descartarentrantecompleto: [descartarEntranteCompleto] PDF entrante no borrado: Error: No such object: gastos-familiares-e6415.firebasestorage.app/entrantes/37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0
+2026-10-07T14:01:28.205146Z ? descartarentrantecompleto: [descartarEntranteCompleto] entrante 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc descartado (por jpcofano@gmail.com)
+2026-10-07T14:01:48.403319Z I routearentrante: Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+2026-10-07T14:01:54.553342Z I routearentrante: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-10-07T14:01:58.556230Z ? routearentrante: [routearEntrante] 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc → resumen (3 marcadores (decisivo): VENCIMIENTO, CIERRE, PAGO MINIMO)
+2026-10-07T14:01:58.787885Z I extraerresumentarjeta: Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffi
+2026-10-07T14:02:03.302801Z I extraerresumentarjeta: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2026-10-07T14:04:51.254974Z ? extraerresumentarjeta: [procesarResumenTarjeta] 37ab6ea1a74b4d38bfb8b326041223eaa9ddaa956d5c0428cdcf0a301a324efc → parseado (155 movs) tokens in=33628 out=15278
+2026-10-07T14:04:52.300311Z I reintentarresumentarjeta: Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current tra
+2026-10-07T14:04:56.781537Z I reintentarresumentarjeta: Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
