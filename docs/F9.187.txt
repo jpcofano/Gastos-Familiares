@@ -1,0 +1,165 @@
+F9.187 — La app se queda con datos viejos hasta refrescar
+
+Base: origin/main @ 6c55c31 (F9.186), confirmada al abrir. Prompt en
+docs/prompts/F9.187-datos-viejos-hasta-refrescar-reconexion.md.
+
+════════════════════════════════════════════════════════════════════════════════
+RESULTADO: GATE §0 NO PASA — NO SE REPRODUCE. NO SE TOCÓ CÓDIGO.
+════════════════════════════════════════════════════════════════════════════════
+
+  Con el código actual (src/firebase.ts REAL, caché persistente multi-pestaña, contra el emulador) y
+  una pestaña de Chrome en segundo plano y congelada de verdad durante 3 minutos:
+    (A)  una pestaña congelada 3 min: el cambio llegó SOLO, 0,0 s después de volver.
+    (A2) ídem y además sin red: llegó 0,1 s después de volver.
+    (B)  dos pestañas, la primaria congelada: la 2 recibió el cambio en 0,0 s.
+    (C)  al descongelar la 1: la 2 ya lo tenía y la 1 lo recibió en 0,0 s.
+  Según el gate ("si ni (A) ni (B) reproducen la falta de actualización, PARAR: el arreglo sería a
+  ciegas"), no se hizo §1-§4. Se commitean solo el script, la página de prueba y este informe.
+  El emulador en una PC no tiene todo lo que pasa en el teléfono (abajo, "Qué no cubre esta
+  reproducción"). Abajo también, qué haría falta para reproducirlo donde pasa.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas contra 6c55c31)
+════════════════════════════════════════════════════════════════════════════════
+
+  Se sostienen las del código:
+  · src/firebase.ts:35-37: initializeFirestore con persistentLocalCache({ tabManager:
+    persistentMultipleTabManager() }).
+  · No hay visibilitychange, enableNetwork ni disableNetwork en src/.
+  · public/manifest.webmanifest: display standalone, share_target POST /share-target, sin
+    launch_handler.
+  · public/sw.js:58-84: el compartir termina en Response.redirect 303 a /comprobantes?share=1….
+  No se sostiene la de las herramientas: "Playwright (Chromium ya instalado)". No hay Playwright en el
+  repo, ni global, ni navegadores de Playwright. Hay Chrome 154 del sistema. Y, sobre todo, Playwright
+  NO SIRVE para este escenario (siguiente sección).
+
+════════════════════════════════════════════════════════════════════════════════
+CÓMO SE CONGELÓ (y por qué no con Playwright)
+════════════════════════════════════════════════════════════════════════════════
+
+  Medido con sondas en una página que cuenta ticks cada 100 ms:
+  · Playwright (playwright-core 1.63 instalado en el scratchpad, con el Chrome del sistema), headless
+    y con ventana: la página queda SIEMPRE 'visible', aunque se minimice la ventana, se ponga otra
+    pestaña al frente, se apague la emulación de foco o se quiten los flags anti-backgrounding.
+    Page.setWebLifecycleState 'frozen' responde ok pero los ticks siguen (45 de 45). Playwright fuerza
+    la visibilidad de sus páginas: con él una pestaña no se congela nunca, y cualquier "repro" daría un
+    falso negativo.
+  · Chrome lanzado directo (--headless=new, --remote-debugging-port) y CDP crudo por WebSocket: la
+    pestaña con otra al frente pasa a 'hidden', 'frozen' frena el JS (16 → 16 ticks en 3 s) y se
+    disparan los eventos 'freeze' y 'resume'. Es lo que hace Android con una PWA en segundo plano. Así
+    quedó scripts/reproducirF9187.ts.
+
+════════════════════════════════════════════════════════════════════════════════
+§0 — ESCENARIOS
+════════════════════════════════════════════════════════════════════════════════
+
+  firebase emulators:exec --only firestore,auth --project demo-f9187 \
+    "npx tsx scripts/reproducirF9187.ts --etiqueta codigo-actual"
+  · La página: scripts/f9187/harness.ts, empaquetada con esbuild e importando el src/firebase.ts real
+    (mismo initializeFirestore, conectado al emulador). Inicia sesión como admin con email verificado
+    y escucha resumenesTarjeta/f9187-prueba con onSnapshot (includeMetadataChanges). Registra cada
+    snapshot que viene del servidor.
+  · El doc cambia por Admin SDK 10 s después de congelar. La espera para dar un cambio por perdido es
+    de 90 s.
+
+  Corrida real (180 s congelada):
+    (A)  llegó 0,0 s después de volver (el cambio se hizo 170 s antes)
+    (A2) llegó 0,1 s después de volver (ídem, sin red)
+    (B)  la 2 lo recibió en 0,0 s
+    (C)  la 2 ya lo tenía · la 1 lo recibió 0,0 s después de descongelarse
+  Corrida de prueba del armado (--rapido, 30 s): igual, salvo (A), que llegó 13,8 s después de volver.
+  No se repitió en la corrida de 3 minutos. Queda anotado como la única demora vista.
+
+  Lectura de (B): al poner la 2 al frente, la caché multi-pestaña le pasa la conexión a la pestaña
+  visible antes de que la 1 se congele. Así que "la primaria congelada deja ciega a la visible" no
+  pasa en Chrome de escritorio.
+
+════════════════════════════════════════════════════════════════════════════════
+QUÉ NO CUBRE ESTA REPRODUCCIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+  · Emulador ≠ servidor de Firestore. El emulador en localhost no corta un stream inactivo; los
+    servidores de Google y la red del celular sí cierran conexiones largas.
+  · Android hace más que congelar: puede matar el proceso del renderer, suspender sockets a nivel del
+    sistema y restaurar la página después. CDP no simula nada de eso.
+  · El "sin red" de A2 es Network.emulateNetworkConditions de DevTools. Afecta a los pedidos nuevos y
+    probablemente no cierra una conexión ya abierta, así que no equivale a que Android corte el socket.
+  · La PWA instalada y el share_target (otra ventana, otro proceso) no existen en Chrome de escritorio.
+  Por eso que no se reproduzca acá no prueba que el teléfono esté bien. Prueba que el mecanismo que
+  suponía el prompt (congelado y multi-pestaña) no alcanza por sí solo para explicarlo.
+
+════════════════════════════════════════════════════════════════════════════════
+LO QUE SÍ QUEDÓ LISTO (sin código de la app)
+════════════════════════════════════════════════════════════════════════════════
+
+  §4, soporte de launch_handler (la consulta que pedía el prompt):
+  · MDN (developer.mozilla.org/…/Manifest/Reference/launch_handler): "Limited availability", no es
+    Baseline. Con client_mode como array se usa el primer valor válido. 'navigate-existing' trae al
+    frente la instancia abierta y la navega al destino.
+  · Datos de compatibilidad de MDN (mdn/browser-compat-data, manifests/webapp/launch_handler.json):
+    chrome 110 · chrome_android "mirror" (copia el de escritorio: no es una medición propia de
+    Android) · Safari y Firefox no.
+  · Chrome for Developers (developer.chrome.com/docs/web-platform/launch-handler): con 'auto', en
+    móvil, que solo admite una instancia, ya usa la existente.
+  Conclusión: en Android, agregarlo probablemente no cambia nada (ya hay una sola instancia), y no
+  hace daño.
+
+════════════════════════════════════════════════════════════════════════════════
+PARA REPRODUCIRLO DONDE PASA (propuesta)
+════════════════════════════════════════════════════════════════════════════════
+
+  1. En el celular, con la depuración remota de Chrome (chrome://inspect desde la PC por USB): abrir
+     la PWA, dejarla en segundo plano unos minutos, cambiar un doc (por ejemplo confirmar algo desde
+     la PC) y volver. Con la consola remota abierta se ve si el listener recibe el cambio y si hay
+     errores de Firestore (los de "transport errored", "Could not reach Cloud Firestore backend").
+  2. Repetir llegando por "compartir", que es el caso de 37ab6ea1.
+  3. Si se reproduce, el arreglo de §1 (reconectar al volver al frente) se puede medir ahí mismo: el
+     script de esta fase sirve como base para la parte de escritorio.
+  Alternativa si Juan prefiere no esperar: aplicar §1 igual, como mitigación barata y sin riesgo
+  (reconectar al volver de más de 20 s oculta). Pero sería un arreglo a ciegas, que es lo que el gate
+  quería evitar. Decisión de Juan.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  Sin cambios en src/, functions/, manifest ni sw. Nada para deployar.
+  tsc cliente: 41 al abrir y 41 al cerrar, misma lista (incluye los dos scripts nuevos). tsc
+  functions: 0 y 0.
+  Herramientas fuera del repo: playwright-core (solo para las sondas que mostraron que no sirve)
+  quedó en el scratchpad. No se agregó nada a package.json.
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA — corrida real (código actual, 180 s)
+════════════════════════════════════════════════════════════════════════════════
+
+F9.187 §0 — codigo-actual · emulador demo-f9187 · Chrome/154.0.8037.95 (headless=new, CDP) · congelado 180 s
+(A) una pestaña: en segundo plano y congelada · responde: 1
+(A) llegó 0.0 s después de volver (el cambio se hizo 170 s antes) · visibilidad visible · logs F9.187: (ninguno)
+(A2) una pestaña: en segundo plano y congelada, sin red · responde: 1
+(A2) llegó 0.1 s después de volver (el cambio se hizo 170 s antes) · visibilidad visible · logs F9.187: (ninguno)
+(B) dos pestañas de la app; la 1 (abierta primero, primaria) en segundo plano y congelada, la 2 al frente (visible)
+(B) la 2 lo recibió en 0.0 s · logs F9.187 de la 2: (ninguno)
+(C) la 2 ya lo tenía (B) · la 1 lo recibió 0.0 s después
+RESUMEN — codigo-actual
+  (A) llegó 0.0 s después de volver (el cambio se hizo 170 s antes)
+  (A2) llegó 0.1 s después de volver (el cambio se hizo 170 s antes)
+  (B) la 2 lo recibió en 0.0 s
+  (C) la 2 ya lo tenía (B) · la 1 lo recibió 0.0 s después
+
+[exited with code 0]
+
+── corrida de prueba del armado (--rapido, 30 s)
+F9.187 §0 — prueba-del-armado · emulador demo-f9187 · Chrome/154.0.8037.95 (headless=new, CDP) · congelado 30 s (--rapido)
+(A) una pestaña: en segundo plano y congelada · responde: 1
+(A) llegó 13.8 s después de volver (el cambio se hizo 20 s antes) · visibilidad visible · logs F9.187: (ninguno)
+(A2) una pestaña: en segundo plano y congelada, sin red · responde: 1
+(A2) llegó 0.0 s después de volver (el cambio se hizo 20 s antes) · visibilidad visible · logs F9.187: (ninguno)
+(B) dos pestañas de la app; la 1 (abierta primero, primaria) en segundo plano y congelada, la 2 al frente (visible)
+(B) la 2 lo recibió en 0.0 s · logs F9.187 de la 2: (ninguno)
+(C) la 2 ya lo tenía (B) · la 1 lo recibió 0.0 s después
+RESUMEN — prueba-del-armado
+  (A) llegó 13.8 s después de volver (el cambio se hizo 20 s antes)
+  (A2) llegó 0.0 s después de volver (el cambio se hizo 20 s antes)
+  (B) la 2 lo recibió en 0.0 s
+  (C) la 2 ya lo tenía (B) · la 1 lo recibió 0.0 s después
