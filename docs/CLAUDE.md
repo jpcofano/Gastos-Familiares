@@ -2721,8 +2721,15 @@ Normativo, escrito antes del código. Reemplaza el diseño de F9.182 en lo que e
   `extraido` sin propuesta a los 2 minutos de creado sale "sin procesar", con "Procesar de nuevo"
   (callable admin `reprocesarHijoAgenda`, que corre `procesarMatch`). `procesarMatch` no crea
   movimientos (solo escribe la propuesta), así que correrlo dos veces no duplica nada.
-- **La imagen es compartida**: `descartarEntrada` no borra el blob de Storage si otro comprobante
-  todavía lo referencia (descartar un hijo no puede dejar sin imagen al padre y a sus hermanos).
+- **La imagen es compartida y es del padre**: un hijo NUNCA borra el archivo al descartarse. Los dos
+  caminos de descarte (`descartarEntrada` y `descartarEntranteCompleto`) borran un archivo de Storage
+  solo si ningún OTRO comprobante tiene ese mismo `refStoragePdf` (`blobUsadoPorOtroComprobante`), y
+  `descartarEntranteCompleto` además rechaza una agenda `dividido` (addendum 1 (c)).
+- **Vencimiento que se corre (addendum 1 (b)): NO hay segunda pasada.** Aparear las filas sueltas
+  contra obligaciones abiertas y vencidas del mismo número de cliente, sin mirar el vencimiento, se
+  midió y aparea MAL: si la boleta del mes anterior sigue abierta en el sistema (pagada pero sin
+  registrar) y la del mes nuevo todavía no está cargada, la fila nueva se toma por la vieja y la
+  obligación del mes nunca se crea (Metrogas, mismo monto dos meses seguidos; docs/F9.183-addendum-1.txt).
 - **Regla de uso: cada boleta se carga por UNA sola fuente.** Una factura PDF que llega DESPUÉS de una
   obligación cargada por agenda o recorte la sigue duplicando (F9.182 0.3, fuera de alcance: el
   matcher no se toca). Las cuotas atrasadas de ABL entran como obligaciones comunes y las salda la

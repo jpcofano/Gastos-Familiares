@@ -340,6 +340,17 @@ async function parteEmulador() {
   const [existe] = await getStorage().bucket().file(ruta).exists();
   chequear(!dHijo.error && !(await comps.doc(hijos[1].id).get()).exists && existe,
     `descartarEntrada(hijo ${h8(hijos[1].id)}): ${dHijo.error ? dHijo.error.message : 'ok'} · doc borrado · la imagen ${existe ? 'SIGUE' : 'SE BORRÓ'} en Storage`);
+  // Addendum (c): el padre y los demás hijos siguen apuntando a la imagen, y la imagen está.
+  const restantes = (await hijosDe(hash)).filter(h => h.id !== hijos[1].id);
+  const padreTras = (await comps.doc(hash).get()).data()!;
+  chequear(padreTras.refStoragePdf === ruta && restantes.length === 3 && restantes.every(h => h.data().refStoragePdf === ruta) && existe,
+    `el padre y los ${restantes.length} hijos restantes conservan refStoragePdf y el archivo existe`);
+  // Addendum (c): el otro camino de descarte, el del entrante, rechaza una agenda dividida y no borra nada.
+  await db.collection('entrantes').doc(hash).set({ estado: 'ruteado', destino: { coleccion: 'comprobantes', id: hash }, rutaStorage: ruta, creadoPor: 'Juan' });
+  const dEnt = await callable('descartarEntranteCompleto', { hash });
+  const [existe2] = await getStorage().bucket().file(ruta).exists();
+  chequear(!!dEnt.error && existe2 && (await comps.doc(hash).get()).exists,
+    `descartarEntranteCompleto(agenda dividida): ${dEnt.error?.message ?? '(no rechazó)'} · el padre sigue · la imagen ${existe2 ? 'SIGUE' : 'SE BORRÓ'}`);
 
   console.log(`\nPARTE 2: ${fallas === 0 ? 'TODO OK' : `${fallas} FALLA(S)`}`);
 }

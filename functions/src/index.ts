@@ -2162,6 +2162,14 @@ export const resolverEntranteAmbiguo = onCall(
   },
 );
 
+// F9.183 addendum (c) — ¿algún comprobante, aparte de `excluirId`, usa este archivo de Storage? Un hijo
+// de agenda NUNCA es dueño del archivo (es del padre), y el padre lo comparte con sus hijos: ningún
+// camino de descarte borra un archivo que otro comprobante todavía referencia.
+async function blobUsadoPorOtroComprobante(refStorage: string, excluirId?: string): Promise<boolean> {
+  const snap = await db.collection('comprobantes').where('refStoragePdf', '==', refStorage).limit(2).get();
+  return snap.docs.some(d => d.id !== excluirId);
+}
+
 export const descartarEntrada = onCall(
   { region: 'southamerica-east1' },
   async (request) => {
@@ -2232,12 +2240,8 @@ export const descartarEntrada = onCall(
 
     // F9.183 — la imagen de una agenda la comparten el padre y todos sus hijos (refStoragePdf igual).
     // Descartar UNO no puede dejar sin imagen a los demás: el blob se borra solo si ya no lo
-    // referencia ningún otro comprobante. El doc descartado ya se borró arriba, así que no se cuenta.
-    let blobCompartido = false;
-    if (refStorage && tipo === 'comprobante') {
-      const otros = await db.collection('comprobantes').where('refStoragePdf', '==', refStorage).limit(1).get();
-      blobCompartido = !otros.empty;
-    }
+    // referencia ningún otro comprobante (ver blobUsadoPorOtroComprobante).
+    const blobCompartido = !!refStorage && tipo === 'comprobante' && await blobUsadoPorOtroComprobante(refStorage, id);
     if (refStorage && !blobCompartido) {
       try { await getStorage().bucket().file(refStorage).delete(); }
       catch (e) { console.warn(`[descartarEntrada] blob no borrado: ${String(e)}`); }
@@ -2303,7 +2307,9 @@ export const descartarEntranteCompleto = onCall(
           );
         }
         const refPdfDestino = d.refStoragePdf as string | undefined;
-        if (refPdfDestino) {
+        // F9.183 addendum (c) — mismo resguardo que descartarEntrada: el archivo es del padre y lo
+        // comparten sus hijos; se borra solo si ningún OTRO comprobante tiene ese refStoragePdf.
+        if (refPdfDestino && !(await blobUsadoPorOtroComprobante(refPdfDestino, destino.id))) {
           try { await getStorage().bucket().file(refPdfDestino).delete(); }
           catch (e) { console.warn(`[descartarEntranteCompleto] PDF destino no borrado: ${String(e)}`); }
         }
@@ -2314,7 +2320,9 @@ export const descartarEntranteCompleto = onCall(
     }
 
     const rutaStorage = entData.rutaStorage as string | undefined;
-    if (rutaStorage) {
+    // F9.183 addendum (c) — la ruta del entrante es la MISMA que el refStoragePdf del comprobante que
+    // crea (crearDocComprobante): mismo resguardo.
+    if (rutaStorage && !(await blobUsadoPorOtroComprobante(rutaStorage, destino?.coleccion === 'comprobantes' ? destino.id : undefined))) {
       try { await getStorage().bucket().file(rutaStorage).delete(); }
       catch (e) { console.warn(`[descartarEntranteCompleto] PDF entrante no borrado: ${String(e)}`); }
     }

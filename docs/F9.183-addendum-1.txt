@@ -1,0 +1,192 @@
+F9.183 — addendum 1: apareo, vencimiento que se corre, imagen compartida
+
+Base: origin/main @ 84f4def (F9.185), confirmada al abrir. Decisiones de Juan en
+docs/prompts/F9.183-addendum-1.md. NO deployado.
+
+El addendum se escribió antes del push de f8a75c4 (F9.183 completo), así que dos de sus tres
+puntos ya estaban hechos y verificados. Esta vuelta los audita y cierra lo que faltaba.
+
+════════════════════════════════════════════════════════════════════════════════
+RESULTADO
+════════════════════════════════════════════════════════════════════════════════
+
+  (a) Apareo por MENOR DIFERENCIA TOTAL: YA ESTABA en f8a75c4. aparearConExistentes,
+      functions/src/agendaPagos.ts:157. Dentro de cada grupo (numeroCliente + vencimiento), uno a
+      uno, con tope del 3 % por par: máximos pares y, entre ésas, la mínima suma de diferencias,
+      probando todas las asignaciones. Verificado: 7/7 hoy y 1 hijo en la simulación del mes
+      siguiente (docs/F9.183.txt, verificación 2 y 3, con la captura real).
+  (b) Segunda pasada contra obligaciones abiertas y vencidas: MEDIDA Y PARADA. Aparea mal en el
+      caso Metrogas (abajo). No se implementó.
+  (c) Imagen compartida: auditados los tres borrados de Storage, extendido el resguardo al segundo
+      camino de descarte y verificado en el emulador. TODO OK.
+  Después de (b) el addendum pide seguir con §1-§3 y su verificación. Eso ya estaba completo y
+  verificado con la captura real en f8a75c4. Esta vuelta lo re-corrió en el emulador con el código
+  de (c): TODO OK.
+
+════════════════════════════════════════════════════════════════════════════════
+(b) — LA SEGUNDA PASADA APAREA MAL: PARADA
+════════════════════════════════════════════════════════════════════════════════
+
+  Medido con scripts/verificarF9183b.ts (solo lectura). Son las 7 filas de la captura real, con el
+  aparearConExistentes REAL en las dos pasadas (en la segunda, el vencimiento fuera de la llave).
+  "Obligación abierta" de un comprobante: el movimiento que creó (origenComprobanteId) sin cubrir, o
+  el comprobante todavía en Carga sin movimiento. "Vencida": primer vencimiento antes de la subida.
+
+  S0  Datos de hoy: el universo de la segunda pasada está VACÍO (no hay obligaciones con
+      numeroCliente abiertas y vencidas). No cambia nada: 4 hijos, 3 ya cargadas.
+  S1  El caso del addendum, literal: Metrogas de septiembre (a650c026, 5.291,83, vence 14/09)
+      impaga y vencida, con los datos de hoy. La fila de octubre (5.291,83, vence 08/10) se aparea en
+      la PRIMERA pasada con el recorte de octubre (1f5087af), que ya está cargado. No se aparea mal.
+  S2  Lo mismo, pero con la boleta de octubre TODAVÍA SIN CARGAR (la agenda es la primera fuente):
+      la fila de octubre queda suelta en la primera pasada y la segunda la aparea con SEPTIEMBRE
+      (Δ 0,00 %). → APAREA MAL. La boleta de octubre se toma por "ya cargada" y su obligación no se
+      crea nunca. Cuando se pague septiembre, la deuda de octubre desaparece sin haber existido.
+  S3  Como S2, pero la agenda también lista septiembre con su vencimiento original: septiembre se
+      aparea en la primera pasada y octubre sale nueva. Correcto.
+  S3b Como S2, pero septiembre aparece con el vencimiento CORRIDO al 08/10 (el caso que (b) quiere
+      cubrir): una de las dos filas idénticas toma septiembre y la otra sale nueva. Correcto.
+
+  Por qué S2 es realista: alcanza con que la boleta del mes anterior esté pagada pero no registrada
+  en el sistema (la transferencia no se subió todavía) cuando se sube la agenda. La app ya no la
+  lista, el sistema la tiene abierta, y la del mes nuevo es idéntica en monto. Es exactamente lo que
+  pasa con un servicio de monto fijo.
+
+  Lo que (b) quería cubrir sigue abierto (docs/F9.183.txt, primera vuelta, hallazgo 2): si la app
+  corre el vencimiento de una cuota atrasada, la llave no aparea y se crea un hijo de nuevo. Opciones
+  para decidir:
+    · que la segunda pasada no descarte la fila sino que cree el hijo y lo marque "posible
+      repetida de <comprobante>" en la card del padre, para que Juan lo decida. Nunca saltea una
+      boleta en silencio;
+    · limitarla a filas cuyo texto diga que están vencidas ("Venció…"), si la app lo marca así (no
+      medido: hace falta una captura con una cuota atrasada);
+    · no tener segunda pasada y aceptar el hijo repetido, que se ve en Carga y se descarta a mano.
+
+════════════════════════════════════════════════════════════════════════════════
+(c) — IMAGEN COMPARTIDA: AUDITORÍA DE LOS BORRADOS DE STORAGE
+════════════════════════════════════════════════════════════════════════════════
+
+  Los tres borrados de archivos de Storage en el código (functions/src/index.ts; el cliente no
+  borra archivos):
+  · descartarEntrada (:2173). Borra refStoragePdf del comprobante. Ya tenía el resguardo desde
+    f8a75c4. Ahora usa el helper común (:2244).
+  · descartarEntranteCompleto (:2262), primer borrado: el PDF del doc destino. ANTES lo borraba sin
+    mirar. Ahora solo si ningún otro comprobante, aparte del destino, lo usa. Además, desde
+    f8a75c4 rechaza un destino 'dividido'.
+  · descartarEntranteCompleto, segundo borrado: rutaStorage del entrante, que es la MISMA ruta que el
+    refStoragePdf del comprobante que crea (crearDocComprobante). ANTES lo borraba sin mirar. Ahora
+    aplica el mismo resguardo.
+  Helper: blobUsadoPorOtroComprobante(refStorage, excluirId), justo antes de descartarEntrada. Busca
+  comprobantes con ese refStoragePdf distintos del que se descarta. Un hijo nunca es dueño del
+  archivo: el archivo es del padre.
+  Verificado en el emulador, con las functions reales:
+    descartarEntrada de 1 hijo → el doc se borra y la imagen SIGUE en Storage;
+    el padre y los 3 hijos restantes conservan su refStoragePdf y el archivo existe;
+    descartarEntranteCompleto sobre la agenda dividida → rechazado ("ya está dividido"), el padre
+    sigue y la imagen sigue.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  docs/CLAUDE.md: la sección "Agenda de pagos" dice ahora que la imagen es del padre, cubre los dos
+  caminos de descarte y anota que NO hay segunda pasada, y por qué.
+  tsc functions: 0 al abrir y 0 al cerrar. tsc cliente: 41 y 41, misma lista.
+  Deploy (lo hace Juan), sin cambios respecto de F9.183: npm run build y firebase deploy --only
+  functions,hosting. Después, el IAM de matchComprobanteHijo (Eventarc) y de reprocesarHijoAgenda
+  (allUsers → roles/run.invoker).
+  Orden sugerido: F9.185 --aplicar → deploy (F9.184 + F9.183 van juntos en el mismo hosting).
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA — npx tsx scripts/verificarF9183b.ts
+════════════════════════════════════════════════════════════════════════════════
+
+F9.183 addendum 1 (b) — SOLO LECTURA. Subida 2026-10-06.
+
+universo de la pasada 2 con los datos de hoy (obligaciones con numeroCliente, vencidas al 2026-10-06 y abiertas): 0
+
+S0 — datos de hoy: ¿la pasada 2 cambia algo? (esperado: lo mismo que sin ella, 4 hijos y 3 ya cargadas)
+    AGIP Inmobiliario/ABL    76.228,21 · 2026-10-07 → NUEVA
+    Edenor                  137.509,91 · 2026-10-07 → ya cargada en PASADA 1: 2824a147 Edenor 137.509,91 · vence 2026-10-07 (Δ 0.00 %)
+    Metrogas                  5.291,83 · 2026-10-08 → ya cargada en PASADA 1: 1f5087af Metrogas 5.291,83 · vence 2026-10-08 (Δ 0.00 %)
+    AGIP Inmobiliario/ABL    92.479,04 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    89.605,43 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    88.081,49 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    87.084,97 · 2026-10-31 → ya cargada en PASADA 1: e9089013 AGIP Inmobiliario/ABL 86.899,19 · vence 2026-10-31 (Δ 0.21 %)
+    → 4 hijos · 3 en pasada 1 · 0 en pasada 2
+
+Metrogas septiembre: a650c026 5.291,83 vence 2026-09-14 · movimiento yR4NiHeW pagado=true confirmadoPago=true
+Metrogas octubre:    1f5087af 5.291,83 vence 2026-10-08 (recorte ya cargado)
+
+S1 — septiembre IMPAGA y vencida, con los datos de hoy (la de octubre YA cargada por recorte)
+    AGIP Inmobiliario/ABL    76.228,21 · 2026-10-07 → NUEVA
+    Edenor                  137.509,91 · 2026-10-07 → ya cargada en PASADA 1: 2824a147 Edenor 137.509,91 · vence 2026-10-07 (Δ 0.00 %)
+    Metrogas                  5.291,83 · 2026-10-08 → ya cargada en PASADA 1: 1f5087af Metrogas 5.291,83 · vence 2026-10-08 (Δ 0.00 %)
+    AGIP Inmobiliario/ABL    92.479,04 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    89.605,43 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    88.081,49 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    87.084,97 · 2026-10-31 → ya cargada en PASADA 1: e9089013 AGIP Inmobiliario/ABL 86.899,19 · vence 2026-10-31 (Δ 0.21 %)
+    → 4 hijos · 3 en pasada 1 · 0 en pasada 2
+
+S2 — septiembre impaga y vencida, y la de octubre SIN cargar (la agenda la trae por primera vez)
+    AGIP Inmobiliario/ABL    76.228,21 · 2026-10-07 → NUEVA
+    Edenor                  137.509,91 · 2026-10-07 → ya cargada en PASADA 1: 2824a147 Edenor 137.509,91 · vence 2026-10-07 (Δ 0.00 %)
+    Metrogas                  5.291,83 · 2026-10-08 → ya cargada en PASADA 2: a650c026 Metrogas 5.291,83 · vence 2026-09-14 (Δ 0.00 %)
+    AGIP Inmobiliario/ABL    92.479,04 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    89.605,43 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    88.081,49 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    87.084,97 · 2026-10-31 → ya cargada en PASADA 1: e9089013 AGIP Inmobiliario/ABL 86.899,19 · vence 2026-10-31 (Δ 0.21 %)
+    → 4 hijos · 2 en pasada 1 · 1 en pasada 2
+
+S3 — como S2, y la agenda también lista la de septiembre con su vencimiento original
+    AGIP Inmobiliario/ABL    76.228,21 · 2026-10-07 → NUEVA
+    Edenor                  137.509,91 · 2026-10-07 → ya cargada en PASADA 1: 2824a147 Edenor 137.509,91 · vence 2026-10-07 (Δ 0.00 %)
+    Metrogas                  5.291,83 · 2026-10-08 → NUEVA
+    AGIP Inmobiliario/ABL    92.479,04 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    89.605,43 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    88.081,49 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    87.084,97 · 2026-10-31 → ya cargada en PASADA 1: e9089013 AGIP Inmobiliario/ABL 86.899,19 · vence 2026-10-31 (Δ 0.21 %)
+    Metrogas                  5.291,83 · 2026-09-14 → ya cargada en PASADA 1: a650c026 Metrogas 5.291,83 · vence 2026-09-14 (Δ 0.00 %)
+    → 5 hijos · 3 en pasada 1 · 0 en pasada 2
+
+S3b — como S2, y la agenda lista la de septiembre con el vencimiento CORRIDO al 08/10 (el caso que (b) quiere cubrir)
+    AGIP Inmobiliario/ABL    76.228,21 · 2026-10-07 → NUEVA
+    Edenor                  137.509,91 · 2026-10-07 → ya cargada en PASADA 1: 2824a147 Edenor 137.509,91 · vence 2026-10-07 (Δ 0.00 %)
+    Metrogas                  5.291,83 · 2026-10-08 → ya cargada en PASADA 2: a650c026 Metrogas 5.291,83 · vence 2026-09-14 (Δ 0.00 %)
+    AGIP Inmobiliario/ABL    92.479,04 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    89.605,43 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    88.081,49 · 2026-10-31 → NUEVA
+    AGIP Inmobiliario/ABL    87.084,97 · 2026-10-31 → ya cargada en PASADA 1: e9089013 AGIP Inmobiliario/ABL 86.899,19 · vence 2026-10-31 (Δ 0.21 %)
+    Metrogas                  5.291,83 · 2026-10-08 → NUEVA
+    → 5 hijos · 2 en pasada 1 · 1 en pasada 2
+
+════════════════════════════════════════════════════════════════════════════════
+SALIDA — emulador, functions reales (probarF9183.ts --emulador, con los chequeos de (c))
+════════════════════════════════════════════════════════════════════════════════
+
+F9.183 — PARTE 2: emulador, functions reales
+sembrados 467 docs (triggers apagados durante la siembra)
+── E2E: extraerComprobante → dividido → matchComprobanteHijo
+  OK padre 8fc1f931 → dividido
+  OK filas del padre = tabla de §0: 7/7
+  OK 4 hijos creados (esperado 4)
+  OK hijo 3c921c17: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+  OK hijo 52a4244c: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+  OK hijo aa05b969: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+  OK hijo c4fffe2c: hashPdf = su id, imagen del padre, padreHash, recibo_servicio (extraido)
+── 6. match de los hijos
+  OK hijo 3c921c17 76.228,21 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+  OK hijo 52a4244c 92.479,04 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+  OK hijo aa05b969 88.081,49 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+  OK hijo c4fffe2c 89.605,43 → rama 2, ítem 62a96fc8 (ABL), requiereConfirmacion=true, esAdicional=false
+── 4. atomicidad e idempotencia (dividirAgenda real contra el emulador)
+  OK (a) segunda división del mismo padre: 0 nuevos, 4 hijos todos nuevo=false, siguen 4 docs
+  OK (b) excepción antes del commit: tiró=true, 0 hijos creados, el padre sigue sin tocar (en el flujo real, el catch lo deja en 'error')
+  OK (c) segunda captura con 3 filas en común: 2 hijos nuevos (esperado 2), 3 ya cargadas como hijos de la primera (esperado 3)
+── §3.2 "Procesar de nuevo" dos veces sobre el mismo hijo
+  OK dos llamadas: ok / ok · movimientos 90 → 90 · propuesta rama 2
+  OK sobre el padre lo rechaza: No es un hijo de una agenda
+── descartar un hijo con la imagen compartida
+  OK descartarEntrada(hijo 52a4244c): ok · doc borrado · la imagen SIGUE en Storage
+  OK el padre y los 3 hijos restantes conservan refStoragePdf y el archivo existe
+  OK descartarEntranteCompleto(agenda dividida): El destino (comprobantes/8fc1f9311e880ad067c8e0b174a2ee7a026577f2a6f7be68333e4d4a75a2bcc2) ya está dividido — no se puede descartar. Este entrante está vinculado a datos reales. · el padre sigue · la imagen SIGUE
+PARTE 2: TODO OK
