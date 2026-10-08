@@ -2826,7 +2826,8 @@ Normativo, escrito antes del código. Consecuencias:
 
 - `confirmarResumenTarjeta` escribe ese total con `confirmadoPago: true` y `pagadoEn` en el mismo
   create, sin mirar el vencimiento. Con monto > 0 no cambia nada: el total se confirma por fecha
-  (`confirmadoPagoPorFecha`) o con el comprobante del débito.
+  (`confirmadoPagoPorFecha`) o con el comprobante del débito. (Desde F9.188 §1 el total con monto > 0
+  nace además `pagado: false` mientras no venció; el de monto 0 sigue igual.)
 - No contradice que `confirmadoPago` sea "saldado por un pago" (§ Ciclo factura → obligación →
   pago): cuando no hay nada que pagar, ningún comprobante va a llegar a confirmarlo, y esperarlo
   deja el ítem `por_confirmar` para siempre.
@@ -2877,6 +2878,10 @@ Consecuencias:
 - **El pendiente se suma por obligación, no por ítem**: cada obligación abierta del mes a su monto
   (más, en el mes actual, las vencidas de meses anteriores), y cada ítem que todavía no tiene NADA
   cargado a su `montoEsperado`. Un ítem con obligaciones no se cuenta además por su esperado.
+  **Desde F9.188 §3 son dos datos y no uno**: "Sin cargar: N" (`sinCargarMes`, los ítems sin nada
+  cargado, con su `montoEsperado` aparte) y "Falta pagar: $Y" (`faltaPagarMes`, SOLO obligaciones
+  abiertas, en pesos equivalentes con la conversión de los totales del Resumen). `pendienteMes` queda
+  solo para los scripts de F9.184/F9.185; la app no lo usa.
 - **Lo vencido no se queda en su mes.** Una obligación de septiembre impaga sigue en la card de
   vencidos del mes actual, con su mes como etiqueta. Mirando un mes cerrado no hay card de vencidos.
 - **La campana avisa por obligación** (vencidas, de hoy y de los próximos `DIAS_VENTANA` días). El
@@ -2906,6 +2911,62 @@ Consecuencias:
 - **Para qué sirve la marca**: para revertir exactamente ese cierre (`--revertir` vuelve a
   `pagado: false` solo lo que lleva ese `cerradoPor` y borra la marca) y para que un audit posterior
   distinga "lo cerró el cierre masivo" de "lo pagó alguien". Un cierre masivo futuro usa otro nombre.
+- **El otro nombre que existe** es `'cierre-al-vencer'`: lo escribe todos los días la función
+  programada `cerrarObligacionesAlVencer` (F9.188 §2, ver "`cierreAlVencer`" abajo). No es masivo
+  ni de una vez, pero es lo mismo: un cierre que no hizo una persona, con nombre para auditarlo.
+
+### El movimiento-total de un resumen es una obligación (F9.188 §1)
+
+> **El movimiento-total de un resumen de tarjeta es una obligación: la plata sale el día del
+> vencimiento. Nace `pagado: false`. Lo cierra la confirmación del pago, o el cierre al vencer si su
+> ítem lo tiene configurado (`cierreAlVencer`).**
+
+Normativo, escrito antes del código. Hasta F9.188 `confirmarResumenTarjeta` escribía `pagado: true`
+en los dos totales: confirmar el resumen el 7/10 dejaba "Pagado" un débito que vence el 9/10, y con
+`movimientoCubierto` eso era "cubierto": no contaba como obligación abierta, no avisaba en la campana
+y la fila del día decía "Pagado". Contradecía la semántica de `pagado` ("la plata salió", F9.138 §2).
+Medido en F9.188 §0.1: 6 totales del 9/10 (ARS 5.622.325,60 · USD 193,63).
+
+- **Con monto > 0** el total nace `pagado: false` + `confirmadoPago: false`, salvo que el resumen se
+  confirme con el vencimiento ya alcanzado (`confirmadoPagoPorFecha`, `<= hoy`): ahí nace
+  `confirmadoPago: true` y por la invariante de F9.140 también `pagado: true`. No cambió el cálculo
+  por fecha; cambió que `pagado` lo sigue en vez de ir fijo en `true`.
+- **Con monto 0** no cambia nada (F9.180 §3): `pagado: true` + `confirmadoPago: true` + `pagadoEn`.
+  No hay débito que esperar.
+- **Los consumos del resumen no cambian**: siguen `pagado: true`. No son obligaciones (no tienen
+  `incluirResumenMes`; la plata de ellos sale con el total).
+- Los 6 totales de §0.1 se corrigen con `scripts/ejecutarF9188s1.ts` (`--aplicar` lo corre Juan), que escribe `pagado: false`
+  + `corregidoPor: 'F9.188-total-no-pagado'` (y `--revertir` lo deshace por esa marca). Los totales
+  ya vencidos con `pagado: true` sin confirmar no se tocan: la plata ya salió.
+
+### `cierreAlVencer` — dar por pagado al vencer, por ítem (F9.188 §2)
+
+> **`itemsEsperados.cierreAlVencer: boolean` (default `false`).** Con `true`, cada obligación abierta
+> de ese ítem se da por pagada **el día siguiente** a su fecha efectiva, sin que nadie la confirme.
+> Con `false` queda a pagar hasta que se confirma, y al pasar el vencimiento aparece vencida.
+
+Normativo, escrito antes del código. Es para los débitos automáticos (las tarjetas, sobre todo). Decisión
+de Juan (2026-10-08): elegir por ítem, desde Config de esperados, entre (a) confirmar a mano y (b) dar
+por pagado al vencer.
+
+- **No es `pagoAutomatico`.** Ese campo es informativo desde F9.99.7, que lo sacó a propósito de las
+  reglas de estado, y no se reusa. La UI destaca el interruptor nuevo cuando `pagoAutomatico` es true,
+  sin prenderlo sola.
+- **Lo escribe una función programada, no una regla del cliente**: `cerrarObligacionesAlVencer`
+  (`functions/src/index.ts`), todos los días a las 00:10 ART. Toma cada movimiento con
+  `pagado == false`, `tipo: 'Gasto'` y `itemEsperadoId` de un ítem con `cierreAlVencer: true`, cuya
+  fecha efectiva (`fechaEfectivaMov`: `vencimientos[0].fecha`, si no `fecha`) es **anterior a hoy en
+  ART**. Le escribe `pagado: true` + `cerradoPor: 'cierre-al-vencer'` + `cerradoEn` + `actualizadoEn`.
+  Así `movimientoCubierto` sigue siendo la única definición de "cubierto", el cierre queda auditable,
+  y cambiar la configuración del ítem no cambia retroactivamente lo ya cerrado.
+- **Las 00:10 no son casuales.** Desde la medianoche una obligación de ayer ya es `vencida` para la
+  app (`estadoDe`, `obligaciones.ts`); si la corrida fuera más tarde, toda la madrugada aparecería
+  vencida en la card y en la campana. Durante el día del vencimiento la obligación sigue a la vista
+  como "a pagar · vence hoy": así se ve si el débito todavía no impactó.
+- **No toca `confirmadoPago`**: queda "pagado sin confirmar", par válido (F9.138 §2). "Confirmar pago"
+  sigue disponible, y el comprobante del débito lo confirma como siempre.
+- **Riesgo aceptado**: si el débito falla, la app no se entera. Lo dice la ayuda del interruptor.
+- Idempotente: solo mira `pagado == false`, así que una segunda corrida el mismo día no escribe nada.
 
 Pendiente: periodicidades no-mensuales necesitan mes-ancla cuando se activen. Hoy `aplicaEnMes`
 devuelve `true` para todas como placeholder.

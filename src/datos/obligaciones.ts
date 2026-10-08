@@ -85,6 +85,62 @@ export function abiertasDelItem(ci: CheckItem): Movement[] {
   return ci.matches.filter(esObligacionAbierta);
 }
 
+// ── F9.188 §3 — los dos datos de arriba del Resumen ─────────────────────────────────────────────
+// `pendienteMes` sumaba en UN número dos cosas que no son lo mismo: lo que falta CARGAR (un ítem
+// esperado sin nada, a su `montoEsperado`) y lo que falta PAGAR (obligaciones cargadas sin cubrir).
+// El banner que lo mostraba cambiaba de significado según el estado ("N sin pagar" contaba ítems sin
+// cargar) y sumaba pesos y dólares crudos. Ahora son dos funciones y dos datos fijos.
+
+export interface SinCargarMes {
+  /** Ítems de Gasto del mes sin NADA cargado y sin cubrir (el `sinCargar` de `pendienteMes`). */
+  items: CheckItem[];
+  /** Suma de sus `montoEsperado` en pesos equivalentes; null si ninguno lo tiene ("monto desconocido"). */
+  esperadoArs: number | null;
+  /** Cuántos ya pasaron su `diaVencimiento` sin nada cargado. */
+  vencidos: number;
+}
+
+/**
+ * "Sin cargar: N". `aArs` convierte un `montoEsperado` a pesos: es plata viva, no se movió, así que el
+ * llamador usa el TC de hoy (F9.114).
+ */
+export function sinCargarMes(checklist: CheckItem[], aArs: (monto: number, moneda: 'ARS' | 'USD') => number): SinCargarMes {
+  const items = checklist.filter(ci => ci.item.tipo === 'Gasto' && ci.matches.length === 0 && !cubierto(ci.estado));
+  const conMonto = items.filter(ci => ci.item.montoEsperado != null);
+  return {
+    items,
+    esperadoArs: conMonto.length === 0 ? null : conMonto.reduce((s, ci) => s + aArs(ci.item.montoEsperado!, ci.item.moneda), 0),
+    vencidos: items.filter(ci => ci.estado === 'vencido').length,
+  };
+}
+
+export interface FaltaPagarMes {
+  /** Las obligaciones abiertas del mes más, en el mes actual, las vencidas de meses anteriores (F9.184), por fecha. */
+  obligaciones: Obligacion[];
+  /** Total en pesos equivalentes, con la conversión de los totales del Resumen. */
+  ars: number;
+  /** Los dólares que entran en `ars`, en su moneda ("incluye U$S Z"). */
+  usd: number;
+  vencidas: number;
+}
+
+/**
+ * "Falta pagar: $Y". SOLO obligaciones abiertas: el `montoEsperado` de lo no cargado está en el otro
+ * dato. `aArs` es `arsEq` del Resumen (cada movimiento a su TC), para no volver a sumar monedas crudas.
+ */
+export function faltaPagarMes(movsDelMes: Movement[], abiertasTodas: Movement[], mes: string, hoy: Date, esMesActual: boolean, aArs: (m: Movement) => number): FaltaPagarMes {
+  const obligaciones = [
+    ...obligacionesAbiertas(movsDelMes, hoy),
+    ...(esMesActual ? vencidasAnteriores(abiertasTodas, mes, hoy) : []),
+  ].sort((a, b) => a.fechaEfectiva.getTime() - b.fechaEfectiva.getTime());
+  return {
+    obligaciones,
+    ars: obligaciones.reduce((s, o) => s + Math.abs(aArs(o.mov)), 0),
+    usd: obligaciones.filter(o => o.mov.moneda === 'USD').reduce((s, o) => s + Math.abs(o.mov.monto), 0),
+    vencidas: obligaciones.filter(o => o.estado === 'vencida').length,
+  };
+}
+
 export interface PendienteMes {
   /** Monto crudo, sin conversión de moneda (igual que el pendiente de antes, `pendienteAgenda`). */
   monto: number;
@@ -95,22 +151,16 @@ export interface PendienteMes {
 }
 
 /**
- * §2.2 — el pendiente del mes, sumado por obligación:
- *   (i)  cada obligación abierta del mes, a su monto, más (solo en el mes actual) las vencidas de
- *        meses anteriores;
- *   (ii) cada ítem de Gasto que todavía no tiene NADA cargado y no está cubierto, a su
- *        `montoEsperado`, como antes.
- * Un ítem no se cuenta dos veces: si tiene obligaciones cargadas, cuentan ellas y no su esperado.
+ * F9.184 §2.2 — el pendiente del mes en UN número. DESDE F9.188 §3 LA APP NO LO USA: lo reemplazan
+ * `sinCargarMes` y `faltaPagarMes`. Queda porque scripts/verificarF9184.ts y scripts/ejecutarF9185.ts
+ * lo cargan para reproducir sus mediciones, y por eso conserva su contrato: suma cruda de monedas.
+ * Se arma con las dos funciones nuevas para que los conjuntos tengan una sola definición.
  */
 export function pendienteMes(checklist: CheckItem[], movsDelMes: Movement[], abiertasTodas: Movement[], mes: string, hoy: Date, esMesActual: boolean): PendienteMes {
-  const delMes = obligacionesAbiertas(movsDelMes, hoy);
-  const anteriores = esMesActual ? vencidasAnteriores(abiertasTodas, mes, hoy) : [];
-  const sinCargar = checklist.filter(ci => ci.item.tipo === 'Gasto' && ci.matches.length === 0 && !cubierto(ci.estado));
-  const monto = [...delMes, ...anteriores].reduce((s, o) => s + Math.abs(o.mov.monto), 0)
-    + sinCargar.reduce((s, ci) => s + (ci.item.montoEsperado ?? 0), 0);
-  const vencidos = delMes.filter(o => o.estado === 'vencida').length + anteriores.length
-    + sinCargar.filter(ci => ci.estado === 'vencido').length;
-  return { monto, vencidos, obligaciones: delMes.length + anteriores.length };
+  const crudo = (m: Movement) => m.monto;
+  const fp = faltaPagarMes(movsDelMes, abiertasTodas, mes, hoy, esMesActual, crudo);
+  const sc = sinCargarMes(checklist, monto => monto);
+  return { monto: fp.ars + (sc.esperadoArs ?? 0), vencidos: fp.vencidas + sc.vencidos, obligaciones: fp.obligaciones.length };
 }
 
 /** §3 — lo que entra en la campana: vencidas (de cualquier antigüedad), de hoy, y las próximas dentro de la ventana. */

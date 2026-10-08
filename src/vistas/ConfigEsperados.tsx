@@ -57,6 +57,7 @@ function ItemLista({ items, inactivos, onEditar, onDesactivar, onReactivar, onEl
             <span className="cfg-chip-moneda">{item.moneda}</span>
             {item.tarjetaCodigo && <span className="cfg-chip-tarj">{item.tarjetaCodigo}</span>}
             {item.pagoAutomatico && <span className="cfg-chip-auto">automático</span>}
+            {item.cierreAlVencer && <span className="cfg-chip-auto">pagado al vencer</span>}
             {item.montoEsperado != null && (
               <span className="cfg-item-monto">{fmtMonto(item.montoEsperado, item.moneda)}</span>
             )}
@@ -148,6 +149,8 @@ function FormItemEsperado({
   const [diaVenc,        setDiaVenc]        = useState(item?.diaVencimiento?.toString() ?? '');
   const [periodicidad,   setPeriodicidad]   = useState<string>(item?.periodicidad ?? 'mensual');
   const [pagoAuto,       setPagoAuto]       = useState(item?.pagoAutomatico ?? false);
+  // F9.188 §2 — (a) confirmar a mano (false, default) o (b) dar por pagado al vencer (true).
+  const [cierreAlVencer, setCierreAlVencer] = useState(item?.cierreAlVencer ?? false);
   // F9.154 §3 — día de corte de imputación. Solo se ofrece para Ingresos; vacío = null = el
   // comportamiento de siempre.
   const [diaCorte,       setDiaCorte]       = useState(item?.diaCorteImputacion?.toString() ?? '');
@@ -260,6 +263,8 @@ function FormItemEsperado({
       matchTexto: (incluye.length > 0 || excluye.length > 0) ? { incluye, excluye } : null,
       periodicidad:   periodicidad as NuevoItemEsperado['periodicidad'],
       pagoAutomatico: pagoAuto,
+      // F9.188 §2 — solo cierra obligaciones de Gasto: si el tipo pasa a Ingreso, se descarta.
+      cierreAlVencer: tipoF === 'Gasto' && cierreAlVencer,
       diaCorteImputacion: corteNum,
       clavesDesambiguacion: clavesLista.length > 0 ? clavesLista : null,
     };
@@ -449,6 +454,24 @@ function FormItemEsperado({
               </label>
             </div>
           </div>
+
+          {/* F9.188 §2 — cierre al vencer. Es un campo propio y NO `pagoAutomatico`: F9.99.7 sacó ese
+              de las reglas de estado a propósito. Con `pagoAutomatico` prendido el interruptor se
+              destaca para que se vea, pero no se prende solo: dar por pagado sin confirmar es una
+              decisión, no un default. */}
+          {tipoF === 'Gasto' && (
+            <div className={`cfg-campo${pagoAuto && !cierreAlVencer ? ' cfg-campo--destacado' : ''}`}>
+              <label className="cfg-toggle-fila">
+                <input type="checkbox" checked={cierreAlVencer} onChange={e => setCierreAlVencer(e.target.checked)} />
+                Dar por pagado al vencer
+              </label>
+              <span className="cfg-ayuda">
+                Para débitos automáticos: el día siguiente al vencimiento queda pagado sin confirmar.
+                Si el débito falla, no te vas a enterar.
+                {pagoAuto && !cierreAlVencer && ' Este ítem está marcado como pago automático.'}
+              </span>
+            </div>
+          )}
 
           {/* matchTexto */}
           <div className="cfg-campo">

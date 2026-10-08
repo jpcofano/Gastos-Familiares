@@ -165,6 +165,11 @@ export interface ExpectedItem {
   matchTexto: MatchTexto | null;
   periodicidad: 'mensual' | 'bimestral' | 'trimestral' | 'anual' | 'unico';
   pagoAutomatico: boolean;
+  // F9.188 §2 — con true, la función programada `cerrarObligacionesAlVencer` da por pagadas sus
+  // obligaciones abiertas el día siguiente al vencimiento (docs/CLAUDE.md, "`cierreAlVencer`"). NO es
+  // `pagoAutomatico`, que sigue siendo informativo. `docAItemEsperado` lo completa siempre (ausente ⇒
+  // false); es opcional solo para que las reconstrucciones de ítems de scripts/ sigan compilando.
+  cierreAlVencer?: boolean;
   // F9.154 §2 — identificadores propios de ESTE ítem dentro de un emisor compartido (el número de
   // suministro de AySA, por ejemplo). Sirven para desambiguar cuando dos ítems comparten destino.
   // Se guardan varios porque el mismo suministro llega con formatos distintos según el documento:

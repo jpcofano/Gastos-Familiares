@@ -349,3 +349,13 @@
   letter-spacing: normal;
   font-weight: 400;
 }
+
+/* F9.188 §2 — "Dar por pagado al vencer" destacado cuando el ítem es de pago automático y todavía
+   no lo tiene prendido. Se destaca, no se prende solo. Tokens de estado `automatico`: tienen su par
+   oscuro en tokens.css. */
+.cfg-campo--destacado {
+  background: var(--st-automatico-bg);
+  border-left: 3px solid var(--st-automatico-line);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+}

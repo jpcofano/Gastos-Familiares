@@ -622,9 +622,15 @@ export async function confirmarResumenTarjeta(
     // resumen en 0"): nace confirmado, sin esperar un vencimiento ni un comprobante que no va a
     // llegar porque no hay débito. Cumple F9.140 (confirmadoPago ⇒ pagado): el total ya sale con
     // `pagado: true`. Con monto > 0 nada cambia: se confirma por fecha y no se escribe `pagadoEn`.
+    //
+    // F9.188 §1 — y con monto > 0 el total es una OBLIGACIÓN: la plata sale el día del vencimiento
+    // (docs/CLAUDE.md, "El movimiento-total de un resumen es una obligación"). Antes iba fijo
+    // `pagado: true`, y confirmar el 7/10 un resumen que vence el 9/10 lo dejaba "Pagado" y fuera de
+    // las obligaciones abiertas. Ahora `pagado` sigue a la confirmación por fecha: si ya venció nace
+    // confirmado y por eso pagado (F9.140); si no, nace a pagar.
     const pagoDelTotal = (monto: number) => (monto === 0
-      ? { confirmadoPago: true, pagadoEn: serverTimestamp() }
-      : { confirmadoPago: confirmadoPagoTotal });
+      ? { pagado: true, confirmadoPago: true, pagadoEn: serverTimestamp() }
+      : { pagado: confirmadoPagoTotal, confirmadoPago: confirmadoPagoTotal });
 
     // ── Total ARS ─────────────────────────────────────────────────────────────
     {
@@ -649,7 +655,6 @@ export async function confirmarResumenTarjeta(
         tarjeta:             resumen.tarjeta || null,
         persona:             null,
         creadoPor:           memberId,
-        pagado:              true,
         excluirDash:         true,
         incluirResumenMes:   true,
         resumenTarjetaId:    resumen.id,
@@ -687,7 +692,6 @@ export async function confirmarResumenTarjeta(
         tarjeta:             resumen.tarjeta || null,
         persona:             null,
         creadoPor:           memberId,
-        pagado:              true,
         excluirDash:         true,
         incluirResumenMes:   true,
         resumenTarjetaId:    resumen.id,

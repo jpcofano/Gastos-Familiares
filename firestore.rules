@@ -91,7 +91,9 @@ service cloud.firestore {
         && request.resource.data.moneda in ['ARS', 'USD']
         && request.resource.data.activo is bool
         && request.resource.data.periodicidad in ['mensual', 'bimestral', 'trimestral', 'anual', 'unico']
-        && request.resource.data.pagoAutomatico is bool;
+        && request.resource.data.pagoAutomatico is bool
+        // F9.188 §2 — opcional: los ítems de antes no lo tienen y ausente vale false.
+        && (!('cierreAlVencer' in request.resource.data) || request.resource.data.cierreAlVencer is bool);
       allow delete: if esAdmin();
     }
     match /reglasNormalizacion/{id} {

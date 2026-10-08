@@ -37,6 +37,8 @@ import { corregirAnioVencimientos, type Vencimiento } from './fechasVencimiento'
 import { buildAgendaPrompt, validarFilas, MAX_TOKENS_AGENDA, type FilaCruda } from './agendaPagos';
 import { dividirAgenda } from './agendaDivision';
 import { corregirSignoConsumos } from './signoLineas';
+// F9.188 §2 — cierre al vencer: módulo propio para poder probarlo en el emulador.
+import { cerrarAlVencer } from './cierreAlVencer';
 // F9.155 §2 — el CUIT de la contraparte en una acreditación viene pelado y el modelo lo archivaba
 // en numeroOperacion. El dígito verificador permite rescatarlo sin depender de etiquetas.
 import { rescatarCuitContraparte } from './cuit';
@@ -2476,6 +2478,28 @@ export const actualizarTCDiario = onSchedule(
     );
 
     console.log(`[actualizarTCDiario] ${fechaHoy} → tcUsdArs=${venta}`);
+  },
+);
+
+// F9.188 §2 — cierre al vencer (docs/CLAUDE.md, "`cierreAlVencer`"). Las obligaciones abiertas de un
+// ítem con `cierreAlVencer: true` se dan por pagadas el día SIGUIENTE a su vencimiento. Corre a las
+// 00:10 ART y no más tarde a propósito: desde la medianoche una obligación de ayer ya es `vencida`
+// para la app (`estadoDe`, src/datos/obligaciones.ts), así que cuanto más tarde corra, más tiempo se
+// ve vencida en la card y en la campana algo que ya se va a cerrar. La lógica vive en
+// cierreAlVencer.ts para poder probarla en el emulador (scripts/probarF9188.ts).
+export const cerrarObligacionesAlVencer = onSchedule(
+  {
+    schedule: '10 0 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+  },
+  async () => {
+    const hoy = hoyArgentinaISO();
+    const cerradas = await cerrarAlVencer(db, hoy, FieldValue.serverTimestamp());
+    console.log(`[cerrarObligacionesAlVencer] ${hoy}: ${cerradas.length} cerrada(s)`);
+    for (const c of cerradas) {
+      console.log(`[cerrarObligacionesAlVencer]   ${c.id} · ítem ${c.itemEsperadoId} · venció ${c.fechaEfectiva} · ${c.moneda} ${c.monto} · ${c.descripcion}`);
+    }
   },
 );
 

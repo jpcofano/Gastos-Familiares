@@ -26,6 +26,8 @@ export function docAItemEsperado(id: string, data: DocumentData): ExpectedItem {
       : null,
     periodicidad:   data.periodicidad   || 'mensual',
     pagoAutomatico: data.pagoAutomatico ?? false,
+    // F9.188 §2 — ausente (todos los ítems de antes) ⇒ false: confirmar a mano, como siempre.
+    cierreAlVencer: data.cierreAlVencer === true,
     // F9.154 §2 — ausente en los docs viejos ⇒ null; el ítem no desambigua nada.
     clavesDesambiguacion: Array.isArray(data.clavesDesambiguacion) ? data.clavesDesambiguacion : null,
     // F9.154 §3 — null (o ausente en los docs viejos) = comportamiento de siempre.
@@ -72,6 +74,8 @@ export interface NuevoItemEsperado {
   matchTexto: { incluye: string[]; excluye: string[] } | null;
   periodicidad: 'mensual' | 'bimestral' | 'trimestral' | 'anual' | 'unico';
   pagoAutomatico: boolean;
+  // F9.188 §2 — solo tiene sentido en Gastos; false = confirmar a mano.
+  cierreAlVencer: boolean;
   // F9.154 §2 — identificadores del ítem dentro de un emisor compartido.
   clavesDesambiguacion: string[] | null;
   // F9.154 §3 — solo tiene sentido en Ingresos; null = comportamiento de siempre.

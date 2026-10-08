@@ -1,0 +1,401 @@
+F9.188 — Resumen del mes: qué falta cargar, qué falta pagar, y el pago de tarjeta que no está pagado
+
+Base: origin/main @ 940ffa1 (F9.187 §1), confirmada al abrir. Prompt en
+docs/prompts/F9.188-resumen-sin-cargar-falta-pagar-total-tarjeta-no-pagado.md.
+Nada escrito en producción: §0 y la verificación son de solo lectura, §1.3 se entrega en dry-run
+(el --aplicar lo corre Juan) y el cierre al vencer se probó en el emulador.
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  · Gate §0 pasa: 6 movimientos-total de tarjeta nacieron "Pagado" sin estarlo, los 6 con vencimiento
+    2026-10-09 (los de la captura). ARS 5.622.325,60 · USD 193,63. Los 33 ya vencidos con pagado=true
+    sin confirmar no se tocan.
+  · §1: confirmarResumenTarjeta escribe los totales > 0 con pagado = confirmadoPago (por fecha). Antes
+    del vencimiento nacen a pagar; el día del vencimiento o después, pagados y confirmados. El total
+    en 0 sigue igual que F9.180. Los consumos no cambian.
+  · §1.3: scripts/ejecutarF9188s1.ts. Dry-run en producción: 6, los 6 de §0. Probado en el emulador
+    sobre la copia de los 2416 movimientos: aplicar, idempotencia, revertir (deja TODO como estaba,
+    actualizadoEn incluido) y que revertir no pise uno confirmado después. TODO OK.
+  · §2: itemsEsperados.cierreAlVencer (default false) en tipo, reglas y Config de esperados ("Dar por
+    pagado al vencer"). Función programada cerrarObligacionesAlVencer, 00:10 ART, southamerica-east1.
+    Probada en el emulador: no cierra lo de hoy, cierra lo de ayer, idempotente, no toca un ítem en
+    false. TODO OK. Reglas probadas con rules-unit-testing. TODO OK.
+  · §3: el banner de una línea pasa a ser dos datos fijos: "Sin cargar: N" y "Falta pagar: $Y".
+    Octubre hoy: antes "Revisar pendientes del mes · 1 sin pagar · $ 3.182.070"; después "Sin cargar 1
+    (~$ 66 esperado)" y "Falta pagar $ 3.182.004 · 4 obligaciones". Con §1.3 aplicado, "Falta pagar"
+    sube a $ 9.102.869 (10 obligaciones · incluye U$S 194).
+  · §4: el monto de cada fila va por estado (pagado neutro con tilde, a pagar ámbar, vencido rojo), el
+    encabezado del día separa pagado / a pagar, las filas en 0 no se listan y el separador dice
+    "De hoy en adelante". La misma regla en la card de HOY y en la de vencidos.
+  · tsc cliente 41 → 41 (misma lista). tsc functions 0 → 0. vite build OK.
+
+════════════════════════════════════════════════════════════════════════════════
+PREMISAS (auditadas contra 940ffa1)
+════════════════════════════════════════════════════════════════════════════════
+
+  Se sostienen todas:
+  · resumenesTarjeta.ts:652 y :690: `pagado: true` en los dos totales. Con movimientoCubierto
+    (checklist.ts:98) eso es "cubierto".
+  · El cálculo de confirmadoPagoTotal está en :511, no en :452 (corrimiento de líneas; la lógica es la
+    citada): confirmadoPagoPorFecha(vencimiento) = vencimiento <= hoy ART.
+  · Resumen.tsx:595-640: banner de una línea; porRevisar (:1445) cuenta ítems SIN CARGAR y el texto
+    dice "N sin pagar"; el monto es pendienteMes().monto (suma cruda de monedas).
+  · Resumen.tsx:826-860: monto de la fila siempre --gf-out; el estado, en la palabra chica.
+  · Resumen.tsx:947: "Hasta acá el mes".
+  · types/index.ts:167 pagoAutomatico; ConfigEsperados.tsx:150. Informativo desde F9.99.7.
+  · index.ts:2445 actualizarTCDiario: onSchedule con timeZone ART y región southamerica-east1.
+  · firestore.rules:82-87: create/update de itemsEsperados, sin cierreAlVencer.
+
+════════════════════════════════════════════════════════════════════════════════
+§0 — MEDICIÓN (scripts/verificarF9188.ts, solo lectura, 2026-10-08)
+════════════════════════════════════════════════════════════════════════════════
+
+  F9.188 §0 — SOLO LECTURA. hoy=2026-10-08 (05:47:15) mes=2026-10 | movimientos: 2416 | itemsEsperados: 24
+  
+  ── 0.1 movimientos-total de resumen (categoria 'Tarjetas' + resumenTarjetaId): 68
+     por par: pagado=true confirmadoPago=true: 29 · pagado=true confirmadoPago=false: 6 · pagado=true confirmadoPago=(falta): 33
+     con pagado: true y confirmadoPago: false → 39
+     (i) fecha efectiva futura o de hoy (dicen "Pagado" sin estarlo): 6
+         id       | tarjeta                | moneda |         monto | vence      | mes     | itemEsperadoId | creadoEn
+         4v6zSQBh | Visa Signature         | ARS    |  3.198.010,89 | 2026-10-09 | 2026-10 | 1a8c199f       | 2026-10-07
+         84tYO8zb | Mastercard Black       | ARS    |  1.650.883,28 | 2026-10-09 | 2026-10 | 8b2a1e71       | 2026-10-07
+         8yrFcA81 | Visa Signature         | USD    |        141,65 | 2026-10-09 | 2026-10 | 20f02d6d       | 2026-10-07
+         GNjyjwBJ | Visa                   | ARS    |    751.681,60 | 2026-10-09 | 2026-10 | 7c02a5b7       | 2026-10-05
+         OpPV0LNm | Mastercard Black       | USD    |         51,98 | 2026-10-09 | 2026-10 | 292256d3       | 2026-10-07
+         dHJfkxGz | Mastercard Black       | ARS    |     21.749,83 | 2026-10-09 | 2026-10 | db9cbf89       | 2026-10-05
+         suma: ARS 5.622.325,60 · USD 193,63 · en 0: 0
+         con vencimiento 2026-10-09 (los de la captura): 6
+     (ii) fecha efectiva pasada (la plata ya salió, no se tocan): 33 · por mes: 2025-05: 2 · 2025-12: 4 · 2026-01: 2 · 2026-02: 2 · 2026-03: 2 · 2026-04: 8 · 2026-05: 8 · 2026-06: 5
+     de ellos con monto 0 (anteriores a F9.180 §3; §1.3 no los toca): 0
+     totales con pagado: false hoy: 0
+  
+  ── 0.2 ítems esperados activos: 22 (tarjeta 8, pagoAutomatico 4, con diaVencimiento 1)
+     id       | tipo    | categoría › subcategoría              | mon | tarjetaCodigo | pagoAutomatico | diaVenc | cierreAlVencer
+     10ef6a27 | Gasto   | Tarjetas › Pago Tarjeta               | USD | GAL-VISA      | false          | -       | (no existe)
+     1a8c199f | Gasto   | Tarjetas › Pago Tarjeta               | ARS | BBVA-VISA-SIG | false          | -       | (no existe)
+     20f02d6d | Gasto   | Tarjetas › Pago Tarjeta               | USD | BBVA-VISA-SIG | false          | -       | (no existe)
+     292256d3 | Gasto   | Tarjetas › Pago Tarjeta               | USD | BBVA-MASTER-BLK | false          | -       | (no existe)
+     7c02a5b7 | Gasto   | Tarjetas › Pago Tarjeta               | ARS | GAL-VISA      | false          | -       | (no existe)
+     8b2a1e71 | Gasto   | Tarjetas › Pago Tarjeta               | ARS | BBVA-MASTER-BLK | false          | -       | (no existe)
+     acc1caba | Gasto   | Tarjetas › Pago Tarjeta               | USD | GAL-MASTER-BLK | false          | -       | (no existe)
+     db9cbf89 | Gasto   | Tarjetas › Pago Tarjeta               | ARS | GAL-MASTER-BLK | false          | -       | (no existe)
+     1663f6a6 | Gasto   | Auto › Agua                           | ARS | -             | false          | -       | (no existe)
+     1d186f3b | Gasto   | Casa › Luz                            | ARS | -             | false          | -       | (no existe)
+     62a96fc8 | Gasto   | Casa › ABL                            | ARS | -             | false          | -       | (no existe)
+     7407642c | Gasto   | Casa › Expensas                       | ARS | -             | false          | -       | (no existe)
+     90b30edc | Gasto   | Casa › Internet                       | ARS | -             | false          | -       | (no existe)
+     94c07e7c | Gasto   | Casa › Agua                           | ARS | -             | false          | -       | (no existe)
+     eb8e59f2 | Gasto   | Casa › Gas                            | ARS | -             | false          | -       | (no existe)
+     184dde3f | Gasto   | Educación y chicos › Colegio Fede     | ARS | -             | false          | -       | (no existe)
+     859b249b | Gasto   | Educación y chicos › Colegio Sofi     | ARS | -             | false          | -       | (no existe)
+     c2e5d057 | Gasto   | Educación y chicos › Actividades extr… | ARS | -             | true           | -       | (no existe)
+     d0837838 | Gasto   | Impuestos y finanzas › Monotributo    | ARS | -             | false          | 20      | (no existe)
+     8d93896a | Ingreso | Ingresos › Sueldo                     | ARS | -             | true           | -       | (no existe)
+     a9c90518 | Ingreso | Ingresos › Sueldo                     | USD | -             | true           | -       | (no existe)
+     ac352ee6 | Ingreso | Ingresos › Sueldo                     | ARS | -             | true           | -       | (no existe)
+  
+  ── 0.3 Resumen de 2026-10 hoy (funciones reales del cliente)
+     porRevisar (sin nada cargado y accionable, Gasto e Ingreso): 1
+       · d0837838 Gasto   Impuestos y finanzas › Monotributo   pendiente     esperado ARS 66,02
+     pendienteMes(): monto 3.182.070,45 · vencidos 0 · obligaciones 4
+       (i)  obligaciones abiertas del mes: 4 · ARS 3.182.004,43
+            9v8LbAZB proxima  vence 2026-10-10 ARS    823.535,00 Colegio Guadalupe
+            kjTdovgf proxima  vence 2026-10-10 ARS  2.017.000,00 ITPA SA
+            zLLTqj7D proxima  vence 2026-10-15 ARS    266.469,43 Cons. Prop. Pje del Signo 4032/42
+            Ho3EKd85 proxima  vence 2026-10-30 ARS     75.000,00 Viaje Rugby cuota 2
+            vencidas de meses anteriores: 0 · 0
+       (ii) ítems de Gasto sin nada cargado y sin cubrir: 1 · montoEsperado 66,02
+            d0837838 pendiente     Impuestos y finanzas › Monotributo   ARS 66,02
+       de ese monto, dólares sumados como si fueran pesos: U$S 0,00
+     agenda: 12/23 cubiertos (1 sueltos)
+     texto del banner: "Revisar pendientes del mes · 1 sin pagar · $ 3.182.070"
+  
+  GATE: 0.1 (i) = 6 → sigue (6 con vencimiento el 9/10).
+
+  Lectura:
+  · 0.1 (i) son los 6 de la captura: los totales de los tres resúmenes confirmados el 5 y el 7/10 que
+    vencen el 9/10. Ninguno en 0. Hoy no existe ningún total con pagado=false.
+  · 0.2: los 8 ítems de tarjeta tienen pagoAutomatico=false y diaVencimiento vacío. pagoAutomatico
+    está prendido en 1 de Gasto (Actividades extra) y en los 3 sueldos.
+  · 0.3: el "1 sin pagar" del banner es Monotributo, que está SIN CARGAR (el texto decía lo contrario).
+    El monto 3.182.070,45 son las 4 obligaciones abiertas (3.182.004,43) más el esperado del
+    Monotributo (66,02). Hoy no hay dólares en juego: la suma cruda todavía no se nota.
+
+════════════════════════════════════════════════════════════════════════════════
+§1 — EL TOTAL DE TARJETA NO NACE PAGADO
+════════════════════════════════════════════════════════════════════════════════
+
+  docs/CLAUDE.md — ANTES del código: "El movimiento-total de un resumen es una obligación (F9.188 §1)"
+    y una línea en la sección del total en 0 de F9.180.
+  src/datos/resumenesTarjeta.ts — pagoDelTotal(monto) devuelve también `pagado`:
+    · monto 0: pagado true + confirmadoPago true + pagadoEn (como F9.180);
+    · monto > 0: pagado = confirmadoPago = confirmadoPagoPorFecha(vencimiento).
+    Se sacó el `pagado: true` fijo de los dos totales. Los consumos siguen con pagado true.
+  scripts/ejecutarF9188s1.ts — universo por regla (no una lista): total de resumen con pagado true,
+    confirmadoPago !== true, monto > 0 y fecha efectiva >= hoy. --aplicar se niega si aparece uno que
+    no estaba en §0. Escribe pagado false + corregidoPor 'F9.188-total-no-pagado' + corregidoEn +
+    actualizadoEn, y guarda el actualizadoEn anterior en actualizadoEnPrevio. --revertir lo restaura
+    tal cual y solo toca lo que sigue como lo dejó --aplicar.
+
+  Dry-run en producción:
+
+  F9.188 §1.3 — DRY-RUN (no escribe nada) · PRODUCCIÓN
+  
+  ── universo: total de resumen · pagado: true · sin confirmar · monto > 0 · vence >= 2026-10-08 → 6 (medidos en §0: 6)
+     id       | tarjeta              | moneda |         monto | vence      | mes     | itemEsperadoId | en §0
+     4v6zSQBh | Visa Signature       | ARS    |  3.198.010,89 | 2026-10-09 | 2026-10 | 1a8c199f       | sí
+     84tYO8zb | Mastercard Black     | ARS    |  1.650.883,28 | 2026-10-09 | 2026-10 | 8b2a1e71       | sí
+     8yrFcA81 | Visa Signature       | USD    |        141,65 | 2026-10-09 | 2026-10 | 20f02d6d       | sí
+     dHJfkxGz | Mastercard Black     | ARS    |     21.749,83 | 2026-10-09 | 2026-10 | db9cbf89       | sí
+     GNjyjwBJ | Visa                 | ARS    |    751.681,60 | 2026-10-09 | 2026-10 | 7c02a5b7       | sí
+     OpPV0LNm | Mastercard Black     | USD    |         51,98 | 2026-10-09 | 2026-10 | 292256d3       | sí
+     suma: ARS 5.622.325,60 · USD 193,63
+  
+  DRY-RUN: listo para --aplicar
+
+  Prueba en el emulador (copia de los 2416 movimientos de producción; el archivo queda en el
+  scratchpad y no se commitea):
+
+    OK dry-run: 6 (esperado 6, todos medidos en §0)
+    OK --aplicar escribió 6
+    OK 6 con pagado=false + corregidoPor + corregidoEn + actualizadoEn + actualizadoEnPrevio
+    OK ningún otro campo cambió (0), confirmadoPago intacto (0), nada fuera del universo se tocó
+    OK las 6 son obligaciones abiertas (proxima, proxima, proxima, proxima, proxima, proxima), ninguna vencida
+    OK las 6 entran en la campana
+    OK dry-run después de aplicar: 0 (esperado 0: idempotente)
+    OK --revertir deshizo 6 (0 cambiados por otro camino)
+    OK después de revertir, TODO igual al original, actualizadoEn incluido (0 documentos distintos)
+    OK dry-run después de revertir: 6 (vuelven a ser 6)
+     no se revierte 4v6zSQBh: cambió después de aplicar (pagado=true confirmadoPago=true cerradoPor=-)
+    OK con uno confirmado después de aplicar, --revertir deshace 5 y deja el confirmado como está
+  PRUEBA EN EMULADOR: TODO OK
+
+  La primera corrida dio 1 falla en la comparación final: era el orden de las claves al serializar
+  los documentos después de un update, no una diferencia de datos. Ahora se compara campo por campo.
+
+  OJO con el momento: el universo es "vence hoy o después". Si §1.3 se aplica después del 9/10, los 6
+  ya están vencidos y el script no encuentra nada (y no hace falta: la plata ya salió).
+
+════════════════════════════════════════════════════════════════════════════════
+§2 — CONFIGURABLE POR ÍTEM: CONFIRMAR A MANO O DAR POR PAGADO AL VENCER
+════════════════════════════════════════════════════════════════════════════════
+
+  docs/CLAUDE.md — ANTES del código: "`cierreAlVencer` — dar por pagado al vencer, por ítem" y el
+    nombre 'cierre-al-vencer' en la sección de cerradoPor.
+  firestore.rules — create/update de itemsEsperados: cierreAlVencer opcional, `is bool`.
+  src/types/index.ts + src/datos/itemsEsperados.ts — cierreAlVencer; si falta, se lee false. En
+    ExpectedItem es opcional para que las reconstrucciones de ítems de scripts/ sigan compilando;
+    docAItemEsperado lo completa siempre.
+  src/vistas/ConfigEsperados.tsx — interruptor "Dar por pagado al vencer", solo para Gasto, con la
+    ayuda pedida. Con pagoAutomatico prendido y el interruptor apagado, el campo se destaca y la ayuda
+    agrega "Este ítem está marcado como pago automático"; no se prende solo. En la lista, chip
+    "pagado al vencer". NO usa ni toca pagoAutomatico.
+  functions/src/cierreAlVencer.ts — la lógica, separada para poder probarla en el emulador. Twin de
+    fechaEfectivaMov en ART (no depende del TZ del proceso). Candidatas: pagado == false (un solo
+    campo, sin índice), tipo Gasto, sin confirmar, itemEsperadoId de un ítem con cierreAlVencer true y
+    fecha efectiva < hoy ART. Escribe pagado true + cerradoPor + cerradoEn + actualizadoEn, en batches
+    de 400. No toca confirmadoPago.
+  functions/src/index.ts — cerrarObligacionesAlVencer: onSchedule '10 0 * * *', ART,
+    southamerica-east1. Loguea cuántas cerró y cuáles.
+
+════════════════════════════════════════════════════════════════════════════════
+§3 y §4 — EL RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  src/datos/obligaciones.ts — sinCargarMes (ítems de Gasto sin nada cargado ni cubiertos; su
+    montoEsperado en pesos, o null) y faltaPagarMes (solo obligaciones abiertas, convertidas con la
+    función que le pase el llamador; separa los dólares). pendienteMes queda armado con las dos y con
+    su contrato de siempre (suma cruda), solo porque verificarF9184 y ejecutarF9185 lo cargan.
+  src/vistas/Resumen.tsx:
+    · los dos datos se calculan una vez en ResumenVisual: lo no cargado al TC de hoy (plata viva,
+      F9.114) y las obligaciones con arsEq, como los totales del Resumen;
+    · "Sin cargar: N": al tocarlo va a Gastos Fijos. Debajo "~$X esperado" o "monto desconocido";
+    · "Falta pagar: $Y": al tocarlo despliega ahí mismo la lista de obligaciones abiertas por fecha
+      (Vence d/m · Venció d/m, con el mes si es de otro). Debajo "N obligaciones", "· N vencidas" en
+      rojo e "incluye U$S Z";
+    · los dos en cero: "Todo cargado y pagado" en verde;
+    · §4: COLOR_PAGO + estadoPago (cubierto / a pagar / vencido por fecha efectiva) en Gastos por día,
+      la card de HOY, la de vencidos, la lista de Falta pagar y las abiertas de un ítem en Gastos
+      Fijos. Encabezado del día "pagado $A" / "a pagar $B" cuando hay de los dos; un solo número con
+      su color si no. Filas en 0 fuera de la lista (del día y de HOY). "De hoy en adelante".
+    · Gastos Fijos: la card "Pendiente" usaba pendienteMes; ahora es "Falta pagar" con el MISMO número
+      que arriba de "Por día" (F9.99.8.1: dos pendientes distintos en dos solapas).
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN — producción, solo lectura (scripts/probarF9188.ts)
+════════════════════════════════════════════════════════════════════════════════
+
+  F9.188 — verificación (SOLO LECTURA). hoy=2026-10-08 mes=2026-10 · base 940ffa1 · movimientos 2417 · medidos 6/6
+  TC: hoy 1.541,80 (tcDiario/2026-10-08) · 18 días en el rango del mes
+  
+  === 1. Los totales del 9/10 con el código nuevo y §1.3 aplicado (simulado) ===
+      4v6zSQBh Visa Signature     ARS  3.198.010,89 → en "Falta pagar", proxima, vence 2026-10-09
+      84tYO8zb Mastercard Black   ARS  1.650.883,28 → en "Falta pagar", proxima, vence 2026-10-09
+      8yrFcA81 Visa Signature     USD        141,65 → en "Falta pagar", proxima, vence 2026-10-09
+      GNjyjwBJ Visa               ARS    751.681,60 → en "Falta pagar", proxima, vence 2026-10-09
+      OpPV0LNm Mastercard Black   USD         51,98 → en "Falta pagar", proxima, vence 2026-10-09
+      dHJfkxGz Mastercard Black   ARS     21.749,83 → en "Falta pagar", proxima, vence 2026-10-09
+    OK los 6 salen "A pagar" (obligación abierta, próxima) y suman en "Falta pagar"
+    OK los 6 entran en la campana con fecha 9/10 (6); la campana los muestra con el día y el badge "Próximo" — no tiene un rótulo "mañana"
+      campana sin §1.3: 3 obligaciones · con §1.3: 9
+  
+  === 3. Confirmar un resumen (commit simulado, nada se escribe) ===
+    resumen con los dos totales > 0: 37ab6ea1 BBVA-VISA-SIG 2026-10
+      vence mañana (antes del vencimiento):
+        viejo  ARS monto=3.198.010,89 pagado=true confirmadoPago=false pagadoEn=(no se escribe)
+        viejo  USD monto=141,65 pagado=true confirmadoPago=false pagadoEn=(no se escribe)
+        nuevo  ARS monto=3.198.010,89 pagado=false confirmadoPago=false pagadoEn=(no se escribe)
+        nuevo  USD monto=141,65 pagado=false confirmadoPago=false pagadoEn=(no se escribe)
+    OK nuevo: los 2 totales nacen pagado=false confirmadoPago=false
+    OK los 154 consumos siguen pagado=true confirmadoPago=false (no cambian)
+    OK invariante F9.140 (confirmadoPago ⇒ pagado) en todos los creates
+      vence hoy (se confirma el día del vencimiento):
+        viejo  ARS monto=3.198.010,89 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+        viejo  USD monto=141,65 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+        nuevo  ARS monto=3.198.010,89 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+        nuevo  USD monto=141,65 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+    OK nuevo: los 2 totales nacen pagado=true confirmadoPago=true
+    OK los 154 consumos siguen pagado=true confirmadoPago=false (no cambian)
+    OK invariante F9.140 (confirmadoPago ⇒ pagado) en todos los creates
+      venció ayer (después del vencimiento):
+        viejo  ARS monto=3.198.010,89 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+        viejo  USD monto=141,65 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+        nuevo  ARS monto=3.198.010,89 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+        nuevo  USD monto=141,65 pagado=true confirmadoPago=true pagadoEn=(no se escribe)
+    OK nuevo: los 2 totales nacen pagado=true confirmadoPago=true
+    OK los 154 consumos siguen pagado=true confirmadoPago=false (no cambian)
+    OK invariante F9.140 (confirmadoPago ⇒ pagado) en todos los creates
+    resumen con un total en 0: 2a0f81f8 GAL-VISA 2026-10
+        viejo  ARS monto=751.681,60 pagado=true confirmadoPago=false pagadoEn=(no se escribe)
+        viejo  USD monto=0,00 pagado=true confirmadoPago=true pagadoEn=serverTimestamp()
+        nuevo  ARS monto=751.681,60 pagado=false confirmadoPago=false pagadoEn=(no se escribe)
+        nuevo  USD monto=0,00 pagado=true confirmadoPago=true pagadoEn=serverTimestamp()
+    OK el total en 0 nace igual que en F9.180: pagado=true confirmadoPago=true pagadoEn, antes del vencimiento
+    OK y el otro total del mismo resumen (> 0) nace a pagar
+  
+  === 4. Los números de arriba del Resumen de 2026-10: antes y después ===
+    ANTES (940ffa1, datos de hoy): "Revisar pendientes del mes · 1 sin pagar · $ 3.182.070"
+       pendienteMes: monto 3.182.070,45 · vencidos 0 · obligaciones 4
+    DESPUÉS, código nuevo, datos de hoy (sin §1.3):
+       Sin cargar: 1 · ~$ 66 esperado   |   Falta pagar: $ 3.182.004 · 4 obligaciones
+         sin cargar: d0837838 Impuestos y finanzas › Monotributo pendiente  ARS 66,02
+         a pagar:    9v8LbAZB proxima  vence 2026-10-10 ARS    823.535,00 → $     823.535,00  Colegio Guadalupe
+         a pagar:    kjTdovgf proxima  vence 2026-10-10 ARS  2.017.000,00 → $   2.017.000,00  ITPA SA
+         a pagar:    zLLTqj7D proxima  vence 2026-10-15 ARS    266.469,43 → $     266.469,43  Cons. Prop. Pje del Signo 4032…
+         a pagar:    Ho3EKd85 proxima  vence 2026-10-30 ARS     75.000,00 → $      75.000,00  Viaje Rugby cuota 2
+    DESPUÉS, código nuevo + §1.3 aplicado (simulado):
+       Sin cargar: 1 · ~$ 66 esperado   |   Falta pagar: $ 9.102.869 · 10 obligaciones · incluye U$S 194
+         sin cargar: d0837838 Impuestos y finanzas › Monotributo pendiente  ARS 66,02
+         a pagar:    4v6zSQBh proxima  vence 2026-10-09 ARS  3.198.010,89 → $   3.198.010,89  Resumen Visa Signature 2026-10
+         a pagar:    84tYO8zb proxima  vence 2026-10-09 ARS  1.650.883,28 → $   1.650.883,28  Resumen Mastercard Black 2026-…
+         a pagar:    8yrFcA81 proxima  vence 2026-10-09 USD        141,65 → $     218.395,97  Resumen Visa Signature 2026-10…
+         a pagar:    GNjyjwBJ proxima  vence 2026-10-09 ARS    751.681,60 → $     751.681,60  Resumen Visa 2026-10
+         a pagar:    OpPV0LNm proxima  vence 2026-10-09 USD         51,98 → $      80.142,76  Resumen Mastercard Black 2026-…
+         a pagar:    dHJfkxGz proxima  vence 2026-10-09 ARS     21.749,83 → $      21.749,83  Resumen Mastercard Black 2026-…
+         a pagar:    9v8LbAZB proxima  vence 2026-10-10 ARS    823.535,00 → $     823.535,00  Colegio Guadalupe
+         a pagar:    kjTdovgf proxima  vence 2026-10-10 ARS  2.017.000,00 → $   2.017.000,00  ITPA SA
+         a pagar:    zLLTqj7D proxima  vence 2026-10-15 ARS    266.469,43 → $     266.469,43  Cons. Prop. Pje del Signo 4032…
+         a pagar:    Ho3EKd85 proxima  vence 2026-10-30 ARS     75.000,00 → $      75.000,00  Viaje Rugby cuota 2
+    diferencias:
+       · antes 3.182.070,45 = obligaciones 3.182.004,43 + esperado sin cargar 66,02.
+         Ahora se parte en dos: "Sin cargar" 1 (~66,02) y "Falta pagar" 3.182.004,43.
+    OK sin dólares en juego, las dos partes suman lo de antes: 3.182.004,43 + 66,02 = 3.182.070,45 (antes 3.182.070,45)
+       · con §1.3 "Falta pagar" sube 5.920.864,33: los 6 totales de tarjeta que pasan a deberse,
+         ARS 5.622.325,60 + U$S 193,63 a TC (298.538,73 en pesos).
+    OK la suba es exactamente la de los 6 totales
+       · monedas: con la suma cruda de antes, los U$S 193,63 habrían sumado como $ 193,63;
+         el pendiente viejo con §1.3 daría 8.804.589,68, contra 9.102.934,78 sumando los dos datos nuevos.
+    OK "incluye U$S 194": los dólares se convierten y se dicen aparte
+  
+  === 5. No regresión: checklist (estadoItem), agenda y picker de conciliación, viejo vs nuevo ===
+    OK calcularChecklist: 242 ítem-mes en 11 meses (2026-01…2026-11), 0 con otro estado o matches
+    OK construirAgenda (la fuente del picker de conciliación y de Gastos Fijos): 0 meses distintos
+    OK docAItemEsperado: los 24 ítems leen cierreAlVencer=false (nadie lo tiene todavía)
+      ítem 1a8c199f (BBVA-VISA-SIG ARS): sin §1.3 por_confirmar → con §1.3 por_confirmar
+      ítem 8b2a1e71 (BBVA-MASTER-BLK ARS): sin §1.3 por_confirmar → con §1.3 por_confirmar
+      ítem 20f02d6d (BBVA-VISA-SIG USD): sin §1.3 por_confirmar → con §1.3 por_confirmar
+      ítem 7c02a5b7 (GAL-VISA ARS): sin §1.3 por_confirmar → con §1.3 por_confirmar
+      ítem 292256d3 (BBVA-MASTER-BLK USD): sin §1.3 por_confirmar → con §1.3 por_confirmar
+      ítem db9cbf89 (GAL-MASTER-BLK ARS): sin §1.3 por_confirmar → con §1.3 por_confirmar
+  
+  TODO OK
+
+  (Entre §0 y esta corrida entró 1 movimiento nuevo en producción: 2416 → 2417. No es un total.)
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN — emulador (scripts/probarF9188.ts --emulador)
+════════════════════════════════════════════════════════════════════════════════
+
+  === 2. Cierre al vencer (functions/src/cierreAlVencer.ts) en el emulador · hoy 2026-10-08 ===
+    OK fechaEfectivaISO: 23:30 ART del 8/10 (02:30 UTC del 9) es el 8/10
+    OK fechaEfectivaISO: 00:30 ART del 9/10 es el 9/10
+    OK fechaEfectivaISO: manda vencimientos[0].fecha
+    OK fechaEfectivaISO: un vencimiento inválido cae a la fecha
+    candidatas: a-venc-pasado (2026-10-06), a-ayer (2026-10-07), a-ayer-tarde (2026-10-07)
+    OK primera corrida cierra 3: a-venc-pasado, a-ayer, a-ayer-tarde (esperadas a-ayer, a-ayer-tarde, a-venc-pasado)
+    OK a-ayer: pagado=true · cerradoPor='cierre-al-vencer' · cerradoEn · actualizadoEn nuevo · confirmadoPago sigue false
+    OK a-ayer-tarde: pagado=true · cerradoPor='cierre-al-vencer' · cerradoEn · actualizadoEn nuevo · confirmadoPago sigue false
+    OK a-venc-pasado: pagado=true · cerradoPor='cierre-al-vencer' · cerradoEn · actualizadoEn nuevo · confirmadoPago sigue false
+    OK los otros 8 no se tocaron (vence hoy, 00:00 de hoy, vencimiento futuro, ya pagado, Ingreso, ítem false, ítem sin campo, suelto)
+    OK segunda corrida el mismo día: 0 cerradas, 0 documentos reescritos (idempotente)
+    OK corriendo mañana (2026-10-09) cerraría a-hoy, a-hoy-temprano: lo de hoy, el día siguiente
+    OK b-ayer (ítem con cierreAlVencer=false): obligación abierta, estado vencida
+    OK a-hoy (ítem con true, vence hoy): sigue a la vista como "hoy"
+    checklist 2026-10: A por_confirmar · B por_confirmar · C por_confirmar (sin vencimientos ni diaVencimiento, estadoItem no puede vencer: ver el reporte)
+    OK b-ayer entra en la campana como vencida (y en la card de vencidos: vencidasParaResumen)
+    OK docAItemEsperado: A true, C (sin el campo) false
+  === firestore.rules: itemsEsperados.cierreAlVencer (rules-unit-testing) ===
+    OK admin crea un ítem sin cierreAlVencer (como todos los de antes): esperado OK → OK
+    OK admin crea un ítem con cierreAlVencer: true: esperado OK → OK
+    OK admin crea un ítem con cierreAlVencer: "si" (no bool): esperado RECHAZA → RECHAZA
+    OK admin prende cierreAlVencer en un ítem existente: esperado OK → OK
+    OK admin lo apaga: esperado OK → OK
+    OK admin le pone null: esperado RECHAZA → RECHAZA
+    OK un miembro no admin lo prende: esperado RECHAZA → RECHAZA
+  TODO OK
+
+  (Se sacaron del log las líneas de PERMISSION_DENIED que imprime el SDK en los casos que se esperaba
+  que rechazaran.)
+
+════════════════════════════════════════════════════════════════════════════════
+LO QUE HAY QUE SABER
+════════════════════════════════════════════════════════════════════════════════
+
+  1. Confirmar un resumen EL DÍA del vencimiento lo deja pagado y confirmado: confirmadoPagoPorFecha
+     es `vencimiento <= hoy`. El prompt pide mantener ese cálculo, y se mantuvo. Solo antes del
+     vencimiento el total nace a pagar.
+  2. Un total de tarjeta impago y vencido NO pone el ítem "vencido" en el checklist: estadoItem mira
+     vencimientos[0] del match o el diaVencimiento del ítem, y el total no trae ninguno de los dos
+     (los 8 ítems de tarjeta tienen diaVencimiento vacío). Lo vencido se ve por la obligación: card
+     de vencidos, "Falta pagar · N vencidas", campana. En Gastos Fijos el ítem dice "por confirmar".
+     estadoItem no se tocó (pedido del prompt). Si se quiere que el ítem también diga vencido,
+     alcanzaría con escribir vencimientos[0] en el total; no se hizo.
+  3. La campana no tiene un rótulo "vence mañana": las obligaciones del 9/10 entran con el día y el
+     badge "Próximo".
+  4. Sin cierreAlVencer, el 10/10 los 6 totales van a aparecer VENCIDOS (en rojo) hasta que se
+     confirmen (comprobante del débito o "Confirmar pago"). Esa es la opción (a). Para la (b) hay que
+     prender "Dar por pagado al vencer" en los ítems de tarjeta después del deploy; la función corre
+     a las 00:10 y cierra lo que venció antes de ese día.
+  5. Agregados chicos que el prompt no pedía: "· N vencidos" en rojo en "Sin cargar" (antes el
+     banner los contaba y no se quería perder el dato), el chip "pagado al vencer" en la lista de
+     Config, y "Vencido" en vez de "A pagar" en la palabra de estado de una fila vencida.
+  6. No se vio la pantalla en un navegador: la app entra con Google a producción. Compila (tsc, vite
+     build) y los números salen de las funciones reales sobre los datos reales.
+
+════════════════════════════════════════════════════════════════════════════════
+CIERRE
+════════════════════════════════════════════════════════════════════════════════
+
+  tsc cliente: 41 al abrir y 41 al cerrar, misma lista (incluye los 3 scripts nuevos). tsc
+  functions: 0 y 0. Medido con grep -c "error TS".
+
+  Deploy (lo hace Juan), en este orden:
+    1. npx tsx scripts/ejecutarF9188s1.ts y, si da los 6 de arriba, --aplicar. Antes de que termine
+       el 9/10 (ver §1.3).
+    2. npm run build
+    3. firebase deploy --only functions,hosting,firestore:rules
+    4. borrar datos del sitio en el celular
+    5. en Config de esperados, prender "Dar por pagado al vencer" en los ítems que quiera.
+  La función programada es nueva y no necesita el permiso de allUsers: la llama Cloud Scheduler.
