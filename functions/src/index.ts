@@ -45,6 +45,10 @@ import { rescatarCuitContraparte } from './cuit';
 import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
 import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 import { backfillTc } from './tcBackfill';
+// F9.190 §2 — señales de mercado de la reserva: módulo puro, la red se inyecta.
+import { leerMercado, resolverBases, type Bases } from './senalesMercado';
+// F9.190 §1 — prompt v2 de "Actualizar todo" (global primero) y su validador.
+import { buildPromptCompletoV2, buildPromptV3, validarGlobal, validarOportunidades, esRespuestaV2, extraerJson, normalizarCasosPosicion, VERSION_INFORME, VERSION_INFORME_V3 } from './informeV2';
 
 if (!getApps().length) initializeApp();
 
@@ -4002,6 +4006,41 @@ export const eliminarDestino = onCall(
 // ── F9.93 — Análisis IA de patrimonio (por posición y sectorial) ──────────────
 const DUENO_EMAIL = 'jpcofano@gmail.com';
 
+// F9.190 §2 — señales de mercado para la reserva (piso de caja). INFORMATIVO: escribe la lectura
+// en `senalesMercado/ultima` para que la card la muestre; no notifica, no dispara nada (contrato de
+// Patrimonio: "nunca ordena ni dispara alarmas"). Corre solo cuando el dueño toca "Actualizar".
+// Cada fuente que falla viaja con su status y cuerpo crudo: la próxima vez se diagnostica con el
+// mensaje real, no con una hipótesis (lección de CAFCI).
+export const leerSenalesMercado = onCall(
+  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 60 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+    const reiniciarBase = (request.data as { reiniciarBase?: unknown } | null)?.reiniciarBase === true;
+
+    const pedir = async (url: string) => {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      let body: unknown = null;
+      const texto = await res.text();
+      try { body = JSON.parse(texto); } catch { body = texto.slice(0, 300); }
+      return { status: res.status, body };
+    };
+
+    const lectura = await leerMercado(pedir, hoyArgentinaISO(), new Date().toISOString());
+    const ref = db.collection('senalesMercado').doc('ultima');
+    const previo = await ref.get();
+    const bases = resolverBases((previo.data()?.['bases'] as Bases | undefined) ?? null, lectura, reiniciarBase);
+
+    await ref.set({ lectura, bases, actualizadoEn: FieldValue.serverTimestamp() });
+    const errores = (['riesgoPais', 'mervalUsd', 'sp500'] as const)
+      .filter(k => lectura[k].error).map(k => `${k}: ${lectura[k].error}`);
+    if (errores.length) console.error(`[leerSenalesMercado] ${errores.join(' | ')}`);
+    console.log(`[leerSenalesMercado] rp=${lectura.riesgoPais.valor} mervalUsd=${lectura.mervalUsd.valor} spy=${lectura.sp500.valor} reiniciarBase=${reiniciarBase}`);
+    return { lectura, bases };
+  },
+);
+
 // F9.147 — el contexto pasó de cuatro campos (ticker, sector, peso, valorUsd) a la ficha entera:
 // precio con fecha, medias, rango, drawdown con su distribución calibrada, volatilidad,
 // performance en dólares, liquidez, semáforos y `estadoSerie`. El análisis se apoya en datos
@@ -4959,13 +4998,9 @@ Estas instrucciones de formato TIENEN PRIORIDAD sobre cualquier instrucción de 
 // Helper compartido: extrae JSON/markdown de un rawText (usado por analizarConIA e importarAnalisisIA)
 function extraerResultado(modo: 'posicion' | 'sectorial' | 'agenda' | 'lote' | 'completo' | 'manuales', rawText: string): unknown {
   if (modo === 'sectorial') return rawText;
-  // posicion, agenda, lote, completo y manuales: JSON esperado
-  const mdJson = rawText.match(/```json\s*([\s\S]*?)\s*```/);
-  const rawJson = rawText.match(/(\{[\s\S]*\})/);
-  const jsonStr = mdJson ? mdJson[1] : (rawJson ? rawJson[1] : null);
-  if (!jsonStr) return null;
-  try { return JSON.parse(jsonStr); }
-  catch { return null; }
+  // posicion, agenda, lote, completo y manuales: JSON esperado.
+  // F9.191 — tolerante a varios bloques (respuesta partida con "seguí"); ver extraerJson.
+  return extraerJson(rawText);
 }
 
 export const generarPromptIA = onCall(
@@ -4998,7 +5033,14 @@ export const generarPromptIA = onCall(
         : modo === 'lote'
           ? buildPromptLote(contexto)
           : modo === 'completo'
-            ? buildPromptCompleto(contexto)
+            // F9.190 §1 — el cliente nuevo manda `version: 2`. Un bundle viejo cacheado sigue
+            // mandando el contexto de F9.101 y recibe el prompt de siempre en vez de uno v2 vacío.
+            // F9.191 — `version: 3` recibe el prompt con coherencia y oportunidades; un bundle v2
+            // cacheado sigue recibiendo el suyo. F9.194 — v3 viene en dos partes (`contexto.parte`:
+            // 'estrategia' | 'posiciones'); buildPromptV3 despacha.
+            ? (contexto['version'] === VERSION_INFORME_V3 ? buildPromptV3(contexto)
+              : contexto['version'] === VERSION_INFORME ? buildPromptCompletoV2(contexto)
+              : buildPromptCompleto(contexto))
             : buildPromptSectorial(contexto);
 
     // lote y completo ya llevan las instrucciones de formato embebidas en su propio builder
@@ -5114,6 +5156,7 @@ async function importarLote(
         continue;
       }
       const t = item.ticker;
+      normalizarCasosPosicion(item.resultado);   // F9.191 — "opciones" → "acciones"
       const errV = validarResultadoImportado('posicion', item.resultado);
       if (errV) {
         erroresPorTicker.push(`${t} (${errV})`);
@@ -5263,6 +5306,73 @@ export const importarAnalisisIA = onCall(
     if (modo === 'completo') {
       const parsed = resultado as Record<string, unknown>;
       const partes: string[] = [];
+
+      // F9.190 §1 — respuesta v2: global + posiciones.{analisis,notas}. Las posiciones usan la MISMA
+      // forma del lote (mismo validador, misma colección), así la ficha no cambia. El global y las
+      // notas van a `analisisGlobal`. Una respuesta v1 pegada a mano sigue entrando por abajo.
+      if (esRespuestaV2(parsed)) {
+        // F9.194 — el informe v3 llega en DOS respuestas: la parte 1 trae global, oportunidades,
+        // sectorial y agenda; la parte 2 trae posiciones y manuales. Cada sección se importa solo si
+        // vino: una sección ausente no es un error (sí lo era en v2, que traía todo junto).
+        const posObj = parsed['posiciones'] as Record<string, unknown> | undefined;
+        const notas = Array.isArray(posObj?.['notas']) ? posObj!['notas'] : [];
+
+        if ('global' in parsed) {
+          const errG = validarGlobal(parsed['global']);
+          // F9.191 — `oportunidades` (v3) viaja en el mismo doc del global. Fail-soft: si viene mal
+          // formada se guarda el global igual y el resumen lo dice.
+          const esV3 = 'oportunidades' in parsed;
+          const errO = esV3 ? validarOportunidades(parsed['oportunidades']) : null;
+          if (errG) {
+            partes.push(`global: error (${errG})`);
+          } else {
+            await db2.collection('analisisGlobal').add({
+              ...meta,
+              version: esV3 ? VERSION_INFORME_V3 : VERSION_INFORME,
+              resultado: parsed['global'],
+              notas,
+              oportunidades: esV3 && !errO ? parsed['oportunidades'] : null,
+            });
+            partes.push('global: ok');
+          }
+          if (esV3) partes.push(errO ? `oportunidades: error (${errO})` : 'oportunidades: ok');
+        } else if (notas.length > 0) {
+          // Parte 2: las notas de posiciones menores se cuelgan del último global (el de la parte 1).
+          const ult = await db2.collection('analisisGlobal').orderBy('generadoEn', 'desc').limit(1).get();
+          if (!ult.empty) {
+            await ult.docs[0].ref.update({ notas });
+            partes.push(`notas: ${notas.length}`);
+          } else {
+            partes.push('notas: sin global donde guardarlas (corré la parte 1)');
+          }
+        }
+
+        if (posObj) {
+          const items = Array.isArray(posObj['analisis'])
+            ? posObj['analisis'] as Array<{ ticker?: unknown; resultado?: unknown }>
+            : [];
+          if (items.length > 0) {
+            const { importados, erroresPorTicker } = await importarLote(db2, items, meta);
+            partes.push(erroresPorTicker.length > 0
+              ? `posiciones: ${importados} importadas, ${erroresPorTicker.length} con error (${erroresPorTicker.join('; ')})`
+              : `posiciones: ${importados} importadas`);
+          } else {
+            partes.push('posiciones: sin datos');
+          }
+        }
+        if ('sectorial' in parsed) {
+          const rSec = await importarSectorial(db2, parsed['sectorial'], meta);
+          partes.push(rSec.error ? `sectorial: error (${rSec.error})` : 'sectorial: ok');
+        }
+        if ('agenda' in parsed) {
+          const rAge = await importarAgenda(db2, parsed['agenda'], meta);
+          partes.push(rAge.error ? `agenda: error (${rAge.error})` : `agenda: ${rAge.count} eventos`);
+        }
+        if ('manuales' in parsed) partes.push(await importarManuales(db2, parsed['manuales']));
+        const resumen = partes.join(' · ');
+        console.log(`[importarAnalisisIA] completo v2: ${resumen}`);
+        return { ok: true, resumen };
+      }
 
       const loteObj = parsed['lote'] as Record<string, unknown> | undefined;
       const loteItems = Array.isArray(loteObj?.['analisis'])

@@ -172,6 +172,20 @@ service cloud.firestore {
     match /analisisSectorial/{id} {
       allow read, write: if esDueno();
     }
+
+    // F9.190 §1 — análisis global de "Actualizar todo" v2. Lo escribe solo importarAnalisisIA
+    // (Admin SDK); el cliente lee.
+    match /analisisGlobal/{id} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
+
+    // F9.190 §2 — última lectura de las señales de mercado de la reserva. La escribe solo la
+    // callable leerSenalesMercado: una medición, no configuración editable.
+    match /senalesMercado/{id} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
     match /configPatrimonio/{id} {
       allow read, write: if esDueno();
     }

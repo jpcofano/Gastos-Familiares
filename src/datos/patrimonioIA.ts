@@ -87,7 +87,59 @@ export type EventoAgenda = {
   evento: string;
   driver: string;
   porQueImporta: string;
+  // F9.190 §1 — tickers de la cartera que toca el evento. Opcional: las agendas anteriores no lo
+  // traen. Reemplaza a los `proximosEventos` por posición, que el informe v2 ya no pide.
+  tickers?: string[];
 };
+
+// F9.190 §1 — análisis GLOBAL de "Actualizar todo" v2. Lo reportado por el modelo, interpretando
+// los números que le pasó la app (motor de riesgo, política, reserva). No es dato de la app.
+export type AnalisisGlobal = {
+  id: string;
+  generadoEnISO: string;
+  resultado: {
+    diagnostico: string;
+    riesgosPrincipales?: { riesgo: string; exposicionPct?: string }[];
+    rebalanceo?: { lectura?: string; casos?: { caso: string; opciones?: string[]; costo?: string }[] };
+    reserva?: string;
+    mercado?: Record<string, { valor: number | null; fecha: string | null; fuente: string | null } | undefined>;
+    // F9.191 — v3: ¿la política del titular es compatible con la cartera?
+    coherencia?: {
+      veredicto?: string;
+      lectura?: string;
+      caminos?: { caso: string; opciones?: string[]; costo?: string }[];
+      supuestos?: string[];
+    };
+  };
+  notas: { ticker: string; nota: string }[];
+  // F9.191 — v3: lo que FALTA en la cartera. null en respuestas v2.
+  oportunidades: OportunidadesInforme | null;
+};
+
+export type OportunidadesInforme = {
+  faltantes?: {
+    exposicion: string; pesoActual?: number | string; queResuelve?: string;   // número (fracción) desde F9.191; string en respuestas viejas
+    candidatos?: string[]; datoClave?: string; tradeoff?: string;
+  }[];
+  fondeo?: { fuente: string; usd?: number | null }[];
+  tacticas?: { caso: string; opciones?: string[]; costo?: string }[];
+};
+
+export async function cargarUltimoGlobal(): Promise<AnalisisGlobal | null> {
+  const snap = await getDocs(
+    query(collection(db, 'analisisGlobal'), orderBy('generadoEn', 'desc'), limit(1))
+  );
+  if (snap.empty) return null;
+  const d = snap.docs[0];
+  const data = d.data();
+  return {
+    id: d.id,
+    generadoEnISO: toISO(data),
+    resultado: (data.resultado as AnalisisGlobal['resultado']) ?? { diagnostico: '' },
+    notas: Array.isArray(data.notas) ? (data.notas as AnalisisGlobal['notas']) : [],
+    oportunidades: (data.oportunidades as OportunidadesInforme | null | undefined) ?? null,
+  };
+}
 
 export type AgendaMacro = {
   id: string;
@@ -271,7 +323,7 @@ export async function importarAnalisisIA(
 
 // ── F9.99.3: helpers de sectorial ─────────────────────────────────────────────
 
-export type Driver = 'energia_ar' | 'cer_pesos' | 'soberano' | 'cripto' | 'tech_global' | 'otro';
+export type Driver = 'energia_ar' | 'cer_pesos' | 'soberano' | 'bancos_ar' | 'cripto' | 'tech_global' | 'otro';
 
 export type SeccionSectorial = { driver: string; titulo: string; cuerpo: string };
 
@@ -297,12 +349,15 @@ export function tickerADriver(ticker: string, sectorDisp: string): Driver {
   if (/^(GD|AL)\d{2}/.test(t)) return 'soberano';
   if (/^(LECAP|LEDES|LECER|LELINK|DICA|TDF|TZVD|TDA|TVP)/.test(t)) return 'cer_pesos';
   if (/^(TRAN|TGSU2|TGSU|PAMP|VIST|YPFD|YPF|CEPU|MOLI)$/.test(t)) return 'energia_ar';
+  // F9.191 — bancos con sección propia en el sectorial v3 (antes caían en 'otro').
+  if (/^(BMA|GGAL|SUPV|BBAR|VALO)$/.test(t)) return 'bancos_ar';
   if (/^(ACN|GLOB|CVX|VZ|MSFT|GOOGL|GOOG|AMZN|META|NVDA|AAPL)$/.test(t) || t === 'B') return 'tech_global';
   if (/cripto|defi|btc|eth/.test(s)) return 'cripto';
   if (/soberano|bono usd|global/.test(s)) return 'soberano';
   if (/energi|tarifas|gas|electr|util|petr|oil/.test(s)) return 'energia_ar';
   if (/peso|cer|ajust|local|captur/.test(s)) return 'cer_pesos';
   if (/tech|eeuu/.test(s)) return 'tech_global';
+  if (/banc/.test(s)) return 'bancos_ar';
   return 'otro';
 }
 

@@ -20,6 +20,7 @@ import {
 import {
   analizarPosicion, analizarSectorial, generarAgenda, analizarManuales,
   cargarAnalisisPosicion, cargarTodosLosAnalisis, cargarUltimoSectorial, cargarUltimaAgenda,
+  cargarUltimoGlobal, type AnalisisGlobal,
   cargarConfigIA, guardarConfigIA,
   normalizarEventoProximo,
   generarPromptIA, importarAnalisisIA,
@@ -61,6 +62,12 @@ import {
   type Declaracion, type Exposicion,
 } from '../datos/patrimonioDeclaraciones';
 import PatrimonioIngesta from './PatrimonioIngesta';
+// F9.190 — informe v2 (contexto con el motor de riesgo) y señales de mercado de la reserva.
+import {
+  contextoInformeV3, contextoPosicionesV3, evaluarSenales, UMBRALES_SENALES,
+  type SenalEvaluada, type LecturaMercado, type BasesMercado,
+} from '../datos/patrimonioInformeV2';
+import { cargarUltimaLecturaSenales, actualizarSenales } from '../datos/patrimonioSenales';
 // F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
 // reusable; la lógica no cambió.
 import { calcMetrics, sectorDisplay, SECTOR_DISPLAY, manualToPosicion } from '../datos/patrimonioMetricas';
@@ -68,7 +75,7 @@ import { calcMetrics, sectorDisplay, SECTOR_DISPLAY, manualToPosicion } from '..
 // movieron al módulo y conviven con los sistémicos por beta. Una sola fuente de números.
 import {
   ESCENARIOS, calcEscenarios, calcBrecha, calcMixObjetivo, violacionesBandas,
-  RIESGO_DEFAULTS, ESCENARIO_TITULAR, BLOQUE_LABEL, inferenciasDeBloque, posicionesInvertibles,
+  RIESGO_DEFAULTS, ESCENARIO_TITULAR, BLOQUE_LABEL, inferenciasDeBloque, posicionesInvertibles, bloqueDe,
   exposicionArgentina, FACTOR_LABEL, FACTOR_AMBIGUO, FACTOR_ENERGIA, type Factor,
   exposicionContraparte, escenariosContraparteDe, CUSTODIA_LABEL, type Custodia,
   type ResultadoEscenario, type ViolacionBanda, type MixObjetivo, type TopesRiesgo, type Bloque,
@@ -968,6 +975,150 @@ function RiesgoCard({ posiciones, manuales, topes, configurado, factores }: {
 }
 
 // ── Solapa Resumen ────────────────────────────────────────────────────────────
+// ── F9.190 §2 — Reserva (piso de caja) y señales de mercado ──────────────────
+// INFORMATIVA, como el resto de Patrimonio: muestra la caja contra el piso que fijó el titular y tres
+// señales de mercado contra sus umbrales. No notifica ni sugiere una acción por sí sola: los casos
+// condicionales son texto fijo acordado con el titular (13-oct-2026), no una salida del sistema.
+const NIVEL_SENAL: Record<0 | 1 | 2, { color: string; label: string }> = {
+  0: { color: 'var(--gf-income)', label: 'lejos del umbral' },
+  1: { color: '#d97706', label: 'nivel 1' },
+  2: { color: 'var(--gf-expense)', label: 'nivel 2' },
+};
+
+function ReservaCard({ posiciones, manuales, topes }: {
+  posiciones: Posicion[];
+  manuales: PosicionManual[];
+  topes: TopesRiesgo;
+}) {
+  const $ = useDinero();
+  const [estado, setEstado] = useState<{ lectura: LecturaMercado | null; bases: BasesMercado | null } | null>(null);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
+  const [leyendo, setLeyendo] = useState(false);
+
+  useEffect(() => {
+    cargarUltimaLecturaSenales()
+      .then(setEstado)
+      .catch(e => { console.error('[senales] no se pudo leer:', e); setErrorCarga(String((e as Error)?.message ?? e)); });
+  }, []);
+
+  async function leer(reiniciarBase: boolean) {
+    setLeyendo(true);
+    setErrorCarga(null);
+    try {
+      setEstado(await actualizarSenales(reiniciarBase));
+    } catch (e) {
+      // Crudo, sin interpretar la causa (lección de CAFCI).
+      setErrorCarga(String((e as Error)?.message ?? e));
+    } finally {
+      setLeyendo(false);
+    }
+  }
+
+  const todas = posicionesInvertibles(posiciones, manuales);
+  const total = todas.reduce((s, p) => s + p.valorUsd, 0);
+  if (total <= 0) return null;
+  const cajaUsd = todas.filter(p => bloqueDe(p) === 'cash').reduce((s, p) => s + p.valorUsd, 0);
+  const caja = cajaUsd / total;
+  const piso = topes.pisoCajaPct;
+  const faltante = Math.max(0, (piso - caja) * total);
+  const senales: SenalEvaluada[] = estado ? evaluarSenales(estado.lectura, estado.bases) : [];
+  const fmtVal = (s: SenalEvaluada) => s.valor === null ? '—'
+    : s.id === 'riesgoPais' ? `${Math.round(s.valor)} pb`
+    : s.valor.toLocaleString('es-AR', { maximumFractionDigits: s.id === 'mervalUsd' ? 0 : 2 });
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Reserva y señales de mercado</div>
+      <div style={{ fontSize: 11, color: 'var(--color-text-sec)', lineHeight: 1.45 }}>
+        Caja (efectivo, money market en dólares y stablecoins) contra el piso de tu política de riesgo. Un money market en pesos no cuenta: es renta fija en pesos.
+      </div>
+
+      <div style={{ marginTop: 10, padding: '11px 12px', borderRadius: 12, background: 'var(--gf-gray-100)' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 700, flex: 1 }}>Caja {pct(caja)} · piso {pct(piso)}</span>
+          {!$.privado && <span style={{ fontSize: 12, color: 'var(--color-text-sec)' }}>{$.usd(cajaUsd)}</span>}
+        </div>
+        <div style={{ fontSize: 11.5, marginTop: 4, color: faltante > 0 ? 'var(--gf-out)' : 'var(--color-text-sec)' }}>
+          {faltante > 0
+            ? <>Faltan {$.usd(faltante)} para el piso.</>
+            : 'La caja está en el piso o por encima.'}
+          {' '}El piso se cambia en Configuración › Política de riesgo.
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700 }}>Señales de mercado</div>
+      {!estado?.lectura && !errorCarga && (
+        <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', marginTop: 4 }}>
+          Todavía no se leyeron. La primera lectura fija la base de las caídas (Merval en USD y S&P).
+        </div>
+      )}
+      {senales.map(s => (
+        <div key={s.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '7px 0', borderBottom: '1px solid var(--gf-gray-100)' }}>
+          <span style={{
+            width: 9, height: 9, borderRadius: 5, marginTop: 4, flexShrink: 0,
+            background: s.nivel === null ? 'transparent' : NIVEL_SENAL[s.nivel].color,
+            border: s.nivel === null ? '1.5px solid var(--gf-gray-400)' : 'none',
+          }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>{s.etiqueta}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtVal(s)}</span>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--color-text-sec)', marginTop: 2, lineHeight: 1.4 }}>
+              {s.variacion !== null && <>{s.variacion >= 0 ? '+' : ''}{(s.variacion * 100).toFixed(1)}% desde la base del {s.base?.fecha ? fmtFecha(s.base.fecha) : '—'} · </>}
+              umbral {s.umbrales}
+              {s.nivel !== null && <> · {NIVEL_SENAL[s.nivel].label}</>}
+              {s.fecha && <> · dato {fmtFecha(s.fecha)}</>}
+            </div>
+            {s.error && (
+              <div style={{ fontSize: 10.5, color: 'var(--gf-out)', marginTop: 2, wordBreak: 'break-word', userSelect: 'text' }}>
+                Sin dato: {s.error}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+      {errorCarga && (
+        <div style={{ fontSize: 11, color: 'var(--gf-out)', marginTop: 6, wordBreak: 'break-word', userSelect: 'text' }}>
+          No se pudieron leer las señales: {errorCarga}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+        <button
+          onClick={() => leer(false)}
+          disabled={leyendo}
+          style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: leyendo ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: leyendo ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: leyendo ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+        >{leyendo ? 'Leyendo…' : 'Actualizar señales'}</button>
+        {estado?.lectura && (
+          <button
+            onClick={() => { if (confirm('¿Fijar la base de las caídas en el valor de hoy?')) leer(true); }}
+            disabled={leyendo}
+            style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'transparent', color: 'var(--color-text-sec)', fontSize: 12, fontWeight: 700, cursor: leyendo ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+          >Reiniciar base</button>
+        )}
+      </div>
+      {estado?.lectura && (
+        <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 6 }}>
+          Última lectura: {fmtFecha(estado.lectura.leidoEnISO.slice(0, 10))}
+        </div>
+      )}
+
+      <details style={{ marginTop: 10 }}>
+        <summary style={{ fontSize: 11.5, fontWeight: 600, cursor: 'pointer', color: 'var(--color-text-sec)' }}>
+          Qué haría en cada caso
+        </summary>
+        <div style={{ fontSize: 11, color: 'var(--color-text-sec)', lineHeight: 1.5, marginTop: 6 }}>
+          <div>· Si el riesgo país pasa {UMBRALES_SENALES.riesgoPais[0]} pb o el Merval en USD cae {UMBRALES_SENALES.mervalUsdCaida[0] * 100}% → las opciones serían usar hasta un tercio de la reserva (GD30 / ETF amplio / reguladas castigadas) o esperar confirmación. Trade-off: entrar temprano vs. perder parte del rebote.</div>
+          <div>· Si pasa {UMBRALES_SENALES.riesgoPais[1]} pb o el Merval cae {UMBRALES_SENALES.mervalUsdCaida[1] * 100}% → las opciones serían usar otro tercio o sostener. Trade-off: más exposición en la baja vs. liquidez para una caída mayor.</div>
+          <div>· Si el S&P cae {UMBRALES_SENALES.sp500Caida[0] * 100}% → las opciones serían destinar parte al ETF amplio o esperar. Trade-off: diversificar en la baja vs. caída adicional.</div>
+          <div>· El último tercio queda guardado salvo una necesidad real. La decisión es tuya: esto no es una orden.</div>
+        </div>
+      </details>
+    </Card>
+  );
+}
+
 function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
@@ -1145,6 +1296,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
       {/* 4b. Riesgo y escenarios (F9.116) */}
       <DeclaracionesCard posiciones={posiciones} manuales={manuales} factores={factores} />
       <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} factores={factores} />
+      <ReservaCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} />
 
       {/* 5. Informe PDF */}
       <Card>
@@ -2187,7 +2339,7 @@ function AnalisisIASection({ ticker, totalUsd, totalPortafolio, sectorDisp, iden
                 {analisis.resultado.queHariaEnCadaCaso.map((c, i) => (
                   <div key={i} style={{ background: 'var(--gf-gray-50)', border: '1px solid var(--gf-gray-100)', borderRadius: 6, padding: '6px 10px' }}>
                     <div style={{ fontSize: 11.5, fontWeight: 700, marginBottom: 2 }}>{c.caso}</div>
-                    {c.acciones.map((a, j) => (
+                    {(c.acciones ?? []).map((a, j) => (
                       <div key={j} style={{ fontSize: 11.5, color: 'var(--color-text-sec)', padding: '1px 0' }}>· {a}</div>
                     ))}
                     {c.costo && (
@@ -2259,6 +2411,7 @@ const DRIVER_CHIP: Record<string, string> = {
   cer_pesos: 'CER', soberano: 'Soberano', tasas_ar: 'Tasas AR',
   tasas_global: 'Fed', cripto: 'Cripto', energia_ar: 'Tarifas',
   tech_global: 'Tech', resultados: 'Earnings', impositivo: 'Fiscal', otro: 'Macro',
+  bancos_ar: 'Bancos',
 };
 
 type EventoCal = {
@@ -2320,7 +2473,8 @@ function buildEventosCal(
         cuandoDisplay: display,
         texto: e.evento,
         chip: DRIVER_CHIP[e.driver] ?? 'Macro',
-        subtitulo: e.porQueImporta,
+        // F9.190 §1 — la agenda v2 dice a qué tickers toca (reemplaza los eventos por posición).
+        subtitulo: e.tickers?.length ? `${e.tickers.join(' · ')} — ${e.porQueImporta}` : e.porQueImporta,
         isPast: ms !== null && ms < hace30,
       });
     }
@@ -2443,7 +2597,130 @@ function CalendarioCard({ analisisCache, agenda, configIA, generandoAgenda, onGe
 }
 
 // ── Solapa Research ───────────────────────────────────────────────────────────
-function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, onChatLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda, onAbrirChat, onActualizarTodoChat, onActualizarTodoApi, actualizandoTodo, resultadoActualizarTodo }: {
+// ── F9.190 §1 — Análisis global ("Actualizar todo" v2) ───────────────────────
+// Lo REPORTADO por el modelo interpretando los números de la app: va marcado como tal, igual que los
+// fundamentals de F9.147. Los números de la app siguen estando en las cards de Resumen.
+function GlobalCard({ global }: { global: AnalisisGlobal | null }) {
+  if (!global) {
+    return (
+      <Card>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>Análisis global</div>
+        <div style={{ fontSize: 11.5, color: 'var(--color-text-sec)', marginTop: 4, lineHeight: 1.45 }}>
+          Todavía no hay. Sale de "Actualización integral › Chat".
+        </div>
+      </Card>
+    );
+  }
+  const r = global.resultado;
+  const sub = { fontSize: 11.5, fontWeight: 700, marginTop: 10 } as const;
+  const txt = { fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.5 } as const;
+  const dias = Math.floor((Date.now() - new Date(global.generadoEnISO).getTime()) / 86400000);
+  const mercado = r.mercado ? Object.entries(r.mercado).filter(([, v]) => v && v.valor !== null) : [];
+  // F9.191 — estilos compartidos por coherencia, rebalanceo y oportunidades.
+  const caja = { marginTop: 6, padding: '8px 10px', borderRadius: 10, background: 'var(--gf-gray-100)' } as const;
+  const nota = { fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 } as const;
+  const op = global.oportunidades;
+  return (
+    <Card>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, flex: 1 }}>Análisis global</span>
+        <MarcaOrigen tipo="reportado" />
+        <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)' }}>hace {dias} d</span>
+      </div>
+      <div style={{ ...txt, marginTop: 6 }}>{renderInline(r.diagnostico)}</div>
+      {r.coherencia && (
+        <>
+          <div style={sub}>
+            Política vs. cartera{r.coherencia.veredicto ? ` · ${r.coherencia.veredicto}` : ''}
+          </div>
+          {r.coherencia.lectura && <div style={txt}>{renderInline(r.coherencia.lectura)}</div>}
+          {r.coherencia.caminos?.map((c, i) => (
+            <div key={i} style={caja}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{c.caso}</div>
+              {c.opciones?.map((o, j) => <div key={j} style={txt}>· {o}</div>)}
+              {c.costo && <div style={nota}>{c.costo}</div>}
+            </div>
+          ))}
+          {r.coherencia.supuestos?.length ? (
+            <div style={{ ...nota, marginTop: 6 }}>Supuestos del modelo (no hay perfil cargado): {r.coherencia.supuestos.join(' · ')}</div>
+          ) : null}
+        </>
+      )}
+      {r.riesgosPrincipales?.length ? (
+        <>
+          <div style={sub}>Riesgos principales</div>
+          {r.riesgosPrincipales.map((x, i) => (
+            <div key={i} style={{ ...txt, display: 'flex', gap: 8 }}>
+              <span style={{ flex: 1 }}>· {x.riesgo}</span>
+              {x.exposicionPct && <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{x.exposicionPct}</span>}
+            </div>
+          ))}
+        </>
+      ) : null}
+      {r.rebalanceo && (
+        <>
+          <div style={sub}>Rebalanceo</div>
+          {r.rebalanceo.lectura && <div style={txt}>{r.rebalanceo.lectura}</div>}
+          {r.rebalanceo.casos?.map((c, i) => (
+            <div key={i} style={{ marginTop: 6, padding: '8px 10px', borderRadius: 10, background: 'var(--gf-gray-100)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{c.caso}</div>
+              {c.opciones?.map((o, j) => <div key={j} style={txt}>· {o}</div>)}
+              {c.costo && <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2 }}>{c.costo}</div>}
+            </div>
+          ))}
+        </>
+      )}
+      {op && (op.faltantes?.length || op.tacticas?.length) ? (
+        <>
+          <div style={sub}>Faltantes y oportunidades</div>
+          {op.faltantes?.map((f, i) => (
+            <div key={i} style={caja}>
+              <div style={{ display: 'flex', gap: 8, fontSize: 12, fontWeight: 600 }}>
+                <span style={{ flex: 1 }}>{f.exposicion}</span>
+                {f.pesoActual !== undefined && f.pesoActual !== null && (
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    hoy {typeof f.pesoActual === 'number' ? `${(f.pesoActual * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 })}%` : f.pesoActual}
+                  </span>
+                )}
+              </div>
+              {f.queResuelve && <div style={txt}>{f.queResuelve}</div>}
+              {f.candidatos?.length ? <div style={txt}>Candidatos: {f.candidatos.join(' · ')}</div> : null}
+              {f.datoClave && <div style={nota}>{f.datoClave}</div>}
+              {f.tradeoff && <div style={nota}>Trade-off: {f.tradeoff}</div>}
+            </div>
+          ))}
+          {op.fondeo?.length ? (
+            <div style={{ ...txt, marginTop: 6 }}>
+              Fondeo posible: {op.fondeo.map(x => x.usd ? `${x.fuente} (USD ${Math.round(x.usd).toLocaleString('es-AR')})` : x.fuente).join(' · ')}
+            </div>
+          ) : null}
+          {op.tacticas?.map((c, i) => (
+            <div key={i} style={caja}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{c.caso}</div>
+              {c.opciones?.map((o, j) => <div key={j} style={txt}>· {o}</div>)}
+              {c.costo && <div style={nota}>{c.costo}</div>}
+            </div>
+          ))}
+        </>
+      ) : null}
+      {r.reserva && (<><div style={sub}>Reserva</div><div style={txt}>{r.reserva}</div></>)}
+      {mercado.length > 0 && (
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 8, lineHeight: 1.4 }}>
+          Mercado según el modelo: {mercado.map(([k, v]) => `${k} ${v!.valor}${v!.fecha ? ` (${v!.fecha})` : ''}`).join(' · ')}
+        </div>
+      )}
+      {global.notas.length > 0 && (
+        <>
+          <div style={sub}>Notas de posiciones menores</div>
+          {global.notas.map((n, i) => <div key={i} style={txt}><strong>{n.ticker}</strong> — {n.nota}</div>)}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLote, loteProgreso, onGenerarSectorial, onAnalizarLote, onChatLote, analisisCache, agenda, generandoAgenda, onGenerarAgenda, onAbrirChat, onActualizarTodoChat, onActualizarTodoApi, actualizandoTodo, resultadoActualizarTodo, global }: {
+  global: AnalisisGlobal | null;
   M: PatMetrics;
   configIA: ConfigIA;
   sectorial: AnalisisSectorial | null;
@@ -2458,7 +2735,7 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
   generandoAgenda: boolean;
   onGenerarAgenda: () => void;
   onAbrirChat: (modo: ModoIA, ticker: string | undefined, contexto: Record<string, unknown>) => void;
-  onActualizarTodoChat: () => void;
+  onActualizarTodoChat: (parte: 'estrategia' | 'posiciones') => void;
   onActualizarTodoApi: () => void;
   actualizandoTodo: { idx: number; total: number; label: string } | null;
   resultadoActualizarTodo: string[] | null;
@@ -2486,13 +2763,17 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <span style={{ fontSize: 13, fontWeight: 700 }}>Actualización integral</span>
           <div style={{ display: 'flex', gap: 7 }}>
-            <button
-              onClick={onActualizarTodoChat}
-              disabled={!!actualizandoTodo}
-              style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'transparent', color: 'var(--color-text-sec)', fontSize: 12, fontWeight: 700, cursor: actualizandoTodo ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
-            >
-              Chat
-            </button>
+            {/* F9.194 — el informe por chat va en dos partes, en este orden. */}
+            {(['estrategia', 'posiciones'] as const).map((parte, i) => (
+              <button
+                key={parte}
+                onClick={() => onActualizarTodoChat(parte)}
+                disabled={!!actualizandoTodo}
+                style={{ padding: '7px 10px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'transparent', color: 'var(--color-text-sec)', fontSize: 12, fontWeight: 700, cursor: actualizandoTodo ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+              >
+                Chat {i + 1} · {parte === 'estrategia' ? 'Estrategia' : 'Posiciones'}
+              </button>
+            ))}
             <button
               onClick={onActualizarTodoApi}
               disabled={!configIA.habilitado || !!actualizandoTodo}
@@ -2513,13 +2794,18 @@ function ResearchTab({ M, configIA, sectorial, generandoSectorial, analizandoLot
           </div>
         )}
         <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', marginTop: 6, lineHeight: 1.4 }}>
-          Análisis de lote + panorama sectorial + agenda macro + valuación de manuales + sincronizar CAFCI, en un solo paso.
+          Chat en dos partes, en orden. 1 · Estrategia: análisis global con el motor de riesgo, coherencia con tu
+          política, faltantes y oportunidades (de una lista blanca), sectorial y agenda. 2 · Posiciones: una ficha por
+          posición de 2% o más y manuales, usando lo que dejó la parte 1. Sincroniza CAFCI al importar.
+          API: lote + sectorial + agenda + manuales + CAFCI, sin análisis global.
           {' '}Chat: costo cero · API: consume, con progreso por etapa
           {!configIA.habilitado && <span style={{ marginLeft: 5 }}>· activar IA en Configuración para usar API</span>}
         </div>
       </Card>
 
       {/* Calendario de eventos */}
+      <GlobalCard global={global} />
+
       <CalendarioCard
         analisisCache={analisisCache}
         agenda={agenda}
@@ -3910,7 +4196,7 @@ function ModalPromptChat({
   const [error, setError] = useState<string | null>(null);
   const [importado, setImportado] = useState(false);
   const [resumenImportado, setResumenImportado] = useState<string | null>(null);
-  const nombreModo = modo === 'posicion' ? `Posición ${ticker}` : modo === 'sectorial' ? 'Sectorial' : modo === 'agenda' ? 'Agenda macro' : modo === 'completo' ? 'Actualización integral' : 'Lote (toda la cartera)';
+  const nombreModo = modo === 'posicion' ? `Posición ${ticker}` : modo === 'sectorial' ? 'Sectorial' : modo === 'agenda' ? 'Agenda macro' : modo === 'completo' ? (contexto['parte'] === 'posiciones' ? 'Informe 2/2 · Posiciones' : 'Informe 1/2 · Estrategia') : 'Lote (toda la cartera)';
 
   useEffect(() => {
     setCargando(true);
@@ -4073,6 +4359,7 @@ export default function Patrimonio() {
   const [analizandoLote,     setAnalizandoLote]     = useState(false);
   const [loteProgreso,       setLoteProgreso]       = useState<{ actual: number; total: number; errores: string[] } | null>(null);
   const [agenda,             setAgenda]             = useState<AgendaMacro | null>(null);
+  const [analisisGlobal,     setAnalisisGlobal]     = useState<AnalisisGlobal | null>(null);
   const [generandoAgenda,    setGenerandoAgenda]    = useState(false);
 
   const [decisiones,          setDecisiones]          = useState<DecisionPatrimonio[]>([]);
@@ -4132,6 +4419,7 @@ export default function Patrimonio() {
     cargarConfigIA().then(setConfigIA);
     cargarUltimoSectorial().then(setSectorial);
     cargarUltimaAgenda().then(setAgenda);
+    cargarUltimoGlobal().then(setAnalisisGlobal).catch(e => console.error('[analisisGlobal] no se pudo leer:', e));
     cargarTodosLosAnalisis().then(lista => {
       const cache: Record<string, AnalisisPosicion> = {};
       for (const a of lista) cache[a.ticker] = a;
@@ -4401,49 +4689,88 @@ export default function Patrimonio() {
     });
   }
 
-  // F9.101 — contexto combinado para el modo 'completo' (lote + sectorial + agenda + manuales).
-  function buildContextoCompleto(): Record<string, unknown> {
+  // F9.190 §1 — contexto del informe v2: los números del motor de riesgo (los mismos que pinta
+  // "Riesgo y escenarios"), la reserva y la materialidad ya resuelta. Asincrónico porque necesita
+  // declaraciones, custodias y la última lectura de señales; cada una es fail-soft: si falla, el
+  // informe sale sin ese dato en vez de no salir.
+  // F9.194 — el informe v3 va en dos partes: 'estrategia' (global, oportunidades, sectorial,
+  // agenda) y 'posiciones' (fichas + manuales, con el panorama que dejó la parte 1).
+  async function buildContextoCompleto(parte: 'estrategia' | 'posiciones' = 'estrategia'): Promise<Record<string, unknown>> {
     if (!M) return {};
     const byTickerMap = buildByTickerMap();
-    const posicionesLote = Object.entries(byTickerMap).map(([t, v]) => ({
-      ticker: t, sector: v.sectorDisp, pesoEnCartera: pct(v.totalUsd / (M.total || 1)), valorUsd: Math.round(v.totalUsd),
-    }));
-    const exposicion: Record<string, string> = {};
-    for (const [sector, val] of Object.entries(M.bySector)) exposicion[sector] = pct(val / (M.total || 1));
-    const manuales = posicionesManuales.map(m => ({
-      id: m.id, ticker: m.ticker, nombre: m.nombre, cantidad: m.cantidad, valorUsd: m.valorUsd, fechaValuacion: m.fechaValuacion,
-    }));
-    return {
-      posiciones: posicionesLote,
-      global: { total: Math.round(M.total), paisAr: pct(M.paisAr), cripto: pct(M.cripto), hhi: M.hhi },
-      bySector: M.bySector,
-      byTipo: M.byTipo,
-      exposicion,
-      total: Math.round(M.total),
-      paisAr: pct(M.paisAr),
-      cripto: pct(M.cripto),
-      manuales,
+    const sectorDe: Record<string, string> = {};
+    for (const [t, v] of Object.entries(byTickerMap)) sectorDe[t] = v.sectorDisp;
+    const [decls, custodias, senales] = await Promise.all([
+      cargarDeclaraciones().catch(e => { console.error('[informe v2] declaraciones:', e); return [] as Declaracion[]; }),
+      cargarCustodiaCuenta().catch(e => { console.error('[informe v2] custodias:', e); return {} as Record<string, Custodia>; }),
+      // F9.191 — si no hay lectura o tiene más de 6 h, se lee ahora: así el modelo copia el mercado
+      // de la app en vez de gastar búsquedas (y no aparecen dos valores para el mismo dato).
+      // Fail-soft: si la lectura nueva falla, se usa la guardada.
+      // La parte 2 no usa el mercado: no se lee.
+      parte === 'posiciones' ? Promise.resolve(null) : cargarUltimaLecturaSenales()
+        .then(async est => {
+          const t = est.lectura?.leidoEnISO ? new Date(est.lectura.leidoEnISO).getTime() : 0;
+          if (Date.now() - t < 6 * 3600_000) return est;
+          return actualizarSenales(false).catch(e => { console.error('[informe v3] actualizar señales:', e); return est; });
+        })
+        .catch(e => { console.error('[informe v2] señales:', e); return null; }),
+    ]);
+    const exposiciones = intentar(() => clasificarExposiciones(
+      posicionesInvertibles(posiciones, posicionesManuales), decls, {
+        factores, custodias,
+        labelFactor: (f: Factor) => FACTOR_LABEL[f],
+        labelBloque: (b: Bloque) => BLOQUE_LABEL[b],
+      }), 'clasificarExposiciones') ?? [];
+    // F9.191 — contexto v3: suma la lectura de mercado cruda (el modelo la copia en vez de
+    // buscarla), umbrales, contribución por bloque de los peores escenarios y universo invertible.
+    const entrada = {
+      fecha: new Date().toISOString().slice(0, 10),
+      posiciones, manuales: posicionesManuales,
+      topes: topesRiesgo, riesgoConfigurado,
+      factores, exposiciones, sectorDe, hhi: M.hhi,
+      senales: null,
+      lectura: senales?.lectura ?? null,
+      bases: senales?.bases ?? null,
+      perfil: null,   // pendiente F9.192: UI de perfil del titular
     };
+    if (parte === 'estrategia') return contextoInformeV3(entrada);
+
+    // Parte 2: lo último importado de la parte 1, leído fresco de Firestore (no del estado, que
+    // puede no haberse refrescado todavía). Fail-soft: sin panorama, el prompt lo avisa.
+    const [glob, sec, age] = await Promise.all([
+      cargarUltimoGlobal().catch(() => null),
+      cargarUltimoSectorial().catch(() => null),
+      cargarUltimaAgenda().catch(() => null),
+    ]);
+    return contextoPosicionesV3(entrada, {
+      generadoEnISO: glob?.generadoEnISO ?? sec?.generadoEnISO ?? null,
+      diagnostico: glob?.resultado.diagnostico ?? null,
+      sectorial: sec?.resultado ?? null,
+      agenda: age ? age.eventos.map(ev => ({ fecha: ev.fecha, evento: ev.evento, tickers: ev.tickers })) : null,
+    });
   }
 
-  function handleAbrirChatCompleto() {
+  async function handleAbrirChatCompleto(parte: 'estrategia' | 'posiciones' = 'estrategia') {
     if (!M) return;
+    const contexto = await buildContextoCompleto(parte);
     setModalPromptChat({
       modo: 'completo',
-      contexto: buildContextoCompleto(),
+      contexto,
       onDone: () => {
         Promise.all([
           cargarTodosLosAnalisis(),
           cargarUltimoSectorial(),
           cargarUltimaAgenda(),
           cargarPosicionesManuales(),
-        ]).then(([analisis, sec, age, manuales]) => {
+          cargarUltimoGlobal().catch(() => null),
+        ]).then(([analisis, sec, age, manuales, glob]) => {
           const cache: Record<string, AnalisisPosicion> = {};
           for (const a of analisis) if (a.ticker) cache[a.ticker] = a;
           setAnalisisCache(prev => ({ ...prev, ...cache }));
           setSectorial(sec);
           setAgenda(age);
           setPosicionesManuales(manuales);
+          setAnalisisGlobal(glob);
         });
         handleSincronizarCafci();
       },
@@ -4878,6 +5205,7 @@ export default function Patrimonio() {
               onActualizarTodoApi={handleActualizarTodoApi}
               actualizandoTodo={actualizandoTodo}
               resultadoActualizarTodo={resultadoActualizarTodo}
+              global={analisisGlobal}
             />
           )}
           {tab === 'config' && (
