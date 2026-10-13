@@ -1,0 +1,192 @@
+F9.189 — Ingesta de Patrimonio: "para revisar" accionable, re-ingesta sin duplicar, y el prompt que marca de más
+
+Base: origin/main @ f5878a7 (F9.188), confirmada al abrir. Prompt en
+docs/prompts/F9.189-ingesta-patrimonio-revisar-y-reingesta.md.
+Nada escrito en producción: §0 y V4 son de solo lectura (Admin SDK); V1–V3 y V5 corrieron contra el
+emulador de Firestore con el código real de src/ (scripts/verificarF9189emu.ts).
+
+════════════════════════════════════════════════════════════════════════════════
+RESUMEN
+════════════════════════════════════════════════════════════════════════════════
+
+  · Premisas verificadas contra el código: confirmarIngesta creaba posiciones con ID automático sin
+    borrar las de la fecha; "para revisar" solo de lectura; el checksum culpaba al TC; titular null →
+    revisar en el prompt; BCMMUSDA sin sector reconocido → accionesAr / sin_clasificar.
+  · §0.1: NO hay corridas duplicadas en producción. Las 6 fechas cuadran. No hay nada que remediar.
+  · §0.2: la corrida del 2026-10-13 YA ESTÁ cargada: 49 posiciones, 13 con revisar (no 17 de 18 —
+    ver nota). 12 son titular=null (Bitfinex, Nexo, Globant); la única con sentido es BCMMUSDA.
+    Además viene con DOS filas de Globant (ver §4.2).
+  · §1: confirmarIngesta borra las posiciones de esa fecha y escribe las nuevas en el MISMO batch.
+    Guard > 450 operaciones con error explícito. Card "Ya hay una corrida del DD/MM/AAAA con N
+    posiciones. Confirmar la reemplaza." y título del diff según el caso.
+  · §2: motivo_revisar opcional en el contrato, validado, persistido, exportado. Paso 3 lo muestra
+    (o "sin motivo indicado"); Tenencias lo muestra bajo REVISAR.
+  · §3: toggle OK por fila + "Marcar todas OK"/"Desmarcar todas"; las OK se guardan revisar:false +
+    revisadoEnIngesta:true; botón "Confirmar y guardar · N quedan para revisar". Checksum sin causa
+    afirmada.
+  · §4: prompt sin "titular null → revisar", con motivo_revisar obligatorio, Globant Portfolio en una
+    fila, BCMMUSDA = fci/money_market_usd. Riesgo: money_market_usd → bloque cash, factor cash.
+  · tsc cliente 41 → 41 (misma lista, diff vacío). functions 0 → 0. npm run build OK.
+  · Sin cambios en firestore.rules, storage.rules ni functions/ → deploy solo hosting.
+
+════════════════════════════════════════════════════════════════════════════════
+§0 — MEDICIÓN (scripts/verificarF9189.ts, solo lectura)
+════════════════════════════════════════════════════════════════════════════════
+
+0.1 Corridas duplicadas
+
+  OK  2026-07-01  esperado 50 pos / U$S 102.549  ·  encontrado 50 pos / U$S 102.549
+  OK  2026-07-17  esperado 50 pos / U$S 103.815  ·  encontrado 50 pos / U$S 103.815
+  OK  2026-08-14  esperado 47 pos / U$S 97.744   ·  encontrado 47 pos / U$S 97.744
+  OK  2026-08-17  esperado 47 pos / U$S 100.123  ·  encontrado 47 pos / U$S 100.123
+  OK  2026-09-03  esperado 46 pos / U$S 107.738  ·  encontrado 46 pos / U$S 107.738
+  OK  2026-10-13  esperado 49 pos / U$S 103.817  ·  encontrado 49 pos / U$S 103.817
+  Fechas que no cuadran: ninguna. Posiciones sin snapshot: ninguna.
+
+  → El paso 2 del post-deploy ("re-subir el .txt correcto de cada fecha duplicada") NO aplica.
+
+0.2 Corrida 2026-10-13
+
+  Snapshot existe · 49 posiciones · 13 con revisar: true:
+    AAVE Bitfinex · ETH Nexo · GLOB "Globant ESPP 0000010348" · AAVE Nexo · BCMMUSDA Balanz 402665 ·
+    BTC Bitfinex · USDT Nexo · GLOB "Globant Holdings Account" · UNI Bitfinex · BTC Nexo ·
+    ETH Bitfinex · UNI Nexo · USDT Bitfinex
+  Todas titular=null salvo BCMMUSDA (titular "Lascano Maria y/o Cofano Juan Pablo").
+
+  NOTA: el spec habla de 17 de 18 marcas. Lo guardado en producción tiene 13 (12 + BCMMUSDA). Puede
+  que el 18 fuera de otra versión del .txt; no cambia nada de lo implementado.
+
+  NOTA §4.2: la corrida guardada tiene GLOB partido en dos cuentas ("Globant ESPP 0000010348" y
+  "Globant Holdings Account"). Es exactamente el caso que §4.2 corrige en el prompt. Al subir la v2
+  del 13/10 con §1 activo, la corrida se REEMPLAZA y queda una sola fila.
+
+  NOTA BCMMUSDA: está guardado con sector "efectivo" (no "money_market_usd"). Hasta que se re-suba
+  la corrida con el prompt nuevo, el modelo de riesgo lo sigue viendo como antes (accionesAr /
+  sin_clasificar): BLOQUE_FCI se apoya en `sector`, no en el ticker.
+
+0.3 Consumidores de `revisar` y de `sector`
+
+  revisar:
+    · src/vistas/PatrimonioIngesta.tsx — validador y card del Paso 3 (tocados).
+    · src/vistas/Patrimonio.tsx:1296, :1368 — dot ámbar + badge REVISAR en Tenencias (lee revisar;
+      con OK marcado queda false y no se pinta, que es lo pedido).
+    · src/datos/patrimonioInforme.ts:333 — informe PDF agrega "⚠" al ticker con revisar. Mismo
+      comportamiento: las dadas por OK ya no llevan ⚠. No necesita cambio.
+    · src/datos/patrimonio.ts — aPosicionRaw (export, tocado).
+    · src/datos/patrimonioMetricas.ts:15, src/vistas/Patrimonio.tsx:267 — construyen Posicion con
+      revisar:false (manuales / simulación). Campos nuevos opcionales: sin cambio.
+    · functions/: ningún consumidor de revisar.
+  sector (strings de driver):
+    · src/datos/patrimonioRiesgo.ts — BLOQUE_FCI / FACTOR_FCI (tocados).
+    · src/datos/patrimonioPromptExtraccion.ts — tabla (tocada).
+    · src/datos/patrimonioMetricas.ts SECTOR_DISPLAY — no tiene money_market_pesos ni
+      money_market_usd: ambos se muestran crudos ("money_market_usd AR"), igual que hoy
+      money_market_pesos. No se tocó (fuera de alcance).
+    · functions/src/patrimonioPreciosCron.ts — lee posicionesPatrimonio (todas las corridas) por
+      ticker/tipo/país; no usa sector ni revisar. Con duplicados sumaría doble el valorUsd de la
+      vigente: §1 lo cubre también.
+    · IA (patrimonioIA.ts) y export: sin dependencia de los strings de sector nuevos.
+
+════════════════════════════════════════════════════════════════════════════════
+CAMBIOS
+════════════════════════════════════════════════════════════════════════════════
+
+  docs/CLAUDE.md (antes del código) — Anexo Patrimonio: "Una corrida es el estado completo a una
+    fecha (F9.189 §1)" y "`motivo_revisar` y `revisadoEnIngesta` (F9.189 §2–§3)".
+  src/types/patrimonio.ts — PosicionRaw.motivo_revisar?: string | null; Posicion.revisadoEnIngesta?.
+  src/datos/patrimonio.ts —
+    · confirmarIngesta: getDocs(fechaCorrida == meta.fecha_corrida) → batch.delete de cada una +
+      batch.set de las nuevas + snapshot, un solo commit. Guard: previas + nuevas + 1 > 450 → Error
+      "… N posiciones a borrar + M a escribir + 1 snapshot = T operaciones (máximo 450)".
+    · aPosicionRaw: incluye motivo_revisar si existe; no exporta revisadoEnIngesta.
+  src/vistas/PatrimonioIngesta.tsx —
+    · validarCorrida: motivo_revisar opcional, string o null.
+    · Card neutra de misma fecha; título del diff "Cambios vs la versión ya guardada de esta fecha".
+    · Card "para revisar": motivo debajo de ticker/cuenta (11px, --color-text-sec) o "sin motivo
+      indicado"; toggle OK por fila (tilde verde cuando está marcado); "Marcar todas OK" /
+      "Desmarcar todas". No bloquea.
+    · handleConfirmar: marcadas → revisar:false + revisadoEnIngesta:true.
+    · Botón: "Confirmar y guardar" / "Confirmar y guardar · N quedan para revisar".
+    · Checksum: "Diferencia de checksum: declarado X, calculado Y (Z%). Causas habituales: TC
+      distinto al de los resúmenes, o un resumen cuyo encabezado no cuadra con su detalle. TC usado: N."
+  src/vistas/Patrimonio.tsx — Tenencias: motivo bajo el badge REVISAR. Decisión mía: se oculta en
+    modo privacidad (es texto libre y puede traer montos, ej. "encabezado 15.708 vs detalle 15.487"),
+    mismo criterio que los nominales de F9.121.
+  src/datos/patrimonioPromptExtraccion.ts — §4.1/§4.2/§4.3 (ver diff); el resto del texto intacto.
+  src/datos/patrimonioRiesgo.ts — BLOQUE_FCI.money_market_usd = 'cash', FACTOR_FCI.money_market_usd
+    = 'cash', con comentario F9.189 (custodia F9.130 si algún día se quiere el riesgo bancario/AR).
+  scripts/verificarF9189.ts — §0 + V4. scripts/verificarF9189emu.ts — V1/V2/V3/V5 en emulador.
+
+§4.3 — piso de caja y otros cálculos de "cash" (reportado, no cambiado)
+  · violacionesBandas (pisoCajaPct) suma por BLOQUE (bloqueDe): BCMMUSDA con money_market_usd SÍ
+    entra a la caja.
+  · Los únicos `tipo === 'cash'` del repo son dentro de bloqueDe y factorDe (la primera rama). No hay
+    otro cálculo de cash por tipo. byTipo de calcMetrics (gráfico por tipo) lo sigue mostrando como
+    "fci", que es lo que es.
+  · exposicionArgentina mide por bloque (accionesAr/soberanoAr/rentaFijaPesos): BCMMUSDA sale de la
+    exposición AR (U$S 412).
+
+════════════════════════════════════════════════════════════════════════════════
+VERIFICACIÓN
+════════════════════════════════════════════════════════════════════════════════
+
+V1–V3, V5 — emulador (scripts/verificarF9189emu.ts), 18/18 OK
+  OK   V1a primera ingesta — 5 posiciones (esperado 5)
+  OK   V1b misma corrida otra vez → N, no 2N — 5 posiciones; batch: 5 delete + 6 set
+  OK   V1c snapshot cuadra — cantidadPosiciones 5 · totalCorridaUsd 4712 · suma posiciones 4712
+  OK   V1d versión con una fila menos → N−1 — 4 posiciones, snapshot 4
+  OK   V1e re-ingestar una fecha no toca otra — 2026-09-03: 1 posición
+  OK   V1f guard >450 lanza con los números — "… 300 posiciones a borrar + 300 a escribir + 1
+       snapshot = 601 operaciones (máximo 450)." Nada escrito.
+  OK   V2a marcadas OK → revisar:false + revisadoEnIngesta:true — BCMMUSDA, ARS
+  OK   V2b no marcada → revisar:true, sin revisadoEnIngesta, conserva motivo — GD30
+  OK   V2c fila sin motivo → sin campo (la UI dice "sin motivo indicado")
+  OK   V2d Tenencias: REVISAR solo en una — GD30
+  OK   V3a .txt viejo sin motivo_revisar valida
+  OK   V3b motivo_revisar no-string se rechaza — "[0] motivo_revisar: string o null."
+  OK   V3c motivo_revisar null valida
+  OK   V3d .txt viejo se guarda — 2 posiciones
+  OK   V3e export→re-import: mismo valorUsd (5 filas, incluye una ARS) y valida
+  OK   V3f export conserva motivo_revisar — BCMMUSDA y GD30
+  OK   V3g export NO incluye revisadoEnIngesta
+  OK   V5 prompt sin "titular null → revisar"; tiene motivo_revisar y la fila de BCMMUSDA
+  V1 incluye dos filas legítimas con la misma cuenta+ticker (cash ARS y USD): no colisionan.
+  Lo que no se ejercitó en el emulador: el render del Paso 3 y de Tenencias (no hay runner de UI). El
+  mapeo de handleConfirmar se replicó en el script (3 líneas, marcado).
+
+V4 — Riesgo, corrida 2026-10-13 de producción, BCMMUSDA (U$S 412) con money_market_usd
+  bloqueDe: accionesAr → cash · factorDe: sin_clasificar → cash
+
+  Escenario                    antes                después              Δ
+  Corrección global −20%       -24,49%  U$S -27.689  -24,40%  U$S -27.582  U$S +107
+  Crash tipo marzo 2020        -38,76%  U$S -43.825  -38,60%  U$S -43.643  U$S +181
+  Evento local AR              -26,45%  U$S -29.907  -26,27%  U$S -29.701  U$S +206
+  Rally global +20%            +24,49%  U$S  27.689  +24,40%  U$S  27.582  U$S -107
+  Corrección energía AR · Invierno cripto · Evento soberano AR · Tormenta perfecta ·
+  Congelamiento tarifario · Crudo a la baja · Normalización argentina · Nombre único (ETH): sin cambio.
+  Piso de caja (5%): violado antes y después; caja 0,11% → 0,47% (total U$S 113.057 con manuales).
+  Ojo: este delta es con el sector nuevo aplicado. Lo guardado hoy dice "efectivo": en la app el
+  cambio aparece recién cuando se suba la v2 del 13/10.
+
+V6 — No regresión
+  · calcDiff, checksum, activos fijos y manuales: sin cambios de código (el diff solo cambia su
+    título, y el checksum solo su texto).
+  · scripts/verificarRiesgo.ts: 6 OK / 1 FAIL — el FAIL (cash-sin-perdida: nombre_unico=-40000) es
+    PREVIO: da igual con git stash sobre f5878a7. No se tocó.
+  · tsc cliente: 41 → 41, misma lista (diff vacío). functions: 0 → 0. npm run build OK.
+
+════════════════════════════════════════════════════════════════════════════════
+DEPLOY Y DESPUÉS
+════════════════════════════════════════════════════════════════════════════════
+
+  · git diff contra f5878a7 sin firestore.rules, storage.rules ni functions/ → firebase deploy
+    --only hosting (autorizado por Juan en la sesión).
+  · Rules de posicionesPatrimonio: `allow read, write: if esDueno()` — permite delete. Verificado,
+    no tocado.
+  · Después del deploy (Juan):
+    1. borrar datos del sitio en el celular;
+    2. (no aplica: §0.1 no encontró fechas duplicadas);
+    3. subir la v2 del 13/10 (con motivo_revisar). La card dirá "Ya hay una corrida del 13/10/2026
+       con 49 posiciones. Confirmar la reemplaza." y el diff será contra esa versión: esperar BAJA
+       de "GLOB · Globant Holdings Account" y Δ en "GLOB · Globant ESPP 0000010348" (§4.2), y que
+       BCMMUSDA venga con money_market_usd.

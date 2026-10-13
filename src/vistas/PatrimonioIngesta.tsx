@@ -49,6 +49,10 @@ function validarCorrida(raw: unknown): string[] {
     if (!MONEDAS_VALIDAS.has(pos.moneda_origen as string)) { errs.push(`[${i}] moneda_origen "${pos.moneda_origen}" inválida.`); posErrs++; }
     if (typeof pos.valor_origen !== 'number' || pos.valor_origen < 0) { errs.push(`[${i}] valor_origen: número ≥ 0.`); posErrs++; }
     if (typeof pos.revisar !== 'boolean') { errs.push(`[${i}] revisar: debe ser boolean.`); posErrs++; }
+    // F9.189 §2 — opcional: los .txt anteriores y el export de F9.115 no lo traen.
+    if (pos.motivo_revisar !== undefined && pos.motivo_revisar !== null && typeof pos.motivo_revisar !== 'string') {
+      errs.push(`[${i}] motivo_revisar: string o null.`); posErrs++;
+    }
   }
   return errs;
 }
@@ -117,6 +121,8 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
   const [tc, setTc] = useState<number>(0);
   const [errorGuardar, setErrorGuardar] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
+  // F9.189 §3 — índices (en posicionesEnriquecidas) de las filas "para revisar" que Juan dio por OK.
+  const [revisadas, setRevisadas] = useState<Set<number>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   // FECHA_CORRIDA prellenada con hoy en zona Argentina; el TC queda como placeholder
@@ -197,12 +203,16 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
     if (diff > 0.01) {
       setChecksumWarning(
         `Diferencia de checksum: declarado ${fmtUsd(data.meta.total_declarado_usd)}, calculado ${fmtUsd(totalCalc)} (${Math.round(diff * 100)}%). ` +
-        `Posible TC distinto al de los resúmenes. El sistema usó TC=${Math.round(tcUsado)}.`
+        // F9.189 §3.5 — no se afirma la causa: el 13/10 no era el TC sino un resumen cuyo encabezado
+        // no cuadraba con su detalle. Se listan las habituales y se deja el dato.
+        `Causas habituales: TC distinto al de los resúmenes, o un resumen cuyo encabezado no cuadra con su detalle. ` +
+        `TC usado: ${Math.round(tcUsado).toLocaleString('es-AR')}.`
       );
     }
 
     setCorrida(data);
     setPosicionesEnriquecidas(enriquecidas);
+    setRevisadas(new Set());
     setTc(tcUsado);
     setStep('confirm');
   }
@@ -213,7 +223,11 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
     setErrorGuardar(null);
     try {
       const totalFijosUsd = activosFijos.reduce((s, a) => s + a.valorUsd, 0);
-      await confirmarIngesta(posicionesEnriquecidas, corrida.meta, totalFijosUsd, totalManualesUsd, metricasJson);
+      // F9.189 §3.2 — las marcadas OK se guardan resueltas pero auditables (`revisadoEnIngesta`).
+      const aGuardar = posicionesEnriquecidas.map((p, i) =>
+        revisadas.has(i) ? { ...p, revisar: false, revisadoEnIngesta: true } : p
+      );
+      await confirmarIngesta(aGuardar, corrida.meta, totalFijosUsd, totalManualesUsd, metricasJson);
       onConfirmado();
     } catch (err) {
       setErrorGuardar(String(err));
@@ -221,7 +235,18 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
     }
   }
 
-  const revisar = posicionesEnriquecidas.filter(p => p.revisar);
+  const revisar = posicionesEnriquecidas.map((p, i) => ({ p, i })).filter(({ p }) => p.revisar);
+  const quedanRevisar = revisar.filter(({ i }) => !revisadas.has(i)).length;
+  const todasOk = revisar.length > 0 && quedanRevisar === 0;
+  function toggleRevisada(i: number) {
+    setRevisadas(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  }
+  // F9.189 §1.3 — la vigente es de la misma fecha: confirmar la reemplaza (no se suma).
+  const mismaFecha = !!corrida && posicionesPrevias[0]?.fechaCorrida === corrida.meta.fecha_corrida;
   const cuentas = [...new Set(posicionesEnriquecidas.map(p => p.cuenta))];
   const totalCalc = posicionesEnriquecidas.reduce((s, p) => s + p.valorUsd, 0);
   const diff = corrida ? calcDiff(posicionesPrevias, posicionesEnriquecidas) : [];
@@ -335,6 +360,15 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
         {/* ── Paso 3: Confirmar ──────────────────────────────────────────────── */}
         {(step === 'confirm' || step === 'saving') && corrida && (
           <>
+            {mismaFecha && corrida && (
+              <Card>
+                <div style={{ fontSize: 12.5, color: 'var(--color-text)', lineHeight: 1.5 }}>
+                  Ya hay una corrida del {corrida.meta.fecha_corrida.split('-').reverse().join('/')} con{' '}
+                  {posicionesPrevias.length} posiciones. Confirmar la reemplaza.
+                </div>
+              </Card>
+            )}
+
             {/* Checksum warning */}
             {checksumWarning && (
               <Card style={{ background: 'rgba(245,158,11,.10)' }}>
@@ -367,26 +401,56 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
               </div>
             </Card>
 
-            {/* Posiciones con revisar=true */}
+            {/* Posiciones con revisar=true — F9.189 §3: cada una se puede dar por OK. No bloquea. */}
             {revisar.length > 0 && (
               <Card style={{ background: 'rgba(245,158,11,.10)' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gf-out)', marginBottom: 10 }}>
-                  {revisar.length} posición{revisar.length > 1 ? 'es' : ''} para revisar
-                </div>
-                {revisar.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: i > 0 ? '1px solid rgba(245,158,11,.2)' : 'none', fontSize: 12 }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(245,158,11,.2)', color: 'var(--gf-out)', borderRadius: 4, padding: '2px 5px' }}>{p.ticker}</span>
-                    <span style={{ color: 'var(--color-text-sec)' }}>{p.cuenta}</span>
-                    <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{fmtUsd(p.valorUsd)}</span>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gf-out)' }}>
+                    {revisar.length} posición{revisar.length > 1 ? 'es' : ''} para revisar
                   </div>
-                ))}
+                  <button
+                    onClick={() => setRevisadas(todasOk ? new Set() : new Set(revisar.map(({ i }) => i)))}
+                    disabled={step === 'saving'}
+                    style={{ marginLeft: 'auto', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)', fontFamily: 'var(--font-base)' }}
+                  >
+                    {todasOk ? 'Desmarcar todas' : 'Marcar todas OK'}
+                  </button>
+                </div>
+                {revisar.map(({ p, i }, k) => {
+                  const ok = revisadas.has(i);
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderTop: k > 0 ? '1px solid rgba(245,158,11,.2)' : 'none', fontSize: 12, opacity: ok ? 0.6 : 1 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 10, fontWeight: 800, background: 'rgba(245,158,11,.2)', color: 'var(--gf-out)', borderRadius: 4, padding: '2px 5px' }}>{p.ticker}</span>
+                          <span style={{ color: 'var(--color-text-sec)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.cuenta}</span>
+                        </span>
+                        <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-sec)', marginTop: 3, lineHeight: 1.35 }}>
+                          {p.motivo_revisar || 'sin motivo indicado'}
+                        </span>
+                      </span>
+                      <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{fmtUsd(p.valorUsd)}</span>
+                      <button
+                        onClick={() => toggleRevisada(i)}
+                        disabled={step === 'saving'}
+                        aria-pressed={ok}
+                        style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 9px', borderRadius: 8, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-base)', border: ok ? '1px solid var(--gf-emerald)' : '1px solid var(--gf-gray-200)', background: ok ? 'var(--gf-emerald)' : 'var(--color-surface)', color: ok ? '#fff' : 'var(--color-text)' }}
+                      >
+                        {ok && <Icon name="check" size={12} color="#fff" />}
+                        OK
+                      </button>
+                    </div>
+                  );
+                })}
               </Card>
             )}
 
             {/* Diff vs corrida previa */}
             {diff.length > 0 && (
               <Card>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Cambios vs corrida anterior</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+                  {mismaFecha ? 'Cambios vs la versión ya guardada de esta fecha' : 'Cambios vs corrida anterior'}
+                </div>
                 {diff.map((d, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderTop: i > 0 ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 12 }}>
                     <span style={{
@@ -420,7 +484,9 @@ export default function PatrimonioIngesta({ posicionesPrevias, activosFijos, tot
                 Cancelar
               </button>
               <button onClick={handleConfirmar} disabled={step === 'saving'} style={{ flex: 2, padding: '13px 16px', borderRadius: 12, border: 'none', background: step === 'saving' ? 'var(--gf-gray-300)' : 'var(--color-accent)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: step === 'saving' ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}>
-                {step === 'saving' ? 'Guardando…' : 'Confirmar y guardar'}
+                {step === 'saving'
+                  ? 'Guardando…'
+                  : quedanRevisar > 0 ? `Confirmar y guardar · ${quedanRevisar} quedan para revisar` : 'Confirmar y guardar'}
               </button>
             </div>
           </>

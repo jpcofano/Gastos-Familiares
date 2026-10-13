@@ -17,6 +17,8 @@ export type PosicionRaw = {
   cantidad: number | null;
   fuente: string;
   revisar: boolean;
+  // F9.189 §2 — qué mirar, en una frase. Opcional: los .txt anteriores no lo traen y validan igual.
+  motivo_revisar?: string | null;
 };
 
 // Posición enriquecida (valorUsd calculado, persistida en Firestore)
@@ -24,6 +26,9 @@ export type Posicion = PosicionRaw & {
   valorUsd: number;
   tcUsado: number | null;
   fechaCorrida: string;
+  // F9.189 §3 — vino con `revisar: true` y Juan la dio por vista en el Paso 3 (queda `revisar: false`).
+  // Estado de la app, no del resumen: el export no lo incluye.
+  revisadoEnIngesta?: boolean;
 };
 
 export type MetaCorrida = {

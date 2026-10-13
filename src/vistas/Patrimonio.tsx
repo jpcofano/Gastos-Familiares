@@ -1391,6 +1391,14 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
                               <span style={{ fontSize: 9.5, color: 'var(--gf-out)' }}>val. anterior a corrida</span>
                             )}
                           </span>
+                          {/* F9.189 §2.3 — qué mirar, si la extracción lo dijo. Texto libre que puede
+                              traer montos ("encabezado 15.708 vs detalle 15.487"): se oculta en modo
+                              privacidad, mismo criterio que los nominales (F9.121). */}
+                          {rev && fila.origen === 'corrida' && fila.pos.motivo_revisar && !$.privado && (
+                            <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-sec)', marginTop: 3, lineHeight: 1.35 }}>
+                              {fila.pos.motivo_revisar}
+                            </span>
+                          )}
                         </span>
                         <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0, paddingTop: 2 }}>
                           {$.usd(val)}

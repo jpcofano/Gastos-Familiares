@@ -3285,3 +3285,36 @@ de `docs/patrimonio/` quedó como nota que apunta acá).
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
 **Implementado hasta F9.101.** Detalle completo en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
+
+### Una corrida es el estado completo a una fecha (F9.189 §1)
+
+> **Una corrida es el estado completo del portafolio a una fecha. Confirmar una corrida para una
+> fecha que ya existe la REEMPLAZA entera; nunca se suma.**
+
+Normativo, escrito antes del código. Hasta F9.189 `confirmarIngesta` creaba cada posición con ID
+automático y no borraba las de esa `fechaCorrida`: el snapshot se pisaba (su ID es la fecha) pero las
+posiciones se acumulaban, y `cargarPosicionesVigentes` las leía todas → Tenencias, métricas y riesgo
+contaban doble. Subir un `.txt` corregido el mismo día es el caso normal, no un borde.
+
+- `confirmarIngesta` lee las `posicionesPatrimonio` con `fechaCorrida == meta.fecha_corrida` y las
+  borra **en el mismo `writeBatch`** que escribe las nuevas y el snapshot: o queda la corrida nueva
+  entera, o la vieja entera. Si deletes + sets + 1 > 450 lanza error con los números, no parte el batch.
+- **No** hay IDs determinísticos `fecha_cuenta_ticker`: hay filas legítimas con la misma
+  cuenta+ticker (cash en dos monedas, mismo ticker en sub-cuentas) que colisionarían en silencio.
+- El Paso 3 avisa cuando la fecha ya existe ("Confirmar la reemplaza") y el diff pasa a ser contra
+  la versión ya guardada de esa fecha.
+- Para remediar una fecha: re-subir el `.txt` correcto. Nunca el export de una fecha que estuviera
+  duplicada (saldría duplicado).
+
+### `motivo_revisar` y `revisadoEnIngesta` (F9.189 §2–§3)
+
+- **`motivo_revisar?: string | null`** — campo opcional del contrato (`PosicionRaw`). Lo escribe el
+  prompt de extracción, obligatorio cuando `revisar: true` (una frase: QUÉ mirar), `null` si no. Los
+  `.txt` sin el campo siguen validando. Se persiste con la posición y el export F9.115 lo incluye.
+- **`revisar: true` ya no lo dispara `titular: null`** (Bitfinex, Nexo y Globant nunca muestran
+  titular: era ruido). Solo: ticker fuera de la tabla, cash con saldos pendientes/negativos, valor
+  ilegible/ambiguo, o total de cuenta que no cuadra con su detalle (>1%).
+- **`revisadoEnIngesta?: true`** — solo en `Posicion` (estado de la app, no del resumen: el export
+  NO lo incluye). En el Paso 3 cada fila "para revisar" tiene un toggle **OK**; las marcadas se
+  guardan `revisar: false` + `revisadoEnIngesta: true` (auditable: venían marcadas y Juan las dio por
+  vistas). Las no marcadas quedan `revisar: true`. No bloquea: el sistema muestra, decide Juan.

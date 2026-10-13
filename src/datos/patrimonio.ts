@@ -125,7 +125,23 @@ export async function confirmarIngesta(
   totalManualesUsd: number,
   metricasJson: Record<string, unknown>,
 ): Promise<void> {
+  // F9.189 §1 — una corrida es el estado completo a una fecha: confirmar una fecha que ya existe
+  // la REEMPLAZA. Las posiciones previas de esa fecha se borran en el MISMO batch que escribe las
+  // nuevas, así nunca queda media corrida. Sin IDs determinísticos (fecha_cuenta_ticker): hay filas
+  // legítimas con la misma cuenta+ticker (cash en dos monedas, sub-cuentas) que colisionarían.
+  const previas = await getDocs(
+    query(collection(db, 'posicionesPatrimonio'), where('fechaCorrida', '==', meta.fecha_corrida))
+  );
+  const operaciones = previas.size + posiciones.length + 1;
+  if (operaciones > 450) {
+    throw new Error(
+      `La corrida no entra en una escritura atómica: ${previas.size} posiciones a borrar + ` +
+      `${posiciones.length} a escribir + 1 snapshot = ${operaciones} operaciones (máximo 450).`
+    );
+  }
+
   const batch = writeBatch(db);
+  for (const d of previas.docs) batch.delete(d.ref);
 
   for (const p of posiciones) {
     const ref = doc(collection(db, 'posicionesPatrimonio'));
@@ -183,6 +199,7 @@ export async function guardarConfigRiesgo(topes: TopesRiesgo): Promise<void> {
 // Posicion → PosicionRaw: se descartan los tres campos derivados que agrega la ingesta
 // (valorUsd, tcUsado, fechaCorrida) y quedan los 11 del schema. Al reimportar, la ingesta
 // los recalcula con tcParaFecha(fecha_corrida), así que el round-trip da el mismo valorUsd.
+// F9.189 — `motivo_revisar` viaja si existe; `revisadoEnIngesta` NO (es estado de la app).
 function aPosicionRaw(p: Posicion): PosicionRaw {
   return {
     cuenta: p.cuenta,
@@ -196,6 +213,7 @@ function aPosicionRaw(p: Posicion): PosicionRaw {
     cantidad: p.cantidad,
     fuente: p.fuente,
     revisar: p.revisar,
+    ...(p.motivo_revisar !== undefined ? { motivo_revisar: p.motivo_revisar } : {}),
   };
 }
 

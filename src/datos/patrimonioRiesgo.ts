@@ -84,6 +84,9 @@ export const BLOQUE_FCI: Record<string, Bloque> = {
   money_market_pesos: 'rentaFijaPesos',
   soberano_usd:       'soberanoAr',
   corporativo_usd:    'soberanoAr',   // mismo criterio que TLCPO en F9.128: se resuelve por factor
+  // F9.189 — decisión de Juan: un money market en dólares (BCMMUSDA) es liquidez en USD. El riesgo
+  // bancario/AR del fondo no se modela acá; si algún día se quiere, va por la capa de custodia (F9.130).
+  money_market_usd:   'cash',
 };
 
 export function denominacionDe(ticker: string): { den: Denominacion; inferida: boolean } {
@@ -251,6 +254,7 @@ const FACTOR_FCI: Record<string, Factor> = {
   money_market_pesos: 'soberano_ar_pesos',
   soberano_usd:       'soberano_ar_hard',
   corporativo_usd:    'soberano_ar_hard',
+  money_market_usd:   'cash',   // F9.189 — ver BLOQUE_FCI: liquidez en USD por decisión de Juan
   // `renta_variable_ar` NO está acá a propósito: un fondo de acciones argentinas es varios factores
   // a la vez, no uno. Cae en `sin_clasificar` y se ve en pantalla, que es la respuesta honesta.
 };

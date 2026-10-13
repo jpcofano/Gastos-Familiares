@@ -8,6 +8,10 @@
 // Bitfinex. Cualquier cambio de contenido es un spec aparte: una "mejora" de
 // redaccion puede romper la extraccion sin que se note hasta la proxima corrida.
 // Lo unico que la app sustituye son los dos marcadores de la cabecera.
+//
+// F9.189 (spec de contenido): `revisar` ya no se dispara por `titular` null (17 de 18 marcas
+// falsas en la corrida del 13/10), `motivo_revisar` obligatorio con `revisar: true`, Globant
+// desde la pantalla Portfolio en una sola fila, y BCMMUSDA como fci/money_market_usd.
 
 const PLANTILLA = `# Prompt de extracción — Patrimonio
 
@@ -45,7 +49,7 @@ TC_REFERENCIA_ARS_USD: {{TC_REFERENCIA}}   # informativo; la app usa su propio t
 | **PPI / Portfolio Personal** — "Estado de Cuenta" | PDF | **ARS** | columna **Valor Corriente ($)** por especie |
 | **Nexo** — "Account balance" | PDF | **USD** | columna **Fiat equivalent (USD)** por activo |
 | **Bitfinex** — captura de "Carteras" | Imagen | **USD** | columna **USD EQUIVALENTE** por activo |
-| **Globant ESPP** — captura del Dashboard (Acct 0000010348) | Imagen | **USD** | "Portfolio Value" total; cantidad = total ÷ cotización GLOB mostrada |
+| **Globant ESPP** — captura del Dashboard o de Portfolio (Acct 0000010348) | Imagen | **USD** | Dashboard: "Portfolio Value" total, cantidad = total ÷ cotización GLOB mostrada. Portfolio: "Total Value" |
 
 Reglas por fuente:
 - **Balanz:** el N° de Comitente identifica la cuenta (ej. 402665, 1120830). El
@@ -58,6 +62,11 @@ Reglas por fuente:
   \`revisar: true\` en el cash.
 - **Nexo / Bitfinex:** cada línea es una cripto con su equivalente en USD.
   \`moneda_origen: "USD"\`. USDT/USDC → \`sector: "stablecoin"\`.
+- **Globant ESPP:** si llega la pantalla **Portfolio** (sub-cuentas "Globant Arg ESPP -
+  Acct 0000010348" y "Holdings Account", con Total Value y cotización GLOB:NYSE),
+  devolvé **una sola fila** \`cuenta: "Globant ESPP 0000010348"\` con \`cantidad\` =
+  suma de las cantidades de las sub-cuentas y \`valor_origen\` = Total Value. No una
+  fila por sub-cuenta.
 
 ---
 
@@ -86,7 +95,8 @@ resumen:
 \`pais_riesgo\` ∈ \`AR | global\`
 Para no-acciones, \`sector\` codifica el **driver de riesgo**
 (\`cer_pesos\`, \`soberano_usd\`, \`corporativo_usd\`, \`lecaps_pesos\`,
-\`money_market_pesos\`, \`renta_variable_ar\`, \`cripto\`, \`stablecoin\`, \`efectivo\`).
+\`money_market_pesos\`, \`money_market_usd\`, \`renta_variable_ar\`, \`cripto\`, \`stablecoin\`,
+\`efectivo\`).
 
 Mapping de tickers conocidos (extender acá cuando aparezca uno nuevo):
 
@@ -108,12 +118,13 @@ Mapping de tickers conocidos (extender acá cuando aparezca uno nuevo):
 | TLCPO | on | corporativo_usd | AR |
 | LECAPSA | fci | lecaps_pesos | AR |
 | BCAHA | fci | money_market_pesos | AR |
+| BCMMUSDA | fci | money_market_usd | AR |
 | RV (Gainvest) | fci | renta_variable_ar | AR |
 | BTC, ETH, AAVE, UNI | cripto | cripto | global |
 | USDT, USDC | cripto | stablecoin | global |
 
 Si un ticker **no** está en la tabla → clasificá lo mejor posible y marcá
-\`revisar: true\`.
+\`revisar: true\` (con \`motivo_revisar\`, ver abajo).
 
 ---
 
@@ -139,7 +150,8 @@ Si un ticker **no** está en la tabla → clasificá lo mejor posible y marcá
       "valor_origen": 14929560,
       "cantidad": 4068,
       "fuente": "estadocuenta_PPI_101268.pdf",
-      "revisar": false
+      "revisar": false,
+      "motivo_revisar": null
     }
   ]
 }
@@ -148,8 +160,15 @@ Si un ticker **no** está en la tabla → clasificá lo mejor posible y marcá
 - \`total_declarado_usd\` = **suma de los totales USD que declara cada resumen**
   (no la calcules sumando posiciones; es el checksum contra el que la app
   compara su propio cálculo).
-- \`titular\` = null si la fuente no lo muestra (ej. captura sin nombre) →
-  \`revisar: true\`.
+- \`titular\` = null si la fuente no lo muestra (ej. captura sin nombre). **Eso
+  solo no es motivo de \`revisar\`.**
+- \`revisar: true\` SOLO cuando: el ticker está fuera de la tabla; cash con saldos
+  pendientes/negativos (regla PPI); el valor es ilegible o ambiguo en la fuente; o
+  el total de la cuenta no cuadra con la suma de su detalle (>1%).
+- Si \`revisar: true\` → \`motivo_revisar\` es **obligatorio**: una frase corta que
+  diga QUÉ mirar (ej. "ticker nuevo, clasificado como fci/money_market_usd",
+  "encabezado Bonos USD 15.708 vs detalle 15.487"). Si \`revisar: false\` →
+  \`motivo_revisar: null\`.
 - \`cantidad\` = null para \`cash\`.
 
 ---
@@ -159,7 +178,7 @@ Si un ticker **no** está en la tabla → clasificá lo mejor posible y marcá
 - [ ] Una fila por tenencia; mismo ticker en distintas cuentas = filas separadas.
 - [ ] \`moneda_origen\` correcta por fuente (Balanz/Nexo/Bitfinex USD; PPI ARS).
 - [ ] Disponibilidades/cash incluidas.
-- [ ] Tickers fuera de la tabla → \`revisar: true\`.
+- [ ] \`revisar: true\` solo por los cuatro motivos de arriba (no por \`titular\` null), siempre con \`motivo_revisar\`.
 - [ ] \`total_declarado_usd\` = suma de los totales de los resúmenes.
 - [ ] Salida = **solo el JSON**, nada más.
 `;
