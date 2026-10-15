@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, createContext, useContext } from 'react';
+import { Fragment, useState, useEffect, useMemo, createContext, useContext } from 'react';
 import { Timestamp } from 'firebase/firestore';
 import { cargarTCReciente, cargarEstadoTcDiario, backfillTcDiario, tcEfectivoDe, type EstadoTcDiario, type ResultadoBackfillTc } from '../datos/tcDiario';
 import { Card, MerchantLogo, MoneyInput } from '../design-system/components';
@@ -55,7 +55,7 @@ import {
   type ConfigCafci, type CafciCartera, type CafciFondoConfig, type ResultadoSincronizarCafci,
   type ResultadoImportarCafciManual, type UniversoCafci,
 } from '../datos/patrimonioCafci';
-import { cargarFactoresTicker, importarFactoresSeed, cargarCustodiaCuenta } from '../datos/patrimonioFactores';
+import { cargarFactoresTicker, importarFactoresSeed, cargarCustodiaCuenta, guardarCustodiaCuenta } from '../datos/patrimonioFactores';
 import {
   cargarDeclaraciones, guardarDeclaracion, clasificarExposiciones,
   NOTA_MINIMA, UMBRAL_MATERIALIDAD, UMBRAL_DERIVADA,
@@ -68,6 +68,15 @@ import {
   type SenalEvaluada, type LecturaMercado, type BasesMercado,
 } from '../datos/patrimonioInformeV2';
 import { cargarUltimaLecturaSenales, actualizarSenales } from '../datos/patrimonioSenales';
+// F9.195 (sistema cripto) — política propia del bloque cripto, evaluación pura y lectura diaria.
+import {
+  evaluarSistemaCripto, validarPoliticaCripto, CRIPTO_DEFAULTS, GRUPOS_CRIPTO, GRUPO_CRIPTO_LABEL,
+  type PoliticaCripto, type DiaCripto,
+} from '../datos/patrimonioCripto';
+import {
+  cargarLecturaCripto, cargarHistorialCripto, actualizarPreciosCripto, cargarPoliticaCripto, guardarPoliticaCripto,
+  type EstadoCripto,
+} from '../datos/patrimonioCriptoLectura';
 // F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
 // reusable; la lógica no cambió.
 import { calcMetrics, sectorDisplay, SECTOR_DISPLAY, manualToPosicion } from '../datos/patrimonioMetricas';
@@ -1119,6 +1128,355 @@ function ReservaCard({ posiciones, manuales, topes }: {
   );
 }
 
+// ── F9.195 (sistema cripto) §5 — Sistema cripto ───────────────────────────────
+// INFORMATIVA, como la card de reserva: composición interna del bloque cripto contra su política,
+// plataformas, tramos de BTC y freno. Sin campana, sin contador, sin push. Los casos de "Qué haría"
+// son texto fijo acordado con el titular (15-oct-2026), no una salida del sistema.
+const pct1 = (x: number) => `${(x * 100).toFixed(1).replace('.', ',')}%`;
+const pts1 = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1).replace('.', ',')} pts`;
+const CUSTODIAS_ELEGIBLES: Custodia[] = ['sin_declarar', 'credito', 'segregada', 'propia', 'emisor'];
+
+function CriptoCard({ posiciones, pesoClase }: { posiciones: Posicion[]; pesoClase: number }) {
+  const $ = useDinero();
+  const [estado, setEstado] = useState<EstadoCripto | null>(null);
+  const [historial, setHistorial] = useState<DiaCripto[]>([]);
+  const [politica, setPolitica] = useState<PoliticaCripto>(CRIPTO_DEFAULTS);
+  const [custodias, setCustodias] = useState<Record<string, Custodia>>({});
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
+  const [leyendo, setLeyendo] = useState(false);
+
+  useEffect(() => {
+    cargarLecturaCripto().then(setEstado)
+      .catch(e => { console.error('[cripto] lectura:', e); setErrorCarga(String((e as Error)?.message ?? e)); });
+    cargarHistorialCripto().then(setHistorial).catch(e => console.error('[cripto] historial:', e));
+    cargarPoliticaCripto().then(r => setPolitica(r.politica)).catch(e => console.error('[cripto] política:', e));
+    cargarCustodiaCuenta().then(setCustodias).catch(e => console.error('[cripto] custodia:', e));
+  }, []);
+
+  async function leer(reiniciarBase: boolean) {
+    setLeyendo(true);
+    setErrorCarga(null);
+    try {
+      setEstado(await actualizarPreciosCripto(reiniciarBase));
+      setHistorial(await cargarHistorialCripto());
+    } catch (e) {
+      setErrorCarga(String((e as Error)?.message ?? e));
+    } finally {
+      setLeyendo(false);
+    }
+  }
+
+  async function declararCustodia(cuenta: string, c: Custodia) {
+    try {
+      await guardarCustodiaCuenta(cuenta, c);
+      setCustodias(prev => {
+        const next = { ...prev };
+        if (c === 'sin_declarar') delete next[cuenta]; else next[cuenta] = c;
+        return next;
+      });
+    } catch (e) {
+      setErrorCarga(`No se pudo guardar la custodia de ${cuenta}: ${String((e as Error)?.message ?? e)}`);
+    }
+  }
+
+  const ev = evaluarSistemaCripto({
+    posiciones, lectura: estado?.lectura ?? null, bases: estado?.bases ?? null,
+    historial, politica, custodias, pesoClase,
+  });
+  if (!ev) return null;
+
+  const rojo = 'var(--gf-out)';
+  const verde = 'var(--gf-income)';
+  const sec = 'var(--color-text-sec)';
+  const th: React.CSSProperties = { fontSize: 10.5, color: sec, fontWeight: 600, textAlign: 'right', padding: '4px 0' };
+  const td: React.CSSProperties = { fontSize: 12, textAlign: 'right', padding: '5px 0', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--gf-gray-100)' };
+  const sinPrecio = estado?.lectura
+    ? Object.entries(estado.lectura.precios).filter(([, p]) => p.valor === null)
+    : [];
+  const { tramos, reserva, freno } = ev;
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>Sistema cripto</div>
+      <div style={{ fontSize: 11, color: sec, lineHeight: 1.45 }}>
+        Composición del bloque cripto contra su política propia. Sigue sumando en el total y en la banda de clase.
+      </div>
+
+      {/* 1. Encabezado */}
+      <div style={{ marginTop: 10, padding: '11px 12px', borderRadius: 12, background: 'var(--gf-gray-100)' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, flex: 1 }}>{$.usd(ev.valorUsd)}</span>
+          <span style={{ fontSize: 12, color: sec }}>{pct1(ev.pesoEnTotal)} del total</span>
+        </div>
+        <div style={{ fontSize: 10.5, color: sec, marginTop: 3, lineHeight: 1.4 }}>
+          Precios {ev.fechaPrecios ? `del ${fmtFecha(ev.fechaPrecios)}` : 'sin leer todavía'}
+          {' · '}cantidades del {ev.fechaCantidades ? fmtFecha(ev.fechaCantidades) : '—'}
+          {ev.valuadosConSnapshot.length > 0 && ev.fechaCantidades && (
+            <> · {ev.valuadosConSnapshot.join(', ')} con el valor del {fmtFecha(ev.fechaCantidades).slice(0, 5)}</>
+          )}
+        </div>
+      </div>
+
+      {/* 2. Composición */}
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700 }}>Composición</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 2 }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: 'left' }}>Grupo</th><th style={th}>Actual</th><th style={th}>Objetivo</th>
+            <th style={th}>Desvío</th><th style={th}>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ev.composicion.map(f => (
+            <tr key={f.grupo}>
+              <td style={{ ...td, textAlign: 'left', fontWeight: 600 }}>{GRUPO_CRIPTO_LABEL[f.grupo]}</td>
+              <td style={td}>{pct1(f.actual)}</td>
+              <td style={td}>{pct1(f.objetivo)}</td>
+              <td style={td}>{pts1(f.desvioPts)}</td>
+              <td style={{ ...td, color: f.estado === 'en_banda' ? verde : rojo, fontWeight: 600 }}>
+                {f.estado === 'en_banda' ? 'en banda' : 'fuera'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 10.5, color: sec, marginTop: 4, lineHeight: 1.4 }}>
+        Banda ±{Math.round(politica.bandaPts * 100)} pts.{' '}
+        {!$.privado && ev.composicion.filter(f => f.estado === 'fuera_de_banda').map(f =>
+          `${GRUPO_CRIPTO_LABEL[f.grupo]}: ${f.usdAlObjetivo >= 0 ? 'faltan' : 'sobran'} ${fmtUsd(Math.abs(f.usdAlObjetivo))} para el objetivo`,
+        ).join(' · ')}
+      </div>
+
+      {/* 3. Plataformas */}
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700 }}>Plataformas</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 2 }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, textAlign: 'left' }}>Plataforma</th><th style={th}>%</th>
+            <th style={th}>Tope {pct(politica.topePlataformaPct)}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ev.plataformas.map(p => (
+            <Fragment key={p.plataforma}>
+              <tr>
+                <td style={{ ...td, textAlign: 'left', fontWeight: 600 }}>
+                  {p.plataforma}
+                  {!p.mapeada && <span style={{ fontSize: 10, color: rojo, fontWeight: 600, marginLeft: 6 }}>plataforma sin mapear</span>}
+                </td>
+                <td style={td}>{pct1(p.pct)}</td>
+                <td style={{ ...td, color: p.superaTope ? rojo : verde, fontWeight: 600 }}>{p.superaTope ? 'supera' : 'dentro'}</td>
+              </tr>
+              {/* La custodia es por cuenta (F9.130): se declara acá, debajo de su plataforma. */}
+              {p.cuentas.map(c => (
+                <tr key={c.cuenta}>
+                  <td colSpan={3} style={{ padding: '2px 0 5px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: sec }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>{c.cuenta} · {pct1(c.pct)}</span>
+                      <select
+                        value={c.custodia}
+                        onChange={e => declararCustodia(c.cuenta, e.target.value as Custodia)}
+                        style={{ fontSize: 11, maxWidth: 170, border: '1px solid var(--gf-gray-200)', borderRadius: 6, padding: '2px 4px', fontFamily: 'var(--font-base)', color: c.custodia === 'sin_declarar' ? rojo : 'inherit', background: 'transparent' }}
+                      >
+                        {CUSTODIAS_ELEGIBLES.map(k => <option key={k} value={k}>{CUSTODIA_LABEL[k]}</option>)}
+                      </select>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+
+      {/* 4. Reserva y tramos */}
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700 }}>Reserva y tramos de BTC</div>
+      <div style={{ fontSize: 11.5, marginTop: 3, lineHeight: 1.5 }}>
+        Reserva {pct1(reserva.actual)} · objetivo {pct1(reserva.objetivo)}
+        {!$.privado && <> · {reserva.faltaUsd > 0 ? `faltan ${fmtUsd(reserva.faltaUsd)}` : 'en el objetivo'} · cada tercio {fmtUsd(reserva.tercioUsd)}</>}
+      </div>
+      <div style={{ fontSize: 11.5, marginTop: 2, lineHeight: 1.5 }}>
+        {tramos.base && tramos.precio !== null && tramos.variacion !== null ? (
+          <>BTC {fmtUsd(tramos.precio)} · {tramos.variacion >= 0 ? '+' : ''}{(tramos.variacion * 100).toFixed(1).replace('.', ',')}% desde la base del {fmtFecha(tramos.base.fecha)} ({fmtUsd(tramos.base.valor)}) · </>
+        ) : (
+          <span style={{ color: sec }}>{tramos.base ? 'Sin precio de BTC en la última lectura · ' : 'Sin base de BTC: la fija la primera lectura · '}</span>
+        )}
+        niveles {tramos.niveles.map((n, i) => (
+          <span key={i} style={{ color: n.alcanzado ? rojo : sec, fontWeight: n.alcanzado ? 700 : 400 }}>
+            {i > 0 ? ' / ' : ''}{Math.round(n.tramo * 100)}%{n.alcanzado ? ' ✓' : ''}
+          </span>
+        ))}
+        {' '}· {tramos.alcanzados} de {tramos.niveles.length} alcanzados
+      </div>
+
+      {/* 5. Freno */}
+      <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700 }}>Freno</div>
+      <div style={{ fontSize: 11.5, marginTop: 3, lineHeight: 1.5, color: freno.activo ? rojo : 'inherit' }}>
+        {(freno.caida * 100).toFixed(1).replace('.', ',')}% desde el máximo
+        {!$.privado && <> ({fmtUsd(freno.maximoUsd)}{freno.fechaMaximo ? `, ${fmtFecha(freno.fechaMaximo)}` : ''})</>}
+        {' '}· umbral −{Math.round(freno.umbral * 100)}%{freno.activo ? ' · superado: pide revisar' : ''}
+      </div>
+      <div style={{ fontSize: 10.5, color: sec, marginTop: 2 }}>
+        {freno.dias > 0 ? `Máximo sobre ${freno.dias} día(s) con todo valuado a precio del día.` : 'Todavía no hay serie diaria: el máximo es el valor de hoy.'}
+      </div>
+
+      {sinPrecio.length > 0 && (
+        <div style={{ fontSize: 10.5, color: rojo, marginTop: 8, wordBreak: 'break-word', userSelect: 'text' }}>
+          {sinPrecio.map(([t, p]) => <div key={t}>Sin precio {t}: {p.error}</div>)}
+        </div>
+      )}
+      {errorCarga && (
+        <div style={{ fontSize: 11, color: rojo, marginTop: 6, wordBreak: 'break-word', userSelect: 'text' }}>
+          {errorCarga}
+        </div>
+      )}
+
+      {/* 7. Botones */}
+      <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+        <button
+          onClick={() => leer(false)}
+          disabled={leyendo}
+          style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: leyendo ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: leyendo ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: leyendo ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+        >{leyendo ? 'Leyendo…' : 'Actualizar'}</button>
+        {estado?.lectura && (
+          <button
+            onClick={() => { if (confirm('¿Fijar la base de BTC en el precio de hoy?')) leer(true); }}
+            disabled={leyendo}
+            style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'transparent', color: sec, fontSize: 12, fontWeight: 700, cursor: leyendo ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+          >Reiniciar base</button>
+        )}
+      </div>
+      {estado?.lectura && estado.lectura.sondeo.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--gf-gray-400)', marginTop: 6, wordBreak: 'break-word' }}>
+          Fuentes: {estado.lectura.sondeo.map(s => `${s.fuente} ${s.status || 'sin respuesta'}`).join(' · ')}
+        </div>
+      )}
+
+      {/* 6. Qué haría en cada caso */}
+      <details style={{ marginTop: 10 }}>
+        <summary style={{ fontSize: 11.5, fontWeight: 600, cursor: 'pointer', color: sec }}>
+          Qué haría en cada caso
+        </summary>
+        <div style={{ fontSize: 11, color: sec, lineHeight: 1.5, marginTop: 6 }}>
+          <div>· Si un grupo sale de banda → rebalancear hacia el objetivo o esperar al próximo snapshot. Costo: comisiones e impuesto vs. más riesgo concentrado.</div>
+          <div>· Si BTC alcanza un nivel → usar un tercio de la reserva o sostenerlo. Costo: entrar antes de un piso vs. perder parte del rebote.</div>
+          <div>· Si una plataforma supera el tope → mover a billetera propia u otra plataforma, o aceptarlo. Costo: comisiones de red y manejo de claves vs. riesgo de contraparte.</div>
+          <div>· Si se activa el freno → pausar compras y revisar la política.</div>
+          <div>· La decisión es tuya: esto no es una orden.</div>
+        </div>
+      </details>
+    </Card>
+  );
+}
+
+// ── F9.195 (sistema cripto) §2 — Política cripto (solapa Config) ─────────────
+// A diferencia de la política de riesgo, no se guarda tecla a tecla: los cuatro objetivos tienen que
+// sumar 100% y un valor intermedio no valida. Borrador local + "Guardar" con la validación a la vista.
+function PoliticaCriptoCard({ onToast }: { onToast: (texto: string, error: boolean) => void }) {
+  const [politica, setPolitica] = useState<PoliticaCripto | null>(null);
+  const [configurada, setConfigurada] = useState(false);
+  const [borrador, setBorrador] = useState<Record<string, string>>({});
+  const [guardando, setGuardando] = useState(false);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
+
+  const aBorrador = (p: PoliticaCripto): Record<string, string> => ({
+    ...Object.fromEntries(GRUPOS_CRIPTO.map(g => [g, String(Math.round(p.objetivo[g] * 1000) / 10)])),
+    bandaPts: String(Math.round(p.bandaPts * 1000) / 10),
+    topePlataformaPct: String(Math.round(p.topePlataformaPct * 1000) / 10),
+    frenoCaidaPct: String(Math.round(p.frenoCaidaPct * 1000) / 10),
+    tramosBtc: p.tramosBtc.map(t => String(Math.round(t * 1000) / 10)).join(', '),
+  });
+
+  useEffect(() => {
+    cargarPoliticaCripto()
+      .then(r => { setPolitica(r.politica); setConfigurada(r.configurada); setBorrador(aBorrador(r.politica)); })
+      .catch(e => { console.error('[politica cripto]', e); setErrorCarga(String((e as Error)?.message ?? e)); });
+  }, []);
+
+  const n = (k: string) => Number(String(borrador[k] ?? '').replace(',', '.')) / 100;
+  const candidata: PoliticaCripto = {
+    objetivo: Object.fromEntries(GRUPOS_CRIPTO.map(g => [g, n(g)])) as PoliticaCripto['objetivo'],
+    bandaPts: n('bandaPts'),
+    topePlataformaPct: n('topePlataformaPct'),
+    frenoCaidaPct: n('frenoCaidaPct'),
+    tramosBtc: String(borrador.tramosBtc ?? '').split(/[;,\s]+/).filter(Boolean).map(s => -Math.abs(Number(s.replace(',', '.'))) / 100),
+  };
+  const errores = politica ? validarPoliticaCripto(candidata) : [];
+  const cambio = politica !== null && JSON.stringify(aBorrador(politica)) !== JSON.stringify(borrador);
+
+  async function guardar() {
+    setGuardando(true);
+    try {
+      await guardarPoliticaCripto(candidata);
+      setPolitica(candidata);
+      setConfigurada(true);
+      setBorrador(aBorrador(candidata));
+      onToast('Política cripto guardada', false);
+    } catch (e) {
+      onToast(`No se pudo guardar: ${String((e as Error)?.message ?? e)}`, true);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  const fila = (k: string, label: string, sub: string, ancho = 58, unidad = '%') => (
+    <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: '1px solid var(--gf-gray-100)' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', lineHeight: 1.3 }}>{sub}</div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        <input
+          type="text" inputMode="decimal"
+          value={borrador[k] ?? ''}
+          onChange={e => setBorrador(b => ({ ...b, [k]: e.target.value }))}
+          style={{ width: ancho, textAlign: 'right', fontSize: 13, fontVariantNumeric: 'tabular-nums', border: '1px solid var(--gf-gray-300)', borderRadius: 8, padding: '5px 7px', fontFamily: 'var(--font-base)' }}
+        />
+        <span style={{ fontSize: 12, color: 'var(--gf-gray-400)' }}>{unidad}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <Card>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>Política cripto</div>
+      <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', marginTop: 2, marginBottom: 6 }}>
+        {errorCarga ? `No se pudo leer: ${errorCarga}` : configurada ? 'Configurada' : 'Sin configurar · se usan los valores iniciales'}
+      </div>
+      {politica && (
+        <>
+          {fila('BTC', 'Objetivo BTC', 'Fracción del sistema cripto')}
+          {fila('ETH', 'Objetivo ETH', 'Fracción del sistema cripto')}
+          {fila('otras', 'Objetivo otras', 'Toda cripto que no es BTC, ETH ni stablecoin')}
+          {fila('reserva', 'Objetivo reserva', 'Stablecoins')}
+          {fila('bandaPts', 'Banda', 'Desvío tolerado por grupo', 58, 'pts')}
+          {fila('topePlataformaPct', 'Tope por plataforma', 'Máximo del sistema en una sola cuenta')}
+          {fila('frenoCaidaPct', 'Freno', 'Caída del sistema desde su máximo que pide revisar')}
+          {fila('tramosBtc', 'Tramos de BTC', 'Caídas desde la base, separadas por coma (ej. 5, 12, 20)', 100)}
+          {errores.length > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--gf-out)', marginTop: 6, lineHeight: 1.45 }}>
+              {errores.map(e => <div key={e}>{e}</div>)}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+            <button
+              onClick={guardar}
+              disabled={!cambio || errores.length > 0 || guardando}
+              style={{ padding: '7px 12px', borderRadius: 9, border: 'none', background: !cambio || errores.length > 0 || guardando ? 'var(--gf-gray-200)' : 'var(--color-accent)', color: !cambio || errores.length > 0 || guardando ? 'var(--gf-gray-400)' : '#fff', fontSize: 12, fontWeight: 700, cursor: !cambio || errores.length > 0 || guardando ? 'default' : 'pointer', fontFamily: 'var(--font-base)' }}
+            >{guardando ? 'Guardando…' : 'Guardar'}</button>
+            {cambio && (
+              <button
+                onClick={() => setBorrador(aBorrador(politica))}
+                style={{ padding: '7px 12px', borderRadius: 9, border: '1px solid var(--gf-gray-200)', background: 'transparent', color: 'var(--color-text-sec)', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+              >Descartar</button>
+            )}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   activosFijos: ActivoFijo[];
@@ -1297,6 +1655,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
       <DeclaracionesCard posiciones={posiciones} manuales={manuales} factores={factores} />
       <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} factores={factores} />
       <ReservaCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} />
+      <CriptoCard posiciones={posiciones} pesoClase={M.cripto} />
 
       {/* 5. Informe PDF */}
       <Card>
@@ -3779,12 +4138,13 @@ function PoliticaRiesgoCard({ topes, configurado, onGuardar }: {
   );
 }
 
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarFactores, onImportarCafciManual }: {
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onToast, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarFactores, onImportarCafciManual }: {
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
   topesRiesgo: TopesRiesgo;
   riesgoConfigurado: boolean;
   onGuardarRiesgo: (t: TopesRiesgo) => void;
+  onToast: (texto: string, error: boolean) => void;
   configIA: ConfigIA;
   fechaCorrida: string;
   flujos: FlujoPatrimonio[];
@@ -3813,6 +4173,7 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
       <CafciFondosCard configCafci={configCafci} carteras={cafciCarteras} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} onImportarFactores={onImportarFactores} onImportarManual={onImportarCafciManual} />
       <TipoCambioCard />
       <PoliticaRiesgoCard topes={topesRiesgo} configurado={riesgoConfigurado} onGuardar={onGuardarRiesgo} />
+      <PoliticaCriptoCard onToast={onToast} />
       <Card>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -5230,6 +5591,7 @@ export default function Patrimonio() {
               topesRiesgo={topesRiesgo}
               riesgoConfigurado={riesgoConfigurado}
               onGuardarRiesgo={handleGuardarRiesgo}
+              onToast={(texto, error) => setToast({ texto, error })}
               onEditFijo={af => { setEditFijo(af); setShowModalFijo(true); }}
               onAddFijo={() => { setEditFijo(null); setShowModalFijo(true); }}
               onEditManual={pm => { setEditManual(pm); setShowModalManual(true); }}

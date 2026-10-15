@@ -58,7 +58,7 @@ export const PANEL_POR_TIPO: Record<PosicionTipo, PanelSpec | null> = {
   bono:   { live: 'arg_bonds',   historical: 'bonds'   },
   on:     { live: 'arg_corp',    historical: null      },  // /historical/corp/ da 404 (medido)
   fci:    null,   // CAFCI, ya integrado (F9.104)
-  cripto: null,   // fuera de alcance de F9.141
+  cripto: null,   // fuera de alcance de F9.141; los precios cripto los lee criptoPrecios.ts (F9.195)
   cash:   null,   // no tiene precio ni indicadores, por definición
 };
 

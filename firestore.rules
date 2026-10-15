@@ -186,6 +186,16 @@ service cloud.firestore {
       allow read: if esDueno();
       allow write: if false;
     }
+    // F9.195 (sistema cripto) — última lectura de precios cripto y serie diaria del sistema. Las
+    // escriben solo el cron leerPreciosCripto y la callable leerPreciosCriptoAhora: mediciones.
+    match /criptoLectura/{id} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
+    match /criptoHistorial/{id} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
     match /configPatrimonio/{id} {
       allow read, write: if esDueno();
     }

@@ -980,6 +980,29 @@ Riesgo país, Merval en USD y S&P (SPY) contra umbrales fijos, en una card. Sin 
 sin histéresis — es la decisión cerrada "no alarmas" aplicada, no una excepción. Las fuentes que
 fallan se muestran con el error crudo; el Merval sin fuente no se reemplaza por un proxy.
 
+## Sistema cripto (F9.195) — contrato
+
+### Política propia, dentro del total
+El bloque cripto tiene reglas propias (`configPatrimonio/cripto`: objetivos BTC/ETH/otras/reserva,
+banda, tope por plataforma, freno, tramos de BTC) pero **sigue sumando en el total familiar y en su
+banda de clase**. No se tocan la banda de clase ni los escenarios.
+
+### Precio de hoy o el del snapshot, marcado
+Valor = cantidad del último snapshot × precio de `criptoLectura/ultima`. Sin precio, el `valorUsd`
+del snapshot con la marca "valor del DD/MM". Nunca un proxy ni un valor viejo presentado como de hoy.
+Stablecoins a 1 por definición.
+
+### Plataforma ≠ cuenta
+El tope se mide por plataforma (`PLATAFORMA_DE_CUENTA`, por prefijo, sin matcheo difuso). Una cuenta
+fuera de la tabla es su propia plataforma, marcada "sin mapear". La custodia es por cuenta (F9.130).
+
+### Base fija y freno sobre días completos
+La base de BTC se fija con la primera lectura y no se mueve sola ("Reiniciar base" la fija en hoy). El
+máximo del freno sale de los días de `criptoHistorial` con todo valuado a precio del día.
+
+### Solo en la app
+Sin campana, sin push, sin Calendar. "Qué haría en cada caso" es texto fijo, no una salida del sistema.
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.

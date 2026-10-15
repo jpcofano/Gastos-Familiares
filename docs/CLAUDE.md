@@ -2051,6 +2051,30 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `firebase deploy --only functions,hosting,firestore:rules` → piso de caja 10% en Config →
   "Actualizar señales" y leer qué fuente respondió → un "Actualizar todo › Chat" pegado con
   `global: ok`.
+- F9.195 (sistema cripto) — **política propia del bloque cripto, precios diarios y card en Resumen**.
+  Ver `docs/prompts/F9.195-sistema-cripto.md` (base + Addendum 1) y el contrato en
+  `docs/patrimonio/CLAUDE-PATRIMONIO.md` §"Sistema cripto (F9.195)". **Numeración:** comparte número
+  con `F9.195-senales-y-manuales-deterministas.md` (13/14-oct, commit propio); son entregas distintas.
+  **Precios:** `functions/src/criptoPrecios.ts` (puro, red inyectada) — Bitfinex primaria (un pedido,
+  LAST_PRICE), Kraken respaldo (de a un par: uno desconocido rompe el pedido), CoinGecko último
+  recurso (tabla explícita de ids). Las tres sondeadas el 15-oct **desde la PC, no desde Functions**:
+  200 las tres. Stablecoins a 1 sin pedido. Sin precio → `valor: null` con el error de cada fuente,
+  nunca un proxy. Cron `leerPreciosCripto` (diario 09:15 ART) + callable `leerPreciosCriptoAhora`
+  (dueño) comparten `leerYGuardarCripto` → `criptoLectura/ultima` (precios, `sondeo` con status por
+  pedido, `bases.btc`) y `criptoHistorial/{YYYY-MM-DD}` (valor del sistema con las cantidades del
+  último snapshot; `completo: false` si algo se valuó al snapshot, y el freno no lo usa como máximo).
+  Rules: read dueño, write false. **Evaluación:** `src/datos/patrimonioCripto.ts`, puro — composición
+  BTC/ETH/otras/reserva contra `configPatrimonio/cripto`, reserva y tercios (de la reserva OBJETIVO),
+  tramos de BTC desde la base, plataformas, freno. **Plataformas por PLATAFORMA, no por `cuenta`**
+  (Addendum 1): tabla `PLATAFORMA_DE_CUENTA` por prefijo ("Nexo…" → Nexo, "Bitfinex…" → Bitfinex);
+  una cuenta fuera de la tabla es su propia plataforma, marcada "sin mapear". La custodia sigue por
+  cuenta y **se declara desde la card** (selector por cuenta → `guardarCustodiaCuenta`): no existía UI
+  que llamara a esa función. Card "Política cripto" en Config: borrador + "Guardar" con validación
+  (los objetivos tienen que sumar 100%, así que no se guarda tecla a tecla como la de riesgo).
+  `npx tsx scripts/verificarF9195.ts`: todo OK. `tsc`: 41 → 41, 0 en `functions/`; builds OK.
+  **Pendiente de cierre manual:** deploy (`functions:leerPreciosCripto,functions:leerPreciosCriptoAhora,hosting,firestore:rules`)
+  → revisar la política en Config → declarar Nexo / Nexo 2 / Bitfinex como `credito` desde la card →
+  "Actualizar" y leer en "Fuentes:" cuál respondió desde Functions.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

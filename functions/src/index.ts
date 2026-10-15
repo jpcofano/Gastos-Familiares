@@ -47,6 +47,7 @@ import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 import { backfillTc } from './tcBackfill';
 // F9.190 §2 — señales de mercado de la reserva: módulo puro, la red se inyecta.
 import { leerMercado, resolverBases, type Bases } from './senalesMercado';
+import { leerPreciosCripto as leerPreciosCriptoDeFuentes, resolverBaseBtc, armarDiaHistorial, type BaseBtc, type PosicionCripto } from './criptoPrecios';
 // F9.190 §1 — prompt v2 de "Actualizar todo" (global primero) y su validador.
 import { buildPromptCompletoV2, buildPromptV3, validarGlobal, validarOportunidades, esRespuestaV2, extraerJson, normalizarCasosPosicion, VERSION_INFORME, VERSION_INFORME_V3 } from './informeV2';
 
@@ -4061,6 +4062,77 @@ export const actualizarSenalesMercado = onSchedule(
     timeoutSeconds: 60,
   },
   async () => { await leerYGuardarSenales(false); },
+);
+
+// F9.195 (sistema cripto) §3 — precios cripto diarios. Mismo patrón que las señales: una función
+// con dos entradas (cron diario y botón "Actualizar"), lectura en `criptoLectura/ultima` y serie en
+// `criptoHistorial/{YYYY-MM-DD}`. Solo en la app: no notifica nada. Las cantidades salen del último
+// snapshot de la ingesta; la app no tiene keys de Nexo ni de Bitfinex.
+async function leerYGuardarCripto(reiniciarBase: boolean) {
+  const pedir = async (url: string) => {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(15_000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; gastos-familiares/1.0)', Accept: 'application/json' },
+    });
+    let body: unknown = null;
+    const texto = await res.text();
+    try { body = JSON.parse(texto); } catch { body = texto.slice(0, 300); }
+    return { status: res.status, body };
+  };
+
+  const snapQ = await db.collection('snapshotsPortafolio').orderBy('fechaCorrida', 'desc').limit(1).get();
+  const fechaCorrida = snapQ.empty ? null : (snapQ.docs[0].data().fechaCorrida as string);
+  const posiciones: PosicionCripto[] = [];
+  if (fechaCorrida) {
+    const posSnap = await db.collection('posicionesPatrimonio')
+      .where('fechaCorrida', '==', fechaCorrida).where('tipo', '==', 'cripto').get();
+    for (const d of posSnap.docs) {
+      const p = d.data() as { ticker?: string; cantidad?: number | null; valorUsd?: number };
+      if (p.ticker) posiciones.push({ ticker: p.ticker, cantidad: p.cantidad ?? null, valorUsd: p.valorUsd ?? 0 });
+    }
+  }
+
+  const hoy = hoyArgentinaISO();
+  const lectura = await leerPreciosCriptoDeFuentes(pedir, posiciones.map(p => p.ticker), new Date().toISOString());
+  const ref = db.collection('criptoLectura').doc('ultima');
+  const previo = await ref.get();
+  const baseBtc = resolverBaseBtc((previo.data()?.['bases']?.['btc'] as BaseBtc | undefined) ?? null, lectura, hoy, reiniciarBase);
+  const bases = { btc: baseBtc };
+
+  await ref.set({ ...lectura, bases, cantidadesDeFecha: fechaCorrida, actualizadoEn: FieldValue.serverTimestamp() });
+  if (posiciones.length) {
+    const dia = armarDiaHistorial(posiciones, lectura, fechaCorrida);
+    await db.collection('criptoHistorial').doc(hoy).set({ ...dia, fecha: hoy, actualizadoEn: FieldValue.serverTimestamp() });
+  }
+
+  const sinPrecio = Object.entries(lectura.precios).filter(([, p]) => p.valor === null);
+  if (sinPrecio.length) console.error(`[criptoPrecios] sin precio: ${sinPrecio.map(([t, p]) => `${t} (${p.error})`).join(' | ')}`);
+  console.log(`[criptoPrecios] ${hoy} corrida=${fechaCorrida} tickers=${Object.keys(lectura.precios).join(',')} ` +
+    `sondeo=${lectura.sondeo.map(s => `${s.fuente}:${s.status}`).join(',')} baseBtc=${baseBtc?.valor ?? null} reiniciarBase=${reiniciarBase}`);
+  return { lectura, bases, cantidadesDeFecha: fechaCorrida };
+}
+
+export const leerPreciosCriptoAhora = onCall(
+  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+    const reiniciarBase = (request.data as { reiniciarBase?: unknown } | null)?.reiniciarBase === true;
+    return leerYGuardarCripto(reiniciarBase);
+  },
+);
+
+// Todos los días (cripto no cierra) a las 09:15 ART, fuera del pico de las 09:00 de
+// actualizarTCDiario. Nunca reinicia la base.
+export const leerPreciosCripto = onSchedule(
+  {
+    schedule: '15 9 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+    timeoutSeconds: 120,
+  },
+  async () => { await leerYGuardarCripto(false); },
 );
 
 // F9.147 — el contexto pasó de cuatro campos (ticker, sector, peso, valorUsd) a la ficha entera:
