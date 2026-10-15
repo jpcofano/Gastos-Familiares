@@ -13,7 +13,7 @@ import { RIESGO_DEFAULTS } from '../src/datos/patrimonioRiesgo';
 import { buildPromptCompletoV2, validarGlobal, esRespuestaV2 } from '../functions/src/informeV2';
 import {
   parseRiesgoPais, precioDePanel, parseCcl, leerMercado, resolverBases,
-  URL_RIESGO_PAIS, URL_ARG_STOCKS, URL_USA_STOCKS, URL_CCL, type RespuestaCruda,
+  URL_RIESGO_PAIS, URL_CCL, URL_YAHOO_MERVAL, URL_YAHOO_SP500, parseYahooChart, type RespuestaCruda,
 } from '../functions/src/senalesMercado';
 
 let fallas = 0;
@@ -95,16 +95,29 @@ const sinMerval = precioDePanel({ status: 200, body: [{ symbol: 'YPFD', c: 1 }] 
 ok(sinMerval.valor === null && !!sinMerval.error?.includes('no trae'), 'Merval ausente del panel: sin proxy, con motivo');
 ok(parseCcl({ status: 200, body: { venta: 1550, fechaActualizacion: '2026-10-13T15:00:00Z' } }, HOY).valor === 1550, 'CCL de dolarapi');
 
+// F9.195 — Merval desde Yahoo (^MERV, pesos) y S&P desde el CEDEAR SPY (pesos) ÷ CCL.
 const respuestas: Record<string, RespuestaCruda> = {
   [URL_RIESGO_PAIS]: { status: 200, body: { valor: 720, fecha: HOY } },
-  [URL_ARG_STOCKS]: { status: 200, body: [{ symbol: 'MERVAL', c: 2_878_000 }] },
-  [URL_USA_STOCKS]: { status: 200, body: [{ symbol: 'SPY', c: 650 }] },
+  [URL_YAHOO_MERVAL]: { status: 200, body: { chart: { result: [{ meta: { regularMarketPrice: 2_878_000, regularMarketTime: 1791921600 } }], error: null } } },
+  [URL_YAHOO_SP500]: { status: 200, body: { chart: { result: [{ meta: { regularMarketPrice: 650, regularMarketTime: 1791921600 } }], error: null } } },
   [URL_CCL]: { status: 200, body: { venta: 1550 } },
 };
+ok(parseYahooChart({ status: 429, body: 'Too Many Requests' }, 'yahoo', HOY).error?.includes('429') === true, 'Yahoo bloqueado: error crudo, sin proxy');
+ok(parseYahooChart(respuestas[URL_YAHOO_MERVAL], 'yahoo', HOY).fecha === '2026-10-13', 'Yahoo: fecha desde regularMarketTime');
 (async () => {
-  const lectura = await leerMercado(async u => respuestas[u], HOY, '2026-10-13T18:00:00Z');
+  const lectura = await leerMercado(async u => respuestas[u], HOY, '2026-10-13T18:00:00Z', 0);
   ok(Math.abs((lectura.mervalUsd.valor ?? 0) - 2_878_000 / 1550) < 1e-6, 'Merval USD = Merval / CCL');
-  const caida = await leerMercado(async () => { throw new Error('ECONNRESET'); }, HOY, 'x');
+  ok(Math.abs((lectura.sp500.valor ?? 0) - 650) < 1e-6, 'S&P = índice ^GSPC, sin CCL');
+  // F9.195.1 — un 502 transitorio se reintenta una vez.
+  let n = 0;
+  const conUn502 = await leerMercado(async u => {
+    if (u === URL_YAHOO_SP500 && n++ === 0) return { status: 502, body: '<html>502 Bad Gateway</html>' };
+    return respuestas[u];
+  }, HOY, 'x', 0);
+  ok(conUn502.sp500.valor === 650 && n === 2, 'un 502 se reintenta y el segundo intento trae el dato');
+  const siempre502 = await leerMercado(async u => u === URL_YAHOO_SP500 ? { status: 502, body: 'Bad Gateway' } : respuestas[u], HOY, 'x', 0);
+  ok(siempre502.sp500.valor === null && !!siempre502.sp500.error?.includes('502'), 'si falla dos veces, queda el error crudo');
+  const caida = await leerMercado(async () => { throw new Error('ECONNRESET'); }, HOY, 'x', 0);
   ok(caida.riesgoPais.error?.includes('ECONNRESET') === true, 'leerMercado nunca rechaza: el error queda en el dato');
 
   // ── 5. Bases y evaluación ──────────────────────────────────────────────────
@@ -113,6 +126,8 @@ const respuestas: Record<string, RespuestaCruda> = {
   const lectura2 = { ...lectura, sp500: { ...lectura.sp500, valor: 540 }, mervalUsd: { ...lectura.mervalUsd, valor: (2_878_000 / 1550) * 0.7 } };
   ok(resolverBases(b1, lectura2, false).sp500?.valor === 650, 'la base no se mueve sola');
   ok(resolverBases(b1, lectura2, true).sp500?.valor === 540, 'reiniciar la fija en hoy');
+  const baseVieja = { mervalUsd: { valor: 999, fecha: '2026-10-01' }, sp500: { valor: 650, fecha: '2026-10-01' } };
+  ok(resolverBases(baseVieja, lectura2, false).sp500?.valor === 540, 'base de otra fuente (sin `fuente`) se reinicia sola');
 
   const ev = evaluarSenales(lectura2 as LecturaMercado, b1);
   const by = Object.fromEntries(ev.map(e => [e.id, e]));

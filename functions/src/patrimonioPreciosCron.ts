@@ -34,7 +34,11 @@ export type Resumen = {
   resultados: ResultadoTicker[];
   fallos: Array<{ ticker: string; error: string }>;
   escrito: boolean;
+  // F9.195 — posiciones manuales revaluadas con el precio live (cantidad × precio).
+  manuales?: ResultadoManual[];
 };
+
+export type ResultadoManual = { id: string; ticker: string; precioUsd: number | null; valorUsd: number | null; motivo: string | null };
 
 const dormir = (ms: number) => new Promise(r => setTimeout(r, ms));
 const PAUSA_MS = 600;  // data912 limita a 120 req/min: serial con pausa, nunca en paralelo
@@ -248,7 +252,56 @@ export async function correrActualizacionPrecios(
     }
   }
 
-  return { fechaCorrida, objetivos: objetivos.length, resultados, fallos, escrito: escribir };
+  const manuales = await valuarManuales(db, live, escribir);
+  return { fechaCorrida, objetivos: objetivos.length, resultados, fallos, escrito: escribir, manuales };
+}
+
+/** Fecha de hoy en Buenos Aires, YYYY-MM-DD. */
+const hoyART = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' });
+
+/**
+ * F9.195 — la valuación de una posición manual es aritmética (cantidad × último precio), así que
+ * la hace la app. Antes la pedía el prompt del informe ("manuales"): un LLM buscando el cierre de
+ * ACN en la web para multiplicarlo por 43. Solo paneles en USD (usa_stocks): un panel en pesos
+ * necesitaría TC y hoy ninguna manual lo usa. Lo que no se puede valuar queda como estaba, con
+ * motivo en el log, y el informe lo pide como respaldo.
+ */
+export async function valuarManuales(
+  db: Firestore,
+  live: Map<PP.PanelLive, Map<string, number>>,
+  escribir: boolean,
+): Promise<ResultadoManual[]> {
+  const snap = await db.collection('posicionesManuales').get();
+  const out: ResultadoManual[] = [];
+  const hoy = hoyART();
+  for (const doc of snap.docs) {
+    const m = doc.data() as { ticker?: string; tipo?: PP.PosicionTipo; pais_riesgo?: PP.PaisRiesgo; cantidad?: unknown };
+    const ticker = m.ticker ?? '';
+    const cantidad = Number(m.cantidad);
+    const spec = ticker ? PP.panelesPara(m.tipo ?? 'accion', m.pais_riesgo ?? 'global') : null;
+    let motivo: string | null = null;
+    let precio: number | null = null;
+    if (!ticker) motivo = 'sin ticker';
+    else if (!(cantidad > 0)) motivo = 'sin cantidad';
+    else if (!spec) motivo = 'tipo sin panel';
+    else if (spec.live !== 'usa_stocks') motivo = `panel ${spec.live} en pesos: no se valúa automático`;
+    else {
+      precio = live.get(spec.live)?.get(PP.simboloDePanel(ticker)) ?? null;
+      if (precio === null) motivo = `el panel ${spec.live} no trajo ${ticker}`;
+    }
+    const valorUsd = precio !== null ? Math.round(cantidad * precio * 100) / 100 : null;
+    if (valorUsd !== null && escribir) {
+      await doc.ref.set({
+        valorUsd, fechaValuacion: hoy,
+        precioUnitarioUsd: precio, fuenteValuacion: `data912:live/${spec!.live}`,
+        valuadoEn: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    if (motivo) console.warn(`[precios] manual ${doc.id} (${ticker}): ${motivo}`);
+    else console.log(`[precios] manual ${doc.id} ${ticker}: ${cantidad} × ${precio} = USD ${valorUsd}`);
+    out.push({ id: doc.id, ticker, precioUsd: precio, valorUsd, motivo });
+  }
+  return out;
 }
 
 async function actualizarUnTicker(

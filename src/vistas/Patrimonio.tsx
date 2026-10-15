@@ -4202,7 +4202,16 @@ function ModalPromptChat({
     setCargando(true);
     setError(null);
     generarPromptIA(modo, contexto, ticker)
-      .then(r => setPromptText(r.prompt))
+      .then(r => {
+        // F9.196 — si el servidor arma un prompt de otra versión que el contexto, el informe sale
+        // vacío o viejo sin que se note. Se corta acá, a la vista.
+        const vCtx = contexto['version'];
+        if (modo === 'completo' && typeof vCtx === 'number' && r.versionPrompt !== vCtx) {
+          setError(`El servidor armó el prompt v${r.versionPrompt ?? 1} para un contexto v${vCtx}: las functions están desactualizadas. Corré "firebase deploy --only functions" y volvé a abrir esto.`);
+          return;
+        }
+        setPromptText(r.prompt);
+      })
       .catch(e => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setCargando(false));
   }, []);

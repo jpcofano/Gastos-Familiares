@@ -260,7 +260,7 @@ Este es el informe PARTE 2 de 2: una ficha por posición. El panorama de la cart
 
 ${REGLAS_V3}
 - Cada ficha tiene que ser coherente con PANORAMA.sectorial del driver de esa posición. Si encontrás algo que lo contradice, decilo explícitamente en "situacionActual".
-- PRIORIDAD SI FALTA ESPACIO: primero las posiciones de mayor peso; las de menor peso pueden quedar fuera. "manuales" siempre va.
+- PRIORIDAD SI FALTA ESPACIO: primero las posiciones de mayor peso; las de menor peso pueden quedar fuera. "manuales" siempre va (aunque sea []).
 
 ═══ DATOS DE LA APP ═══
 CARTERA (resumen):
@@ -279,7 +279,7 @@ ${j('materiales')}
 POSICIONES MENORES (0,5%–2%, ${menores.length}) — una nota solo si hay novedad relevante:
 ${j('menores')}
 
-POSICIONES MANUALES (precio a actualizar):
+POSICIONES MANUALES SIN VALUACIÓN RECIENTE (la app las valúa sola todos los días hábiles; acá llegan solo las que quedaron viejas — si viene [], devolvé "manuales": []):
 ${j('manuales')}
 
 ═══ QUÉ DEVOLVER ═══
@@ -287,7 +287,7 @@ ${j('manuales')}
    - "analisis": una entrada por posición MATERIAL, en orden de peso, máx. 130 palabras por resultado (sin contar fuentes):
        queEs (1 frase); situacionActual (2-3 frases con info de hoy); riesgos (2); rolEnCartera (1 frase: qué aporta o qué concentra, usando "factor" y los desvíos de política); queHariaEnCadaCaso (2 casos condicionales; OJO: acá la clave de las opciones es "acciones", no "opciones"); fuentes (≤ 2 URLs).
    - "notas": para posiciones MENORES, una línea SOLO si hay una novedad relevante; si no, se omite.
-2) "manuales": último cierre verificado de cada posición manual; valorUsd = cantidad × precioUnitarioUsd. Si no se verifica → null en precio y valor.
+2) "manuales": solo para las que vinieron arriba: último cierre verificado; valorUsd = cantidad × precioUnitarioUsd. Si no se verifica → null en precio y valor.
 
 ═══ FORMATO ═══
 Respondé ÚNICAMENTE con UN bloque \`\`\`json, sin texto afuera ni comentarios adentro, con esta forma exacta:

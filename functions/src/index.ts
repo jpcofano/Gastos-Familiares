@@ -4011,6 +4011,35 @@ const DUENO_EMAIL = 'jpcofano@gmail.com';
 // Patrimonio: "nunca ordena ni dispara alarmas"). Corre solo cuando el dueño toca "Actualizar".
 // Cada fuente que falla viaja con su status y cuerpo crudo: la próxima vez se diagnostica con el
 // mensaje real, no con una hipótesis (lección de CAFCI).
+// F9.195 — lectura + guardado en una sola función, con dos entradas: el botón "Actualizar señales"
+// (callable) y el cron de días hábiles. Es un dato determinista: la app lo mantiene sola, sin
+// depender de que alguien toque un botón ni de un prompt.
+async function leerYGuardarSenales(reiniciarBase: boolean) {
+  const pedir = async (url: string) => {
+    // User-Agent explícito: Yahoo responde 4xx a pedidos sin UA. Al resto no le cambia nada.
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(15_000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; gastos-familiares/1.0)', Accept: 'application/json' },
+    });
+    let body: unknown = null;
+    const texto = await res.text();
+    try { body = JSON.parse(texto); } catch { body = texto.slice(0, 300); }
+    return { status: res.status, body };
+  };
+
+  const lectura = await leerMercado(pedir, hoyArgentinaISO(), new Date().toISOString());
+  const ref = db.collection('senalesMercado').doc('ultima');
+  const previo = await ref.get();
+  const bases = resolverBases((previo.data()?.['bases'] as Bases | undefined) ?? null, lectura, reiniciarBase);
+
+  await ref.set({ lectura, bases, actualizadoEn: FieldValue.serverTimestamp() });
+  const errores = (['riesgoPais', 'mervalUsd', 'sp500'] as const)
+    .filter(k => lectura[k].error).map(k => `${k}: ${lectura[k].error}`);
+  if (errores.length) console.error(`[senalesMercado] ${errores.join(' | ')}`);
+  console.log(`[senalesMercado] rp=${lectura.riesgoPais.valor} mervalUsd=${lectura.mervalUsd.valor} sp500=${lectura.sp500.valor} reiniciarBase=${reiniciarBase}`);
+  return { lectura, bases };
+}
+
 export const leerSenalesMercado = onCall(
   { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 60 },
   async (request) => {
@@ -4018,27 +4047,20 @@ export const leerSenalesMercado = onCall(
     const email = request.auth.token.email?.toLowerCase();
     if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
     const reiniciarBase = (request.data as { reiniciarBase?: unknown } | null)?.reiniciarBase === true;
-
-    const pedir = async (url: string) => {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-      let body: unknown = null;
-      const texto = await res.text();
-      try { body = JSON.parse(texto); } catch { body = texto.slice(0, 300); }
-      return { status: res.status, body };
-    };
-
-    const lectura = await leerMercado(pedir, hoyArgentinaISO(), new Date().toISOString());
-    const ref = db.collection('senalesMercado').doc('ultima');
-    const previo = await ref.get();
-    const bases = resolverBases((previo.data()?.['bases'] as Bases | undefined) ?? null, lectura, reiniciarBase);
-
-    await ref.set({ lectura, bases, actualizadoEn: FieldValue.serverTimestamp() });
-    const errores = (['riesgoPais', 'mervalUsd', 'sp500'] as const)
-      .filter(k => lectura[k].error).map(k => `${k}: ${lectura[k].error}`);
-    if (errores.length) console.error(`[leerSenalesMercado] ${errores.join(' | ')}`);
-    console.log(`[leerSenalesMercado] rp=${lectura.riesgoPais.valor} mervalUsd=${lectura.mervalUsd.valor} spy=${lectura.sp500.valor} reiniciarBase=${reiniciarBase}`);
-    return { lectura, bases };
+    return leerYGuardarSenales(reiniciarBase);
   },
+);
+
+// F9.195 — días hábiles 18:30 ART, después del cierre local y con EE.UU. todavía operando (el
+// CEDEAR y Yahoo traen el último precio). Nunca reinicia la base.
+export const actualizarSenalesMercado = onSchedule(
+  {
+    schedule: '30 18 * * 1-5',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+    timeoutSeconds: 60,
+  },
+  async () => { await leerYGuardarSenales(false); },
 );
 
 // F9.147 — el contexto pasó de cuatro campos (ticker, sector, peso, valorUsd) a la ficha entera:
@@ -5026,6 +5048,18 @@ export const generarPromptIA = onCall(
       throw new HttpsError('invalid-argument', 'contexto requerido');
     }
 
+    // F9.196 — un contexto de una versión que este servidor no conoce NO cae al prompt v1: eso
+    // producía un prompt vacío ("CONTEXTO GLOBAL: {}", "0 posiciones") que el modelo respondía igual.
+    // Pasó el 13-oct-2026: cliente v3 contra functions sin deployar.
+    const versionCtx = contexto['version'];
+    if (modo === 'completo' && versionCtx !== undefined && versionCtx !== VERSION_INFORME && versionCtx !== VERSION_INFORME_V3) {
+      throw new HttpsError('failed-precondition',
+        `El contexto es v${String(versionCtx)} y este servidor no lo conoce: hay que deployar functions.`);
+    }
+    const versionPrompt = modo === 'completo'
+      ? (versionCtx === VERSION_INFORME_V3 || versionCtx === VERSION_INFORME ? versionCtx as number : 1)
+      : null;
+
     const promptBase = modo === 'posicion'
       ? buildPromptPosicion(contexto)
       : modo === 'agenda'
@@ -5053,6 +5087,7 @@ export const generarPromptIA = onCall(
     return {
       prompt: promptBase + instrucciones,
       modo,
+      versionPrompt,   // F9.196 — el cliente verifica que coincida con la versión que mandó
       ...(ticker ? { ticker } : {}),
       generadoEn: new Date().toISOString(),
     };

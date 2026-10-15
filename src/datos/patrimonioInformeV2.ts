@@ -188,7 +188,7 @@ export type LecturaMercado = {
   mervalUsd: DatoMercado;
   sp500: DatoMercado;
 };
-export type BaseMercado = { valor: number; fecha: string };
+export type BaseMercado = { valor: number; fecha: string; fuente?: string };
 export type BasesMercado = { mervalUsd: BaseMercado | null; sp500: BaseMercado | null };
 
 // Umbrales elegidos con el titular el 13-oct-2026 (chat de planificación). ELECCIONES, no verdades:
@@ -242,7 +242,7 @@ export function evaluarSenales(lectura: LecturaMercado | null, bases: BasesMerca
       error: lectura.mervalUsd.error,
     },
     {
-      id: 'sp500', etiqueta: 'S&P 500 (SPY)', valor: lectura.sp500.valor, fecha: lectura.sp500.fecha,
+      id: 'sp500', etiqueta: 'S&P 500 (índice)', valor: lectura.sp500.valor, fecha: lectura.sp500.fecha,
       variacion: varSp, base: bases?.sp500 ?? null,
       umbrales: `−${UMBRALES_SENALES.sp500Caida[0] * 100}% desde la base`,
       nivel: varSp === null ? null : nivelPorUmbrales(-varSp, UMBRALES_SENALES.sp500Caida),
@@ -434,6 +434,14 @@ export function contextoPosicionesV3(e: EntradaContextoV3, panorama: PanoramaPar
     panorama,
     materiales: v3.materiales.map(conFactor),
     menores: v3.menores.map(conFactor),
-    manuales: v3.manuales,
+    // F9.195 — el cron de precios valúa las manuales (cantidad × precio live). Al modelo solo le
+    // llegan las que quedaron viejas (> DIAS_MANUAL_VIEJA): es el respaldo, no el camino normal.
+    manuales: v3.manuales.filter(m => diasEntre(m.fechaValuacion, v3.fecha) > DIAS_MANUAL_VIEJA),
   };
 }
+
+export const DIAS_MANUAL_VIEJA = 4;
+const diasEntre = (desde: string, hasta: string) => {
+  const a = Date.parse(`${desde}T00:00:00Z`), b = Date.parse(`${hasta}T00:00:00Z`);
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.round((b - a) / 86_400_000) : Infinity;
+};

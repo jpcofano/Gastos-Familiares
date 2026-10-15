@@ -2026,6 +2026,31 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   **Cero escrituras y cero lecturas de `preciosDiarios` desde el cliente** (verificado con un
   barrido de `src/`: el único archivo que lo menciona es la propia capa de datos). Frontend puro.
   `tsc`: 41 → 41, 0 en `functions/`; `vite build` OK. Deploy: `--only hosting`.
+- F9.190 — **"Actualizar todo" v2: el análisis global primero, y la reserva con señales de mercado**.
+  Ver `docs/prompts/F9.190-informe-v2-y-reserva.md` y el contrato en
+  `docs/patrimonio/CLAUDE-PATRIMONIO.md` §"Actualizar todo v2 y reserva (F9.190)". Diseñado en el chat
+  de planificación e implementado desde Cowork **sin push** (la sesión no tenía credencial del repo).
+  **§1 — el informe no llegaba al análisis global porque no tenía con qué hacerlo:**
+  `buildPromptCompleto` concatenaba los cuatro prompts standalone enteros (reglas ×4), ponía el lote
+  primero con la regla de corte ahí, y el contexto solo traía total / % AR / % cripto / HHI. El v2
+  (`functions/src/informeV2.ts`) tiene un solo bloque de reglas, orden global → sectorial → agenda →
+  posiciones → manuales, y recibe el motor de riesgo ya calculado (`contextoInformeV2`, puro, en
+  `src/datos/patrimonioInformeV2.ts`). Materialidad en el cliente: 15 / 10 / 10 sobre la cartera de
+  oct-2026. Las posiciones v2 tienen la forma del lote → mismo validador, misma colección. Global y
+  notas en `analisisGlobal` (rules: read dueño, write false). La agenda gana `tickers?`. Un cliente
+  viejo (sin `version: 2`) sigue recibiendo el prompt v1; el import decide por la forma.
+  **El camino API no cambió y no tiene global.**
+  **§2 — la reserva es el piso de caja de F9.116**, no un concepto nuevo: se sube a ~10% desde
+  Config. Card "Reserva y señales de mercado" en Resumen: caja contra el piso + riesgo país
+  (700/800 pb), Merval en USD (−15/−25% desde la base) y S&P/SPY (−15%). **Solo en la app**, sin
+  campana ni push: es la decisión "no alarmas" aplicada. Callable `leerSenalesMercado` (dueño, a
+  demanda) → `senalesMercado/ultima` (read dueño, write false). **Fuentes no verificadas en vivo**;
+  cada una que falla se muestra con status y cuerpo crudo, y el Merval sin fuente queda "sin dato",
+  nunca un proxy. `npx tsx scripts/verificarF9190.ts`: todo OK. `tsc`: 41 → 41, 0 en `functions/`;
+  `vite build` y `functions build` OK. **Pendiente de cierre manual:** commit + push →
+  `firebase deploy --only functions,hosting,firestore:rules` → piso de caja 10% en Config →
+  "Actualizar señales" y leer qué fuente respondió → un "Actualizar todo › Chat" pegado con
+  `global: ok`.
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con

@@ -284,6 +284,9 @@ export type ModoIA = 'posicion' | 'sectorial' | 'agenda' | 'lote' | 'completo';
 export type PromptGenerado = {
   prompt: string;
   modo: ModoIA;
+  // F9.196 — versión del prompt que armó el servidor (solo modo 'completo'). Ausente = servidor
+  // anterior a F9.196.
+  versionPrompt?: number | null;
   ticker?: string;
   generadoEn: string;
 };

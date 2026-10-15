@@ -959,6 +959,27 @@ antes de creerle al promedio.
 
 ---
 
+## "Actualizar todo" v2 y reserva (F9.190) — contrato
+
+### El global interpreta, no calcula
+El análisis global del informe v2 recibe los números del motor (escenarios, brecha, bandas de la
+política, exposición por factor, exposiciones sin decidir de F9.131) calculados con las mismas
+funciones que pinta "Riesgo y escenarios", y tiene prohibido recalcularlos. Lo que devuelve es
+**reportado** (`analisisGlobal`) y se muestra con esa marca.
+
+### Materialidad en el cliente
+≥ 2% análisis completo; 0,5–2% una nota solo si hay novedad; < 0,5% y bloque `cash` fuera. Lo decide
+`contextoInformeV2` (`src/datos/patrimonioInformeV2.ts`), no el modelo.
+
+### La reserva ES el piso de caja
+No hay un concepto "reserva" aparte: es `pisoCajaPct` de la política (F9.116). Cuenta lo que
+`bloqueDe` manda a `cash` (efectivo, stablecoins, `money_market_usd`).
+
+### Señales de mercado: solo en la app
+Riesgo país, Merval en USD y S&P (SPY) contra umbrales fijos, en una card. Sin campana, sin push,
+sin histéresis — es la decisión cerrada "no alarmas" aplicada, no una excepción. Las fuentes que
+fallan se muestran con el error crudo; el Merval sin fuente no se reemplaza por un proxy.
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.
