@@ -25,3 +25,7 @@ service-account*.json
 data/*
 !data/.gitkeep
 *.xlsx
+# Hook ultimochat (Stop de Claude Code): eco del ultimo reporte para Cowork.
+# Se reescribe en cada turno; versionarlo daria un commit por turno.
+docs/ultimochat.md
+.ultimochat/

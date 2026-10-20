@@ -2585,6 +2585,12 @@ Estas mejoras quedan registradas pero no se implementan en F2:
   nada sin sincronizar al cierre de la sesión.
 - Claude Code NO corre `npm install`, `npm run seed`, ni `firebase deploy` por
   iniciativa propia. Esos comandos los corro yo manualmente.
+- `docs/ultimochat.md` lo escribe sólo el hook `Stop` de Claude Code (`tools/ultimochat.js`,
+  registrado en `.claude/settings.json`): es el eco del último reporte de Code para que claude.ai
+  lo lea de la carpeta local en vez de copiarlo y pegarlo. Está fuera de git, nadie lo edita y no es
+  fuente de verdad: si discrepa con el repo, gana el repo. No se lee para arrancar una sesión (eso es
+  el handoff). Antes de pisarlo, el hook archiva el anterior en `.ultimochat/` (últimos 100, también
+  fuera de git). Sólo captura la sesión principal: lo que reporta un subagente no llega.
 
 ## Proceso de prompts (modo B)
 - Un prompt BASE por feature en docs/prompts/ (ej: F5.3_realtime_base.md), congelado al entregarse.
@@ -3321,6 +3327,8 @@ componente — `ResumenCard` ahora solo aporta las acciones (vía `children`).
 - `firestore.rules` — Security Rules.
 - `firestore.indexes.json` — indices compuestos.
 - `firebase.json` — config de Hosting + Emulators + Headers.
+- `tools/ultimochat.js` — hook `Stop`: escribe `docs/ultimochat.md` (generado, fuera de git).
+  `tools/probar-ultimochat.js` es su banco (`node tools/probar-ultimochat.js --autoprueba`).
 
 ## Anexo: Patrimonio
 
