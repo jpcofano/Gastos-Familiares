@@ -1075,6 +1075,22 @@ diferencia total supera el 2%, se avisa con el detalle por especie. Las especies
 distinta (más de 5×, por ejemplo bonos cotizados cada 100 VN en data912) se listan aparte y no
 entran al total. No corrige nada.
 
+## Aportes y retiros automáticos (F9.196 Addendum 2 §C) — contrato
+
+`src/datos/patrimonioFlujosAuto.ts` (puro). El flujo de F9.96 sale solo de los movimientos de
+cada fuente. Una transferencia entre cuentas propias no es flujo.
+
+- **Dinero:** retiro y depósito en cuentas distintas, misma moneda, montos a 1% o menos y a
+  5 días hábiles o menos: es interna.
+- **Cripto:** mismo activo, llega igual o menos que lo que salió (comisión de 1% o menos,
+  propuesto) y a 3 días corridos o menos.
+- **Títulos en especie:** misma especie y misma cantidad, a 5 días hábiles o menos (propuesto).
+- El apareo es goloso y determinista: el depósito más cercano en el tiempo, y a igual distancia
+  el de monto más parecido. La llegada nunca es anterior a la salida.
+- Lo que no aparea queda **pendiente**, sin flujo, hasta que Juan elige aporte, retiro o interna.
+- Los movimientos `inferido` nunca son flujo.
+- Un monto en pesos sin TC para su fecha va a `sinTc`: no se inventa la conversión.
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.
