@@ -6,10 +6,11 @@
 // escribir esas.
 //
 // La lógica (y la lectura del .xlsx) está en ./patrimonioBalanzArchivo; acá solo hay Firestore.
-import { doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { MovimientoCuenta } from './patrimonioMovimientos';
 import { idCuentaVivaBalanz, type CuentaVivaBalanz } from './patrimonioBalanzArchivo';
+import type { CajaAnclada } from './patrimonioBalanzMovimientos';
 
 export async function cargarCuentaVivaBalanz(comitente: string): Promise<CuentaVivaBalanz | null> {
   const snap = await getDoc(doc(db, 'cuentasVivas', idCuentaVivaBalanz(comitente)));
@@ -37,4 +38,36 @@ export async function guardarImportacionBalanz(cv: CuentaVivaBalanz, movimientos
     batch.set(doc(db, 'movimientosCuenta', m.id), { ...limpio(m), creadoEn: serverTimestamp() });
   }
   await batch.commit();
+}
+
+/**
+ * Addendum 2 §B (H3c) — movimientos del archivo de Movimientos de Balanz, en batches de 400
+ * (ids deterministas: un export que se pisa con otro no duplica). Si la caja anclada se pudo
+ * calcular y la comitente ya tiene "Mis Instrumentos" importado, se le escriben los `saldos` a su
+ * cuenta viva; si no, la caja sigue siendo la de la corrida.
+ * @returns si se actualizaron los saldos de la cuenta viva.
+ */
+export async function guardarMovimientosBalanz(
+  comitente: string,
+  movimientos: MovimientoCuenta[],
+  caja: CajaAnclada,
+): Promise<{ saldosActualizados: boolean }> {
+  for (let i = 0; i < movimientos.length; i += 400) {
+    const batch = writeBatch(db);
+    for (const m of movimientos.slice(i, i + 400)) {
+      if (!m.id) throw new Error('Movimiento sin id.');
+      batch.set(doc(db, 'movimientosCuenta', m.id), { ...limpio(m), creadoEn: serverTimestamp() });
+    }
+    await batch.commit();
+  }
+  if (caja.estado !== 'ok') return { saldosActualizados: false };
+  const ref = doc(db, 'cuentasVivas', idCuentaVivaBalanz(comitente));
+  const previa = await getDoc(ref);
+  // Sin "Mis Instrumentos" no hay posiciones: una cuenta viva con solo caja haría que la cartera
+  // viva descarte las posiciones de la corrida de esa cuenta.
+  if (!previa.exists() || !Array.isArray(previa.data().posiciones) || !previa.data().posiciones.length) {
+    return { saldosActualizados: false };
+  }
+  await updateDoc(ref, { saldos: caja.saldos, cajaAnclada: limpio(caja), cajaActualizadaEn: serverTimestamp() });
+  return { saldosActualizados: true };
 }

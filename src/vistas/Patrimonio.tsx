@@ -5637,6 +5637,7 @@ export default function Patrimonio() {
           posicionesCorrida={posiciones}
           indicadores={indicadores}
           tc={tc}
+          fechaCorrida={fechaCorrida}
           onGuardado={texto => { setShowBalanz(false); setToast({ texto, error: false }); }}
           onClose={() => setShowBalanz(false)}
         />

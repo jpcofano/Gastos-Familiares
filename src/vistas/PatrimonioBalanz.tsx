@@ -2,6 +2,9 @@
 // (.xlsx) a `cuentasVivas/balanz_<comitente>`, sin LLM. No crea una corrida: alimenta solo la
 // cartera viva. Antes de confirmar muestra la comitente, la fecha del archivo, las especies, el
 // total en USD, el control contra la app y qué cambió contra la importación anterior.
+//
+// §B (H3c) — el mismo botón acepta el archivo de Movimientos: sugiere la comitente por tickers
+// (Juan la confirma), clasifica cada fila, registra los movimientos y ancla la caja en la corrida.
 import { useRef, useState } from 'react';
 import { Card } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
@@ -13,7 +16,11 @@ import {
   cuentaDeComitente, leerFilasXlsx, tiposPorTickerDe, esMasViejo, UMBRAL_CONTROL,
   type ImportacionMisInstrumentos, type ControlBalanz, type CuentaVivaBalanz,
 } from '../datos/patrimonioBalanzArchivo';
-import { cargarCuentaVivaBalanz, guardarImportacionBalanz } from '../datos/patrimonioCuentasVivas';
+import { cargarCuentaVivaBalanz, guardarImportacionBalanz, guardarMovimientosBalanz } from '../datos/patrimonioCuentasVivas';
+import {
+  parsearMovimientosBalanz, aparearDevoluciones, movimientosDeBalanz, cajaAnclada, sugerirComitente,
+  contarPorClase, type CajaAnclada, type ClaseBalanz, type FilaMovBalanz,
+} from '../datos/patrimonioBalanzMovimientos';
 
 type Props = {
   /** Posiciones de la corrida vigente: de acá salen las comitentes conocidas y la clasificación. */
@@ -22,6 +29,8 @@ type Props = {
   indicadores: Map<string, IndicadoresPosicion>;
   /** ARS por USD que usa la vista (último `tcDiario`). */
   tc: number;
+  /** Fecha de la corrida vigente: ancla la caja del archivo de Movimientos (§B). */
+  fechaCorrida: string;
   onGuardado: (texto: string) => void;
   onClose: () => void;
 };
@@ -39,11 +48,24 @@ type Lista = {
   descartada: string | null;
 };
 
+/** §B — un archivo de Movimientos listo para confirmar. */
+type ListaMovimientos = {
+  comitente: string;
+  filas: FilaMovBalanz[];
+  duplicadas: number;
+  conteo: Record<ClaseBalanz, number>;
+  movimientos: MovimientoCuenta[];
+  devueltas: number;
+  sinComprobante: FilaMovBalanz[];
+  caja: CajaAnclada;
+};
+
 /** `id` = nombre + fecha del archivo + posición: un resultado viejo nunca pisa una subida nueva. */
 type Entrada = { id: string; nombre: string } & (
   | { estado: 'leyendo' }
   | { estado: 'error'; mensaje: string }
-  | { estado: 'movimientos' }
+  | { estado: 'mov_pide_cuenta'; filas: unknown[][]; sugerencias: Array<{ comitente: string; comunes: number; total: number }> }
+  | ({ estado: 'mov_lista' } & ListaMovimientos)
   | { estado: 'pide_cuenta'; filas: unknown[][]; exportadoEn: string | null; lastModified: number }
   | ({ estado: 'lista' } & Lista)
 );
@@ -74,7 +96,7 @@ function resolverRepetidas(xs: Entrada[]): Entrada[] {
   });
 }
 
-export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, onGuardado, onClose }: Props) {
+export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, fechaCorrida, onGuardado, onClose }: Props) {
   const [entradas, setEntradas] = useState<Entrada[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [errorGuardar, setErrorGuardar] = useState<string | null>(null);
@@ -129,7 +151,7 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, o
       try {
         const { filas } = await leerFilasXlsx(await f.arrayBuffer());
         const tipo = detectarArchivoBalanz(filas[0] ?? []);
-        if (tipo === 'movimientos') { out.push({ id, nombre: f.name, estado: 'movimientos' }); continue; }
+        if (tipo === 'movimientos') { out.push(await sugerir(id, f.name, filas)); continue; }
         if (tipo !== 'mis_instrumentos') {
           out.push({ id, nombre: f.name, estado: 'error', mensaje: 'No reconozco el archivo: los encabezados no son los de "Mis Instrumentos" ni los de "Movimientos" de Balanz.' });
           continue;
@@ -157,10 +179,49 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, o
     setEntradas(prev => resolverRepetidas(prev.map(y => (y.id === id ? lista : y))));
   }
 
+  /** §B — el nombre no trae la comitente: se sugiere por tickers en común y Juan la confirma. */
+  async function sugerir(id: string, nombre: string, filas: unknown[][]): Promise<Entrada> {
+    try {
+      const prueba = parsearMovimientosBalanz(filas, 'x').filas;
+      const candidatas = await Promise.all(comitentesConocidas.map(async c => {
+        const viva = await cargarCuentaVivaBalanz(c).catch(() => null);
+        const tickers = viva?.posiciones.length
+          ? viva.posiciones.map(p => p.ticker)
+          : posicionesCorrida.filter(p => p.cuenta === cuentaDeComitente(c) && p.tipo !== 'cash').map(p => p.ticker);
+        return { comitente: c, tickers };
+      }));
+      return { id, nombre, estado: 'mov_pide_cuenta', filas, sugerencias: sugerirComitente(prueba, candidatas) };
+    } catch (e) {
+      return { id, nombre, estado: 'error', mensaje: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  async function confirmarComitenteMovimientos(id: string, comitente: string) {
+    const x = entradas.find(y => y.id === id);
+    if (!x || x.estado !== 'mov_pide_cuenta' || !comitente) return;
+    let lista: Entrada;
+    try {
+      const { filas, duplicadas } = parsearMovimientosBalanz(x.filas, comitente);
+      const dev = aparearDevoluciones(filas);
+      lista = {
+        id, nombre: x.nombre, estado: 'mov_lista', comitente, filas, duplicadas,
+        conteo: contarPorClase(filas),
+        movimientos: movimientosDeBalanz(filas, comitente, dev.anuladas),
+        devueltas: dev.pares.length, sinComprobante: dev.sinComprobante,
+        caja: cajaAnclada(filas, fechaCorrida ? { fecha: fechaCorrida, posiciones: posicionesCorrida } : null, comitente),
+      };
+    } catch (e) {
+      lista = { id, nombre: x.nombre, estado: 'error', mensaje: e instanceof Error ? e.message : String(e) };
+    }
+    setEntradas(prev => prev.map(y => (y.id === id ? lista : y)));
+  }
+
   const quitar = (id: string) => setEntradas(prev => resolverRepetidas(prev.filter(y => y.id !== id)));
 
   const aGuardar = entradas.filter((x): x is Extract<Entrada, { estado: 'lista' }> =>
     x.estado === 'lista' && !x.mismo && !x.bloqueo && !x.descartada);
+  const movAGuardar = entradas.filter((x): x is Extract<Entrada, { estado: 'mov_lista' }> => x.estado === 'mov_lista');
+  const totalAGuardar = aGuardar.length + movAGuardar.length;
   // Solo lo que se está leyendo frena la confirmación; un archivo que pide cuenta se puede quitar.
   const pendientes = entradas.some(x => x.estado === 'leyendo');
 
@@ -168,8 +229,17 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, o
     setGuardando(true);
     setErrorGuardar(null);
     try {
+      // Primero "Mis Instrumentos": la caja anclada se escribe sobre la cuenta viva que ese archivo crea.
       for (const x of aGuardar) await guardarImportacionBalanz(cuentaVivaDeImportacion(x.imp), x.movimientos);
-      onGuardado(`Balanz actualizado: ${aGuardar.map(x => `${x.imp.comitente} (${x.imp.posiciones.length} especies)`).join(', ')}.`);
+      const textosMov: string[] = [];
+      for (const x of movAGuardar) {
+        const { saldosActualizados } = await guardarMovimientosBalanz(x.comitente, x.movimientos, x.caja);
+        textosMov.push(`${x.comitente}: ${x.movimientos.length} movimientos${saldosActualizados ? ', caja actualizada' : ', caja sin cambios'}`);
+      }
+      onGuardado(`Balanz actualizado: ${[
+        ...aGuardar.map(x => `${x.imp.comitente} (${x.imp.posiciones.length} especies)`),
+        ...textosMov,
+      ].join(' · ')}.`);
     } catch (e) {
       setErrorGuardar(e instanceof Error ? e.message : String(e));
     } finally {
@@ -220,9 +290,26 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, o
 
             {x.estado === 'leyendo' && <div style={sub}>Leyendo…</div>}
             {x.estado === 'error' && <div style={{ fontSize: 13, color: 'var(--gf-expense)', lineHeight: 1.45 }}>{x.mensaje}</div>}
-            {x.estado === 'movimientos' && (
-              <div style={sub}>Es un archivo de <strong>Movimientos</strong>. Su importación llega en una etapa siguiente (H3c); por ahora no se carga.</div>
+            {x.estado === 'mov_pide_cuenta' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={sub}>
+                  Archivo de <strong>Movimientos</strong>. El nombre no dice la comitente
+                  {x.sugerencias[0]?.comunes
+                    ? <>: por los tickers parece <strong>Balanz {x.sugerencias[0].comitente}</strong> ({x.sugerencias[0].comunes} de {x.sugerencias[0].total} en común). Confirmala:</>
+                    : '. Elegila:'}
+                </div>
+                <select
+                  defaultValue=""
+                  onChange={e => confirmarComitenteMovimientos(x.id, e.target.value)}
+                  style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', fontSize: 14, fontFamily: 'var(--font-base)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+                >
+                  <option value="" disabled>Elegí la comitente…</option>
+                  {x.sugerencias.map(c => <option key={c.comitente} value={c.comitente}>Balanz {c.comitente} · {c.comunes} tickers en común</option>)}
+                </select>
+                {!x.sugerencias.length && <div style={sub}>No hay cuentas de Balanz en la corrida para elegir: quitá este archivo.</div>}
+              </div>
             )}
+            {x.estado === 'mov_lista' && <ResumenMovimientos x={x} />}
 
             {x.estado === 'pide_cuenta' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -256,10 +343,10 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, o
             </button>
             <button
               onClick={confirmar}
-              disabled={!aGuardar.length || guardando || pendientes}
-              style={{ flex: 2, padding: '12px 14px', borderRadius: 11, border: 'none', background: aGuardar.length && !guardando && !pendientes ? 'var(--color-accent)' : 'var(--gf-gray-200)', color: aGuardar.length && !guardando && !pendientes ? '#fff' : 'var(--gf-gray-400)', fontSize: 14, fontWeight: 700, cursor: aGuardar.length && !guardando && !pendientes ? 'pointer' : 'default', fontFamily: 'var(--font-base)' }}
+              disabled={!totalAGuardar || guardando || pendientes}
+              style={{ flex: 2, padding: '12px 14px', borderRadius: 11, border: 'none', background: totalAGuardar && !guardando && !pendientes ? 'var(--color-accent)' : 'var(--gf-gray-200)', color: totalAGuardar && !guardando && !pendientes ? '#fff' : 'var(--gf-gray-400)', fontSize: 14, fontWeight: 700, cursor: totalAGuardar && !guardando && !pendientes ? 'pointer' : 'default', fontFamily: 'var(--font-base)' }}
             >
-              {guardando ? 'Guardando…' : aGuardar.length ? `Confirmar (${aGuardar.length})` : 'Nada para guardar'}
+              {guardando ? 'Guardando…' : totalAGuardar ? `Confirmar (${totalAGuardar})` : 'Nada para guardar'}
             </button>
           </div>
         )}
@@ -345,6 +432,61 @@ function ResumenImportacion({ x }: { x: Lista }) {
           {imp.avisos.map((a, k) => <li key={k}>{a}</li>)}
         </ul>
       )}
+    </div>
+  );
+}
+
+const ROTULO_CLASE: Record<ClaseBalanz, string> = {
+  deposito: 'depósitos (Recibo de Cobro)', retiro: 'retiros (Comprobante de Pago)', anula_retiro: 'devoluciones por rechazo',
+  compra: 'compras', venta: 'ventas', caucion: 'cauciones', renta: 'dividendos, rentas y amortizaciones',
+  gasto: 'retenciones y cargos', ajuste_caja: 'conversiones y ajustes de caja', fci_caja: 'FCI (lado caja)',
+  fci_tenencia: 'FCI (lado tenencia)', transferencia_titulos: 'transferencias de títulos', para_revisar: 'para revisar',
+};
+
+function ResumenMovimientos({ x }: { x: ListaMovimientos }) {
+  const sub = { fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.45 } as const;
+  const fechas = x.filas.map(f => f.concertacion).sort();
+  const revisar = x.filas.filter(f => f.clase === 'para_revisar');
+  const candidatos = x.movimientos.filter(m => m.tipo === 'deposito' || m.tipo === 'retiro');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 800 }}>Movimientos · Balanz {x.comitente}</div>
+        <div style={sub}>
+          {x.filas.length} filas del {fechas[0]} al {fechas[fechas.length - 1]}
+          {x.duplicadas ? ` · ${x.duplicadas} repetidas, contadas una vez` : ''} · {x.movimientos.length} movimientos a registrar
+          {x.filas.length >= 1000 ? ' · ⚠ justo 1000 filas: el export puede venir cortado' : ''}
+        </div>
+      </div>
+      <ul style={{ ...sub, margin: 0, paddingLeft: 18 }}>
+        {(Object.entries(x.conteo) as Array<[ClaseBalanz, number]>).sort((a, b) => b[1] - a[1]).map(([c, n]) => (
+          <li key={c} style={c === 'para_revisar' ? { color: 'var(--gf-expense)', fontWeight: 700 } : undefined}>{n} {ROTULO_CLASE[c]}</li>
+        ))}
+      </ul>
+      {revisar.length > 0 && (
+        <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: 'rgba(245,158,11,.10)' }}>
+          <strong>Para revisar</strong> (no se clasifican solas):
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {revisar.map(f => <li key={f.fila}>fila {f.fila}: «{f.descripcion}»</li>)}
+          </ul>
+        </div>
+      )}
+      {(x.devueltas > 0 || x.sinComprobante.length > 0) && (
+        <div style={sub}>
+          {x.devueltas > 0 && <>{x.devueltas} devolución(es) por rechazo anulan su Comprobante de Pago. </>}
+          {x.sinComprobante.length > 0 && <strong>{x.sinComprobante.length} devolución(es) sin su Comprobante de Pago en el archivo.</strong>}
+        </div>
+      )}
+      <div style={sub}>
+        {candidatos.length} depósitos y retiros (dinero o títulos en especie) quedan como candidatos a aporte o retiro.
+        No son flujos todavía: se aparean contra las otras cuentas y lo que no aparea lo decidís vos.
+      </div>
+      <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: 'var(--gf-gray-50)' }}>
+        <strong>Caja anclada:</strong>{' '}
+        {x.caja.estado === 'ok'
+          ? <>caja de la corrida del {x.caja.ancla} (ARS {Math.round(x.caja.cajaCorrida.ARS).toLocaleString('es-AR')} · USD {Math.round(x.caja.cajaCorrida.USD).toLocaleString('es-AR')}) + {x.caja.filasSumadas} filas liquidadas después = <strong>ARS {Math.round(x.caja.saldos.ARS).toLocaleString('es-AR')} · USD {Math.round(x.caja.saldos.USD).toLocaleString('es-AR')}</strong>. Se guarda en la cuenta viva si ya importaste su "Mis Instrumentos".</>
+          : <>desconocida — {x.caja.motivo} La caja sigue siendo la de la corrida.</>}
+      </div>
     </div>
   );
 }

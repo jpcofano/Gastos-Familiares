@@ -35,6 +35,13 @@ export type MovimientoCuenta = {
    * es flujo. La cartera viva no lo aplica (la cuenta ya viene con la tenencia del archivo).
    */
   inferido?: boolean;
+  /**
+   * Addendum 2 §B — la `Moneda` original de Balanz (`Dólares`, `Dólares C.V. 7000`,
+   * `US Dollar (Cable)`, `Pesos`). Las tres de dólar suman como USD; acá queda la subcuenta.
+   */
+  subcuenta?: string | null;
+  /** Addendum 2 §B — renta que es (o incluye) amortización: devolución de capital. */
+  devolucionCapital?: boolean;
 };
 
 /**

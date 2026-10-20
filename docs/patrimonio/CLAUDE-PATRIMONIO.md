@@ -1083,6 +1083,32 @@ diferencia total supera el 2%, se avisa con el detalle por especie. Las especies
 distinta (más de 5×, por ejemplo bonos cotizados cada 100 VN en data912) se listan aparte y no
 entran al total. No corrige nada.
 
+## Balanz: archivo de Movimientos (F9.196 Addendum 2 §B) — contrato
+
+`src/datos/patrimonioBalanzMovimientos.ts` (puro) y el mismo botón "Actualizar Balanz".
+
+- **Comitente:** el nombre del archivo no la trae. Se sugiere por los tickers en común con el
+  último "Mis Instrumentos" (o la corrida) y Juan la confirma.
+- **Clasificación:** por el texto de `Descripcion`, con la tabla de §B tal cual. Lo que no está en
+  la tabla queda `para_revisar` con el texto crudo, sin reglas nuevas. Las dos muestras reales
+  dan 0 (`scripts/clasificarBalanzMuestras.ts`).
+- **Un boleto es un movimiento**, aunque venga en varias filas (una por moneda). La tenencia sale
+  de la fila con precio; las de otra moneda mueven solo la caja.
+- **FCI:** la tenencia sale solo de "Suscripción desde Balanz" / "Rescate a Balanz". Su importe NO
+  entra a la caja: en las muestras espeja al de "Liquidación de …", y sumar los dos dejaría una
+  suscripción sin efecto en la caja.
+- **Devolución por rechazo:** anula el `Comprobante de Pago` anterior del mismo monto y moneda.
+  Se anulan los dos.
+- **Transferencia de títulos:** es un depósito o retiro en especie, valuado cantidad × precio del
+  archivo. La fila no trae moneda y se asume pesos (pendiente de confirmar).
+- **Duplicados:** se descartan por `(comitente, Descripcion, Concertacion, Moneda, Importe,
+  Cantidad)`. Los ids son deterministas, así que un export que se pisa con otro no duplica nada.
+- **Caja anclada:** caja de la última corrida de la comitente + Importe de lo liquidado después.
+  Las tres subcuentas de dólar suman USD, y se guarda el detalle por subcuenta. Sin corrida con
+  caja, o si el archivo no llega hasta la corrida, la caja es "desconocida". Si la comitente ya
+  tiene "Mis Instrumentos", la caja se escribe como `saldos` de su cuenta viva.
+- Depósitos, retiros y transferencias de títulos son **candidatos** de §C: no son flujo solos.
+
 ## Aportes y retiros automáticos (F9.196 Addendum 2 §C) — contrato
 
 `src/datos/patrimonioFlujosAuto.ts` (puro). El flujo de F9.96 sale solo de los movimientos de
