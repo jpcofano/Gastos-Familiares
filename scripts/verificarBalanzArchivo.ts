@@ -62,10 +62,10 @@ const parsear = (filas = tabla(), exportadoEn = EXP) => parsearMisInstrumentos(f
 
 (async () => {
   console.log('=== nombre del archivo ===');
-  const conCorchetes = parsearNombreBalanz('[MisInstrumentos][com402665][cuo175001][TITULAR UNO Y/O TITULAR DOS][20261020]_[183109hs].xlsx');
-  ok(conCorchetes.comitente === '402665' && conCorchetes.exportadoEn === '2026-10-20T18:31:09-03:00', 'con corchetes: comitente y fecha/hora', conCorchetes);
-  const sinCorchetes = parsearNombreBalanz('MisInstrumentoscom1120830cuo645804TITULAR_UNO20261013_142444hs.xlsx');
-  ok(sinCorchetes.comitente === '1120830' && sinCorchetes.exportadoEn === '2026-10-13T14:24:44-03:00', 'sin corchetes: comitente y fecha/hora', sinCorchetes);
+  const conCorchetes = parsearNombreBalanz('[MisInstrumentos][com999001][cuo555001][TITULAR UNO Y/O TITULAR DOS][20261020]_[183109hs].xlsx');
+  ok(conCorchetes.comitente === '999001' && conCorchetes.exportadoEn === '2026-10-20T18:31:09-03:00', 'con corchetes: comitente y fecha/hora', conCorchetes);
+  const sinCorchetes = parsearNombreBalanz('MisInstrumentoscom999002cuo555002TITULAR_UNO20261013_142444hs.xlsx');
+  ok(sinCorchetes.comitente === '999002' && sinCorchetes.exportadoEn === '2026-10-13T14:24:44-03:00', 'sin corchetes: comitente y fecha/hora', sinCorchetes);
   const raro = parsearNombreBalanz('Mis Instrumentos (1).xlsx');
   ok(raro.comitente === null && raro.exportadoEn === null, 'nombre raro → null: la cuenta la elige Juan', raro);
 
