@@ -6,7 +6,7 @@
 // Los stops y señales (H4) tienen su propio banco: npx tsx functions/src/patrimonioStops.test.ts
 import type { Posicion, PosicionManual } from '../src/types/patrimonio';
 import {
-  armarCarteraViva, resolverTcCarteraViva,
+  armarCarteraViva, resolverTcCarteraViva, diaHabilAnterior,
   type CuentaViva, type PreciosCarteraViva, type TcCarteraViva,
 } from '../src/datos/patrimonioCarteraViva';
 import {
@@ -148,7 +148,12 @@ console.log('\n=== Addendum 1: el TC de la cartera viva ===');
   const b = resolverTcCarteraViva({ status: 200, body: RESP }, diario, '2026-10-20T01:38:00.000Z');   // 22:38 ART del 19
   ok(b?.fuente === 'dolarapi-bolsa', 'a las 22:38 ART (ya 20/10 en UTC) sigue siendo de hoy: la fecha se compara en hora argentina', b);
   const c = resolverTcCarteraViva({ status: 502, body: 'Bad Gateway' }, diario, '2026-10-19T21:20:00.000Z');
-  ok(c?.fuente === 'tcDiario' && c.valor === 1541 && c.fechaCotizacion === '2026-10-19' && c.viejo, 'API caída → el tcDiario más reciente, marcado viejo', c);
+  ok(c?.fuente === 'tcDiario' && c.valor === 1541 && c.viejo, 'API caída → el tcDiario más reciente, marcado viejo', c);
+  // tcDiario[D] guarda el cierre del día hábil anterior (F9.103): el doc del lunes 19/10 rotula el viernes 16/10.
+  ok(c?.fechaCotizacion === '2026-10-16', 'respaldo: un doc del lunes rotula el viernes', c?.fechaCotizacion);
+  ok(diaHabilAnterior('2026-10-21') === '2026-10-20', 'día hábil anterior de un miércoles = martes');
+  ok(diaHabilAnterior('2026-10-18') === '2026-10-16' && diaHabilAnterior('2026-10-17') === '2026-10-16', 'domingo y sábado → viernes');
+  ok(diaHabilAnterior('2026-03-02') === '2026-02-27', 'cruza fin de mes (lunes 02/03 → viernes 27/02)');
   const d = resolverTcCarteraViva({ status: 200, body: { ...RESP, fechaActualizacion: '2026-10-17T21:00:00.000Z' } }, diario, '2026-10-19T21:20:00.000Z');
   ok(d?.fuente === 'tcDiario', 'fechaActualizacion de otro día → respaldo', d);
   const e = resolverTcCarteraViva({ status: 200, body: { ...RESP, venta: 'x' } }, diario, '2026-10-19T21:20:00.000Z');

@@ -20,7 +20,10 @@ import { efectoMovimiento, movimientoVigente, type MovimientoCuenta } from './pa
 export type TcCarteraViva = {
   valor: number;
   fuente: 'dolarapi-bolsa' | 'tcDiario';
-  /** YYYY-MM-DD. dolarapi: `fechaActualizacion` pasada a hora argentina. tcDiario: el id del doc. */
+  /**
+   * YYYY-MM-DD: la fecha del CIERRE cotizado. dolarapi: `fechaActualizacion` pasada a hora
+   * argentina. tcDiario: el día hábil anterior al id del doc (convención D−1 de F9.103).
+   */
   fechaCotizacion: string;
   viejo: boolean;
 };
@@ -413,8 +416,9 @@ export function armarCarteraViva(
  *   Medido el 19/10/2026: `fechaActualizacion` viene en ISO UTC (`2026-10-19T21:00:00.000Z` =
  *   18:00 ART), así que se pasa a hora argentina antes de comparar: después de las 21:00 ART la
  *   fecha UTC ya es la del día siguiente.
- * - Si no: el `tcDiario` más reciente, `viejo: true`. Ojo que `tcDiario[D]` guarda el cierre de
- *   D−1 (F9.103); `fechaCotizacion` es el id del doc, no la fecha del cierre.
+ * - Si no: el `tcDiario` más reciente, `viejo: true`. `tcDiario[D]` guarda el cierre del día hábil
+ *   anterior (el cron corre a las 09:00, antes de que abra el mercado; F9.103), así que
+ *   `fechaCotizacion` es `diaHabilAnterior(D)`: un doc del lunes rotula el viernes.
  * - Sin ninguno de los dos: null. No se inventa un valor.
  */
 export function resolverTcCarteraViva(
@@ -435,5 +439,16 @@ export function resolverTcCarteraViva(
   const validos = tcDiario.filter(d => Number.isFinite(d.tcUsdArs) && d.tcUsdArs > 0);
   if (!validos.length) return null;
   const ultimo = validos.reduce((a, b) => (b.fecha > a.fecha ? b : a));
-  return { valor: ultimo.tcUsdArs, fuente: 'tcDiario', fechaCotizacion: ultimo.fecha, viejo: true };
+  return { valor: ultimo.tcUsdArs, fuente: 'tcDiario', fechaCotizacion: diaHabilAnterior(ultimo.fecha), viejo: true };
+}
+
+/**
+ * Día hábil anterior a una fecha YYYY-MM-DD: salta sábados y domingos.
+ * ⚠ Limitación: no conoce feriados. Un doc del día siguiente a un feriado rotula el feriado.
+ */
+export function diaHabilAnterior(fecha: string): string {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  do d.setUTCDate(d.getUTCDate() - 1);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
 }
