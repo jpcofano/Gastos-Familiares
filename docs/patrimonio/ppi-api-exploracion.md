@@ -2,7 +2,29 @@
 
 - **Fecha de armado:** 2026-10-19
 - **Fuente:** documentación pública oficial; nada de esto se probó en vivo con credenciales.
+- **20/10/2026 — prueba en vivo bloqueada en el login.** Ver "Estado de la prueba en vivo" abajo:
+  producción responde, pero `LoginApi` rechaza las credenciales (`400 "Credenciales invalidas."`).
+  Los puntos 2 a 7 siguen "según la doc".
 - **Spec:** [`docs/prompts/F9.196-acciones-stops-cartera-viva.md`](../prompts/F9.196-acciones-stops-cartera-viva.md) §0 (y §0.b para lo cripto).
+
+## Estado de la prueba en vivo (20/10/2026)
+
+Cliente de exploración: `scripts/explorarPPI.ts`, sobre `scripts/ppiCliente.ts`. Es solo de
+lectura, con lista blanca de rutas: cualquier otra tira error antes de salir a la red, verificado
+por `scripts/ppiCliente.test.ts`. A la lista de §0 se le sumaron `Configuration/InstrumentTypes` y
+`Configuration/Settlements`, que hacen falta para el punto 6 y son de consulta. Las respuestas
+crudas quedan en `data/ppi-exploracion/` (gitignored) con los tokens tapados.
+
+| Punto | Estado | Detalle |
+|---|---|---|
+| 1. Base URL | **Confirmado en vivo, 20/10 19:44** (parcial) | `https://clientapi.portfoliopersonal.com/api/1.0/Account/LoginApi` existe y responde (nginx, `application/json; charset=utf-8`). Que sirva con credenciales válidas queda sin confirmar. |
+| 1. Login con `AuthorizedClient`/`ClientKey` de Gestiones | **Falló, 20/10 19:44 y 19:45** | Las dos veces: **HTTP 400**, cuerpo `"Credenciales invalidas."` (un string JSON). Se probó una vez y se reintentó una sola vez más. No se usaron los valores fijos del SDK. |
+| 1. Contrato de error del login | **Contradicción** | La Swagger declara `401 Unauthorized` para el login. Con credenciales inválidas, producción devuelve **400**. Quien escriba el cliente no puede detectar "credenciales malas" solo por un 401. |
+| 2 a 7 | Sin probar | Todo pasa por el token. |
+
+Se descartó un error del lado del lector. El `.env` se parsea limpio: sin BOM, sin comillas ni
+espacios colados, sin caracteres raros, con las seis variables presentes y `PPI_ENTORNO` =
+producción. No se imprimieron valores.
 
 ## Cómo leer este documento
 
@@ -474,6 +496,8 @@ del día siguiente.
 
 ## Pendiente con credenciales
 
+0. **Antes que nada: que el login funcione.** El 20/10, `LoginApi` en producción devolvió
+   `400 "Credenciales invalidas."` dos veces (ver "Estado de la prueba en vivo").
 1. **Base URL de producción.** Confirmar `https://clientapi.portfoliopersonal.com/api/`, que sale del SDK y no de la doc REST. Confirmar también que el sandbox actual es `clientapisbx` y no `clientapi_sandbox`, que cambió en la doc el 2026-10-19.
 2. **`LoginApi`:**
    - qué devuelve: `accessToken`, `refreshToken` y `expires` con su unidad real (la Swagger dice segundos);
