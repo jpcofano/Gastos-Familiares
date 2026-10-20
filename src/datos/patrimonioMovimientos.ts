@@ -51,8 +51,8 @@ export type MovimientoCuenta = {
  * |----------|---------------------|----------------|
  * | venta    | − cantidad          | + montoNeto    |
  * | compra   | + cantidad          | − montoNeto    |
- * | retiro   | —                   | − montoNeto    |
- * | deposito | —                   | + montoNeto    |
+ * | retiro   | —  (en especie: − cantidad) | − montoNeto (en especie: —) |
+ * | deposito | —  (en especie: + cantidad) | + montoNeto (en especie: —) |
  * | renta    | —                   | + montoNeto    |
  */
 export function efectoMovimiento(m: MovimientoCuenta): { deltaCantidad: number; deltaCaja: number } {
@@ -61,8 +61,10 @@ export function efectoMovimiento(m: MovimientoCuenta): { deltaCantidad: number; 
   switch (m.tipo) {
     case 'venta':    return { deltaCantidad: -cant, deltaCaja: +monto };
     case 'compra':   return { deltaCantidad: +cant, deltaCaja: -monto };
-    case 'retiro':   return { deltaCantidad: 0, deltaCaja: -monto };
-    case 'deposito': return { deltaCantidad: 0, deltaCaja: +monto };
+    // Un retiro o depósito CON ticker es en especie (títulos o cripto que entran o salen de la
+    // cuenta): mueve la tenencia, no la caja. `montoNeto` es solo su valuación, para el flujo.
+    case 'retiro':   return m.ticker && cant > 0 ? { deltaCantidad: -cant, deltaCaja: 0 } : { deltaCantidad: 0, deltaCaja: -monto };
+    case 'deposito': return m.ticker && cant > 0 ? { deltaCantidad: +cant, deltaCaja: 0 } : { deltaCantidad: 0, deltaCaja: +monto };
     case 'renta':    return { deltaCantidad: 0, deltaCaja: +monto };
   }
 }

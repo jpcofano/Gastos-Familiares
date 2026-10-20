@@ -37,6 +37,23 @@ export function claseDe(m: MovimientoCuenta): ClaseMovimiento {
   return m.tipoActivo === 'cripto' ? 'cripto' : 'titulos';
 }
 
+/**
+ * Clave estable de cada movimiento de una lista: su `id` o, sin id, la clave de duplicado más el
+ * número de ocurrencia. Dos movimientos legítimos iguales sin id (mismo día, cuenta y monto) son
+ * dos, no uno. Las decisiones de Juan se guardan con esta clave; conviene que las fuentes pongan id.
+ */
+export function clavesDe(movimientos: MovimientoCuenta[]): string[] {
+  const vistas = new Map<string, number>();
+  return movimientos.map(m => {
+    if (m.id) return m.id;
+    const base = claveDuplicado(m);
+    const n = vistas.get(base) ?? 0;
+    vistas.set(base, n + 1);
+    return n ? `${base}#${n}` : base;
+  });
+}
+
+/** Clave de UN movimiento suelto (sin contexto de lista): su id o su clave de duplicado. */
 export const claveMovimiento = (m: MovimientoCuenta) => m.id ?? claveDuplicado(m);
 
 const ms = (f: string) => Date.parse(`${f}T12:00:00Z`);
@@ -95,36 +112,53 @@ export function compatibles(r: MovimientoCuenta, d: MovimientoCuenta): { dias: n
 }
 
 /**
- * Apareo goloso y determinista: cada retiro (del más viejo al más nuevo) toma el depósito
- * compatible más cercano en el tiempo y, a igual distancia, el de monto o cantidad más parecido.
+ * Apareo de cardinalidad MÁXIMA (caminos aumentantes, Kuhn), determinista. Cada retiro (del más
+ * viejo al más nuevo) prueba los depósitos compatibles del más cercano en el tiempo al más lejano
+ * (y a igual distancia, el de monto o cantidad más parecido). Si el que quiere ya está tomado, se
+ * intenta reasignar al otro retiro. Así un par válido no queda afuera por una elección golosa:
+ * R1 1000 / R2 1015 contra D1 1010 / D2 995 aparea R1–D2 y R2–D1.
  * Cada movimiento entra a lo sumo en un par.
  */
 export function aparearTransferencias(movimientos: MovimientoCuenta[]): {
   internas: TransferenciaInterna[];
   sinAparear: MovimientoCuenta[];
 } {
-  const candidatos = movimientos.filter(m => m.tipo === 'retiro' || m.tipo === 'deposito');
-  const retiros = candidatos.filter(m => m.tipo === 'retiro')
-    .sort((a, b) => a.fecha.localeCompare(b.fecha) || claveMovimiento(a).localeCompare(claveMovimiento(b)));
-  const usados = new Set<string>();
-  const internas: TransferenciaInterna[] = [];
+  const claves = clavesDe(movimientos);
+  const idx = movimientos.map((_, i) => i).filter(i => movimientos[i].tipo === 'retiro' || movimientos[i].tipo === 'deposito');
+  const retiros = idx.filter(i => movimientos[i].tipo === 'retiro')
+    .sort((a, b) => movimientos[a].fecha.localeCompare(movimientos[b].fecha) || claves[a].localeCompare(claves[b]));
+  const depositos = idx.filter(i => movimientos[i].tipo === 'deposito');
+  // Candidatos de cada retiro, ordenados por preferencia.
+  const opciones = new Map<number, Array<{ d: number; dias: number; diferencia: number }>>();
   for (const r of retiros) {
-    let mejor: { d: MovimientoCuenta; dias: number; diferencia: number } | null = null;
-    for (const d of candidatos) {
-      if (d.tipo !== 'deposito' || usados.has(claveMovimiento(d))) continue;
-      const c = compatibles(r, d);
-      if (!c) continue;
-      if (!mejor || c.dias < mejor.dias || (c.dias === mejor.dias && Math.abs(c.diferencia) < Math.abs(mejor.diferencia))) {
-        mejor = { d, ...c };
-      }
+    const cs: Array<{ d: number; dias: number; diferencia: number }> = [];
+    for (const d of depositos) {
+      const c = compatibles(movimientos[r], movimientos[d]);
+      if (c) cs.push({ d, ...c });
     }
-    if (mejor) {
-      usados.add(claveMovimiento(r));
-      usados.add(claveMovimiento(mejor.d));
-      internas.push({ retiro: r, deposito: mejor.d, clase: claseDe(r), dias: mejor.dias, diferencia: mejor.diferencia });
-    }
+    cs.sort((x, y) => x.dias - y.dias || Math.abs(x.diferencia) - Math.abs(y.diferencia) || claves[x.d].localeCompare(claves[y.d]));
+    opciones.set(r, cs);
   }
-  return { internas, sinAparear: candidatos.filter(m => !usados.has(claveMovimiento(m))) };
+  const duenoDe = new Map<number, number>();   // depósito → retiro
+  const intentar = (r: number, visto: Set<number>): boolean => {
+    for (const { d } of opciones.get(r) ?? []) {
+      if (visto.has(d)) continue;
+      visto.add(d);
+      const otro = duenoDe.get(d);
+      if (otro === undefined || intentar(otro, visto)) { duenoDe.set(d, r); return true; }
+    }
+    return false;
+  };
+  for (const r of retiros) intentar(r, new Set());
+
+  const internas: TransferenciaInterna[] = [];
+  const usados = new Set<number>();
+  for (const [d, r] of [...duenoDe].sort((a, b) => movimientos[a[1]].fecha.localeCompare(movimientos[b[1]].fecha) || a[1] - b[1])) {
+    const c = opciones.get(r)!.find(o => o.d === d)!;
+    usados.add(r); usados.add(d);
+    internas.push({ retiro: movimientos[r], deposito: movimientos[d], clase: claseDe(movimientos[r]), dias: c.dias, diferencia: c.diferencia });
+  }
+  return { internas, sinAparear: idx.filter(i => !usados.has(i)).map(i => movimientos[i]) };
 }
 
 export type DecisionFlujo = 'aporte' | 'retiro' | 'interna';
@@ -157,18 +191,21 @@ export function flujosAutomaticos(
 } {
   // Los movimientos inferidos (diferencias entre dos "Mis Instrumentos") nunca son flujo.
   const reales = movimientos.filter(m => !m.inferido);
+  const claveDe = new Map(reales.map((m, i) => [m, clavesDe(reales)[i]] as const));
   const { internas, sinAparear } = aparearTransferencias(reales);
   const flujos: Array<FlujoPropuesto & { movimientoClave: string }> = [];
   const pendientes: PendienteFlujo[] = [];
   const sinTc: MovimientoCuenta[] = [];
   for (const m of sinAparear) {
-    const clave = claveMovimiento(m);
+    const clave = claveDe.get(m)!;
     const decision = decisiones[clave];
     if (!decision) { pendientes.push({ movimiento: m, sugerido: m.tipo === 'retiro' ? 'retiro' : 'aporte' }); continue; }
     if (decision === 'interna') continue;
     const comoFlujo: MovimientoCuenta = { ...m, tipo: decision === 'retiro' ? 'retiro' : 'deposito' };
     const { flujo, motivo } = flujoDeMovimiento(comoFlujo, m.moneda === 'ARS' ? tcDe(m.fecha) : null);
     if (motivo === 'sin_tc') { sinTc.push(m); continue; }
+    // Un movimiento en especie sin valuación (precio -1 o 0 en el archivo) no da un flujo de 0: queda pendiente.
+    if (flujo && flujo.montoUsd === 0 && m.ticker) { pendientes.push({ movimiento: m, sugerido: decision === 'retiro' ? 'retiro' : 'aporte' }); continue; }
     if (flujo) flujos.push({ ...flujo, movimientoClave: clave });
   }
   return { internas, flujos, pendientes, sinTc };

@@ -18,7 +18,7 @@ import {
 } from '../datos/patrimonioBalanzArchivo';
 import { cargarCuentaVivaBalanz, guardarImportacionBalanz, guardarMovimientosBalanz } from '../datos/patrimonioCuentasVivas';
 import {
-  parsearMovimientosBalanz, aparearDevoluciones, movimientosDeBalanz, cajaAnclada, sugerirComitente,
+  parsearMovimientosBalanz, aparearDevoluciones, movimientosDeBalanz, cajaAnclada, sugerirComitente, idsAnulados,
   contarPorClase, type CajaAnclada, type ClaseBalanz, type FilaMovBalanz,
 } from '../datos/patrimonioBalanzMovimientos';
 
@@ -55,6 +55,11 @@ type ListaMovimientos = {
   duplicadas: number;
   conteo: Record<ClaseBalanz, number>;
   movimientos: MovimientoCuenta[];
+  /** Comprobantes anulados por una devolución: si un export anterior los guardó, se borran. */
+  borrar: string[];
+  monedasDesconocidas: string[];
+  /** Fecha de la tenencia vigente ("Mis Instrumentos"), para avisar si no coincide con la caja. */
+  tenenciaDel: string | null;
   devueltas: number;
   sinComprobante: FilaMovBalanz[];
   caja: CajaAnclada;
@@ -114,7 +119,10 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
 
   async function preparar(id: string, nombre: string, filas: unknown[][], comitente: string, exportadoEn: string, fechaDelNombre: boolean): Promise<Entrada> {
     try {
-      const previa = await cargarCuentaVivaBalanz(comitente);
+      const leida = await cargarCuentaVivaBalanz(comitente);
+      // Una cuenta viva con solo la caja anclada (sin "Mis Instrumentos" todavía) no es una
+      // importación anterior: comparar contra ella inferiría la compra de todas las especies.
+      const previa = leida?.posiciones?.length ? leida : null;
       const cuenta = cuentaDeComitente(comitente);
       const imp = parsearMisInstrumentos(filas, {
         comitente, exportadoEn,
@@ -201,11 +209,14 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
     if (!x || x.estado !== 'mov_pide_cuenta' || !comitente) return;
     let lista: Entrada;
     try {
-      const { filas, duplicadas } = parsearMovimientosBalanz(x.filas, comitente);
+      const { filas, duplicadas, monedasDesconocidas } = parsearMovimientosBalanz(x.filas, comitente);
       const dev = aparearDevoluciones(filas);
+      const viva = await cargarCuentaVivaBalanz(comitente).catch(() => null);
       lista = {
-        id, nombre: x.nombre, estado: 'mov_lista', comitente, filas, duplicadas,
+        id, nombre: x.nombre, estado: 'mov_lista', comitente, filas, duplicadas, monedasDesconocidas,
+        tenenciaDel: viva?.posiciones?.length ? viva.exportadoEn : null,
         conteo: contarPorClase(filas),
+        borrar: idsAnulados(filas, comitente, dev.anuladas),
         movimientos: movimientosDeBalanz(filas, comitente, dev.anuladas),
         devueltas: dev.pares.length, sinComprobante: dev.sinComprobante,
         caja: cajaAnclada(filas, fechaCorrida ? { fecha: fechaCorrida, posiciones: posicionesCorrida } : null, comitente),
@@ -232,9 +243,13 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
       // Primero "Mis Instrumentos": la caja anclada se escribe sobre la cuenta viva que ese archivo crea.
       for (const x of aGuardar) await guardarImportacionBalanz(cuentaVivaDeImportacion(x.imp), x.movimientos);
       const textosMov: string[] = [];
-      for (const x of movAGuardar) {
-        const { saldosActualizados } = await guardarMovimientosBalanz(x.comitente, x.movimientos, x.caja);
-        textosMov.push(`${x.comitente}: ${x.movimientos.length} movimientos${saldosActualizados ? ', caja actualizada' : ', caja sin cambios'}`);
+      // Del archivo que llega a la fecha más vieja al más nuevo: si hay dos de la misma comitente,
+      // la caja que queda es la más nueva (y guardarMovimientosBalanz no deja pisarla con una vieja).
+      const hasta = (y: (typeof movAGuardar)[number]) => (y.caja.estado === 'ok' ? y.caja.hasta : '');
+      for (const x of [...movAGuardar].sort((a, b) => hasta(a).localeCompare(hasta(b)))) {
+        const r = await guardarMovimientosBalanz(x.comitente, cuentaDeComitente(x.comitente), x.movimientos, x.borrar, x.caja);
+        const caja = { actualizada: 'caja actualizada', creada_sin_tenencia: 'caja guardada (falta Mis Instrumentos)', mas_vieja: 'caja sin cambios: ya hay una más nueva', desconocida: 'caja desconocida' }[r.caja];
+        textosMov.push(`${x.comitente}: ${x.movimientos.length} movimientos, ${caja}`);
       }
       onGuardado(`Balanz actualizado: ${[
         ...aGuardar.map(x => `${x.imp.comitente} (${x.imp.posiciones.length} especies)`),
@@ -454,7 +469,7 @@ function ResumenMovimientos({ x }: { x: ListaMovimientos }) {
         <div style={{ fontSize: 15, fontWeight: 800 }}>Movimientos · Balanz {x.comitente}</div>
         <div style={sub}>
           {x.filas.length} filas del {fechas[0]} al {fechas[fechas.length - 1]}
-          {x.duplicadas ? ` · ${x.duplicadas} repetidas, contadas una vez` : ''} · {x.movimientos.length} movimientos a registrar
+          {x.duplicadas ? ` · ${x.duplicadas} filas idénticas a otra (se cuentan todas)` : ''} · {x.movimientos.length} movimientos a registrar
           {x.filas.length >= 1000 ? ' · ⚠ justo 1000 filas: el export puede venir cortado' : ''}
         </div>
       </div>
@@ -469,6 +484,18 @@ function ResumenMovimientos({ x }: { x: ListaMovimientos }) {
           <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
             {revisar.map(f => <li key={f.fila}>fila {f.fila}: «{f.descripcion}»</li>)}
           </ul>
+        </div>
+      )}
+      {x.monedasDesconocidas.length > 0 && (
+        <div style={{ ...sub, color: 'var(--gf-expense)', fontWeight: 700 }}>
+          Monedas desconocidas (quedan fuera de la caja): {x.monedasDesconocidas.join(' · ')}
+        </div>
+      )}
+      {x.caja.estado === 'ok' && x.tenenciaDel && x.tenenciaDel.slice(0, 10) !== x.caja.hasta && (
+        <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: 'rgba(245,158,11,.12)' }}>
+          ⚠ La tenencia es de "Mis Instrumentos" del {x.tenenciaDel.slice(0, 10)} y esta caja llega hasta el {x.caja.hasta}.
+          Si operaste entre las dos fechas, una compra o venta puede quedar contada en la caja y no en la tenencia (o al revés).
+          Subí los dos archivos del mismo día para que cuadren.
         </div>
       )}
       {(x.devueltas > 0 || x.sinComprobante.length > 0) && (

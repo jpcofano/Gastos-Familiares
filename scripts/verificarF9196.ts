@@ -46,8 +46,10 @@ const precios = (ggal: number | null, fecha = HOY): PreciosCarteraViva => ({
   porIdentidad: ggal === null ? {} : { 'GGAL|accion|AR': { precio: ggal, moneda: 'ARS', fecha } },
 });
 const tcHoy: TcCarteraViva = { valor: 1544.1, fuente: 'dolarapi-bolsa', fechaCotizacion: HOY, viejo: false };
+// Origen 'manual' (carga manual de §3): desde el Addendum 2 los movimientos del archivo de Balanz
+// (`archivo_balanz`) no se aplican en la cartera viva — la caja de Balanz es la anclada (§B).
 const mov = (m: Partial<MovimientoCuenta> & Pick<MovimientoCuenta, 'tipo' | 'montoNeto'>): MovimientoCuenta => ({
-  fecha: '2026-10-15', cuenta: BALANZ, moneda: 'ARS', origen: 'archivo_balanz', ...m,
+  fecha: '2026-10-15', cuenta: BALANZ, moneda: 'ARS', origen: 'manual', ...m,
 });
 const caja = (cv: ReturnType<typeof armarCarteraViva>, moneda: 'ARS' | 'USD') =>
   cv.lineas.filter(l => l.cuenta === BALANZ && l.tipo === 'cash' && l.moneda === moneda).reduce((a, l) => a + l.valorOrigen, 0);
@@ -76,6 +78,10 @@ console.log('\n=== §9 una venta en Balanz baja la tenencia y sube la caja ===')
   // Venta a 6.200 con precio del día 6.500: el efecto de la venta es (186.000 − 30×6.500)/MEP.
   ok(cerca(con.efectoMovimientosUsd, (186_000 - 30 * 6_500) / 1544.1), 'efecto movimientos de la venta = monto cobrado − tenencia a precio de hoy', con.efectoMovimientosUsd);
   ok(cerca(sin.efectoMovimientosUsd, 0), 'sin movimientos, el efecto movimientos es 0');
+  const delArchivo = armarCarteraViva(corrida, [], [{ ...venta, origen: 'archivo_balanz' }], precios(6_500), null, [], tcHoy);
+  ok(tenencia(delArchivo, 'GGAL') === 100 && caja(delArchivo, 'ARS') === 150_000, 'Addendum 2: un movimiento del archivo de Balanz no se aplica (la caja es la anclada)');
+  const enEspecie = armarCarteraViva(corrida, [], [mov({ tipo: 'deposito', ticker: 'GGAL', cantidad: 10, montoNeto: 60_000 })], precios(6_500), null, [], tcHoy);
+  ok(tenencia(enEspecie, 'GGAL') === 110 && caja(enEspecie, 'ARS') === 150_000, 'un depósito EN ESPECIE suma tenencia y no caja');
 }
 
 console.log('\n=== §9 un retiro baja la caja y crea el flujo ===');

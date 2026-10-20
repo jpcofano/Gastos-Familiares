@@ -204,8 +204,27 @@ export function armarCarteraViva(
    * mande su caja como fila cash no tiene que sumar además la de la corrida.
    */
   const sinCaja = new Set<string>();
+  /**
+   * Balanz con caja anclada (archivo de Movimientos, Addendum 2 §B) pero todavía sin "Mis
+   * Instrumentos": la tenencia sigue siendo la de la corrida y la caja pasa a ser la anclada.
+   */
+  const soloCaja = new Set<string>();
+  const cajasSolas: Trabajo[] = [];
+  const lineaCaja = (cuenta: string, moneda: 'ARS' | 'USD', monto: number, fecha: string): Trabajo => ({
+    cuenta, ticker: moneda, tipo: 'cash', pais_riesgo: moneda === 'ARS' ? 'AR' : 'global', sector: 'cash',
+    cantidad: null, cantidadCarga: null, moneda, valorOrigen: monto, valorUsd: null, precio: 'caja',
+    precioFecha: fecha, revisar: false, tcCarga: null, v0: 0, vp: null, monedaVp: null, unitCarga: null, esCarga: false,
+  });
   for (const c of cuentasVivas) {
-    if (!c.posiciones.length) continue;   // sin lectura buena: la cuenta sigue por la carga
+    if (!c.posiciones?.length) {
+      if (c.fuente === 'archivo_balanz' && c.saldos) {
+        soloCaja.add(c.cuenta);
+        for (const moneda of ['ARS', 'USD'] as const) {
+          if (c.saldos[moneda]) cajasSolas.push(lineaCaja(c.cuenta, moneda, c.saldos[moneda], c.leidoEn.slice(0, 10)));
+        }
+      }
+      continue;   // sin lectura buena: la tenencia sigue por la carga
+    }
     const conSaldos = !!c.saldos;
     if (!conSaldos && c.fuente === 'archivo_balanz' && !c.posiciones.some(p => p.tipo === 'cash')) sinCaja.add(c.cuenta);
     if (conSaldos && c.posiciones.some(p => p.tipo === 'cash')) {
@@ -290,8 +309,11 @@ export function armarCarteraViva(
   // Una cuenta viva sin `saldos` conserva la caja de la carga (Addendum 2 §B: la caja de Balanz
   // se ancla en la última corrida; el archivo de Movimientos la moverá en H3c).
   const salida: Trabajo[] = [
-    ...trabajo.filter(l => !cuentasConApi.has(l.cuenta) || (sinCaja.has(l.cuenta) && l.tipo === 'cash')).map(l => ({ ...l })),
+    ...trabajo.filter(l =>
+      (!cuentasConApi.has(l.cuenta) && !(soloCaja.has(l.cuenta) && l.tipo === 'cash'))
+      || (sinCaja.has(l.cuenta) && l.tipo === 'cash')).map(l => ({ ...l })),
     ...deApi,
+    ...cajasSolas,
   ];
   const aplicados = new Map<string, number>();
   const ordenados = [...movimientos].sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -299,6 +321,10 @@ export function armarCarteraViva(
     // Un movimiento inferido (diferencia entre dos "Mis Instrumentos") describe un cambio que la
     // tenencia del archivo ya trae: aplicarlo sería contarlo dos veces. Nunca se aplica.
     if (m.inferido) continue;
+    // Addendum 2: en Balanz la tenencia sale de "Mis Instrumentos" y la caja de la caja anclada. Los
+    // movimientos del archivo de Movimientos son historial y candidatos de §C: aplicarlos acá no
+    // reproduciría la caja (comisiones en otra moneda, retenciones y cauciones no son movimientos).
+    if (m.origen === 'archivo_balanz') continue;
     if (cuentasConApi.has(m.cuenta)) continue;
     const corte = corrida.fechaPorCuenta?.[m.cuenta] ?? corrida.fecha;
     if (!movimientoVigente(m, corte)) continue;

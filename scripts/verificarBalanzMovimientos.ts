@@ -4,7 +4,7 @@
 // Uso: npx tsx scripts/verificarBalanzMovimientos.ts   → exit 1 si algo falla.
 import {
   ENCABEZADOS_MOVIMIENTOS_BALANZ, clasificarDescripcion, parsearMovimientosBalanz, aparearDevoluciones,
-  movimientosDeBalanz, cajaAnclada, sugerirComitente, contarPorClase, type ClaseBalanz,
+  movimientosDeBalanz, cajaAnclada, sugerirComitente, contarPorClase, idsAnulados, type ClaseBalanz,
 } from '../src/datos/patrimonioBalanzMovimientos';
 import { detectarArchivoBalanz } from '../src/datos/patrimonioBalanzArchivo';
 import { flujosAutomaticos } from '../src/datos/patrimonioFlujosAuto';
@@ -103,8 +103,10 @@ console.log('\n=== duplicados entre exportes que se pisan ===');
 {
   const a = FIX.slice(0, 15).map(x => x[0]);
   const b = FIX.slice(10).map(x => x[0]);
+  // Dentro de UN archivo, dos filas idénticas son dos filas (se cuentan las dos); entre exportes que
+  // se pisan, la deduplicación la da el id (clave de §B + ocurrencia).
   const { filas: juntas, duplicadas } = parsearMovimientosBalanz(tabla([...a, ...b]), COM);
-  ok(juntas.length === FIX.length && duplicadas === 5, 'las 5 filas en común se cuentan una vez', { n: juntas.length, duplicadas });
+  ok(juntas.length === a.length + b.length && duplicadas === 5, 'en un mismo archivo las filas idénticas se conservan (y se informan)', { n: juntas.length, duplicadas });
   const m1 = movimientosDeBalanz(parsearMovimientosBalanz(tabla(a), COM).filas, COM, new Set()).map(m => m.id);
   const m2 = movimientosDeBalanz(parsearMovimientosBalanz(tabla(b), COM).filas, COM, new Set()).map(m => m.id);
   const comunes = m1.filter(id => m2.includes(id));
@@ -130,6 +132,34 @@ console.log('\n=== caja anclada ===');
   ok(cajaAnclada(filas, { fecha: '2026-10-10', posiciones: [] }, COM).estado === 'desconocida', 'corrida sin caja de la comitente → desconocida');
   const tarde = cajaAnclada(filas.filter(f => f.liquidacion > '2026-10-12'), corrida, COM);
   ok(tarde.estado === 'desconocida' && tarde.motivo.includes('puede faltar historia'), 'archivo que empieza después de la corrida (export cortado) → desconocida, no se inventa', tarde);
+}
+
+console.log('\n=== regresiones de la revisión del diff (H3c) ===');
+{
+  // Dos filas legítimas idénticas en el mismo archivo: las dos suman a la caja y tienen ids distintos.
+  const ajuste: F = ['Movimiento Manual / Ajuste de saldo', '', '', '2026-10-20', 0, -1, '2026-10-20', 'Pesos', 100];
+  const viejo: F = ['Recibo de Cobro / 900020', '', '', '2026-10-01', 0, -1, '2026-10-01', 'Pesos', 0];   // cubre el ancla
+  const dos = parsearMovimientosBalanz(tabla([ajuste, ajuste, viejo]), COM).filas.filter(f => f.importe !== 0 || f.liquidacion < '2026-10-10');
+  const c = cajaAnclada(dos, { fecha: '2026-10-10', posiciones: [{ cuenta: `Balanz ${COM}`, tipo: 'cash', moneda_origen: 'ARS', valor_origen: 0 }] }, COM);
+  ok(dos.filter(f => f.importe === 100).length === 2 && c.estado === 'ok' && c.saldos.ARS === 200, 'dos "Ajuste de saldo" de 100 idénticos → la caja suma 200', c);
+  // Boletos con el mismo número en otra fecha y otra especie no se funden.
+  const b1: F = ['Boleto / 800009 / COMPRA / 0 / GGAL / $', 'GGAL', 'Acciones', '2026-10-05', 10, 6000, '2026-10-06', 'Pesos', -60000];
+  const b2: F = ['Boleto / 800009 / COMPRA / 0 / YPFD / $', 'YPFD', 'Acciones', '2026-10-09', 5, 40000, '2026-10-10', 'Pesos', -200000];
+  const bm = movimientosDeBalanz(parsearMovimientosBalanz(tabla([b1, b2]), COM).filas, COM, new Set());
+  ok(bm.length === 2 && bm.some(m => m.ticker === 'GGAL') && bm.some(m => m.ticker === 'YPFD') && bm[0].id !== bm[1].id, 'mismo número de boleto en otra fecha/especie → dos movimientos');
+  // Una devolución que llega en un export posterior borra el retiro que guardó el anterior.
+  const comp: F = ['Comprobante de Pago / 900003', '', '', '2026-10-03', 0, -1, '2026-10-03', 'Dólares', -120];
+  const devo: F = ['Movimiento Manual / Devolucion por rechazo de transferencia', '', '', '2026-10-04', 0, -1, '2026-10-04', 'Dólares', 120];
+  const export1 = movimientosDeBalanz(parsearMovimientosBalanz(tabla([comp]), COM).filas, COM, new Set());
+  const f2 = parsearMovimientosBalanz(tabla([devo, comp]), COM).filas;
+  const borrar = idsAnulados(f2, COM, aparearDevoluciones(f2).anuladas);
+  ok(export1.length === 1 && borrar.length === 1 && borrar[0] === export1[0].id, 'idsAnulados devuelve el id del retiro que guardó el export anterior');
+  // Moneda desconocida: se informa.
+  const raro: F = ['Recibo de Cobro / 900010', '', '', '2026-10-20', 0, -1, '2026-10-20', 'Euros', 50];
+  ok(parsearMovimientosBalanz(tabla([raro]), COM).monedasDesconocidas.length === 1, 'una Moneda desconocida se informa (queda fuera de la caja)');
+  // La caja dice hasta cuándo llega.
+  const cc = cajaAnclada(filas, { fecha: '2026-10-10', posiciones: [{ cuenta: `Balanz ${COM}`, tipo: 'cash', moneda_origen: 'ARS', valor_origen: 0 }] }, COM);
+  ok(cc.estado === 'ok' && cc.hasta === '2026-10-16', 'cajaAnclada.hasta = última liquidación del archivo', cc.estado === 'ok' ? cc.hasta : cc);
 }
 
 console.log('\n=== comitente sugerida y §C ===');

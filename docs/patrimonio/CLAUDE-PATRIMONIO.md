@@ -1101,12 +1101,27 @@ entran al total. No corrige nada.
   Se anulan los dos.
 - **Transferencia de títulos:** es un depósito o retiro en especie, valuado cantidad × precio del
   archivo. La fila no trae moneda y se asume pesos (pendiente de confirmar).
-- **Duplicados:** se descartan por `(comitente, Descripcion, Concertacion, Moneda, Importe,
-  Cantidad)`. Los ids son deterministas, así que un export que se pisa con otro no duplica nada.
+- **Duplicados:** el id es la clave `(comitente, Descripcion, Concertacion, Moneda, Importe,
+  Cantidad)` más el número de ocurrencia dentro del archivo. Un export que se pisa con otro no
+  duplica nada, y dos filas idénticas del mismo archivo cuentan como dos. Los boletos se agrupan
+  por número, operación, fecha y ticker. Se escribe con `merge`.
+- **Devolución en un export posterior:** el retiro que guardó el export anterior se borra
+  (`idsAnulados`).
 - **Caja anclada:** caja de la última corrida de la comitente + Importe de lo liquidado después.
   Las tres subcuentas de dólar suman USD, y se guarda el detalle por subcuenta. Sin corrida con
-  caja, o si el archivo no llega hasta la corrida, la caja es "desconocida". Si la comitente ya
-  tiene "Mis Instrumentos", la caja se escribe como `saldos` de su cuenta viva.
+  caja, o si el archivo no llega hasta la corrida, la caja es "desconocida".
+- **La caja va a la cuenta viva** como `saldos`, con `cajaAnclada.hasta` (la última liquidación).
+  Una caja más vieja no pisa a una más nueva. Re-importar "Mis Instrumentos" la conserva. Sin
+  "Mis Instrumentos", se crea la cuenta viva solo con la caja (`posiciones: []`): la cartera viva
+  usa la tenencia de la corrida y la caja anclada.
+- **En Balanz, la tenencia sale de "Mis Instrumentos" y la caja de la caja anclada.**
+  `armarCarteraViva` no aplica los movimientos de origen `archivo_balanz`: son historial y
+  candidatos de §C. Aplicarlos no reproduciría la caja, porque las comisiones en otra moneda, las
+  retenciones y las cauciones no son movimientos.
+- ⚠ Si "Mis Instrumentos" y Movimientos son de fechas distintas, una operación entre las dos puede
+  quedar en la caja y no en la tenencia, o al revés. La vista previa lo avisa; el corte está
+  pendiente de decisión.
+- Una `Moneda` desconocida queda fuera de la caja y se informa.
 - Depósitos, retiros y transferencias de títulos son **candidatos** de §C: no son flujo solos.
 
 ## Aportes y retiros automáticos (F9.196 Addendum 2 §C) — contrato
@@ -1119,8 +1134,13 @@ cada fuente. Una transferencia entre cuentas propias no es flujo.
 - **Cripto:** mismo activo, llega igual o menos que lo que salió (comisión de 1% o menos,
   propuesto) y a 3 días corridos o menos.
 - **Títulos en especie:** misma especie y misma cantidad, a 5 días hábiles o menos (propuesto).
-- El apareo es goloso y determinista: el depósito más cercano en el tiempo, y a igual distancia
-  el de monto más parecido. La llegada nunca es anterior a la salida.
+- El apareo es de cardinalidad máxima (caminos aumentantes) y determinista: prefiere el depósito
+  más cercano en el tiempo y, a igual distancia, el de monto más parecido, pero un par válido no
+  queda afuera por una elección golosa. La llegada nunca es anterior a la salida.
+- Las claves son el `id` o, sin id, la clave de duplicado más la ocurrencia: dos movimientos iguales
+  sin id son dos.
+- Un retiro o depósito **con ticker** es en especie: en la cartera viva mueve la tenencia, no la
+  caja. Sin valuación (monto 0) no genera un flujo de 0: queda pendiente.
 - Lo que no aparea queda **pendiente**, sin flujo, hasta que Juan elige aporte, retiro o interna.
 - Los movimientos `inferido` nunca son flujo.
 - Un monto en pesos sin TC para su fecha va a `sinTc`: no se inventa la conversión.

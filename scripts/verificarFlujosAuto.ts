@@ -77,6 +77,28 @@ console.log('\n=== reglas de cripto y títulos ===');
   ok(aparearTransferencias([sale, mov({ cuenta: 'B', tipo: 'deposito', fecha: '2026-10-19', montoNeto: 5000 })]).internas.length === 0, 'cripto contra dinero → no');
 }
 
+console.log('\n=== regresiones de la revisión del diff (H3b) ===');
+{
+  // Goloso perdía este par: R1 1000 (05/10) y R2 1015 (07/10) contra D1 1010 (07/10) y D2 995 (09/10).
+  const R1 = mov({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-05', montoNeto: 1000 });
+  const R2 = mov({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-07', montoNeto: 1015 });
+  const D1 = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-07', montoNeto: 1010 });
+  const D2 = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-09', montoNeto: 995 });
+  const ap = aparearTransferencias([R1, R2, D1, D2]);
+  ok(ap.internas.length === 2 && ap.sinAparear.length === 0, 'apareo máximo: R1–D2 y R2–D1, ninguno queda pendiente', ap.internas.map(i => [i.retiro.montoNeto, i.deposito.montoNeto]));
+  // Movimientos sin id con la misma clave no se pisan.
+  const sinId = (m: Partial<MovimientoCuenta> & Pick<MovimientoCuenta, 'cuenta' | 'tipo' | 'fecha' | 'montoNeto'>): MovimientoCuenta => ({ moneda: 'USD', origen: 'manual', ...m });
+  const a = sinId({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-19', montoNeto: 1000 });
+  const b = sinId({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-19', montoNeto: 1000 });
+  const d = sinId({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-20', montoNeto: 1000 });
+  const out = flujosAutomaticos([a, b, d], {}, tcDe);
+  ok(out.internas.length === 1 && out.pendientes.length === 1, 'dos retiros iguales sin id + un depósito → 1 par y 1 pendiente (no desaparece)', { i: out.internas.length, p: out.pendientes.length });
+  // En especie sin valuación no da un flujo de 0.
+  const t = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-19', montoNeto: 0, ticker: 'PAMP', cantidad: 10, tipoActivo: 'accion', moneda: 'ARS' });
+  const z = flujosAutomaticos([t], { [claveMovimiento(t)]: 'aporte' }, tcDe);
+  ok(z.flujos.length === 0 && z.pendientes.length === 1, 'aporte en especie sin valuación → sigue pendiente, no un flujo de 0');
+}
+
 console.log('\n=== decisiones de Juan y flujos ===');
 {
   const retiro = mov({ cuenta: 'PPI 0000', tipo: 'retiro', fecha: '2026-10-19', montoNeto: 1000 });

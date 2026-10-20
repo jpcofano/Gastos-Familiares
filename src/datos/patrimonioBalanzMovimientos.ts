@@ -41,6 +41,12 @@ export type FilaMovBalanz = {
   detalle: string | null;
   /** Número de boleto / comprobante / recibo, si la descripción lo trae. */
   numero: string | null;
+  /**
+   * Cuántas filas IDÉNTICAS (misma clave de §B) aparecieron antes en el mismo archivo. Dos filas
+   * legítimas iguales (dos "Ajuste de saldo" de 100 el mismo día) son dos filas; la clave de §B sirve
+   * para que exportes que se pisan no dupliquen, y eso lo garantiza el id (clave + ocurrencia).
+   */
+  ocurrencia: number;
 };
 
 const MONEDAS: Record<string, 'ARS' | 'USD'> = {
@@ -104,6 +110,18 @@ const num = (x: unknown): number | null => {
 export const claveFilaBalanz = (comitente: string, f: Pick<FilaMovBalanz, 'descripcion' | 'concertacion' | 'monedaCruda' | 'importe' | 'cantidad'>) =>
   [comitente, f.descripcion, f.concertacion, f.monedaCruda, f.importe.toFixed(2), String(f.cantidad)].join('|');
 
+/** Id de Firestore de una fila: clave de §B + ocurrencia. Igual en dos exportes que se pisan. */
+export const idFilaBalanz = (comitente: string, f: FilaMovBalanz) =>
+  `bzmov_${comitente}_${hashId(`${claveFilaBalanz(comitente, f)}#${f.ocurrencia}`)}`;
+
+/**
+ * Ids de los `Comprobante de Pago` anulados por una devolución. Si un export anterior los guardó
+ * como retiro, hay que BORRARLOS: si no, quedan como candidatos de §C aunque ya no existan.
+ */
+export function idsAnulados(filas: FilaMovBalanz[], comitente: string, anuladas: Set<number>): string[] {
+  return filas.filter(f => anuladas.has(f.fila) && f.clase === 'retiro').map(f => idFilaBalanz(comitente, f));
+}
+
 /** Hash determinista (FNV-1a de 2 × 32 bits) para ids de Firestore. Sin crypto: puro y sincrónico. */
 export function hashId(s: string): string {
   let h1 = 0x811c9dc5, h2 = 0x01000193 ^ 0x5bd1e995;
@@ -121,15 +139,19 @@ export function hashId(s: string): string {
  */
 export function parsearMovimientosBalanz(filas: unknown[][], comitente: string): {
   filas: FilaMovBalanz[];
+  /** Filas idénticas dentro del archivo (se conservan; ver `ocurrencia`). */
   duplicadas: number;
+  /** Filas con una `Moneda` que no es ninguna de las cuatro conocidas: quedan fuera de la caja. */
+  monedasDesconocidas: string[];
 } {
   if (!filas.length) throw new Error('El archivo está vacío: no tiene fila de encabezados.');
   const enc = filas[0].map(txt);
   const faltan = ENCABEZADOS_MOVIMIENTOS_BALANZ.filter(e => !enc.includes(e));
   if (faltan.length) throw new Error(`No es un archivo de Movimientos válido: falta el encabezado ${faltan.map(f => `"${f}"`).join(', ')}.`);
   const col = (n: (typeof ENCABEZADOS_MOVIMIENTOS_BALANZ)[number]) => enc.indexOf(n);
-  const vistas = new Set<string>();
+  const vistas = new Map<string, number>();
   const out: FilaMovBalanz[] = [];
+  const monedasDesconocidas: string[] = [];
   let duplicadas = 0;
   filas.slice(1).forEach((r, i) => {
     const descripcion = txt(r[col('Descripcion')]);
@@ -147,14 +169,16 @@ export function parsearMovimientosBalanz(filas: unknown[][], comitente: string):
       liquidacion: txt(r[col('Liquidacion')]).slice(0, 10),
       monedaCruda, moneda: MONEDAS[monedaCruda] ?? null,
       importe: num(r[col('Importe')]) ?? 0,
-      clase, detalle, numero,
+      clase, detalle, numero, ocurrencia: 0,
     };
     const k = claveFilaBalanz(comitente, f);
-    if (vistas.has(k)) { duplicadas++; return; }
-    vistas.add(k);
+    f.ocurrencia = vistas.get(k) ?? 0;
+    if (f.ocurrencia) duplicadas++;
+    vistas.set(k, f.ocurrencia + 1);
+    if (monedaCruda && !f.moneda) monedasDesconocidas.push(`fila ${f.fila}: «${monedaCruda}»`);
     out.push(f);
   });
-  return { filas: out, duplicadas };
+  return { filas: out, duplicadas, monedasDesconocidas };
 }
 
 /**
@@ -202,7 +226,7 @@ export function aparearDevoluciones(filas: FilaMovBalanz[]): {
 export function movimientosDeBalanz(filas: FilaMovBalanz[], comitente: string, anuladas: Set<number>): MovimientoCuenta[] {
   const cuenta = cuentaDeComitente(comitente);
   const base = (f: FilaMovBalanz, extra: Partial<MovimientoCuenta>): MovimientoCuenta => ({
-    id: `bzmov_${comitente}_${hashId(claveFilaBalanz(comitente, f))}`,
+    id: idFilaBalanz(comitente, f),
     fecha: f.concertacion, cuenta, moneda: f.moneda ?? 'ARS', origen: 'archivo_balanz',
     idOrigen: f.numero, subcuenta: f.monedaCruda || null, nota: f.descripcion,
     tipo: 'deposito', montoNeto: Math.abs(f.importe), ...extra,
@@ -234,7 +258,9 @@ export function movimientosDeBalanz(filas: FilaMovBalanz[], comitente: string, a
   const boletos = new Map<string, FilaMovBalanz[]>();
   for (const f of filas) {
     if (f.clase !== 'compra' && f.clase !== 'venta') continue;
-    const k = `${f.numero ?? `fila${f.fila}`}|${f.clase}`;
+    // Número + operación + fecha + ticker: dos boletos con el mismo número en otra fecha u otra
+    // especie no se funden. Sin número, la clave de la fila (estable entre exportes, no la posición).
+    const k = f.numero ? `${f.numero}|${f.clase}|${f.concertacion}|${f.ticker ?? ''}` : `sin_numero|${claveFilaBalanz(comitente, f)}#${f.ocurrencia}`;
     boletos.set(k, [...(boletos.get(k) ?? []), f]);
   }
   for (const grupo of boletos.values()) {
@@ -242,7 +268,9 @@ export function movimientosDeBalanz(filas: FilaMovBalanz[], comitente: string, a
     const otras = grupo.filter(f => f !== conPrecio);
     out.push({
       ...base(conPrecio, {}),
-      id: `bzmov_${comitente}_${hashId(`${comitente}|boleto|${conPrecio.numero ?? conPrecio.fila}|${conPrecio.clase}|${conPrecio.concertacion}`)}`,
+      id: conPrecio.numero
+        ? `bzmov_${comitente}_${hashId(`${comitente}|boleto|${conPrecio.numero}|${conPrecio.clase}|${conPrecio.concertacion}|${conPrecio.ticker ?? ''}`)}`
+        : idFilaBalanz(comitente, conPrecio),
       tipo: conPrecio.clase === 'venta' ? 'venta' : 'compra',
       ticker: conPrecio.ticker, cantidad: Math.abs(conPrecio.cantidad), precio: conPrecio.precio,
       tipoActivo: conPrecio.tipoInstrumento ? TIPO_INSTRUMENTO[conPrecio.tipoInstrumento] ?? null : null,
@@ -272,6 +300,8 @@ export type CajaAnclada =
       /** Suma de Importe posterior al ancla, por subcuenta original (Dólares, C.V. 7000, Cable…). */
       porSubcuenta: Record<string, number>;
       filasSumadas: number;
+      /** Última liquidación del archivo: hasta cuándo llega esta caja. Una caja más vieja no pisa a una más nueva. */
+      hasta: string;
     }
   | { estado: 'desconocida'; motivo: string };
 
@@ -314,6 +344,7 @@ export function cajaAnclada(
     saldos: { ARS: r2(cajaCorrida.ARS + sumaMovimientos.ARS), USD: r2(cajaCorrida.USD + sumaMovimientos.USD) },
     porSubcuenta: Object.fromEntries(Object.entries(porSubcuenta).map(([k, v]) => [k, r2(v)])),
     filasSumadas,
+    hasta: filas.map(f => f.liquidacion).filter(Boolean).sort().pop() ?? F,
   };
 }
 

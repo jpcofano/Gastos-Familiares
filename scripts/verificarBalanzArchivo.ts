@@ -175,6 +175,14 @@ const parsear = (filas = tabla(), exportadoEn = EXP) => parsearMisInstrumentos(f
     const vacia = { ...cuentaVivaDeImportacion(imp2), posiciones: [] };
     const sinViva = armarCarteraViva(corridaBalanz, [vacia], movs, { hoy: '2026-10-21', porIdentidad: {} }, null, [], tcHoy);
     ok(sinViva.lineas.find(l => l.ticker === 'VIST')?.cantidad === 318 && sinViva.cuentas[0].movimientosAplicados === 0, 'A2: cuenta viva sin posiciones → corrida, sin aplicar la venta inferida');
+    // H3c — cuenta viva de Balanz con solo la caja anclada (sin "Mis Instrumentos"): tenencia de la
+    // corrida, caja de la anclada (reemplaza a la de la corrida).
+    const soloCaja = armarCarteraViva(corridaBalanz,
+      [{ cuenta: `Balanz ${COM}`, fuente: 'archivo_balanz', leidoEn: '2026-10-16T23:59:59-03:00', posiciones: [], saldos: { ARS: 999, USD: 5 } }],
+      [], { hoy: '2026-10-21', porIdentidad: {} }, null, [], tcHoy);
+    const cajasSolo = soloCaja.lineas.filter(l => l.tipo === 'cash').map(l => `${l.moneda}:${l.valorOrigen}`).sort();
+    ok(soloCaja.lineas.find(l => l.ticker === 'VIST')?.cantidad === 318 && JSON.stringify(cajasSolo) === JSON.stringify(['ARS:999', 'USD:5']),
+      'solo caja anclada: tenencia de la corrida y caja anclada (no la de la corrida)', cajasSolo);
     // A3 — un archivo más viejo que la importación vigente se detecta.
     ok(esMasViejo(cuentaVivaDeImportacion(imp2), imp) && !esMasViejo(cuentaVivaDeImportacion(imp), imp2) && !esMasViejo(null, imp), 'A3: esMasViejo');
     // M1 — tipo desconocido con tipo conocido del ticker → entra con ese tipo, marcado.
