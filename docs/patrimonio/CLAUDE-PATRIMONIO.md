@@ -1058,16 +1058,24 @@ movimientos inferidos, en un solo batch. Las corridas siguen siendo la foto hist
   Juan elige la cuenta en un selector: nunca se adivina.
 - El archivo no trae sector ni país: se heredan de la importación anterior o de la corrida (mismo
   ticker y tipo). Si no aparecen, la fila queda `revisar` con motivo.
-- Un `Tipo de Instrumento` desconocido queda en `paraRevisar` con el texto crudo. No entra a la
-  cartera viva, pero su valor sí cuenta en el total del archivo.
+- Un `Tipo de Instrumento` desconocido toma el tipo conocido del ticker (corrida o importación
+  anterior) y queda `revisar` con el texto crudo. Sin tipo conocido va a `paraRevisar`: no entra a
+  la cartera viva, pero su valor sí cuenta en el total del archivo.
+- La clasificación se busca en este orden: la corrida de la misma cuenta, la importación anterior y
+  la corrida de otras cuentas. Así una corrección en la corrida llega a la cuenta viva.
+- Si en una fila `Nominales × Precio` no da el `Valor actual` (más de 1 USD), es un número mal
+  leído y el archivo no se puede confirmar.
 
 ### Doble importación, diferencias y caja
-- El mismo archivo (misma comitente, fecha y hora) no cambia nada.
+- El mismo archivo (misma comitente, fecha y hora) no cambia nada. Un archivo **más viejo** que la
+  importación vigente no se importa. Entre dos archivos de la misma comitente en la misma subida, se
+  queda el más nuevo.
 - Un cambio de cantidad contra la importación anterior genera `compra` / `venta` con
-  `inferido: true` y monto estimado. Nunca es flujo, y la cartera viva no lo aplica: la tenencia
-  ya es la del archivo.
+  `inferido: true` y monto estimado. Nunca es flujo, y `armarCarteraViva` nunca lo aplica,
+  aunque la cuenta caiga a la corrida.
 - "Mis Instrumentos" no trae caja. Una cuenta viva sin `saldos` conserva la caja de la corrida
-  (`armarCarteraViva`) hasta que el archivo de Movimientos (H3c) la mueva.
+  (`armarCarteraViva`, solo para `archivo_balanz` sin filas cash) hasta que el archivo de
+  Movimientos (H3c) la mueva.
 
 ### Control contra la app
 Valor del archivo contra `indicadoresPosicion` (último cierre) × el TC de la vista. Si la

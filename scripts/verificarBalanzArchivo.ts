@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import {
   ENCABEZADOS_MIS_INSTRUMENTOS, detectarArchivoBalanz, parsearNombreBalanz, parsearMisInstrumentos,
   clasificacionesDe, cuentaVivaDeImportacion, esMismaImportacion, movimientosInferidos, controlContraApp,
-  leerFilasXlsx, numeroCelda, type Clasificacion,
+  leerFilasXlsx, numeroCelda, esMasViejo, tiposPorTickerDe, type Clasificacion,
 } from '../src/datos/patrimonioBalanzArchivo';
 import { armarCarteraViva, type TcCarteraViva } from '../src/datos/patrimonioCarteraViva';
 import { flujoDeMovimiento } from '../src/datos/patrimonioMovimientos';
@@ -161,6 +161,44 @@ const parsear = (filas = tabla(), exportadoEn = EXP) => parsearMisInstrumentos(f
   const cajas = viva.lineas.filter(l => l.tipo === 'cash').map(l => `${l.moneda}:${l.valorOrigen}`).sort();
   ok(JSON.stringify(cajas) === JSON.stringify(['ARS:150000', 'USD:1234']), 'el archivo no trae caja: se conserva la de la corrida', cajas);
   ok(viva.cuentas.find(c2 => c2.cuenta === `Balanz ${COM}`)?.fuente === 'api' && viva.lineas.length === 17 + 2, 'la cuenta figura con fuente de archivo (api) y las 17 especies + 2 cajas');
+
+  console.log('\n=== regresiones de la revisión del diff (H2b) ===');
+  {
+    // A1 — una cuenta con API sin `saldos` que manda la caja como fila cash no suma además la de la corrida.
+    const conCashApi = armarCarteraViva(
+      { fecha, posiciones: [pos('ARS', 'cash', 'ARS', 150_000, null)] },
+      [{ cuenta: `Balanz ${COM}`, fuente: 'ppi_api', leidoEn: '2026-10-21T18:00:00-03:00',
+        posiciones: [{ cuenta: `Balanz ${COM}`, titular: null, ticker: 'ARS', tipo: 'cash', sector: 'cash', pais_riesgo: 'AR', moneda_origen: 'ARS', valor_origen: 200_000, cantidad: null, fuente: 'api', revisar: false }] }],
+      [], { hoy: '2026-10-21', porIdentidad: {} }, null, [], tcHoy);
+    ok(JSON.stringify(conCashApi.lineas.filter(l => l.tipo === 'cash').map(l => l.valorOrigen)) === '[200000]', 'A1: API sin saldos con fila cash → una sola caja (la de la API)');
+    // A2 — los movimientos inferidos nunca se aplican, aunque la cuenta caiga a la corrida.
+    const vacia = { ...cuentaVivaDeImportacion(imp2), posiciones: [] };
+    const sinViva = armarCarteraViva(corridaBalanz, [vacia], movs, { hoy: '2026-10-21', porIdentidad: {} }, null, [], tcHoy);
+    ok(sinViva.lineas.find(l => l.ticker === 'VIST')?.cantidad === 318 && sinViva.cuentas[0].movimientosAplicados === 0, 'A2: cuenta viva sin posiciones → corrida, sin aplicar la venta inferida');
+    // A3 — un archivo más viejo que la importación vigente se detecta.
+    ok(esMasViejo(cuentaVivaDeImportacion(imp2), imp) && !esMasViejo(cuentaVivaDeImportacion(imp), imp2) && !esMasViejo(null, imp), 'A3: esMasViejo');
+    // M1 — tipo desconocido con tipo conocido del ticker → entra con ese tipo, marcado.
+    const conOpcion = tabla(FILAS.map(r => (r[0] === 'VIST' ? ['VIST', 'Opciones', 318, 2.2, '18:04', 'Pesos'] as typeof r : r)));
+    const impOp = parsearMisInstrumentos(conOpcion, { comitente: COM, exportadoEn: EXP, clasificaciones: clas(), tiposPorTicker: tiposPorTickerDe([], corrida, `Balanz ${COM}`) });
+    const vOp = impOp.posiciones.find(p => p.ticker === 'VIST');
+    ok(!!vOp && vOp.tipo === 'cedear' && vOp.revisar && (vOp.motivo_revisar ?? '').includes('Opciones') && impOp.paraRevisar.length === 0, 'M1: "Opciones" en un ticker conocido → cedear, revisar con el texto crudo', vOp);
+    // M2 — números como texto y filas que no cuadran.
+    ok(numeroCelda('1.500') === 1500 && numeroCelda('1,500.25') === 1500.25 && numeroCelda('1.500,25') === 1500.25 && numeroCelda('0,5685') === 0.5685 && numeroCelda('0.5685') === 0.5685, 'M2: miles y decimales en texto');
+    const malLeida = tabla(FILAS).map((r, i) => (i === 8 ? r.map((c, j) => (j === 3 ? 1.5 : c)) : r));   // GGAL: 1,5 nominales
+    const impMal = parsear(malLeida);
+    ok(impMal.noCuadran.length === 1 && impMal.noCuadran[0].startsWith('GGAL'), 'M2: Nominales × Precio ≠ Valor actual → noCuadran (la UI no deja confirmar)', impMal.noCuadran);
+    // M5 — la corrida de la misma cuenta manda sobre la importación anterior.
+    const anterior = [{ ...imp.posiciones.find(p => p.ticker === 'GGAL')!, sector: 'viejo', pais_riesgo: 'global' as const }];
+    const m5 = clasificacionesDe(anterior, [{ cuenta: `Balanz ${COM}`, ticker: 'GGAL', tipo: 'accion', sector: 'bancos', pais_riesgo: 'AR' }], `Balanz ${COM}`);
+    ok(m5.get('GGAL|accion')?.sector === 'bancos', 'M5: una corrección en la corrida llega a la cuenta viva');
+    // L2 — encabezados en NFD.
+    const nfd = tabla().map((r, i) => (i === 0 ? r.map(c => String(c).normalize('NFD')) : r));
+    ok(parsear(nfd).filas.length === 17, 'L2: encabezados con tildes descompuestas (NFD) se reconocen');
+    // L4 — valor del archivo en 0 no entra al total comparable.
+    const cero = tabla(FILAS.map(r => (r[0] === 'GGAL' ? ['GGAL', 'Acciones', 0, 4.1, '18:04', 'Pesos'] as typeof r : r)));
+    const c0 = controlContraApp(parsear(cero), p => (p.ticker === 'GGAL' ? { precio: 4.1 * 1500, moneda: 'ARS', fecha: '' } : null), 1500);
+    ok(c0.especies.find(e => e.ticker === 'GGAL')?.nota === 'valor_archivo_cero' && c0.difTotalPct === null, 'L4: valor 0 en el archivo → fuera del total, no infla la diferencia');
+  }
 
   console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);
   if (fallas) process.exit(1);

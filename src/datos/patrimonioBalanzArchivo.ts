@@ -32,7 +32,8 @@ const TIPO_BALANZ: Record<string, PosicionTipo> = {
   Acciones: 'accion', Cedears: 'cedear', Bonos: 'bono', Corporativos: 'on', Fondos: 'fci',
 };
 
-const normEnc = (x: unknown) => String(x ?? '').trim();
+/** Texto de celda normalizado. NFC: un mismo "Garantías" puede llegar con la tilde compuesta o separada. */
+const normEnc = (x: unknown) => String(x ?? '').normalize('NFC').trim();
 
 /**
  * Filas de la primera hoja de un .xlsx, como array de arrays (fila 1 = encabezados). `xlsx` se
@@ -77,13 +78,26 @@ export function parsearNombreBalanz(nombre: string): { comitente: string | null;
 export const cuentaDeComitente = (comitente: string) => `Balanz ${comitente}`;
 export const idCuentaVivaBalanz = (comitente: string) => `balanz_${comitente}`;
 
-/** Número de una celda: number tal cual; texto en formato argentino ("1.234,56") o plano. */
+/**
+ * Número de una celda: number tal cual; texto en formato argentino ("1.234,56") o plano.
+ * Con punto y coma, el ÚLTIMO es el decimal ("1,500.25" y "1.500,25"). Solo puntos en grupos de
+ * tres ("1.500", "1.234.567") son miles. Lo demás, punto decimal. Ante la duda, la guarda de
+ * `Nominales × Precio` contra `Valor actual` frena la fila (ver `noCuadran`).
+ */
 export function numeroCelda(x: unknown): number | null {
   if (typeof x === 'number') return Number.isFinite(x) ? x : null;
   if (typeof x !== 'string') return null;
   let s = x.trim().replace(/[^\d,.\-]/g, '');
   if (!s) return null;
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  const ip = s.lastIndexOf('.'), ic = s.lastIndexOf(',');
+  if (ip >= 0 && ic >= 0) {
+    s = ic > ip ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (ic >= 0) {
+    s = s.replace(/,/g, '.');
+    if ((s.match(/\./g) ?? []).length > 1) return null;
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, '');
+  }
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
@@ -119,8 +133,17 @@ export type ImportacionMisInstrumentos = {
   costoPromedio: Record<string, number>;
   /** Suma de `Valor actual` del archivo (todas las filas, también las para revisar). */
   valorUsdBalanz: number;
-  /** Filas con tipo desconocido: no entran a `posiciones`, se muestran con el texto crudo. */
+  /**
+   * Filas con tipo desconocido y sin tipo conocido para su ticker: no entran a `posiciones` y se
+   * muestran con el texto crudo. Si el ticker tenía tipo en la corrida, entra con ese tipo y
+   * `revisar: true` (F9.189 §2: la fila se conserva marcada).
+   */
   paraRevisar: Array<{ ticker: string; motivo: string }>;
+  /**
+   * Filas donde `Nominales × Precio` no cuadra con `Valor actual` (más de 1 USD): un número mal
+   * leído. La importación no se puede confirmar con alguna de estas.
+   */
+  noCuadran: string[];
   avisos: string[];
 };
 
@@ -133,7 +156,11 @@ export const TOLERANCIA_VALOR_USD = 1;
  */
 export function parsearMisInstrumentos(
   filas: unknown[][],
-  ctx: { comitente: string; exportadoEn: string; clasificaciones: Map<string, Clasificacion> },
+  ctx: {
+    comitente: string; exportadoEn: string; clasificaciones: Map<string, Clasificacion>;
+    /** Tipo conocido por ticker (de la corrida o la importación anterior), para un tipo desconocido. */
+    tiposPorTicker?: Map<string, PosicionTipo>;
+  },
 ): ImportacionMisInstrumentos {
   if (!filas.length) throw new Error('El archivo está vacío: no tiene fila de encabezados.');
   const enc = filas[0].map(normEnc);
@@ -149,6 +176,7 @@ export function parsearMisInstrumentos(
   const posiciones: PosicionRaw[] = [];
   const costoPromedio: Record<string, number> = {};
   const paraRevisar: Array<{ ticker: string; motivo: string }> = [];
+  const noCuadran: string[] = [];
   const avisos: string[] = [];
 
   filas.slice(1).forEach((r, i) => {
@@ -166,7 +194,9 @@ export function parsearMisInstrumentos(
       return;
     }
     const tipoCrudo = normEnc(celda('Tipo de Instrumento'));
-    const tipo = TIPO_BALANZ[tipoCrudo] ?? null;
+    const tipoBalanz = TIPO_BALANZ[tipoCrudo] ?? null;
+    const tipoHeredado = tipoBalanz ? null : ctx.tiposPorTicker?.get(ticker) ?? null;
+    const tipo = tipoBalanz ?? tipoHeredado;
     const monedaCruda = normEnc(celda('Moneda'));
     const monedaCotizacion = monedaCruda === 'Pesos' ? 'ARS'
       : monedaCruda === 'Dólares' || monedaCruda === 'US Dollar (Cable)' ? 'USD' : null;
@@ -185,7 +215,7 @@ export function parsearMisInstrumentos(
     out.push(filaOut);
 
     if (difRedondeoUsd > TOLERANCIA_VALOR_USD) {
-      avisos.push(`${ticker}: Nominales × Precio = ${(nominales * precio).toFixed(2)} y Valor actual = ${va.toFixed(2)} (difieren ${difRedondeoUsd.toFixed(2)} USD).`);
+      noCuadran.push(`${ticker}: Nominales × Precio = ${(nominales * precio).toFixed(2)} y Valor actual = ${va.toFixed(2)} (difieren ${difRedondeoUsd.toFixed(2)} USD).`);
     }
     if (monedaCotizacion === null) avisos.push(`${ticker}: moneda de cotización desconocida «${monedaCruda}».`);
     if (!tipo) {
@@ -194,13 +224,17 @@ export function parsearMisInstrumentos(
     }
 
     const clas = ctx.clasificaciones.get(claveClasificacion(ticker, tipo)) ?? null;
+    const motivos = [
+      tipoHeredado ? `Tipo de Instrumento desconocido «${tipoCrudo}»: se usó el tipo conocido del ticker (${tipoHeredado})` : null,
+      clas ? null : `Sector y país desconocidos para ${ticker} (${tipoCrudo}): no está en la corrida ni en la importación anterior`,
+    ].filter((m): m is string => !!m);
     posiciones.push({
       cuenta, titular: null, ticker, tipo,
       sector: clas?.sector ?? '',
       pais_riesgo: clas?.pais_riesgo ?? 'AR',
       moneda_origen: 'USD', valor_origen: va, cantidad: nominales,
-      fuente: 'archivo_balanz', revisar: !clas,
-      motivo_revisar: clas ? null : `Sector y país desconocidos para ${ticker} (${tipoCrudo}): no está en la corrida ni en la importación anterior`,
+      fuente: 'archivo_balanz', revisar: motivos.length > 0,
+      motivo_revisar: motivos.length ? motivos.join(' · ') : null,
     });
     if (ppc !== null && ppc > 0) costoPromedio[ticker] = ppc;
   });
@@ -208,11 +242,15 @@ export function parsearMisInstrumentos(
   const valorUsdBalanz = Math.round(out.reduce((a, f) => a + f.valorActualUsd, 0) * 100) / 100;
   return {
     comitente: ctx.comitente, cuenta, exportadoEn: ctx.exportadoEn,
-    filas: out, posiciones, costoPromedio, valorUsdBalanz, paraRevisar, avisos,
+    filas: out, posiciones, costoPromedio, valorUsdBalanz, paraRevisar, noCuadran, avisos,
   };
 }
 
-/** Clasificaciones conocidas: primero la importación anterior, después la corrida (misma cuenta antes que otra). */
+/**
+ * Clasificaciones conocidas. Orden: la corrida de la MISMA cuenta (lo último que Juan revisó),
+ * después la importación anterior, después la corrida de otras cuentas. Así una corrección de
+ * sector o país en una corrida nueva llega a la cuenta viva en vez de quedar congelada.
+ */
 export function clasificacionesDe(
   anteriores: PosicionRaw[],
   corrida: Array<Pick<PosicionRaw, 'cuenta' | 'ticker' | 'tipo' | 'sector' | 'pais_riesgo'>>,
@@ -223,11 +261,37 @@ export function clasificacionesDe(
     const k = claveClasificacion(p.ticker, p.tipo);
     if (!m.has(k) && p.sector) m.set(k, { sector: p.sector, pais_riesgo: p.pais_riesgo });
   };
-  anteriores.forEach(poner);
   corrida.filter(p => p.cuenta === cuenta).forEach(poner);
+  anteriores.forEach(poner);
   corrida.forEach(poner);
   return m;
 }
+
+/** Tipo conocido por ticker (misma prioridad que `clasificacionesDe`), para un tipo desconocido. */
+export function tiposPorTickerDe(
+  anteriores: PosicionRaw[],
+  corrida: Array<Pick<PosicionRaw, 'cuenta' | 'ticker' | 'tipo'>>,
+  cuenta: string,
+): Map<string, PosicionTipo> {
+  const m = new Map<string, PosicionTipo>();
+  const poner = (p: Pick<PosicionRaw, 'ticker' | 'tipo'>) => {
+    const t = p.ticker.trim().toUpperCase();
+    if (!m.has(t) && p.tipo !== 'cash') m.set(t, p.tipo);
+  };
+  corrida.filter(p => p.cuenta === cuenta).forEach(poner);
+  anteriores.forEach(poner);
+  corrida.forEach(poner);
+  return m;
+}
+
+/**
+ * Un archivo MÁS VIEJO que la importación vigente no se importa: volvería atrás la cuenta viva e
+ * inferiría movimientos al revés, pisando los ids de la importación original de esa fecha.
+ */
+export const esMasViejo = (
+  previa: Pick<CuentaVivaBalanz, 'exportadoEn'> | null,
+  imp: Pick<ImportacionMisInstrumentos, 'exportadoEn'>,
+) => !!previa && Date.parse(imp.exportadoEn) < Date.parse(previa.exportadoEn);
 
 /** El documento de `cuentasVivas/balanz_<comitente>`. Forma normalizada de §1 + control. */
 export type CuentaVivaBalanz = CuentaViva & {
@@ -316,7 +380,7 @@ export type ControlEspecie = {
   valorArchivoUsd: number;
   valorAppUsd: number | null;
   difPct: number | null;
-  nota: 'sin_precio_app' | 'escala_distinta' | 'sin_tc' | null;
+  nota: 'sin_precio_app' | 'escala_distinta' | 'sin_tc' | 'valor_archivo_cero' | null;
   precioAppFecha: string | null;
 };
 
@@ -347,11 +411,12 @@ export function controlContraApp(
     if (!pd || p.cantidad === null) return { ...base, valorAppUsd: null, difPct: null, nota: 'sin_precio_app' as const };
     if (pd.moneda === 'ARS' && !(tc && tc > 0)) return { ...base, valorAppUsd: null, difPct: null, nota: 'sin_tc' as const };
     const app = p.cantidad * (pd.moneda === 'USD' ? pd.precio : pd.precio / tc!);
-    const r = archivo > 0 ? app / archivo : null;
-    if (r !== null && (r > FACTOR_ESCALA || r < 1 / FACTOR_ESCALA)) {
+    if (!(archivo > 0)) return { ...base, valorAppUsd: app, difPct: null, nota: 'valor_archivo_cero' as const };
+    const r = app / archivo;
+    if (r > FACTOR_ESCALA || r < 1 / FACTOR_ESCALA) {
       return { ...base, valorAppUsd: app, difPct: r - 1, nota: 'escala_distinta' as const };
     }
-    return { ...base, valorAppUsd: app, difPct: archivo > 0 ? app / archivo - 1 : null, nota: null };
+    return { ...base, valorAppUsd: app, difPct: r - 1, nota: null };
   });
   const comparables = especies.filter(e => e.nota === null && e.valorAppUsd !== null);
   const totalArchivoComparableUsd = comparables.reduce((a, e) => a + e.valorArchivoUsd, 0);

@@ -76,7 +76,7 @@ export type CorridaBase = {
  * - `corrida`: sin precio nuevo; vale lo de la carga, con su fecha.
  * - `escala_dudosa`: el precio del día difiere más de 5× del implícito en la carga (escala distinta,
  *   p. ej. bonos cotizados cada 100 nominales, o un split sin registrar). Se usa el de la carga.
- * - `api`: lo valuó la propia API de la cuenta (sin precio del día disponible).
+ * - `api`: lo valuó la propia fuente de la cuenta (API o archivo de Balanz), sin precio del día.
  * - `caja`: efectivo. `manual`: valuada por el cron de precios (F9.195).
  */
 export type EstadoPrecio = 'hoy' | 'viejo' | 'corrida' | 'escala_dudosa' | 'api' | 'caja' | 'manual';
@@ -198,12 +198,16 @@ export function armarCarteraViva(
   // 2) Cuentas con API: sus filas reemplazan a las de la carga en la salida. Las de la carga se
   //    quedan solo como base (v0, vp) para separar precios de movimientos.
   const deApi: Trabajo[] = [];
-  /** Cuentas vivas SIN `saldos` (Balanz por archivo: "Mis Instrumentos" no trae caja). */
+  /**
+   * Cuentas por archivo de Balanz SIN `saldos`: "Mis Instrumentos" no trae caja, así que se conserva
+   * la de la carga. Solo `archivo_balanz` y solo si no trae filas cash: una cuenta con API que
+   * mande su caja como fila cash no tiene que sumar además la de la corrida.
+   */
   const sinCaja = new Set<string>();
   for (const c of cuentasVivas) {
     if (!c.posiciones.length) continue;   // sin lectura buena: la cuenta sigue por la carga
     const conSaldos = !!c.saldos;
-    if (!conSaldos) sinCaja.add(c.cuenta);
+    if (!conSaldos && c.fuente === 'archivo_balanz' && !c.posiciones.some(p => p.tipo === 'cash')) sinCaja.add(c.cuenta);
     if (conSaldos && c.posiciones.some(p => p.tipo === 'cash')) {
       inconsistencias.push(`${c.cuenta}: la API trae filas cash y saldos; se usan los saldos`);
     }
@@ -292,6 +296,9 @@ export function armarCarteraViva(
   const aplicados = new Map<string, number>();
   const ordenados = [...movimientos].sort((a, b) => a.fecha.localeCompare(b.fecha));
   for (const m of ordenados) {
+    // Un movimiento inferido (diferencia entre dos "Mis Instrumentos") describe un cambio que la
+    // tenencia del archivo ya trae: aplicarlo sería contarlo dos veces. Nunca se aplica.
+    if (m.inferido) continue;
     if (cuentasConApi.has(m.cuenta)) continue;
     const corte = corrida.fechaPorCuenta?.[m.cuenta] ?? corrida.fecha;
     if (!movimientoVigente(m, corte)) continue;
