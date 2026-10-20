@@ -29,6 +29,12 @@ export type MovimientoCuenta = {
    */
   tipoActivo?: PosicionTipo | null;
   paisRiesgo?: PaisRiesgo | null;
+  /**
+   * Addendum 2 §A — deducido de la diferencia entre dos "Mis Instrumentos" de la misma comitente,
+   * no leído de un movimiento real: muestra QUÉ cambió en el historial, con monto estimado. Nunca
+   * es flujo. La cartera viva no lo aplica (la cuenta ya viene con la tenencia del archivo).
+   */
+  inferido?: boolean;
 };
 
 /**

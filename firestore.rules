@@ -199,6 +199,17 @@ service cloud.firestore {
     match /configPatrimonio/{id} {
       allow read, write: if esDueno();
     }
+    // F9.196 §1 / Addendum 2 §A — cartera viva por cuenta. El cliente solo escribe las de Balanz
+    // por archivo (`balanz_<comitente>`, "Actualizar Balanz"); las de API (ppi, bitfinex) las
+    // escribe la sincronización con Admin SDK, que se saltea las Rules.
+    match /cuentasVivas/{id} {
+      allow read: if esDueno();
+      allow write: if esDueno() && id.matches('balanz_[0-9]+');
+    }
+    // F9.196 §3 — movimientos por cuenta (archivo de Balanz, carga manual; PPI vía Admin SDK).
+    match /movimientosCuenta/{id} {
+      allow read, write: if esDueno();
+    }
     match /cafciCarteras/{id} {
       allow read, write: if esDueno();
     }

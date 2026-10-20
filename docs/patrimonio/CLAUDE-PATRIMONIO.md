@@ -1043,6 +1043,38 @@ se hereda de la lectura anterior, porque el trinquete no se reconstruye desde la
 **nueva** durante 3 ruedas desde `desde`. "Evento próximo" y "Gatillo de tesis" entran por
 `ContextoStops.senalesTesis` cuando exista la tesis (§6, H5).
 
+## Balanz por archivo: "Mis Instrumentos" (F9.196 Addendum 2 §A) — contrato
+
+### Alimenta la cartera viva, no crea corrida
+"Actualizar Balanz" (`src/vistas/PatrimonioBalanz.tsx`) lee el .xlsx sin LLM
+(`src/datos/patrimonioBalanzArchivo.ts`) y escribe `cuentasVivas/balanz_<comitente>` más los
+movimientos inferidos, en un solo batch. Las corridas siguen siendo la foto histórica (F9.189 §1).
+
+### Qué se toma del archivo
+- `Valor actual` está en USD para todas las especies y `Precio` es USD por unidad nominal (bonos
+  por 1 VN). `Moneda` es la moneda de cotización, no la del valor. `Precio promedio de compra`
+  va a `costoPromedio`.
+- La comitente y el momento de exportación salen del nombre, con o sin corchetes. Si no están,
+  Juan elige la cuenta en un selector: nunca se adivina.
+- El archivo no trae sector ni país: se heredan de la importación anterior o de la corrida (mismo
+  ticker y tipo). Si no aparecen, la fila queda `revisar` con motivo.
+- Un `Tipo de Instrumento` desconocido queda en `paraRevisar` con el texto crudo. No entra a la
+  cartera viva, pero su valor sí cuenta en el total del archivo.
+
+### Doble importación, diferencias y caja
+- El mismo archivo (misma comitente, fecha y hora) no cambia nada.
+- Un cambio de cantidad contra la importación anterior genera `compra` / `venta` con
+  `inferido: true` y monto estimado. Nunca es flujo, y la cartera viva no lo aplica: la tenencia
+  ya es la del archivo.
+- "Mis Instrumentos" no trae caja. Una cuenta viva sin `saldos` conserva la caja de la corrida
+  (`armarCarteraViva`) hasta que el archivo de Movimientos (H3c) la mueva.
+
+### Control contra la app
+Valor del archivo contra `indicadoresPosicion` (último cierre) × el TC de la vista. Si la
+diferencia total supera el 2%, se avisa con el detalle por especie. Las especies con escala
+distinta (más de 5×, por ejemplo bonos cotizados cada 100 VN en data912) se listan aparte y no
+entran al total. No corrige nada.
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.

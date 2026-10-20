@@ -62,6 +62,7 @@ import {
   type Declaracion, type Exposicion,
 } from '../datos/patrimonioDeclaraciones';
 import PatrimonioIngesta from './PatrimonioIngesta';
+import PatrimonioBalanz from './PatrimonioBalanz';
 // F9.190 — informe v2 (contexto con el motor de riesgo) y señales de mercado de la reserva.
 import {
   contextoInformeV3, contextoPosicionesV3, evaluarSenales, UMBRALES_SENALES,
@@ -4772,6 +4773,8 @@ export default function Patrimonio() {
   } | null>(null);
 
   const [showIngesta,      setShowIngesta]      = useState(false);
+  // F9.196 Addendum 2 §A — "Actualizar Balanz" (Mis Instrumentos → cuentasVivas).
+  const [showBalanz,       setShowBalanz]       = useState(false);
   const [showModalFijo,    setShowModalFijo]    = useState(false);
   const [editFijo,         setEditFijo]         = useState<ActivoFijo | null>(null);
   const [showModalManual,  setShowModalManual]  = useState(false);
@@ -5357,6 +5360,12 @@ export default function Patrimonio() {
           >
             <Icon name="upload" size={13} color="var(--color-text-sec)" /> Actualizar posiciones
           </button>
+          <button
+            onClick={() => setShowBalanz(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', background: 'var(--color-surface)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)', color: 'var(--color-text)' }}
+          >
+            <Icon name="file-up" size={13} color="var(--color-text-sec)" /> Actualizar Balanz
+          </button>
         </div>
       </div>
 
@@ -5620,6 +5629,16 @@ export default function Patrimonio() {
           metricasJson={metricasJson}
           onConfirmado={() => { setShowIngesta(false); cargar(); setToastIngestaOk(true); }}
           onClose={() => setShowIngesta(false)}
+        />
+      )}
+
+      {showBalanz && (
+        <PatrimonioBalanz
+          posicionesCorrida={posiciones}
+          indicadores={indicadores}
+          tc={tc}
+          onGuardado={texto => { setShowBalanz(false); setToast({ texto, error: false }); }}
+          onClose={() => setShowBalanz(false)}
         />
       )}
 

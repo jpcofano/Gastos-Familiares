@@ -39,7 +39,7 @@ export type TcCarteraViva = {
  */
 export type CuentaViva = {
   cuenta: string;                       // mismo texto que `cuenta` en las corridas ("PPI 101268")
-  fuente: 'ppi_api' | 'bitfinex_api' | 'nexo_api';
+  fuente: 'ppi_api' | 'bitfinex_api' | 'nexo_api' | 'archivo_balanz';
   leidoEn: string;                      // ISO
   posiciones: PosicionRaw[];
   saldos?: { ARS: number; USD: number };
@@ -198,9 +198,12 @@ export function armarCarteraViva(
   // 2) Cuentas con API: sus filas reemplazan a las de la carga en la salida. Las de la carga se
   //    quedan solo como base (v0, vp) para separar precios de movimientos.
   const deApi: Trabajo[] = [];
+  /** Cuentas vivas SIN `saldos` (Balanz por archivo: "Mis Instrumentos" no trae caja). */
+  const sinCaja = new Set<string>();
   for (const c of cuentasVivas) {
     if (!c.posiciones.length) continue;   // sin lectura buena: la cuenta sigue por la carga
     const conSaldos = !!c.saldos;
+    if (!conSaldos) sinCaja.add(c.cuenta);
     if (conSaldos && c.posiciones.some(p => p.tipo === 'cash')) {
       inconsistencias.push(`${c.cuenta}: la API trae filas cash y saldos; se usan los saldos`);
     }
@@ -280,8 +283,10 @@ export function armarCarteraViva(
 
   // 4) Movimientos posteriores al corte de cada cuenta. Las cuentas con API no los aplican: sus
   //    posiciones ya son las de hoy (aplicarlos contaría dos veces).
+  // Una cuenta viva sin `saldos` conserva la caja de la carga (Addendum 2 §B: la caja de Balanz
+  // se ancla en la última corrida; el archivo de Movimientos la moverá en H3c).
   const salida: Trabajo[] = [
-    ...trabajo.filter(l => !cuentasConApi.has(l.cuenta)).map(l => ({ ...l })),
+    ...trabajo.filter(l => !cuentasConApi.has(l.cuenta) || (sinCaja.has(l.cuenta) && l.tipo === 'cash')).map(l => ({ ...l })),
     ...deApi,
   ];
   const aplicados = new Map<string, number>();
