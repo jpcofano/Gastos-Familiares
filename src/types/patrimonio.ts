@@ -166,6 +166,38 @@ export type IndicadoresPosicion = {
   montoOperadoProm30d: number | null; montoOperadoUltimo: number | null;
   ratioVolumen: number | null;
   semaforos: Record<string, Semaforo>;
+  // F9.196 §4–§5 — los escribe el cron (functions/src/patrimonioPrecios.ts, `calcStops` y
+  // `calcSenales`). Solo acciones y CEDEARs; null en el resto. Opcionales: los docs anteriores a
+  // F9.196 no los traen. Son niveles de REFERENCIA, no órdenes: sin push ni campana.
+  atr14?: number | null;
+  stops?: StopsPosicion | null;
+  historialStops?: Array<{
+    fecha: string; stopAtr: number | null; sma50: number | null; sma200: number | null; cierre: number;
+  }> | null;
+  senales?: SenalPosicion[] | null;
+};
+
+/** F9.196 §4 — espejo de `Stops` de functions/src/patrimonioPrecios.ts. */
+export type StopsPosicion = {
+  identidad: string;
+  fechaLectura: string;
+  fechaCorridaLectura: string | null;
+  cierre: number;
+  atr14: number | null;
+  stopAtrBase: number | null;
+  stopAtr: number | null;
+  stopAtrDesde: string | null;
+  motivoStopAtr: 'menos_de_30_puntos' | 'sin_ohlc' | null;
+  reinicio: 'identidad' | 'tenencia_interrumpida' | null;
+  stopSma50: number | null;  estadoSma50: 'encima' | 'cerca' | 'debajo' | null;  cierresDebajoSma50: number;
+  stopSma200: number | null; estadoSma200: 'encima' | 'cerca' | 'debajo' | null; cierresDebajoSma200: number;
+  distStopAtrPct: number | null; distSma50Pct: number | null; distSma200Pct: number | null;
+  estado: 'tocado' | 'cerca' | 'ok' | 'sin_datos';
+};
+
+/** F9.196 §5 — espejo de `Senal` de functions/src/patrimonioPrecios.ts. */
+export type SenalPosicion = {
+  id: string; texto: string; desde: string; nivel: 'info' | 'atencion'; nueva: boolean;
 };
 
 // Métricas calculadas sobre un conjunto de posiciones (output de calcMetrics)

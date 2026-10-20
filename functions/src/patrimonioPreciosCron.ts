@@ -3,7 +3,7 @@
 // el backfill inicial (scripts/backfillPreciosF9141.ts). No duplicar esto en ninguna de las dos.
 //
 // El motor (routing, splits, indicadores) está en ./patrimonioPrecios.
-import { FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { FieldValue, type DocumentReference, type Firestore } from 'firebase-admin/firestore';
 import * as PP from './patrimonioPrecios';
 
 export type ObjetivoPrecio = {
@@ -15,6 +15,8 @@ export type ObjetivoPrecio = {
   vigenteEnCorrida: boolean;   // F9.141.1 — desempata quién se queda con el ticker pelado
   docId: string;
   observaciones: Array<{ fecha: string; cantidad: number; valorOrigen: number }>;
+  /** F9.196 §4 — fechas de corrida en que aparece la identidad (reinicio del trinquete). */
+  corridas: string[];
 };
 
 export type ResultadoTicker = {
@@ -46,10 +48,12 @@ const PAUSA_MS = 600;  // data912 limita a 120 req/min: serial con pausa, nunca 
 /** Universo de tickers: la corrida vigente más las posiciones manuales. */
 export async function objetivosDePrecio(
   db: Firestore,
-): Promise<{ objetivos: ObjetivoPrecio[]; totalUsd: number; fechaCorrida: string | null }> {
+): Promise<{
+  objetivos: ObjetivoPrecio[]; totalUsd: number; fechaCorrida: string | null; fechasCorrida: string[];
+}> {
   const snapQ = await db.collection('snapshotsPortafolio')
     .orderBy('fechaCorrida', 'desc').limit(1).get();
-  if (snapQ.empty) return { objetivos: [], totalUsd: 0, fechaCorrida: null };
+  if (snapQ.empty) return { objetivos: [], totalUsd: 0, fechaCorrida: null, fechasCorrida: [] };
   const fechaVigente = snapQ.docs[0].data().fechaCorrida as string;
 
   // Todas las corridas, no solo la vigente: la capa 2 del detector compara `cantidad`
@@ -62,7 +66,9 @@ export async function objetivosDePrecio(
   const porIdentidad = new Map<string, ObjetivoPrecio>();
   const nuevo = (i: PP.Identidad): ObjetivoPrecio => ({
     ...i, valorUsd: 0, vigente: false, vigenteEnCorrida: false, docId: i.ticker, observaciones: [],
+    corridas: [],
   });
+  const fechasCorrida = new Set<string>();
 
   for (const doc of posSnap.docs) {
     const p = doc.data() as {
@@ -74,6 +80,10 @@ export async function objetivosDePrecio(
     const id: PP.Identidad = { ticker: p.ticker, tipo: p.tipo, paisRiesgo: p.pais_riesgo ?? 'AR' };
     const clave = PP.claveIdentidad(id);
     const entrada = porIdentidad.get(clave) ?? nuevo(id);
+    if (p.fechaCorrida) {
+      fechasCorrida.add(p.fechaCorrida);
+      if (!entrada.corridas.includes(p.fechaCorrida)) entrada.corridas.push(p.fechaCorrida);
+    }
     if (p.fechaCorrida === fechaVigente) {
       entrada.valorUsd += p.valorUsd ?? 0;
       entrada.vigente = true;
@@ -115,6 +125,7 @@ export async function objetivosDePrecio(
     objetivos,
     totalUsd: objetivos.reduce((a, o) => a + o.valorUsd, 0),
     fechaCorrida: fechaVigente,
+    fechasCorrida: [...fechasCorrida].sort(),
   };
 }
 
@@ -222,7 +233,7 @@ export async function correrActualizacionPrecios(
   db: Firestore,
   { escribir }: { escribir: boolean },
 ): Promise<Resumen> {
-  const { objetivos, totalUsd, fechaCorrida } = await objetivosDePrecio(db);
+  const { objetivos, totalUsd, fechaCorrida, fechasCorrida } = await objetivosDePrecio(db);
   if (!objetivos.length) {
     console.warn('[precios] sin corrida vigente, no hay nada que actualizar');
     return { fechaCorrida, objetivos: 0, resultados: [], fallos: [], escrito: escribir };
@@ -242,7 +253,8 @@ export async function correrActualizacionPrecios(
 
   for (const o of objetivos) {
     try {
-      const r = await actualizarUnTicker(db, o, live, totalUsd, tcHoy, tcSerie, escribir);
+      const r = await actualizarUnTicker(
+        db, o, live, totalUsd, tcHoy, tcSerie, escribir, { fechaCorrida, fechasCorrida });
       resultados.push(r);
       if (r.cobertura === 'con_serie' || r.motivo === 'fuente_sin_serie') await dormir(PAUSA_MS);
     } catch (e) {
@@ -312,6 +324,7 @@ async function actualizarUnTicker(
   tcHoy: number | null,
   tcSerie: Map<string, number>,
   escribir: boolean,
+  corridas: { fechaCorrida: string | null; fechasCorrida: string[] },
 ): Promise<ResultadoTicker> {
   const refPrecios = db.collection('preciosDiarios').doc(o.docId);
   const refInd = db.collection('indicadoresPosicion').doc(o.docId);
@@ -446,7 +459,8 @@ async function actualizarUnTicker(
   // conversión se descarta entera (`dolarizarSerie` devuelve null) y la performance queda en
   // pesos, dicho en `monedaPerformance`. Nunca una serie con agujeros.
   const serieUsd = monedaSerie === 'USD' ? null : dolarizarSerie(util, tcSerie);
-  const ind = PP.calcIndicadores(util, { serieUsd, yaEnUsd: monedaSerie === 'USD' });
+  const stops = PP.llevaStops(o.tipo) ? await contextoStops(refInd, o, corridas) : undefined;
+  const ind = PP.calcIndicadores(util, { serieUsd, yaEnUsd: monedaSerie === 'USD', stops });
   const peso = totalUsd > 0 ? o.valorUsd / totalUsd : null;
   const ruedas = ruedasParaSalir(o.valorUsd, ind.montoOperadoProm30d, monedaSerie, tcHoy);
 
@@ -477,6 +491,30 @@ async function actualizarUnTicker(
     puntos: ind.puntosDisponibles, saltosPendientes: saltos.length,
     splitsAplicados: aplicados.length, motivo: null,
   };
+}
+
+/**
+ * F9.196 §4 — lo que el trinquete, el historial y el `desde` de las señales necesitan de la
+ * lectura anterior. Se lee el documento que se va a pisar; una lectura por ticker por día.
+ */
+async function contextoStops(
+  refInd: DocumentReference,
+  o: ObjetivoPrecio,
+  corridas: { fechaCorrida: string | null; fechasCorrida: string[] },
+): Promise<PP.ContextoStops> {
+  const d = (await refInd.get()).data() ?? {};
+  const previo: PP.PrevioStops = {
+    stops: (d.stops as PP.Stops | null | undefined) ?? null,
+    historialStops: Array.isArray(d.historialStops) ? (d.historialStops as PP.LecturaStop[]) : [],
+    senales: Array.isArray(d.senales) ? (d.senales as PP.Senal[]) : [],
+  };
+  const identidad = PP.claveIdentidad(o);
+  const reinicio = PP.motivoReinicioTrinquete(previo.stops, {
+    identidad, fechaCorrida: corridas.fechaCorrida, vigenteEnCorrida: o.vigenteEnCorrida,
+    corridasPresente: o.corridas, fechasCorrida: corridas.fechasCorrida,
+  });
+  if (reinicio) console.log(`[precios] ${o.docId}: trinquete del stop ATR reiniciado (${reinicio})`);
+  return { identidad, fechaCorrida: corridas.fechaCorrida, previo, reinicio };
 }
 
 /** Ruedas necesarias para liquidar la posición al monto operado promedio. */

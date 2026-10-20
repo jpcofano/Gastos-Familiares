@@ -1003,11 +1003,53 @@ máximo del freno sale de los días de `criptoHistorial` con todo valuado a prec
 ### Solo en la app
 Sin campana, sin push, sin Calendar. "Qué haría en cada caso" es texto fijo, no una salida del sistema.
 
+## Stops y señales (F9.196 §4–§5) — contrato
+
+### Los stops son niveles de referencia visuales, no alarmas
+Se muestran **solo en la app**: sin push, sin campana y **sin campo de "acción sugerida"**. Un stop
+`tocado` dice que el precio llegó a un nivel medido; no dice "vendé". Es la decisión cerrada "no
+alarmas" aplicada a los stops, no una excepción. Las señales de §5 siguen la misma regla: nivel
+`info` o `atencion`, nunca una orden.
+
+### Qué se calcula, dónde y para quién
+En `calcIndicadores` (`functions/src/patrimonioPrecios.ts`, `calcStops` y `calcSenales`), dentro del
+cron de precios, y se guarda en `indicadoresPosicion` (`atr14`, `stops`, `historialStops`, `senales`).
+Moneda: la de la serie (`monedaSerie`). Parámetros en `UMBRALES.stops` y `UMBRALES.senales`.
+**Solo acciones y CEDEARs** (`llevaStops`); bonos y ONs no llevan stop: la volatilidad es tan baja
+que el número no sirve.
+
+- **Stop ATR (chandelier):** máximo de **cierre** de 22 ruedas − 3 × `atr14` (ATR absoluto, la misma
+  media de true range que `atrPct`). Con menos de 30 puntos, `null` con `motivoStopAtr`; sin OHLC
+  (`usa_stocks`: ACN, GLOB global) también `null`, con `sin_ohlc`.
+- **Trinquete:** el vigente nunca baja: `max(base de hoy, stopAtr de la lectura anterior)`;
+  `stopAtrDesde` es la fecha del último ajuste hacia arriba. Se **reinicia** si el documento era de
+  otra identidad o si hubo una corrida, posterior a la lectura anterior, en la que la posición no
+  estaba (vendida entera y recomprada). Una venta total y recompra entre dos corridas no se ve
+  todavía: la verá `movimientosCuenta` (H3).
+- **Stops por media:** `stopSma50` / `stopSma200` con estado `encima` / `cerca` (a menos de
+  0,5 × ATR por encima) / `debajo`. `debajo` exige **dos cierres seguidos** por debajo de la media de
+  cada día; un solo cierre debajo queda en `cerca` (no confirma: evita el falso cruce de un día).
+- **Estado resumido:** `tocado` (cierre ≤ stop ATR, o SMA200 `debajo`) · `cerca` (a 1 ATR o menos
+  del stop ATR, o SMA200 `cerca`) · `ok` · `sin_datos` cuando no hay ni stop ATR ni SMA200: no se
+  inventa un `ok`.
+- **Historial:** `historialStops`, una lectura por fecha de mercado (re-correr el mismo día la
+  reemplaza), últimas 60.
+
+### Señales: `desde` medido, "nueva" por 3 ruedas
+Cruce de medias (en las últimas 10 ruedas, `desde` = día del cruce), stop ATR tocado, debajo de la
+SMA200, RSI14 > 70 / < 30, caída 52s peor que su CDaR80 (la banda roja de F9.149) y volumen > 2× su
+promedio de 30 ruedas. El `desde` sale de la serie (inicio de la racha actual); solo el del stop ATR
+se hereda de la lectura anterior, porque el trinquete no se reconstruye desde la serie. Una señal es
+**nueva** durante 3 ruedas desde `desde`. "Evento próximo" y "Gatillo de tesis" entran por
+`ContextoStops.senalesTesis` cuando exista la tesis (§6, H5).
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.
 - Unidad = familia como una entidad; se mide el total.
 - Filosofía proponer/medir/mostrar, no alarmas. El diario registra y contrasta; nunca puntúa.
+- Stops (F9.196): niveles de referencia visuales, solo en la app. Sin push, sin campana, sin
+  "acción sugerida". Dos tipos: ATR y media móvil; sin stop de tesis ni desde el costo.
 - Vista privada dentro de la app; datos aislados; sin puente con gastos.
 - Ingesta: ventana de chat → `.txt` JSON → app valida/carga. No auto-ingesta,
   no parser por bróker, no online en la app.

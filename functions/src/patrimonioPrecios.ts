@@ -421,7 +421,18 @@ export type Indicadores = {
   volAnualizada30d: number | null; volAnualizada90d: number | null;
   perf1m: number | null; perf3m: number | null; perf6m: number | null; perf1a: number | null;
   rsi14: number | null;  atrPct: number | null;
+  /** F9.196 §4 — ATR absoluto, en `monedaSerie`. Lo usa el stop ATR. */
+  atr14: number | null;
   montoOperadoProm30d: number | null; montoOperadoUltimo: number | null; ratioVolumen: number | null;
+  /**
+   * F9.196 §4 — stops de referencia. Solo acciones y CEDEARs (los pide el cron con
+   * `opciones.stops`); para el resto es null. Niveles de referencia visuales, no órdenes.
+   */
+  stops: Stops | null;
+  /** F9.196 §4 — últimas `UMBRALES.stops.historial` lecturas, para el gráfico de la ficha. */
+  historialStops: LecturaStop[] | null;
+  /** F9.196 §5 — señales deterministas. Mismo alcance que `stops`. */
+  senales: Senal[] | null;
   /**
    * F9.148 §4 — en qué moneda están `perf1m/3m/6m/1a`, y SOLO ellos. Todo lo demás está en
    * `monedaSerie`. Nunca se infiere en la UI: el motor dice cuál usó.
@@ -563,8 +574,12 @@ function rsi(cierres: number[], ventana = 14): number | null {
   return 100 - 100 / (1 + ganancia / perdida);
 }
 
-/** ATR% de Wilder. null sin OHLC — es el caso de /historical/usa_stocks/ (solo cierre). */
-function atrPct(serie: PuntoSerie[], ventana = 14): number | null {
+/**
+ * ATR absoluto (media del true range de las últimas 14 ruedas), en la moneda de la serie.
+ * null sin OHLC — es el caso de /historical/usa_stocks/ (solo cierre).
+ * F9.196 §4 — se expone como `atr14` porque el stop ATR necesita el número, no el porcentaje.
+ */
+function atrAbs(serie: PuntoSerie[], ventana = 14): number | null {
   if (serie.length < ventana + 1) return null;
   const tramo = serie.slice(-(ventana + 1));
   const trs: number[] = [];
@@ -574,8 +589,15 @@ function atrPct(serie: PuntoSerie[], ventana = 14): number | null {
     const cPrev = tramo[i - 1].c;
     trs.push(Math.max(h - l, Math.abs(h - cPrev), Math.abs(l - cPrev)));
   }
-  const ultimo = tramo[tramo.length - 1].c;
-  return ultimo > 0 ? media(trs) / ultimo : null;
+  return media(trs);
+}
+
+/** ATR% de Wilder. El mismo número que `atrAbs`, dividido por el último cierre. */
+function atrPct(serie: PuntoSerie[], ventana = 14): number | null {
+  const atr = atrAbs(serie, ventana);
+  if (atr === null) return null;
+  const ultimo = serie[serie.length - 1].c;
+  return ultimo > 0 ? atr / ultimo : null;
 }
 
 /**
@@ -595,10 +617,13 @@ function atrPct(serie: PuntoSerie[], ventana = 14): number | null {
  * @param serieUsd la MISMA serie convertida, rueda a rueda. Si no cubre todas las ruedas buenas
  *   (falta TC en alguna), NO se usa: se calcula en la moneda de la serie y se dice por qué.
  *   Recortar el índice sobre una serie con agujeros correría la ventana de 252 ruedas sin avisar.
+ * @param stops F9.196 — solo para acciones y CEDEARs. Trae la lectura anterior (para el
+ *   trinquete, el historial y el `desde` de las señales) y si hay que reiniciar el trinquete.
+ *   Sin este parámetro, `stops`, `historialStops` y `senales` salen null.
  */
 export function calcIndicadores(
   serieConMalos: PuntoSerie[],
-  opciones?: { serieUsd?: PuntoSerie[] | null; yaEnUsd?: boolean },
+  opciones?: { serieUsd?: PuntoSerie[] | null; yaEnUsd?: boolean; stops?: ContextoStops },
 ): Indicadores {
   // F9.148 — un punto marcado como dato malo no entra en NINGÚN indicador: ni medias, ni
   // máximos y mínimos, ni drawdown, ni volatilidad, ni performance, ni RSI, ni ATR, ni volumen.
@@ -638,6 +663,16 @@ export function calcIndicadores(
   const hayMontos = montos.length >= 30 && montos.slice(-30).every(m => m !== null);
   const montoProm30 = hayMontos ? media(montos.slice(-30) as number[]) : null;
   const montoUlt = montos.length ? montos[montos.length - 1] : null;
+  const atr14 = atrAbs(serie);
+  const ratioVolumen = montoProm30 && montoUlt !== null && montoProm30 > 0 ? montoUlt / montoProm30 : null;
+
+  // F9.196 §4–§5 — stops y señales, sobre la MISMA serie utilizable que el resto.
+  const st = opciones?.stops && serie.length
+    ? calcStops(serie, atr14, opciones.stops)
+    : null;
+  const senales = st && opciones?.stops
+    ? calcSenales(serie, st.stops, opciones.stops, { curva, ddCdar80, distanciaMax52sPct: rel(max52) })
+    : null;
 
   return {
     puntosDisponibles: serie.length,
@@ -656,9 +691,13 @@ export function calcIndicadores(
     perf1a: perf(cierresPerf, RUEDAS.anio),
     rsi14: rsi(cierres),
     atrPct: atrPct(serie),
+    atr14,
     montoOperadoProm30d: montoProm30,
     montoOperadoUltimo: montoUlt,
-    ratioVolumen: montoProm30 && montoUlt !== null && montoProm30 > 0 ? montoUlt / montoProm30 : null,
+    ratioVolumen,
+    stops: st?.stops ?? null,
+    historialStops: st?.historial ?? null,
+    senales,
     monedaPerformance, motivoPerfEnMoneda,
     ddMediana, ddCdar80, ddObservaciones: curva.length,
     ulcerIndex126: ulcerIndex(cierres),
@@ -702,6 +741,27 @@ export const UMBRALES = {
   // información: entrena a no mirarlo. El número sigue en la ficha, que es lo que sí sirve.
   // Si algún día la cartera crece un orden de magnitud, se recalibra con la distribución de
   // entonces y no con una banda inventada para que algo se encienda.
+
+  // F9.196 §4 — stops de referencia (acciones y CEDEARs). Decisión de Juan: ATR estilo
+  // chandelier y media móvil; sin stop de tesis ni desde el costo. Son niveles para MIRAR: sin
+  // push, sin campana, sin "acción sugerida".
+  stops: {
+    ventanaMax: 22,      // máximo de CIERRE de las últimas 22 ruedas
+    multAtr: 3,          // stopAtrBase = máx22 − 3 × ATR14
+    minPuntos: 30,       // con menos, stopAtr null con motivo
+    cercaSmaAtr: 0.5,    // `cerca` de una media = a menos de 0,5 ATR por encima
+    cercaStopAtr: 1,     // estado resumido `cerca` = a 1 ATR o menos del stop ATR
+    ruedasDebajo: 2,     // "cierre debajo" de una media cuenta con 2 cierres seguidos
+    historial: 60,       // lecturas que guarda `historialStops`
+  },
+  // F9.196 §5 — señales deterministas. Informativas, sin push.
+  senales: {
+    ventanaCruce: 10,    // cruce de SMA50/SMA200 dentro de las últimas 10 ruedas
+    rsiSobrecompra: 70,
+    rsiSobreventa: 30,
+    ratioVolumen: 2,     // monto operado de hoy > 2 × su promedio de 30 ruedas
+    ruedasNueva: 3,      // una señal es "nueva" durante 3 ruedas desde `desde`
+  },
 } as const;
 
 export function claseUmbral(tipo: PosicionTipo, pais: PaisRiesgo): ClaseUmbral {
@@ -778,6 +838,331 @@ export function calcSemaforos(
     caida52s: bandaCaidaCalibrada(ind),
     volatilidad: banda(ind.volAnualizada90d, UMBRALES.volatilidad[clase]),
   };
+}
+
+// ── Stops de referencia (F9.196 §4) ─────────────────────────────────────────
+// Contrato: docs/patrimonio/CLAUDE-PATRIMONIO.md → "Stops y señales (F9.196)". Son NIVELES DE
+// REFERENCIA que se miran en la app: sin push, sin campana y sin campo de "acción sugerida".
+// Solo acciones y CEDEARs: en bonos y ONs la volatilidad es tan baja que el número no sirve.
+// Todo en la moneda de la serie (`monedaSerie`), como el resto de los indicadores técnicos.
+
+export type EstadoMedia = 'encima' | 'cerca' | 'debajo';
+/** `sin_datos` = no hay ni stop ATR ni SMA200 calculables: no se inventa un `ok`. */
+export type EstadoStops = 'tocado' | 'cerca' | 'ok' | 'sin_datos';
+export type MotivoStopAtr = 'menos_de_30_puntos' | 'sin_ohlc';
+export type MotivoReinicio = 'identidad' | 'tenencia_interrumpida';
+
+export type LecturaStop = {
+  fecha: string; stopAtr: number | null; sma50: number | null; sma200: number | null; cierre: number;
+};
+
+export type Stops = {
+  /** `claveIdentidad` de la posición: un stop de otra identidad nunca alimenta el trinquete. */
+  identidad: string;
+  /** Fecha de mercado del cierre usado. */
+  fechaLectura: string;
+  /** Corrida vigente al leer. La usa el reinicio por tenencia interrumpida. */
+  fechaCorridaLectura: string | null;
+  cierre: number;
+  atr14: number | null;
+  /** Máximo de cierre de `ventanaMax` ruedas − `multAtr` × ATR14, sin trinquete. */
+  stopAtrBase: number | null;
+  /** El vigente: max(base, el de la lectura anterior). Nunca baja salvo reinicio. */
+  stopAtr: number | null;
+  /** Fecha del último ajuste hacia arriba (o del inicio del trinquete). */
+  stopAtrDesde: string | null;
+  motivoStopAtr: MotivoStopAtr | null;
+  /** Si ESTA lectura reinició el trinquete, por qué. */
+  reinicio: MotivoReinicio | null;
+  stopSma50: number | null;  estadoSma50: EstadoMedia | null;  cierresDebajoSma50: number;
+  stopSma200: number | null; estadoSma200: EstadoMedia | null; cierresDebajoSma200: number;
+  /** Negativo = el cierre está debajo del nivel. */
+  distStopAtrPct: number | null; distSma50Pct: number | null; distSma200Pct: number | null;
+  estado: EstadoStops;
+};
+
+export type IdSenal =
+  | 'cruce_bajista' | 'cruce_alcista' | 'stop_atr_tocado' | 'debajo_sma200'
+  | 'sobrecompra' | 'sobreventa' | 'caida_fuera_de_lo_normal' | 'volumen_anomalo'
+  // §6 (H5): las calcula la tesis y entran por `ContextoStops.senalesTesis`.
+  | 'evento_proximo' | 'gatillo_tesis';
+
+export type Senal = {
+  id: IdSenal; texto: string; desde: string; nivel: 'info' | 'atencion';
+  /** Dentro de las primeras `UMBRALES.senales.ruedasNueva` ruedas desde `desde`. */
+  nueva: boolean;
+};
+
+/** Lo que el cron lee del documento `indicadoresPosicion` antes de pisarlo. */
+export type PrevioStops = {
+  stops: Stops | null;
+  historialStops: LecturaStop[];
+  senales: Senal[];
+};
+
+export type ContextoStops = {
+  identidad: string;
+  fechaCorrida: string | null;
+  previo: PrevioStops | null;
+  reinicio: MotivoReinicio | null;
+  /** §6 — "Evento próximo" y "Gatillo de tesis". Vacío hasta H5 (tesis por acción). */
+  senalesTesis?: Array<Omit<Senal, 'nueva'>>;
+};
+
+/** Tipos que llevan stop y señales. */
+export const llevaStops = (tipo: PosicionTipo): boolean => tipo === 'accion' || tipo === 'cedear';
+
+/**
+ * Reinicio del trinquete (§4). Dos causas, las dos verificables con dato propio:
+ * - **identidad**: el documento era de otra identidad (un `docId` que pasó de una a otra).
+ * - **tenencia_interrumpida**: hubo una corrida, posterior a la de la lectura anterior, en la que
+ *   la posición no estaba. Se vendió entera y se volvió a comprar: el máximo de antes no es suyo.
+ *   Solo para lo que viene de corridas — una manual nunca aparece en ellas.
+ * ⚠ Una venta total y recompra ENTRE dos corridas no se ve acá; la verá `movimientosCuenta` (H3).
+ */
+export function motivoReinicioTrinquete(
+  previo: Stops | null,
+  ctx: {
+    identidad: string; fechaCorrida: string | null; vigenteEnCorrida: boolean;
+    corridasPresente: string[]; fechasCorrida: string[];
+  },
+): MotivoReinicio | null {
+  if (!previo) return null;
+  if (previo.identidad !== ctx.identidad) return 'identidad';
+  const desde = previo.fechaCorridaLectura;
+  if (!ctx.vigenteEnCorrida || !desde || !ctx.fechaCorrida) return null;
+  const presente = new Set(ctx.corridasPresente);
+  const hueco = ctx.fechasCorrida.some(f => f > desde && f <= ctx.fechaCorrida! && !presente.has(f));
+  return hueco ? 'tenencia_interrumpida' : null;
+}
+
+/** SMA de `ventana` ruedas que termina en `fin` (inclusive). null si no entra entera. */
+function smaEn(cierres: number[], ventana: number, fin: number): number | null {
+  if (fin + 1 < ventana || fin >= cierres.length) return null;
+  let s = 0;
+  for (let k = fin - ventana + 1; k <= fin; k++) s += cierres[k];
+  return s / ventana;
+}
+
+/** Cierres seguidos, contando desde el último hacia atrás, por debajo de su SMA de ese día. */
+function cierresDebajoDe(cierres: number[], ventana: number): number {
+  let k = 0;
+  for (let i = cierres.length - 1; i >= 0; i--) {
+    const m = smaEn(cierres, ventana, i);
+    if (m === null || !(cierres[i] < m)) break;
+    k++;
+  }
+  return k;
+}
+
+function estadoMedia(cierre: number, sma: number | null, debajo: number, atr: number | null): EstadoMedia | null {
+  const U = UMBRALES.stops;
+  if (sma === null) return null;
+  if (debajo >= U.ruedasDebajo) return 'debajo';
+  // Un solo cierre debajo NO confirma (evita el falso cruce de un día): queda en `cerca`.
+  if (debajo > 0) return 'cerca';
+  if (atr !== null && cierre - sma < U.cercaSmaAtr * atr) return 'cerca';
+  return 'encima';
+}
+
+/** F9.196 §4 — stop ATR con trinquete, stops por media, distancias, estado e historial. */
+export function calcStops(
+  serie: PuntoSerie[],
+  atr14: number | null,
+  ctx: ContextoStops,
+): { stops: Stops; historial: LecturaStop[] } {
+  const U = UMBRALES.stops;
+  const cierres = serie.map(p => p.c);
+  const n = cierres.length;
+  const cierre = cierres[n - 1];
+  const fecha = serie[n - 1].f;
+
+  // El previo alimenta el trinquete solo si es de esta misma identidad y no hay reinicio.
+  const prevStops = ctx.previo?.stops ?? null;
+  const mismaIdentidad = !prevStops || prevStops.identidad === ctx.identidad;
+  const prev = ctx.reinicio || !mismaIdentidad ? null : prevStops;
+
+  let motivoStopAtr: MotivoStopAtr | null = null;
+  let stopAtrBase: number | null = null;
+  if (n < U.minPuntos) motivoStopAtr = 'menos_de_30_puntos';
+  else if (atr14 === null) motivoStopAtr = 'sin_ohlc';
+  else stopAtrBase = Math.max(...cierres.slice(-U.ventanaMax)) - U.multAtr * atr14;
+
+  let stopAtr: number | null = null;
+  let stopAtrDesde: string | null = null;
+  if (stopAtrBase !== null) {
+    const anterior = prev?.stopAtr ?? null;
+    if (anterior !== null && anterior >= stopAtrBase) {
+      stopAtr = anterior;                                  // trinquete: nunca baja
+      stopAtrDesde = prev!.stopAtrDesde ?? fecha;
+    } else {
+      stopAtr = stopAtrBase;
+      stopAtrDesde = fecha;
+    }
+  }
+
+  const s50 = smaEn(cierres, 50, n - 1);
+  const s200 = smaEn(cierres, 200, n - 1);
+  const d50 = cierresDebajoDe(cierres, 50);
+  const d200 = cierresDebajoDe(cierres, 200);
+  const estadoSma50 = estadoMedia(cierre, s50, d50, atr14);
+  const estadoSma200 = estadoMedia(cierre, s200, d200, atr14);
+  const dist = (nivel: number | null) => (nivel === null || nivel <= 0 ? null : cierre / nivel - 1);
+
+  let estado: EstadoStops;
+  if ((stopAtr !== null && cierre <= stopAtr) || estadoSma200 === 'debajo') estado = 'tocado';
+  else if (
+    (stopAtr !== null && atr14 !== null && cierre - stopAtr <= U.cercaStopAtr * atr14) ||
+    estadoSma200 === 'cerca'
+  ) estado = 'cerca';
+  else if (stopAtr !== null || s200 !== null) estado = 'ok';
+  else estado = 'sin_datos';
+
+  const stops: Stops = {
+    identidad: ctx.identidad, fechaLectura: fecha, fechaCorridaLectura: ctx.fechaCorrida,
+    cierre, atr14, stopAtrBase, stopAtr, stopAtrDesde, motivoStopAtr,
+    reinicio: ctx.reinicio ?? (mismaIdentidad ? null : 'identidad'),
+    stopSma50: s50, estadoSma50, cierresDebajoSma50: d50,
+    stopSma200: s200, estadoSma200, cierresDebajoSma200: d200,
+    distStopAtrPct: dist(stopAtr), distSma50Pct: dist(s50), distSma200Pct: dist(s200),
+    estado,
+  };
+
+  // Historial: una lectura por fecha de mercado (re-correr el mismo día la reemplaza). Si cambió
+  // la identidad, el historial anterior es de otra posición y se descarta.
+  const base = mismaIdentidad && stops.reinicio !== 'identidad' ? ctx.previo?.historialStops ?? [] : [];
+  const historial = [
+    ...base.filter(l => l.fecha < fecha),
+    { fecha, stopAtr, sma50: s50, sma200: s200, cierre },
+  ].slice(-U.historial);
+
+  return { stops, historial };
+}
+
+// ── Señales por acción (F9.196 §5) ──────────────────────────────────────────
+// Deterministas e informativas: nivel `info` o `atencion`, nunca una orden. Sin push.
+
+/** RSI de Wilder rueda a rueda; null antes de tener 15 puntos. El último es `rsi(cierres)`. */
+export function rsiSerie(cierres: number[], ventana = 14): Array<number | null> {
+  const out: Array<number | null> = cierres.map(() => null);
+  if (cierres.length < ventana + 1) return out;
+  let ganancia = 0, perdida = 0;
+  for (let i = 1; i <= ventana; i++) {
+    const d = cierres[i] - cierres[i - 1];
+    if (d >= 0) ganancia += d; else perdida -= d;
+  }
+  ganancia /= ventana; perdida /= ventana;
+  const valor = () => (perdida === 0 ? (ganancia === 0 ? 50 : 100) : 100 - 100 / (1 + ganancia / perdida));
+  out[ventana] = valor();
+  for (let i = ventana + 1; i < cierres.length; i++) {
+    const d = cierres[i] - cierres[i - 1];
+    ganancia = (ganancia * (ventana - 1) + Math.max(d, 0)) / ventana;
+    perdida = (perdida * (ventana - 1) + Math.max(-d, 0)) / ventana;
+    out[i] = valor();
+  }
+  return out;
+}
+
+/** Índice donde empieza la racha final de `cumple`; −1 si el último no cumple. */
+function inicioRacha(n: number, cumple: (i: number) => boolean): number {
+  if (n === 0 || !cumple(n - 1)) return -1;
+  let i = n - 1;
+  while (i > 0 && cumple(i - 1)) i--;
+  return i;
+}
+
+const fmtNum = (x: number) => x.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+
+export function calcSenales(
+  serie: PuntoSerie[],
+  stops: Stops,
+  ctx: ContextoStops,
+  extra: { curva: number[]; ddCdar80: number | null; distanciaMax52sPct: number | null },
+): Senal[] {
+  const S = UMBRALES.senales;
+  const fechas = serie.map(p => p.f);
+  const cierres = serie.map(p => p.c);
+  const n = cierres.length;
+  const hoy = fechas[n - 1];
+  const crudas: Array<Omit<Senal, 'nueva'>> = [];
+
+  // Cruces de medias: el más reciente de cada sentido dentro de las últimas `ventanaCruce` ruedas.
+  let bajista: string | null = null, alcista: string | null = null;
+  for (let i = Math.max(1, n - S.ventanaCruce); i < n; i++) {
+    const a0 = smaEn(cierres, 50, i - 1), b0 = smaEn(cierres, 200, i - 1);
+    const a1 = smaEn(cierres, 50, i), b1 = smaEn(cierres, 200, i);
+    if (a0 === null || b0 === null || a1 === null || b1 === null) continue;
+    if (a0 >= b0 && a1 < b1) bajista = fechas[i];
+    if (a0 <= b0 && a1 > b1) alcista = fechas[i];
+  }
+  if (bajista) crudas.push({ id: 'cruce_bajista', nivel: 'atencion', desde: bajista,
+    texto: 'Cruce de medias bajista: la SMA50 pasó debajo de la SMA200' });
+  if (alcista) crudas.push({ id: 'cruce_alcista', nivel: 'info', desde: alcista,
+    texto: 'Cruce de medias alcista: la SMA50 pasó arriba de la SMA200' });
+
+  // Stop ATR tocado. El `desde` no se deriva de la serie (el trinquete depende de lecturas
+  // anteriores): se hereda de la lectura anterior si la señal ya estaba activa.
+  if (stops.stopAtr !== null && stops.cierre <= stops.stopAtr) {
+    const antes = ctx.reinicio ? undefined : ctx.previo?.senales.find(s => s.id === 'stop_atr_tocado');
+    crudas.push({ id: 'stop_atr_tocado', nivel: 'atencion', desde: antes?.desde ?? hoy,
+      texto: `Cierre ${fmtNum(stops.cierre)} en o debajo del stop ATR ${fmtNum(stops.stopAtr)}` });
+  }
+
+  // Debajo de la SMA200: desde la rueda en que se completaron los dos cierres seguidos.
+  if (stops.estadoSma200 === 'debajo') {
+    const i = n - stops.cierresDebajoSma200 + (UMBRALES.stops.ruedasDebajo - 1);
+    crudas.push({ id: 'debajo_sma200', nivel: 'atencion', desde: fechas[i],
+      texto: `${stops.cierresDebajoSma200} cierres seguidos debajo de la SMA200` });
+  }
+
+  // RSI14: desde el inicio de la racha actual fuera de banda.
+  const rs = rsiSerie(cierres);
+  const ultimoRsi = rs[n - 1];
+  if (ultimoRsi !== null && ultimoRsi > S.rsiSobrecompra) {
+    const i = inicioRacha(n, k => (rs[k] ?? -1) > S.rsiSobrecompra);
+    crudas.push({ id: 'sobrecompra', nivel: 'info', desde: fechas[i],
+      texto: `RSI14 en ${Math.round(ultimoRsi)}: sobrecompra (más de ${S.rsiSobrecompra})` });
+  }
+  if (ultimoRsi !== null && ultimoRsi < S.rsiSobreventa) {
+    const i = inicioRacha(n, k => rs[k] !== null && rs[k]! < S.rsiSobreventa);
+    crudas.push({ id: 'sobreventa', nivel: 'info', desde: fechas[i],
+      texto: `RSI14 en ${Math.round(ultimoRsi)}: sobreventa (menos de ${S.rsiSobreventa})` });
+  }
+
+  // Caída fuera de lo normal: la caída 52s de hoy es peor que su CDaR(0,8) (F9.149), o sea la
+  // banda roja de `caida52s`. La curva arranca en la rueda 252 de la serie.
+  const { curva, ddCdar80, distanciaMax52sPct } = extra;
+  if (ddCdar80 !== null && distanciaMax52sPct !== null && Math.abs(distanciaMax52sPct) > ddCdar80) {
+    const desfase = n - curva.length;
+    const j = inicioRacha(curva.length, k => curva[k] > ddCdar80);
+    crudas.push({ id: 'caida_fuera_de_lo_normal', nivel: 'atencion', desde: fechas[(j < 0 ? curva.length - 1 : j) + desfase],
+      texto: `Caída de ${fmtNum(Math.abs(distanciaMax52sPct) * 100)}% desde el máximo de 52 semanas, peor que su CDaR80 (${fmtNum(ddCdar80 * 100)}%)` });
+  }
+
+  // Volumen anómalo: monto operado del día > `ratioVolumen` × su promedio de 30 ruedas. Misma
+  // definición que `Indicadores.ratioVolumen`, rueda a rueda para el `desde`.
+  const montos = serie.map(p => (p.v === null ? null : p.c * p.v));
+  const ratioEn = (t: number): number | null => {
+    if (t < 29) return null;
+    const tramo = montos.slice(t - 29, t + 1);
+    if (tramo.some(m => m === null)) return null;
+    const prom = media(tramo as number[]);
+    return prom > 0 ? (montos[t] as number) / prom : null;
+  };
+  const ratioHoy = ratioEn(n - 1);
+  if (ratioHoy !== null && ratioHoy > S.ratioVolumen) {
+    const i = inicioRacha(n, k => (ratioEn(k) ?? 0) > S.ratioVolumen);
+    crudas.push({ id: 'volumen_anomalo', nivel: 'info', desde: fechas[i],
+      texto: `Monto operado ${fmtNum(ratioHoy)}× su promedio de 30 ruedas` });
+  }
+
+  // §6 — "Evento próximo" y "Gatillo de tesis" van acá cuando exista la tesis (H5).
+  crudas.push(...(ctx.senalesTesis ?? []));
+
+  return crudas.map(s => {
+    const idx = fechas.lastIndexOf(s.desde);
+    return { ...s, nueva: idx >= 0 && idx >= n - S.ruedasNueva };
+  });
 }
 
 // ── Recorte por estado de serie ──────────────────────────────────────────────
