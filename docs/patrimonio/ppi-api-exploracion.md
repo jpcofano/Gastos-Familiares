@@ -1,32 +1,207 @@
 # Exploración de la API de PPI
 
 - **Fecha de armado:** 2026-10-19
-- **Fuente:** documentación pública oficial; nada de esto se probó en vivo con credenciales.
-- **20/10/2026 — prueba en vivo bloqueada en el login.** Ver "Estado de la prueba en vivo" abajo:
-  producción responde, pero `LoginApi` rechaza las credenciales (`400 "Credenciales invalidas."`).
-  Los puntos 2 a 7 siguen "según la doc".
+- **Fuente:** documentación pública oficial (de abajo de "Cómo leer este documento"), y **prueba
+  en vivo del 20/10/2026 a las 22:19 ART** (la sección siguiente). Lo de la prueba en vivo manda sobre
+  lo que dice la doc.
 - **Spec:** [`docs/prompts/F9.196-acciones-stops-cartera-viva.md`](../prompts/F9.196-acciones-stops-cartera-viva.md) §0 (y §0.b para lo cripto).
 
-## Estado de la prueba en vivo (20/10/2026)
+## Confirmado en vivo (20/10/2026 22:19 ART)
 
 Cliente de exploración: `scripts/explorarPPI.ts`, sobre `scripts/ppiCliente.ts`. Es solo de
 lectura, con lista blanca de rutas: cualquier otra tira error antes de salir a la red, verificado
 por `scripts/ppiCliente.test.ts`. A la lista de §0 se le sumaron `Configuration/InstrumentTypes` y
 `Configuration/Settlements`, que hacen falta para el punto 6 y son de consulta. Las respuestas
-crudas quedan en `data/ppi-exploracion/` (gitignored) con los tokens tapados.
+crudas quedan en `data/ppi-exploracion/` (gitignored, con los tokens tapados). Acá van solo
+extractos anonimizados: montos redondeados y la cuenta como `XXXXX`.
 
-| Punto | Estado | Detalle |
-|---|---|---|
-| 1. Base URL | **Confirmado en vivo, 20/10 19:44** (parcial) | `https://clientapi.portfoliopersonal.com/api/1.0/Account/LoginApi` existe y responde (nginx, `application/json; charset=utf-8`). Que sirva con credenciales válidas queda sin confirmar. |
-| 1. Login con `AuthorizedClient`/`ClientKey` de Gestiones | **Falló, 20/10 19:44 y 19:45** | Las dos veces: **HTTP 400**, cuerpo `"Credenciales invalidas."` (un string JSON). Se probó una vez y se reintentó una sola vez más. No se usaron los valores fijos del SDK. |
-| 1. Contrato de error del login | **Contradicción** | La Swagger declara `401 Unauthorized` para el login. Con credenciales inválidas, producción devuelve **400**. Quien escriba el cliente no puede detectar "credenciales malas" solo por un 401. |
-| 2 a 7 | Sin probar | Todo pasa por el token. |
+Antecedente: el mismo 20/10 a las 19:44 y 19:45, `LoginApi` devolvió **HTTP 400** `"Credenciales
+invalidas."`. Juan regeneró las credenciales y a las 22:19 entró. Ver la contradicción C1.
 
-Se descartó un error del lado del lector. El `.env` se parsea limpio: sin BOM, sin comillas ni
-espacios colados, sin caracteres raros, con las seis variables presentes y `PPI_ENTORNO` =
-producción. No se imprimieron valores.
+### 1. Base URL y headers — confirmado en vivo, 20/10 22:19
+
+- **Producción:** `https://clientapi.portfoliopersonal.com/api/1.0/`.
+- **Headers:** `AuthorizedClient` y `ClientKey` de Gestiones (no los valores fijos del SDK), más
+  `ApiKey` y `ApiSecret` en el login. Después, `Authorization: Bearer <accessToken>`.
+
+### 2. LoginApi y RefreshToken — confirmado en vivo, 20/10 22:19
+
+| Qué | Resultado |
+|---|---|
+| Forma de la respuesta | **Objeto**, no array: `{creationDate, expirationDate, accessToken, expires, refreshToken, tokenType: "bearer"}`. **Contradicción C2** con la doc y la Swagger; el SDK estaba bien. |
+| `expires` | **Segundos**: `28799`, y `expirationDate − creationDate` = 28.800 s. El token dura **8 horas**. |
+| Refresh sin Bearer | **HTTP 400** `"Token was not provided."`: `RefreshToken` **necesita el Bearer viejo**. **Contradicción C3** con la doc, que solo pide `AuthorizedClient`/`ClientKey`. |
+| Refresh con Bearer viejo | HTTP 200, objeto con la misma forma. El **`refreshToken` rota** (cambia en cada refresh) y el access token también es nuevo. |
+| Access token viejo después del refresh | **Sigue sirviendo** (HTTP 200 en `Account/Accounts`): el refresh no invalida el anterior. |
+| Qué pasa al vencer | No se esperó a que venza (8 h). Queda sin confirmar si da 401. |
+
+### 3. Account/Accounts — confirmado en vivo, 20/10 22:19
+
+- Un array con 1 cuenta: `{accountNumber, name, officer: {name, eMail, phone: null}, externalID: null, owners: [2 × {email, telephone, name, lastname}]}`.
+- `accountNumber`: **6 dígitos solos** (el `XXXXX` de "PPI XXXXX"), igual a `PPI_ACCOUNT_NUMBER`.
+  La corrida rotula la cuenta "PPI <número>": quien sincronice tiene que armar ese mismo texto.
+- `externalID` viene `null`. `owners` trae los 2 cotitulares.
+
+### 4. Saldos y posiciones — confirmado en vivo, 20/10 22:19
+
+**`AvailableBalance`:** un array de 11 filas `{name, symbol, amount, settlement}`. **Usa `symbol`,
+no `simbol`** (contradicción C4 con la doc). Una fila por moneda y plazo:
+
+| `name` | `symbol` | plazos | ejemplo (redondeado) |
+|---|---|---|---|
+| `Pesos` | `ARS` | INMEDIATA, A-24HS, A-48HS | 0 |
+| `Dolar Divisa \| CCL` | `USD` | INMEDIATA, A-24HS, A-48HS | ~80 |
+| `Transferencia Dolar Divisa \| CCL` | `USD` | INMEDIATA | ~80 |
+| `Dolar Billete \| MEP` | `USD` | INMEDIATA, A-24HS, A-48HS | ~11.000 |
+| `Transferencia Dolar Billete \| MEP` | `USD` | INMEDIATA | ~11.000 |
+
+En `AvailableBalance` el monto se repite igual en los tres plazos (es "disponible para operar en ese
+plazo"). En `BalancesAndPositions` el disponible aparece solo en INMEDIATA y en 0 en los otros:
+**la caja de la cuenta es la fila INMEDIATA de `groupedAvailability`**, por moneda (Pesos / CCL / MEP).
+
+**`BalancesAndPositions`:** es un **objeto**, no el array de la doc (contradicción C5):
+
+```
+{
+  groupedAvailability: [ { currency: "Pesos" | "Dolar Divisa | CCL" | "Dolar Billete | MEP",
+                           availability: [ {name, symbol, amount, settlement} × 3 plazos ] } × 3 ],
+  groupedInstruments:  [ { name: "ACCIONES" | "BONOS" | "FCI", groupedValue: number,
+                           instruments: [ { ticker, description, currency, price, amount, quantity,
+                                            collateralQuantity, isin, cajaValoresCode,
+                                            ppc: { ppcValue, currency, cumulativeReturn,
+                                                   cumulativeReturnPercentage } } ] } ]
+}
+```
+
+| Campo | Qué es (verificado) |
+|---|---|
+| `groupedInstruments[].name` | El tipo: `ACCIONES`, `BONOS`, `FCI` (los que hay hoy en la cuenta). Mapea a `accion` / `bono` / `fci`. |
+| `ticker`, `quantity` | Especie y cantidad (cuotapartes en FCI, nominales en bonos). |
+| `price` | Precio **en pesos por unidad**, también en los bonos: GD30 ~878 ARS por 1 VN, **no por 100**. |
+| `amount` | Valuación = `quantity × price`, en pesos. Verificado en las 12 posiciones (±2%). |
+| `currency` | `Pesos` en todas, también GD30, GD35 y BPOD7 (se valúan en pesos). |
+| `ppc.ppcValue` | **Costo promedio por unidad**, en `ppc.currency`. **Trae costo** → `costoPromedio`. ⚠ Parece arrastrar escala de antes de splits (PAMP ~46, TGSU2 ~77, TRAN ~41 contra precios de miles): sirve como dato, no para calcular rendimiento sin revisar. |
+| `collateralQuantity` | 0 en todas (nada en garantía). |
+
+**Contra la última corrida de PPI que tiene la app (13/10):**
+
+- **Ninguna especie falta.** **Sobra `AD.LEC.A`** (FCI), que no estaba en la corrida.
+- Cambian tres cantidades, y las tres se explican con los movimientos posteriores al 13/10:
+
+| Especie | Corrida 13/10 | API 20/10 | Movimientos |
+|---|---|---|---|
+| YPFD | 2200 | 600 | venta de 400 (13/10) y de 1200 (15/10) |
+| TRAN | 4068 | 1568 | venta de 2500 (15/10) |
+| TGSU2 | 593 | 243 | venta de 300 (15/10) y de 50 (16/10) |
+
+- `AD.LEC.A` entró por una suscripción del 16/10.
+- La caja en MEP (~11.000) sale de la compra de AL30 en pesos y su venta en MEP del 16/10.
+
+### 5. Movements — confirmado en vivo, 20/10 22:19
+
+- **Fechas:** acepta `YYYY-MM-DD` y también ISO completo (las dos dieron HTTP 200 y los mismos 29
+  movimientos en 90 días).
+- **Rango:** 1095 días respondió HTTP 200 con 167 movimientos (10/01/2024 a 16/10/2026). No se
+  encontró tope en 3 años; un rango mayor no se probó.
+- **Forma:** `{agreementDate, settlementDate, currency, amount, price, description, ticker, quantity, balance}`,
+  igual que la doc. **No hay campo de tipo:** el tipo **solo se distingue por `description`**.
+- `ticker` viene **`"Ticker not found"`** (texto, no null) en las filas que no son de una especie.
+- `currency` usa **otro vocabulario** que `BalancesAndPositions`: `Pesos`, `Dolar MEP`, `Dolar Cable`,
+  `DolarCV7000 Ext.`, `DolarCV7000-Op.`, `DolarCV10000-Op.`, `DolarCV10000-Loc.`.
+- El signo de `amount` es el efecto en la caja. Una venta trae `quantity` negativa.
+
+**Textos de `description` que aparecieron (3 años, 167 movimientos), con un ejemplo de cada uno.**
+Los números de comprobante van como `#`.
+
+| Texto (prefijo) | n | Ejemplo | Qué es |
+|---|---|---|---|
+| `COMPRA <ticker>` | 13 | `COMPRA GD30` (ticker GD30, qty 21) | compra |
+| `VENTA <ticker>` | 18 | `VENTA PAMP` (qty −400) | venta |
+| `Ingreso de Fondos` | 1 | `Ingreso de Fondos ` | depósito |
+| `Retiro de Fondos` | 10 | `Retiro de Fondos ` | retiro |
+| `Dividendo en efectivo / <t>` | 24 | `Dividendo en efectivo / BMA` | renta |
+| `Renta / <t>` y `RENTA. / <t>` | 24 | `Renta / GD30` | renta (cupón) |
+| `Amortización / <t>` | 11 | `Amortización / GD30`, `Amortización / S14O4` (qty −71119) | renta, devolución de capital; en letras baja la tenencia |
+| `Interest payment (INTR) - DISN / <t>` | 12 | `Interest payment (INTR) - DISN / BPOD7` | cupón del Bopreal |
+| `Liquidación de Suscripción / # / <fondo>` | 8 | `… / Gainvest Renta Variable` (ticker RV) | suscripción de FCI (caja + cuotapartes en la misma fila) |
+| `Ret. Ganancias Div…`, `Ret. Gcias. Div…`, `Ret Ganancias Div.…` | 6 | `Ret. Ganancias Div BMA` | retención (gasto) |
+| `Ret. Bs. Ps.…`, `Ret Bs. Ps.…`, `Retenciones Div. <t>` | 5 | `Ret. Bs. Ps. Dividendo TRAN` | retención (gasto) |
+| `Split / <t>` | 5 | `Split / CEPU` | split. ⚠ El `ticker` de la fila viene equivocado (GD30, GD38) |
+| `Movimiento Manual / Vencimiento Plazo Comunicación A 8042` | 16 | — | ajuste de caja en dólares CV7000 |
+| `Movimiento Manual / Fracción Split <t>` | 6 | `… / Fracción Split CEPU` | ajuste de caja por fracción de split |
+| `Movimiento Manual / Débito/Crédito - Compensación de monedas` | 4 | — | conversión entre subcuentas de dólar |
+| `Movimiento Manual / Gastos CVSA Split <t>` | 1 | — | gasto |
+
+Las variantes de un mismo concepto (`RENTA.` contra `Renta`, `Ret.` contra `Ret` contra `Retenciones`)
+obligan a clasificar por reglas de texto, como Balanz en §B. Esa tabla es material para H2; acá
+queda solo documentada.
+
+### 6. MarketData — confirmado en vivo, 20/10 22:19
+
+- **`Configuration/InstrumentTypes`:** `BONOS, LETRAS, NOBAC, LEBAC, ON, FCI, CAUCIONES, ACCIONES,
+  ETF, CEDEARS, OPCIONES, FUTUROS, LICITACIONES, ACCIONES-USA, FCI-EXTERIOR`. Suma `LICITACIONES`
+  contra la doc.
+- **`Configuration/Settlements`:** `INMEDIATA, A-24HS, A-48HS, A-72HS`.
+- **`Type` no distingue mayúsculas:** `Acciones` dio 200 igual que `ACCIONES`.
+- **`Current`:** las 5 especies de Balanz dieron precio, con fecha `2026-10-20T17:00:00-03:00` (el
+  cierre del día, a las 22:19):
+
+| Especie (Type) | INMEDIATA | A-24HS | A-48HS / A-72HS | prevClose (24 hs) |
+|---|---|---|---|---|
+| YPFD (ACCIONES) | 8215 | 8220 | = 24 hs | 8235 |
+| PAMP (ACCIONES) | 5045 | 5080 | = 24 hs | 5165 |
+| GGAL (ACCIONES) | 5755 | 5765 | = 24 hs | 5690 |
+| GLOB (CEDEARS) | 3752,5 | 3760 | = 24 hs | 3615 |
+| TLCPO (ON) | 172.220 | 172.910 | = 24 hs | 170.750 |
+
+- **Moneda del precio:** `Current` no la trae. `SearchInstrument` sí: `currency: "Pesos"` para las
+  cinco, y existen las especies en dólares aparte (`PAMPC`, `GGALC`… con `"Dolares divisa | CCL"`).
+- **Escala:** `SearchInstrument` trae `nominalInPrice`, que vale **1 en acciones y CEDEARs y 100 en
+  la ON TLCPO**: el precio de `Current` de la ON es por 100 VN. En `BalancesAndPositions`, en cambio,
+  los bonos vienen por 1 VN. **Quien use `Current` tiene que dividir por `nominalInPrice`.**
+- **Rareza:** `SearchInstrument?Ticker=YPFD` dio **HTTP 400 `{"error":"Currency not found"}`**,
+  aunque `Current` de YPFD anda.
+- GLOB aparece dos veces en `SearchInstrument`: como `ACCIONES-USA` en NYSE (CCL) y como `CEDEARS`
+  en BYMA (pesos). Es la misma ambigüedad que F9.141.1.
+
+### 7. Límites — medido en vivo, 20/10 22:20
+
+- **50 llamadas seguidas a `MarketData/Current`: 50 × HTTP 200.** Ningún 429. Mediana 40 ms, máximo 55 ms.
+- **Headers de límite:** `x-rate-limit-limit: 1s`, `x-rate-limit-remaining` entre **19 y 5** durante la
+  ráfaga, y `x-rate-limit-reset` con la hora del próximo segundo. El límite parece ser del orden de
+  **20 pedidos por segundo**: no se llegó a agotar. La doc no dice nada.
+
+### Evidencia para decidir si `MarketData/Current` sirve de respaldo de data912
+
+La decisión es de Juan. Lo medido:
+
+- **Cobertura:** dio precio para las 5 especies de Balanz probadas (acción, CEDEAR y ON) y para todo
+  lo que hay en PPI.
+- **Frescura:** a las 22:19 devolvía el cierre de las 17:00 del mismo día, con `previousClose`.
+- **Plazos:** INMEDIATA y A-24HS difieren un poco (son mercados distintos); A-48HS y A-72HS repiten
+  el de 24 hs. data912 valúa por `c`, el cierre: el equivalente sería A-24HS.
+- **Moneda y escala:** siempre en pesos. La escala sale de `nominalInPrice` (ON por 100 VN), y hace
+  falta una llamada a `SearchInstrument` por especie, que puede fallar (YPFD).
+- **Límites:** holgados (~20 por segundo; 50 seguidas sin 429). Una sola sesión de 8 h alcanza para
+  el cron diario.
+- **Costo:** requiere credenciales y login (data912 es público). No trae series históricas en
+  `Current`; `MarketData/Search` sí, pero no se probó.
+
+### Contradicciones con la doc o el SDK
+
+| # | Qué | Doc / Swagger | En vivo |
+|---|---|---|---|
+| C1 | Error de login con credenciales inválidas | 401 | **400** `"Credenciales invalidas."` |
+| C2 | Respuesta de LoginApi y RefreshToken | array | **objeto** (el SDK acertaba) |
+| C3 | RefreshToken | solo AuthorizedClient y ClientKey | **exige el Bearer viejo** (400 `"Token was not provided."` sin él) |
+| C4 | Campo de moneda en saldos | `simbol` (doc) | **`symbol`** (Swagger y ejemplos acertaban) |
+| C5 | BalancesAndPositions | array de saldos, sin posiciones | **objeto** `{groupedAvailability, groupedInstruments}` con posiciones y costo (`ppc`) |
+| C6 | InstrumentTypes | sin `LICITACIONES` | la incluye |
+| C7 | SearchInstrument YPFD | — | 400 `"Currency not found"` |
 
 ## Cómo leer este documento
+
+> Desde acá abajo es la exploración por documentación (19/10). Donde contradice a "Confirmado en vivo" (arriba), manda lo de arriba: los puntos 1 a 7 ya no son "según la doc".
 
 Ninguno de estos datos se confirmó en vivo. Cada dato lleva una de estas marcas:
 
@@ -188,7 +363,7 @@ Fuentes: [doc] D1 `#accounts` y [swagger] S2.
 | `externalID` | string, nullable | External client account number. **No figura en D1.** |
 | `owners` | array de `Contract` {`email`, `telephone`, `name`, `lastname`} | List of co-owners for the account. **No figura en D1.** |
 
-- **Formato del número de cuenta:** la doc no lo dice. Solo dice que es `string`. Si viene "101268" o "PPI 101268" se confirma en vivo.
+- **Formato del número de cuenta:** la doc no lo dice. Solo dice que es `string`. Si viene "XXXXX" o "PPI XXXXX" se confirma en vivo.
 - [ejemplo] D3 y E1 toman `account_numbers[0]['accountNumber']` y lo pasan tal cual a los demás endpoints.
 
 ---
@@ -496,26 +671,10 @@ del día siguiente.
 
 ## Pendiente con credenciales
 
-0. **Antes que nada: que el login funcione.** El 20/10, `LoginApi` en producción devolvió
-   `400 "Credenciales invalidas."` dos veces (ver "Estado de la prueba en vivo").
-1. **Base URL de producción.** Confirmar `https://clientapi.portfoliopersonal.com/api/`, que sale del SDK y no de la doc REST. Confirmar también que el sandbox actual es `clientapisbx` y no `clientapi_sandbox`, que cambió en la doc el 2026-10-19.
-2. **`LoginApi`:**
-   - qué devuelve: `accessToken`, `refreshToken` y `expires` con su unidad real (la Swagger dice segundos);
-   - si viene como array o como objeto;
-   - qué pasa al vencer: código HTTP, si `RefreshToken` necesita el Bearer viejo y si el `refreshToken` rota.
-   - Confirmar además si se usan los `AuthorizedClient`/`ClientKey` propios de Gestiones.
-3. **`Account/Accounts`:** el número de cuenta. Hoy figura como "PPI 101268"; ver si viene "101268" a secas. Mirar también `externalID` y `owners`.
-4. **`BalancesAndPositions`:** pegar un ejemplo real anonimizado. Documentar:
-   - la forma exacta de las posiciones (`groupedInstruments`): ticker, tipo, cantidad, precio, valuación (`amount`?), moneda, `collateralQuantity` y si trae costo promedio;
-   - los saldos por moneda y plazo (`groupedAvailability`, `symbol` vs `simbol`).
-5. **`Movements`:**
-   - qué tipos existen (compra, venta, depósito, retiro, cupón, dividendo) y cómo se distinguen (¿solo por `description`?);
-   - qué campos trae cada uno;
-   - qué formato de fecha acepta y cuál es el rango máximo.
-6. **`MarketData/Current`:**
-   - los valores válidos de `Type` y `Settlement` (llamar a `Configuration/InstrumentTypes` y `Configuration/Settlements`), y si distinguen mayúsculas;
-   - si devuelve precio para las especies de BYMA que están en **Balanz**;
-   - en qué moneda viene el precio.
-7. **Límites de uso.** No están documentados. Medir con 50 llamadas seguidas y anotar la respuesta (código HTTP, cuerpo y headers de límite si los hay).
+Estado al 20/10 22:19: **los puntos 1 a 7 se confirmaron en vivo** (ver arriba). Queda:
 
-**Decisión pendiente:** si `MarketData/Current` sirve como **respaldo de data912**, que devolvió 502 el 14/10 (ver F9.195.1). Depende de los puntos 6 y 7: cobertura de especies BYMA/Balanz, moneda del precio, frescura de `date` y límite de llamadas.
+1. **Vencimiento del token:** qué código devuelve al pasar las 8 h (se supone 401, sin confirmar).
+2. **Movements:** tope de rango por encima de 3 años, y si pagina.
+3. **`MarketData/Search`** (histórico): no se probó.
+4. **Decisión de Juan:** si `MarketData/Current` sirve de respaldo de data912 (ver la evidencia arriba).
+
