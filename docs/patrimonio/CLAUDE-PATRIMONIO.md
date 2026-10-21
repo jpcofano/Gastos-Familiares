@@ -1285,6 +1285,21 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
   manteniendo la agrupación por identidad.
 - **Textos:** ninguno es una orden; describen niveles y señales. Sin push, campana ni "acción
   sugerida".
+- **Arreglos de la revisión de H6:**
+  - **Distancia a un nivel** en el formato de §7: nivel ÷ precio − 1 (`distANivel`). El cron guarda
+    precio ÷ nivel − 1.
+  - **Variación:** dice "hoy" solo si el último cierre es de hoy en Argentina; si no, "al dd/mm". Si
+    entre las dos lecturas hay más de 4 días, no se muestra.
+  - **Tesis en la ficha:** se recalcula en el cliente con `calcularTesis` (lo editado se ve al
+    guardar). Usa el último cierre y el MEP de la cartera viva.
+  - **Gatillos:** se editan de a uno (`gatillosEditados` y `gatillosDistintos`), así que corregir un
+    valor no congela la lista. Cada campo o gatillo "distinto" tiene "usar el del chat".
+  - **Guardado:** `guardarTesis` escribe todo en un solo `updateDoc`. `tesisMap` se recarga después
+    de importar.
+  - **Números del editor:** se aceptan "45000", "45,5" y "1.234,56". "45.000" es ambiguo y se
+    rechaza (`leerNumero`).
+  - **Modo privado:** tapa los montos del detalle de la card y de los textos de señales.
+  - **Varias identidades del mismo ticker:** muestran una sola tesis, en la primera.
 
 ## Decisiones cerradas — no re-litigar
 

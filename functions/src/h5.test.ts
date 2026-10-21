@@ -4,6 +4,7 @@
 // Correr: npx tsx functions/src/h5.test.ts   → exit 1 si algo falla.
 import {
   normalizarTesis, fusionarTesis, editarTesis, calcularTesis, senalesDeTesis, type Tesis,
+  editarValorGatillo, aceptarDatoDelChat, aceptarGatilloDelChat, claveGatillo,
 } from './compartido/tesis';
 import { tesisDeItems } from './tesisImport';
 import { buildPromptPosicionesV3, ESQUEMA_TESIS } from './informeV2';
@@ -116,6 +117,27 @@ console.log('\n=== arreglos de la revisión de H5 ===');
   t('cumplido → sin dato → no cumplido: sale "dejó de cumplirse"', a2.estado[0].cumplido === true && a3.senales.some(x => x.id === 'gatillo_tesis' && x.texto.includes('dejó de cumplirse')));
   const r = tesisDeItems([{ ticker: 'PAMP', resultado: { tesis: delChat } }, { ticker: 'A/B', tesis: delChat }]);
   t('tesis dentro de "resultado" → se importa con aviso; ticker con "/" → aviso, no se guarda', r.tesis.length === 1 && r.tesis[0].ticker === 'PAMP' && r.avisos.some(x => x.includes('dentro de "resultado"')) && r.avisos.some(x => x.startsWith('A/B')));
+}
+
+console.log('\n=== edición por gatillo y "usar el del chat" (revisión de H6) ===');
+{
+  const base = fusionarTesis(null, 'YPFD', T);
+  const k0 = claveGatillo(T.gatillos[0]);
+  const ed = editarValorGatillo(base, k0, 0.25);
+  const nuevoChat: Tesis = { ...T, gatillos: [{ ...T.gatillos[0], valorActual: 0.33 }, { ...T.gatillos[1], valorActual: 1.8 }, { texto: 'Nuevo', metrica: 'n', operador: '>=', umbral: 1, valorActual: 2 }] };
+  const re = fusionarTesis(ed, 'YPFD', nuevoChat);
+  t('editar un gatillo no congela los demás: el chat actualiza el resto y agrega los nuevos',
+    re.tesis.gatillos.length === 3 && re.tesis.gatillos[0].valorActual === 0.25 && re.tesis.gatillos[1].valorActual === 1.8 && !re.editadoPorJuan.gatillos);
+  t('el gatillo editado guarda el dato distinto del chat', re.gatillosDistintos?.[k0] === 0.33);
+  const ac = aceptarGatilloDelChat(re, k0);
+  t('"usar el del chat" en un gatillo: vuelve el valor del chat y deja de estar editado', ac.tesis.gatillos[0].valorActual === 0.33 && !(k0 in (ac.gatillosEditados ?? {})) && !(k0 in (ac.gatillosDistintos ?? {})));
+  const e2 = fusionarTesis(editarTesis(base, 'precioObjetivoConsenso', 55), 'YPFD', { ...T, precioObjetivoConsenso: 70 });
+  const a2 = aceptarDatoDelChat(e2, 'precioObjetivoConsenso');
+  t('"usar el del chat" en un campo: queda el 70 y deja de estar editado', a2.tesis.precioObjetivoConsenso === 70 && !a2.editadoPorJuan.precioObjetivoConsenso && a2.distintoDelChat.precioObjetivoConsenso === undefined);
+  // Firestore puede devolver los mapas con las claves en otro orden: eso no es "distinto".
+  const ev = editarTesis(base, 'proximoEvento', { ...T.proximoEvento });
+  const desordenado = { ...ev, tesis: { ...ev.tesis, proximoEvento: { texto: T.proximoEvento.texto, tipo: T.proximoEvento.tipo, fecha: T.proximoEvento.fecha } } };
+  t('mismo valor con otro orden de claves → no queda "distinto"', fusionarTesis(desordenado, 'YPFD', T).distintoDelChat.proximoEvento === undefined);
 }
 
 console.log('\n=== prompt del Chat 2 ===');

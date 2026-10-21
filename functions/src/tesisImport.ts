@@ -46,7 +46,7 @@ export async function importarTesis(
         delChat: JSON.parse(JSON.stringify(delChat)),
         importadoEn: FieldValue.serverTimestamp(),
         generadoEnISO: meta.generadoEnISO ?? null,
-      }, { mergeFields: ['ticker', 'tesis', 'editadoPorJuan', 'distintoDelChat', 'delChat', 'importadoEn', 'generadoEnISO'] });
+      }, { mergeFields: ['ticker', 'tesis', 'editadoPorJuan', 'distintoDelChat', 'gatillosEditados', 'gatillosDistintos', 'delChat', 'importadoEn', 'generadoEnISO'] });
       return Object.keys(doc.distintoDelChat).length;
     });
   }

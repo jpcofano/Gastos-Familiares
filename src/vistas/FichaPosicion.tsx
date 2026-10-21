@@ -17,7 +17,7 @@ import { Icon } from '../design-system/Icon';
 import { motivoDeAusencia, LEYENDA_SEMAFOROS, ETIQUETA_SEMAFORO, ETIQUETA_CAMPO_SEMAFORO } from '../datos/patrimonioPrecios';
 import type { IndicadoresPosicion, Semaforo, PosicionTipo } from '../types/patrimonio';
 import type { DocTesis } from '../datos/compartido/tesis';
-import { variacionDia } from '../datos/patrimonioAccionesAMirar';
+import { variacionConFecha, cuandoFue, fmtPctAR } from '../datos/patrimonioAccionesAMirar';
 import { SeccionStops, SeccionSenales, SeccionTesis, Plegable } from './FichaStopsTesis';
 
 // ── Mínimos de ventana ────────────────────────────────────────────────────────
@@ -232,7 +232,7 @@ export type PosicionFicha = {
   deCarteraViva?: boolean;
 };
 
-export default function FichaPosicion({ ident, filas, ind, privado, tesis = null, onTesisGuardada }: {
+export default function FichaPosicion({ ident, filas, ind, privado, tesis = null, onTesisGuardada, mostrarTesis = true, tc = null }: {
   ident: string;                       // "TICKER|tipo|pais", para el encabezado cuando hay ambigüedad
   filas: PosicionFicha[];              // las posiciones de ESA identidad (puede haber varias cuentas)
   ind: IndicadoresPosicion | null;
@@ -240,6 +240,10 @@ export default function FichaPosicion({ ident, filas, ind, privado, tesis = null
   /** F9.196 H5/H6 — la tesis de este ticker (`tesisPosicion`), si hay. */
   tesis?: DocTesis | null;
   onTesisGuardada?: (d: DocTesis) => void;
+  /** false en la 2.ª identidad del mismo ticker (GLOB CEDEAR y acción): una sola tesis y un solo editor. */
+  mostrarTesis?: boolean;
+  /** MEP de hoy, para los cálculos de la tesis. */
+  tc?: number | null;
 }) {
   const primera = filas[0];
   const totalUsd = filas.reduce((s, f) => s + f.valorUsd, 0);
@@ -297,12 +301,16 @@ export default function FichaPosicion({ ident, filas, ind, privado, tesis = null
             nota={ind.fechaUltimoPrecio ? `al ${fmtFecha(ind.fechaUltimoPrecio)}` : undefined}
           />
         ) : null}
-        {ind && variacionDia(ind) !== null && (
-          <Fila label="Variación" valor={fmtPct(variacionDia(ind)!)} nota="último cierre" />
+        {ind && variacionConFecha(ind) && (
+          <Fila label="Variación" valor={fmtPctAR(variacionConFecha(ind)!.valor)} nota={`último cierre, ${cuandoFue(variacionConFecha(ind)!.fecha)}`} />
         )}
-        {/* F9.196 H2a — frescura del precio: de qué fuente salió el precio del día. */}
+        {/* F9.196 H2a — precio del día (el que valúa la cartera viva) y de qué fuente salió. */}
         {ind?.precioDia && (
-          <Fila label="Precio del día" valor={ind.precioDia.fuente === 'ppi' ? 'PPI (respaldo)' : 'data912'} nota={`al ${fmtFecha(ind.precioDia.fecha)}`} />
+          <Fila
+            label="Precio del día"
+            valor={privado ? '•••' : `${ind.precioDia.moneda === 'USD' ? 'U$S ' : '$ '}${fmtNum(ind.precioDia.precio)}`}
+            nota={`${ind.precioDia.fuente === 'ppi' ? 'PPI (respaldo)' : 'data912'}, al ${fmtFecha(ind.precioDia.fecha)}`}
+          />
         )}
         <Fila label={primera.deCarteraViva ? 'Valor de hoy' : 'Valor actual'} valor={privado ? '•••' : `U$S ${fmtNum(totalUsd, 0)}`} />
         {ind?.pesoEnCartera !== null && ind?.pesoEnCartera !== undefined && (
@@ -325,8 +333,8 @@ export default function FichaPosicion({ ident, filas, ind, privado, tesis = null
 
       {/* ── F9.196 H6: STOPS → SEÑALES → TESIS ───────────────────────────── */}
       <SeccionStops ind={ind} privado={privado} />
-      <SeccionSenales ind={ind} />
-      <SeccionTesis ticker={primera.ticker} ind={ind} doc={tesis} onGuardada={d => onTesisGuardada?.(d)} />
+      <SeccionSenales ind={ind} privado={privado} />
+      {mostrarTesis && <SeccionTesis ticker={primera.ticker} ind={ind} doc={tesis} tc={tc} privado={privado} onGuardada={d => onTesisGuardada?.(d)} />}
 
       {/* ── INDICADORES (plegados, §7) ─────────────────────────────────────── */}
       {tieneDatos && ind && (

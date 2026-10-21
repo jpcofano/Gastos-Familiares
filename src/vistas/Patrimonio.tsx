@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useMemo, createContext, useContext } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
 import { Timestamp } from 'firebase/firestore';
 import { cargarTCReciente, cargarEstadoTcDiario, backfillTcDiario, tcEfectivoDe, type EstadoTcDiario, type ResultadoBackfillTc } from '../datos/tcDiario';
 import { Card, MerchantLogo, MoneyInput } from '../design-system/components';
@@ -1813,7 +1813,7 @@ function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, pos
       {/* F9.196 H6 — debajo de Reserva y señales: solo excepciones, en el orden de §7. */}
       {(() => {
         const a = accionesAMirar(indicadores, identidadesHoy);
-        return <AccionesAMirarCard filas={a.filas} revisadas={a.revisadas} calculadoEnISO={a.calculadoEnISO} privado={$.privado} onAbrir={onAbrirFicha} />;
+        return <AccionesAMirarCard filas={a.filas} revisadas={a.revisadas} sinDatos={a.sinDatos} calculadoEnISO={a.calculadoEnISO} privado={$.privado} onAbrir={onAbrirFicha} />;
       })()}
       {/* F9.196 H2c — cripto: las cantidades de Bitfinex salen de `cuentasVivas/bitfinex` vía la cartera
           viva (que sincronizarBitfinex recalcula al terminar); sin cartera viva, la corrida. */}
@@ -1934,11 +1934,13 @@ function agruparPorIdentidad(filas: FilaTenencia[]): Array<[string, PosicionFich
     b[1].reduce((s, x) => s + x.valorUsd, 0) - a[1].reduce((s, x) => s + x.valorUsd, 0));
 }
 
-function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, analisisCache, configIA, onAnalizar, onAbrirChat, agenda, sectorial, fichaAbierta, onFichaConsumida, tesisMap, onTesisGuardada }: {
+function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, analisisCache, configIA, onAnalizar, onAbrirChat, agenda, sectorial, fichaAbierta, onFichaConsumida, tcHoy, tesisMap, onTesisGuardada }: {
   M: PatMetrics; posiciones: Posicion[]; manuales: PosicionManual[]; fechaCorrida: string;
   /** F9.196 H6 — deep link desde "Acciones a mirar": la identidad cuya ficha hay que abrir. */
   fichaAbierta: string | null;
   onFichaConsumida: () => void;
+  /** MEP de hoy (cartera viva), para los cálculos de la tesis en la ficha. */
+  tcHoy: number | null;
   tesisMap: Record<string, DocTesis>;
   onTesisGuardada: (d: DocTesis) => void;
   indicadores: Map<string, IndicadoresPosicion>;
@@ -1955,6 +1957,8 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
   // F9.196 H6 — orden y buscador, manteniendo la agrupación por identidad.
   const [orden, setOrden] = useState<OrdenTenencias>('peso');
   const [busqueda, setBusqueda] = useState('');
+  const scrollFicha = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (scrollFicha.current) clearTimeout(scrollFicha.current); }, []);
 
   // Consolidar por ticker usando valorUsd ya calculado (no re-suma)
   const byTickerMap = new Map<string, ConsolidadoTicker>();
@@ -1990,7 +1994,9 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
     if (c) {
       setBusqueda('');
       setExpandidos(prev => new Set(prev).add(c.ticker));
-      setTimeout(() => document.getElementById(`ficha-${fichaAbierta}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+      // El timer no se limpia al consumir el deep link (eso re-corre el efecto), solo al desmontar.
+      if (scrollFicha.current) clearTimeout(scrollFicha.current);
+      scrollFicha.current = setTimeout(() => document.getElementById(`ficha-${fichaAbierta}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
     }
     onFichaConsumida();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2019,7 +2025,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
           onChange={e => setBusqueda(e.target.value)}
           placeholder="Buscar ticker"
           aria-label="Buscar ticker"
-          style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', fontSize: 14, fontFamily: 'var(--font-base)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+          style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', fontSize: 16, fontFamily: 'var(--font-base)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
         />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {([['peso', 'Peso'], ['stop', 'Cerca del stop primero'], ['variacion', 'Variación']] as const).map(([k, l]) => (
@@ -2130,7 +2136,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
                       GLOB es a la vez un CEDEAR en ARS y una acción global en USD, y buscar por
                       ticker le daría al plan de empleado los indicadores del CEDEAR. Es el
                       defecto que F9.141.1 cerró en el escritor; no se reintroduce en el lector. */}
-                  {agruparPorIdentidad(c.filas).map(([ident, fichaFilas]) => (
+                  {agruparPorIdentidad(c.filas).map(([ident, fichaFilas], iIdent) => (
                     <div key={ident} id={`ficha-${ident}`} style={{ scrollMarginTop: 12 }}>
                       <FichaPosicion
                         ident={ident}
@@ -2139,6 +2145,8 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
                         privado={$.privado}
                         tesis={tesisMap[c.ticker] ?? null}
                         onTesisGuardada={onTesisGuardada}
+                        mostrarTesis={iIdent === 0}
+                        tc={tcHoy}
                       />
                     </div>
                   ))}
@@ -5686,6 +5694,7 @@ export default function Patrimonio() {
             <TenenciasTab
               M={Mhoy ?? M} posiciones={posicionesHoy} manuales={posicionesManuales} fechaCorrida={fechaCorrida}
               fichaAbierta={fichaAbierta} onFichaConsumida={() => setFichaAbierta(null)}
+              tcHoy={carteraViva?.tc?.valor ?? null}
               tesisMap={tesisMap} onTesisGuardada={d => setTesisMap(prev => ({ ...prev, [d.ticker]: d }))}
               indicadores={indicadores}
               analisisCache={analisisCache}
@@ -5974,7 +5983,11 @@ export default function Patrimonio() {
           modo={modalPromptChat.modo}
           ticker={modalPromptChat.ticker}
           contexto={modalPromptChat.contexto}
-          onDone={() => { modalPromptChat.onDone(); setModalPromptChat(null); }}
+          onDone={() => {
+            modalPromptChat.onDone(); setModalPromptChat(null);
+            // F9.196 H6 — la importación pudo traer tesis nuevas: que la ficha no edite sobre una copia vieja.
+            cargarTodasLasTesis().then(setTesisMap).catch(e => console.warn('[tesis]', e));
+          }}
           onClose={() => setModalPromptChat(null)}
         />
       )}

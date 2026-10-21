@@ -18,20 +18,57 @@ export type FilaAMirar = {
   moneda: 'ARS' | 'USD' | null;
   /** Variación del último cierre contra el anterior (de `historialStops`), o null. */
   variacionDia: number | null;
+  /** Fecha del último cierre de esa variación (para decir "hoy" o "al dd/mm"). */
+  fechaVariacion: string | null;
   /** Segunda línea: "Stop ATR 36,40 (−6,9%) · SMA200 debajo · Balance en 4 días". */
   detalle: string[];
 };
 
 const fmt = (n: number) => n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtPct = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1).replace('.', ',')}%`;
+export const fmtPctAR = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1).replace('.', ',')}%`;
+const fmtPct = fmtPctAR;
 
-/** Variación del último cierre contra el anterior, de las lecturas guardadas en `historialStops`. */
-export function variacionDia(ind: Pick<IndicadoresPosicion, 'historialStops'>): number | null {
+/** Hoy en Argentina, YYYY-MM-DD. */
+export const hoyART = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' });
+
+/**
+ * Distancia del precio a un nivel, en el formato de §7: nivel ÷ precio − 1 ("Stop ATR 36,40 (−6,9%)"
+ * = cuánto tendría que caer el precio para llegar al nivel). El cron guarda precio ÷ nivel − 1.
+ */
+export const distANivel = (distCron: number) => 1 / (1 + distCron) - 1;
+
+/** Más de esto entre las dos lecturas no es "una rueda": el cron faltó y la variación sería de varios días. */
+const MAX_DIAS_ENTRE_LECTURAS = 4;
+
+/**
+ * Variación del último cierre contra el anterior, de las lecturas guardadas en `historialStops`, con
+ * la fecha de ese último cierre. null si no hay dos lecturas o si entre ellas hay un hueco.
+ */
+export function variacionConFecha(ind: Pick<IndicadoresPosicion, 'historialStops'>): { valor: number; fecha: string } | null {
   const h = ind.historialStops ?? [];
   if (h.length < 2) return null;
-  const [a, b] = [h[h.length - 2].cierre, h[h.length - 1].cierre];
-  return a > 0 ? b / a - 1 : null;
+  const [a, b] = [h[h.length - 2], h[h.length - 1]];
+  const dias = (Date.parse(`${b.fecha}T12:00:00Z`) - Date.parse(`${a.fecha}T12:00:00Z`)) / 86_400_000;
+  if (!(a.cierre > 0) || !(dias > 0) || dias > MAX_DIAS_ENTRE_LECTURAS) return null;
+  return { valor: b.cierre / a.cierre - 1, fecha: b.fecha };
 }
+
+export function variacionDia(ind: Pick<IndicadoresPosicion, 'historialStops'>): number | null {
+  return variacionConFecha(ind)?.valor ?? null;
+}
+
+/** "hoy" si la fecha es hoy en Argentina; si no, "al dd/mm". */
+export const cuandoFue = (fecha: string, hoy = hoyART()) => (fecha === hoy ? 'hoy' : `al ${fecha.slice(8, 10)}/${fecha.slice(5, 7)}`);
+
+/**
+ * Modo privado: tapa los montos de un texto (números con decimales o de 3+ cifras), deja los
+ * porcentajes y los conteos chicos ("en 4 días", "60 ruedas").
+ */
+export const taparMontos = (texto: string) => texto.replace(/\d[\d.,]*(\s*%)?/g, (m, pct) => {
+  if (pct) return m;
+  const digitos = m.replace(/[.,]/g, '');
+  return /[.,]\d/.test(m) || digitos.length >= 3 ? '•••' : m;
+});
 
 /** El motivo más importante de una acción, o null si no hay nada que mirar. */
 export function motivoDe(ind: IndicadoresPosicion): MotivoAMirar | null {
@@ -47,7 +84,7 @@ export function motivoDe(ind: IndicadoresPosicion): MotivoAMirar | null {
 export function detalleDe(ind: IndicadoresPosicion): string[] {
   const out: string[] = [];
   const st = ind.stops;
-  if (st?.stopAtr != null) out.push(`Stop ATR ${fmt(st.stopAtr)}${st.distStopAtrPct != null ? ` (${fmtPct(st.distStopAtrPct)})` : ''}`);
+  if (st?.stopAtr != null) out.push(`Stop ATR ${fmt(st.stopAtr)}${st.distStopAtrPct != null ? ` (${fmtPct(distANivel(st.distStopAtrPct))})` : ''}`);
   if (st?.estadoSma200 === 'debajo') out.push('SMA200 debajo');
   else if (st?.estadoSma200 === 'cerca') out.push('SMA200 cerca');
   for (const s of ind.senales ?? []) {
@@ -63,26 +100,32 @@ export function detalleDe(ind: IndicadoresPosicion): string[] {
  * cartera (las demás pueden tener indicadores viejos).
  */
 export function accionesAMirar(indicadores: Map<string, IndicadoresPosicion>, identidades: Set<string>): {
-  filas: FilaAMirar[]; revisadas: number; calculadoEnISO: string | null;
+  filas: FilaAMirar[]; revisadas: number; sinDatos: number; calculadoEnISO: string | null;
 } {
   const filas: FilaAMirar[] = [];
-  let revisadas = 0;
+  let revisadas = 0, sinDatos = 0;
   let calculadoEnISO: string | null = null;
   for (const [identidad, ind] of indicadores) {
     if (!identidades.has(identidad) || (ind.tipo !== 'accion' && ind.tipo !== 'cedear') || !ind.stops) continue;
     revisadas++;
+    if (ind.stops.estado === 'sin_datos') sinDatos++;
     if (ind.calculadoEnISO && (!calculadoEnISO || ind.calculadoEnISO > calculadoEnISO)) calculadoEnISO = ind.calculadoEnISO;
     const motivo = motivoDe(ind);
     if (!motivo) continue;
     filas.push({
       identidad, ticker: ind.ticker, motivo, precio: ind.precio, moneda: ind.monedaSerie,
-      variacionDia: variacionDia(ind), detalle: detalleDe(ind),
+      variacionDia: variacionConFecha(ind)?.valor ?? null, fechaVariacion: variacionConFecha(ind)?.fecha ?? null, detalle: detalleDe(ind),
     });
   }
+  // A igual motivo: los eventos por días al evento; lo demás por distancia al stop.
+  const orden = (f: FilaAMirar) => {
+    const ind = indicadores.get(f.identidad);
+    return f.motivo === 'evento' ? (ind?.tesisCalculo?.diasAlEvento ?? Infinity) : (ind?.stops?.distStopAtrPct ?? Infinity);
+  };
   filas.sort((a, b) => PRIORIDAD[a.motivo] - PRIORIDAD[b.motivo]
-    || (indicadores.get(a.identidad)?.stops?.distStopAtrPct ?? Infinity) - (indicadores.get(b.identidad)?.stops?.distStopAtrPct ?? Infinity)
+    || (orden(a) - orden(b) || 0)
     || a.ticker.localeCompare(b.ticker));
-  return { filas, revisadas, calculadoEnISO };
+  return { filas, revisadas, sinDatos, calculadoEnISO };
 }
 
 // ── Orden de Tenencias ───────────────────────────────────────────────────────

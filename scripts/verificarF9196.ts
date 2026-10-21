@@ -20,7 +20,8 @@ import { planSincronizacionBitfinex } from '../functions/src/bitfinexSincronizac
 import { armarDocCarteraViva } from '../functions/src/carteraVivaCron';
 import { elegirPrecioDia, escalaData912 } from '../functions/src/preciosRespaldo';
 import { normalizarTesis, fusionarTesis, editarTesis, calcularTesis, type Tesis } from '../src/datos/compartido/tesis';
-import { accionesAMirar, ordenarTenencias } from '../src/datos/patrimonioAccionesAMirar';
+import { accionesAMirar, ordenarTenencias, variacionConFecha, distANivel, taparMontos, cuandoFue } from '../src/datos/patrimonioAccionesAMirar';
+import { leerNumero } from '../src/datos/patrimonioNumeros';
 import type { IndicadoresPosicion } from '../src/types/patrimonio';
 
 let fallas = 0;
@@ -285,6 +286,17 @@ console.log('\n=== H6: Acciones a mirar y orden de Tenencias (sintéticos) ===')
   const xs = [...m.keys()].map((k, i) => ({ ticker: k.split('|')[0], totalUsd: 100 - i, identidades: [k] }));
   ok(ordenarTenencias(xs, 'stop', m)[0].ticker === 'TOC' && ordenarTenencias(xs, 'peso', m)[0].ticker === 'OKA' && ordenarTenencias(xs, 'peso', m, 'ce').map(x => x.ticker).join() === 'CER',
     'Tenencias: "cerca del stop primero", peso y buscador por ticker');
+  // Arreglos de la revisión de H6.
+  const h = (f1: string, f2: string) => ({ historialStops: [{ fecha: f1, cierre: 100, stopAtr: null, sma50: null, sma200: null }, { fecha: f2, cierre: 90, stopAtr: null, sma50: null, sma200: null }] }) as Pick<IndicadoresPosicion, 'historialStops'>;
+  ok(variacionConFecha(h('2026-10-10', '2026-10-20')) === null && cerca(variacionConFecha(h('2026-10-16', '2026-10-19'))!.valor, -0.1, 1e-9),
+    'variación: con un hueco de más de 4 días no se muestra; viernes → lunes sí');
+  ok(cuandoFue('2026-10-20', '2026-10-20') === 'hoy' && cuandoFue('2026-10-17', '2026-10-20') === 'al 17/10', 'variación rotulada "hoy" solo si es de hoy');
+  ok(cerca(distANivel(39.10 / 36.40 - 1), 36.40 / 39.10 - 1, 1e-12), 'distancia al stop en el formato de §7: nivel ÷ precio − 1 (36,40 vs 39,10 → −6,9%)');
+  ok(taparMontos('Cierre 39,10 en o debajo del stop ATR 36,40') === 'Cierre ••• en o debajo del stop ATR •••' && taparMontos('Balance en 4 días · −6,9%') === 'Balance en 4 días · −6,9%',
+    'modo privado: se tapan los montos, no los porcentajes ni los días');
+  const n = (s: string) => { const r = leerNumero(s); return 'error' in r ? 'error' : r.valor; };
+  ok(n('45000') === 45000 && n('45,5') === 45.5 && n('1.234,56') === 1234.56 && n('2.5') === 2.5 && n('0.125') === 0.125 && n('45.000') === 'error' && n('abc') === 'error' && n('-1,5') === -1.5 && n('') === null,
+    'editor: números como se escriben en Argentina; "45.000" es ambiguo y se rechaza');
 }
 
 console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);

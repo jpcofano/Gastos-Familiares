@@ -105,9 +105,19 @@ export type DocTesis = {
   editadoPorJuan: Partial<Record<CampoTesis, true>>;
   /** Campo editado por Juan donde el chat trajo OTRO valor: se muestra "dato del chat distinto: X". */
   distintoDelChat: Partial<Record<CampoTesis, unknown>>;
+  /**
+   * Gatillos: la edición es POR GATILLO (clave de `claveGatillo` → `valorActual` que puso Juan). Así
+   * corregir un valor no congela la lista: el chat sigue trayendo textos, umbrales y los demás valores.
+   */
+  gatillosEditados?: Record<string, number | null>;
+  /** Gatillo editado por Juan donde el chat trajo otro `valorActual`. */
+  gatillosDistintos?: Record<string, number | null>;
 };
 
-const igual = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** JSON con las claves ordenadas: Firestore puede devolver los mapas con otro orden de claves. */
+const estable = (x: unknown): string => JSON.stringify(x, (_k, v) => (v && typeof v === 'object' && !Array.isArray(v)
+  ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]])) : v));
+const igual = (a: unknown, b: unknown) => estable(a) === estable(b);
 
 /**
  * La importación del Chat 2 sobre lo que ya había. Un campo con `editadoPorJuan` NO se pisa: si el
@@ -123,7 +133,59 @@ export function fusionarTesis(previo: DocTesis | null, ticker: string, delChat: 
     tesis[c] = deJuan;
     if (!igual(deJuan, (delChat as Record<CampoTesis, unknown>)[c])) distintoDelChat[c] = (delChat as Record<CampoTesis, unknown>)[c];
   }
-  return { ticker, tesis: tesis as unknown as Tesis, editadoPorJuan: { ...editado }, distintoDelChat };
+  // Gatillos editados de a uno: el valor de Juan se mantiene en el gatillo de igual clave; un gatillo
+  // que el chat ya no trae se va (y su edición con él).
+  const gatillosEditados: Record<string, number | null> = {};
+  const gatillosDistintos: Record<string, number | null> = {};
+  if (!editado.gatillos) {
+    const ge = previo?.gatillosEditados ?? {};
+    tesis.gatillos = delChat.gatillos.map(g => {
+      const k = claveGatillo(g);
+      if (!(k in ge)) return g;
+      gatillosEditados[k] = ge[k];
+      if (ge[k] !== g.valorActual) gatillosDistintos[k] = g.valorActual;
+      return { ...g, valorActual: ge[k] };
+    });
+  }
+  return { ticker, tesis: tesis as unknown as Tesis, editadoPorJuan: { ...editado }, distintoDelChat, gatillosEditados, gatillosDistintos };
+}
+
+/** Juan corrige el `valorActual` de UN gatillo: solo ese queda editado. */
+export function editarValorGatillo(doc: DocTesis, clave: string, valor: number | null): DocTesis {
+  const gatillosDistintos = { ...(doc.gatillosDistintos ?? {}) };
+  delete gatillosDistintos[clave];
+  return {
+    ...doc,
+    tesis: { ...doc.tesis, gatillos: doc.tesis.gatillos.map(g => (claveGatillo(g) === clave ? { ...g, valorActual: valor } : g)) },
+    gatillosEditados: { ...(doc.gatillosEditados ?? {}), [clave]: valor },
+    gatillosDistintos,
+  };
+}
+
+/** "Usar el dato del chat": el campo vuelve a ser del chat (deja de estar editado por Juan). */
+export function aceptarDatoDelChat(doc: DocTesis, campo: CampoTesis): DocTesis {
+  if (!(campo in (doc.distintoDelChat ?? {}))) return doc;
+  const editadoPorJuan = { ...doc.editadoPorJuan };
+  delete editadoPorJuan[campo];
+  const distintoDelChat = { ...doc.distintoDelChat };
+  const valor = distintoDelChat[campo];
+  delete distintoDelChat[campo];
+  return { ...doc, tesis: { ...doc.tesis, [campo]: valor }, editadoPorJuan, distintoDelChat };
+}
+
+/** Lo mismo para un gatillo. */
+export function aceptarGatilloDelChat(doc: DocTesis, clave: string): DocTesis {
+  const d = doc.gatillosDistintos ?? {};
+  if (!(clave in d)) return doc;
+  const gatillosEditados = { ...(doc.gatillosEditados ?? {}) };
+  delete gatillosEditados[clave];
+  const gatillosDistintos = { ...d };
+  delete gatillosDistintos[clave];
+  return {
+    ...doc,
+    tesis: { ...doc.tesis, gatillos: doc.tesis.gatillos.map(g => (claveGatillo(g) === clave ? { ...g, valorActual: d[clave] } : g)) },
+    gatillosEditados, gatillosDistintos,
+  };
 }
 
 /** Una edición de Juan: cambia el campo y lo marca `editadoPorJuan` (y ya no está "distinto"). */
