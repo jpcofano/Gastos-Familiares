@@ -6,7 +6,6 @@
 //   `Order/*`, `Account/BankAccount*`, `Account/ForeignBankAccount`, `POST Account/InvestingProfile`
 //   e `InterestBearingAccount/*`. Lo verifica scripts/ppiCliente.test.ts.
 // - Nunca se loguean headers, credenciales ni tokens. Los errores llevan método, ruta y status.
-import * as fs from 'fs';
 
 export type Metodo = 'GET' | 'POST';
 
@@ -73,30 +72,8 @@ export async function pedirPPI(
   return { status: res.status, headers: hs, body: parsed, ms: Date.now() - t0 };
 }
 
-/**
- * Parser mínimo de `.env`: `clave=valor`, ignora vacías y `#`, saca comillas y espacios de los
- * costados. Devuelve los valores; quien llama NUNCA los imprime.
- */
-export function parsearEnv(texto: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const cruda of texto.split(/\r?\n/)) {
-    const linea = cruda.trim();
-    if (!linea || linea.startsWith('#')) continue;
-    const i = linea.indexOf('=');
-    if (i <= 0) continue;
-    const clave = linea.slice(0, i).trim();
-    let valor = linea.slice(i + 1).trim();
-    if (valor.length >= 2 && ((valor[0] === '"' && valor.endsWith('"')) || (valor[0] === "'" && valor.endsWith("'")))) {
-      valor = valor.slice(1, -1).trim();
-    }
-    out[clave] = valor;
-  }
-  return out;
-}
-
-export function leerEnv(ruta: string): Record<string, string> {
-  return parsearEnv(fs.readFileSync(ruta, 'utf8'));
-}
+// El parser del .env vive en ./envSecretos (común con Bitfinex); se re-exporta para no romper usos.
+export { parsearEnv, leerEnv } from './envSecretos';
 
 /** Copia del body sin tokens, para guardar en disco o resumir. */
 export function sinTokens(body: unknown): unknown {

@@ -1,7 +1,9 @@
 # Exploración de las APIs cripto: Bitfinex y Nexo
 
 - **Fecha de armado:** 2026-10-19
-- **Fuente:** documentación pública oficial; nada de esto se probó en vivo con credenciales.
+- **Fuente:** documentación pública oficial, más la **prueba en vivo de Bitfinex del 20/10/2026 a las
+  22:27 ART** (sección "Bitfinex: confirmado en vivo"; donde contradice a la doc, manda la prueba).
+- **Nexo:** cerrado sin probar, por decisión del Addendum 2 (ver "Nexo: cerrado").
 - **Spec:** [`docs/prompts/F9.196-acciones-stops-cartera-viva.md`](../prompts/F9.196-acciones-stops-cartera-viva.md) §0.b (el contexto de PPI está en §0).
 
 ## Cómo leer este documento
@@ -16,6 +18,93 @@ Ninguno de estos datos se confirmó en vivo. Cada dato lleva una de estas marcas
 Si una marca va en el título de una sección, vale para todo lo que hay debajo, salvo que una fila diga otra cosa.
 
 ---
+
+## Bitfinex: confirmado en vivo (20/10/2026 22:27 ART)
+
+Cliente de exploración: `scripts/explorarBitfinex.ts`, sobre `scripts/bitfinexCliente.ts`. Es solo
+de lectura, con lista blanca `auth/r/*`: cualquier `auth/w/*` tira error antes de salir a la red,
+verificado por `scripts/bitfinexCliente.test.ts` (25/25, sin red). El ritmo es de 1 llamada cada
+1,1 s, y el límite **no se midió** (el bloqueo es de 60 s por IP). Las respuestas crudas quedan en
+`data/bitfinex-exploracion/` (gitignored). Acá van extractos con montos redondeados, sin IDs de
+transacción ni direcciones.
+
+### Decisiones fijas del cliente (no cambiarlas)
+
+- **Nonce en milisegundos**, estrictamente creciente dentro del proceso
+  (`max(Date.now(), último + 1)`). Funcionó de entrada. Si algún día se pasa a microsegundos y se
+  vuelve atrás, el nonce baja y la API rechaza la key.
+- **Firma:** HMAC-SHA384 en hex de `/api/v2/<endpoint>` + nonce + body, con **body `{}` siempre
+  firmado**. Funcionó al primer intento: no hizo falta el fallback sin body.
+
+### Punto por punto
+
+| # | Qué | Resultado en vivo |
+|---|---|---|
+| 1 | `auth/r/permissions` | 9 scopes (`account, history, orders, positions, funding, settings, wallets, withdraw, ui_withdraw`). **WRITE = 0 en todos.** READ = 1 en todos menos `withdraw` y `ui_withdraw` (0). Key de solo lectura, confirmado. |
+| 2 | `auth/r/wallets` | 6 filas, **largo 7**. Todas son billeteras `exchange` (hoy no hay `margin` ni `funding`). Monedas: `UST, ETH, BTC, USD, UNI, AAVE`. `BALANCE` y `AVAILABLE_BALANCE` vienen como **número**. `LAST_CHANGE` y `LAST_CHANGE_METADATA` vienen **`null`** (contradicción D1: la doc muestra un texto). |
+| 3 | Funding | `funding/credits` (sin símbolo, `fUSD` y `fUST`), `funding/offers` y `funding/loans`: **0 filas en todos**. Hoy no hay nada prestado, así que no se pudo ver la forma de las filas, la unidad de `PERIOD` ni si `RATE` es diaria. |
+| 4 | `auth/r/ledgers/hist` | En 90 días, **0 asientos**: no hubo actividad. Sin ventana devuelve los **25 más recientes** (largo 9; 17/09/2025 a 06/05/2026). `/USD/hist` responde 200. **El asiento no trae la categoría**; filtrando por `category` (sin ventana) se confirmó el mapeo de abajo. |
+| 5 | `auth/r/movements/hist` | **`limit: 2500` da HTTP 500 `["error",10020,"limit: invalid"]`** (contradicción D2: la doc dice "Max 2500"). Sin `limit` anda. En 90 días, 0 movimientos. Sin ventana, 25 (largo 22, ago/2024 a dic/2025). **`AMOUNT` y `FEES` vienen como string**, confirmado. |
+| 6 | `auth/r/trades/hist` | En 90 días, 0. Sin ventana, 25 (largo 12, hasta 11/12/2025). Para el costo alcanza con `SYMBOL`, `MTS`, `EXEC_AMOUNT` (+ compra / − venta), `EXEC_PRICE`, `FEE` (negativo) y `FEE_CURRENCY`. La comisión puede venir en el activo comprado (BTC, UNI, COMP) o en UST. |
+| 7 | Escritura bloqueada | Confirmado con el test local: `auth/w/order/submit`, `auth/w/withdraw`, `auth/w/transfer`, `auth/w/funding/offer/submit`, `auth/w/deposit/address`, `auth/calc/*` y el path traversal `auth/r/../w/…` se cortan sin red. **No se llamó a la API.** |
+
+### Ledgers: qué categoría es qué (confirmado con `category`, sin ventana)
+
+| `category` | Asientos | Texto (`DESCRIPTION`) | Billetera |
+|---|---|---|---|
+| 5 | 25+ | `Exchange <q> BTC for UST @ <precio> on wallet exchange` | exchange |
+| **28** | 17 (07/2025 a 08/2025) | **`Margin Funding Payment on wallet funding`**: el interés cobrado por lo prestado | **funding** |
+| 51 | 4 | `Transfer of <q> UST from wallet Deposit to Exchange` (y al revés): transferencia **entre billeteras propias** | exchange / funding |
+| 101 | 15 | `Deposit (TETHERUSDTAVAX) #… on wallet exchange`: depósito | exchange |
+| 104 | 8 | `Tetherusx Withdrawal #… on wallet exchange`: retiro | exchange |
+| 201 | 25+ | `Trading fees for <q> BTC (BTCUST) @ … on BFX (0.2%) …` | exchange |
+
+Además apareció `Delist adjustment on wallet exchange` (COMP, 06/05/2026), sin categoría probada.
+**El interés de funding es la categoría 28**: queda confirmado lo que antes era inferencia.
+
+### Movimientos (depósitos y retiros) y §C
+
+- **Forma** (índices no nulos): 0 ID, 1 `CURRENCY` (`UST`, `USD`), 2 `CURRENCY_NAME`, 5 `MTS_STARTED`,
+  6 `MTS_UPDATED`, 9 `STATUS` (`COMPLETED`, `CANCELED`), 12 `AMOUNT` (string, + depósito / − retiro),
+  13 `FEES` (string), 16 dirección de destino, 17 payment ID o memo (solo en algunos retiros), 20 TXID.
+- **La red sale del índice 2**, `CURRENCY_NAME`: `TETHERUSDTAVAX` (USDT en Avalanche),
+  `TETHERUSDTPLY` (Polygon), `TETHERUSE` (Ethereum), `TETHERUSX` y `WIRE` (transferencia bancaria,
+  las dos `CANCELED`). La doc lo describe como "nombre de la moneda" (contradicción D3: en la
+  práctica es el método o la red).
+- **Apareo con otra cuenta (§C):** en los 90 días **no hubo ningún movimiento**, así que no hubo
+  nada que aparear. Los últimos retiros son del 17/09 al 17/10/2025 (8 retiros de USDT, ~3.000 en
+  total) y el último depósito del 10/12/2025. Para aparearlos hace falta la otra punta con fecha y
+  cantidad. Nexo y Lemon no tienen API, así que la otra punta solo puede salir de un archivo o de una
+  corrida: es justamente el caso de la lista "¿Es plata que entró o salió?". Para H2 sirven
+  `CURRENCY` → activo, `AMOUNT` (con signo), `FEES`, `MTS_UPDATED` → fecha y `CURRENCY_NAME` → red.
+
+### Cuadre contra la última corrida de Bitfinex (13/10)
+
+Billeteras × precio público de Bitfinex (`api-pub` tickers, 20/10 22:29), contra la corrida local
+del 13/10:
+
+| Activo | API 20/10 (cantidad) | U$S (aprox.) | Corrida 13/10 (cantidad) | U$S corrida |
+|---|---|---|---|---|
+| ETH | ~5,13 | ~12.600 | ~5,12 | ~12.900 |
+| BTC | ~0,104 | ~8.600 | ~0,1 | ~8.700 |
+| AAVE | ~4,76 | ~740 | ~4,76 | ~760 |
+| UNI | ~85,2 | ~650 | ~85,2 | ~650 |
+| USDT | ~0,2 | ~0 | ~0,2 | ~0 |
+| USD | 0 | 0 | — | — |
+| **Total** | | **~22.600** | | **~22.900** |
+
+**Diferencia: −1,4%**, menos que el 5%. Las cantidades coinciden (la corrida las trae redondeadas),
+así que la diferencia es de precio entre el 13/10 y el 20/10. **Prestado en funding: 0** (no hay
+créditos, ofertas ni préstamos activos).
+
+### Contradicciones con la doc
+
+| # | Doc | En vivo |
+|---|---|---|
+| D1 | `wallets`: `LAST_CHANGE` es la descripción del último asiento | `null` (y la metadata también) |
+| D2 | `movements/hist`: `limit` hasta 2500 | `limit: 2500` → HTTP 500 `["error",10020,"limit: invalid"]`; sin `limit` anda (25 por defecto) |
+| D3 | `movements`: índice 2 = `CURRENCY_NAME` | es el método o la red (`TETHERUSDTAVAX`, `WIRE`…) |
+| D4 | Sin `start`/`end`: "los más recientes" | confirmado, **25 filas** por defecto en ledgers, movements y trades |
 
 # Parte A: Bitfinex API v2
 
@@ -397,6 +486,12 @@ Si sin `start`/`end` devuelve todo el historial o solo una ventana reciente, la 
 
 ---
 
+## Nexo: cerrado (Addendum 2, decisión de Juan del 20/10/2026)
+
+**No se prueba nada.** La plataforma principal de Nexo no tiene API, y Nexo Pro está vacío. Nexo
+entra por carga manual de la posición y, si hace falta, por el CSV de Transacciones. La Parte B de
+abajo queda como referencia de la documentación, sin pendientes.
+
 # Parte B: Nexo Pro
 
 ### Fuentes leídas
@@ -528,21 +623,17 @@ La doc **no dice** si `accountSummary` incluye los saldos de la cuenta Nexo prin
 
 ## Pendiente con credenciales
 
-### Bitfinex (key de solo lectura)
+### Bitfinex
 
-1. **Forma real de cada respuesta** de `auth/r/wallets`, `auth/r/funding/credits` (con y sin símbolo), `auth/r/funding/offers`, `auth/r/ledgers/hist` (y `/{Currency}/hist`), `auth/r/movements/hist` (y `/{Currency}/hist`) y `auth/r/trades/hist` (y `/{symbol}/hist`). En particular:
-   - el largo real de cada array y si cambia algún índice;
-   - si `AMOUNT`/`FEES` de movements vienen como string;
-   - la unidad de `PERIOD` y si `RATE` es diaria;
-   - qué categoría de ledger trae el interés cobrado por funding (¿28?);
-   - si lo prestado aparece en `funding/credits`, en `funding/loans` o en los dos.
-2. **Rate limit real:** cuántas llamadas por minuto aguanta antes de `ERR_RATE_LIMIT`, qué código HTTP devuelve y si de verdad bloquea la IP 60 s. No hay que probarlo desde la IP de producción de Cloud Functions sin cuidado, porque el bloqueo es por IP.
-3. **Firma y nonce:** confirmar la firma con body `{}` y sin body. Fijar la unidad del nonce (ms o µs) y no cambiarla después. Ver qué error devuelve un nonce chico.
-4. **Que la key de solo lectura rechace `auth/w/*`:** probar un endpoint de escritura inocuo y anotar el error. `auth/r/permissions` tiene que mostrar `WRITE = 0` en todos los scopes.
+Estado al 20/10 22:27: **los puntos 1, 2, 4, 5, 6 y 7 se confirmaron en vivo.** Queda:
+
+1. **Funding (punto 3):** la forma real de `funding/credits` / `offers` / `loans`, la unidad de
+   `PERIOD` y si `RATE` es diaria. Hoy no hay nada prestado: se confirma la primera vez que haya.
+   La categoría 28 del ledger (el interés) sí quedó confirmada.
+2. **Límite real de llamadas:** no se mide a propósito (el bloqueo es por IP). Se usa el documentado,
+   90 por minuto, a 1 por segundo como máximo.
+3. **Apareo de §C con datos reales:** no hubo movimientos en 90 días.
 
 ### Nexo
 
-5. **Cuál es la API de Nexo Pro:** si la doc de Nexo Prime (N3, `prime-api.prime-nexo.net`) aplica a una cuenta Nexo Pro o si la base es `pro-api.nexo.io`, que es la de las librerías no oficiales.
-6. **Si `accountSummary` ve la cuenta principal** (Earn flexible y a plazo) o solo Nexo Pro. Probar también `GET /api/v1/platform/balances` con la key VIEWER: si responde, qué trae y si distingue flexible de a plazo.
-7. **Una key por cada una de las dos cuentas Nexo:** confirmar que cada cuenta genera su propia key VIEWER y que cada una ve solo lo suyo.
-8. **Firma real:** confirmar que es Base64(HMAC-SHA256(secret, nonce)) sin path ni body. Ver si el nonce tiene que ser creciente o si hay ventana de tiempo, y qué devuelve una cuenta sin saldos (¿500?).
+Cerrado sin probar (Addendum 2).
