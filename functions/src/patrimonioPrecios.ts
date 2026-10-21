@@ -1160,7 +1160,10 @@ export function calcSenales(
   crudas.push(...(ctx.senalesTesis ?? []));
 
   return crudas.map(s => {
-    const idx = fechas.lastIndexOf(s.desde);
+    // `desde` puede no ser una rueda (el de "Evento próximo" es fecha − 7 días corridos y puede caer
+    // en feriado o fin de semana): cuenta la primera rueda en o después de esa fecha.
+    let idx = fechas.lastIndexOf(s.desde);
+    if (idx < 0) idx = fechas.findIndex(f => f >= s.desde);
     return { ...s, nueva: idx >= 0 && idx >= n - S.ruedasNueva };
   });
 }

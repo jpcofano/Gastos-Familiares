@@ -18,7 +18,8 @@ export type Gatillo = {
 };
 
 export type Tesis = {
-  monedaFundamentals: 'USD' | 'ARS';
+  /** null = el chat no trajo una moneda válida: P/E y potencial no se calculan (motivo `sin_moneda`). */
+  monedaFundamentals: 'USD' | 'ARS' | null;
   epsGuiaMin: number | null;
   epsGuiaMax: number | null;
   epsPeriodo: string | null;
@@ -41,7 +42,15 @@ export const CAMPOS_TESIS = [
 ] as const;
 export type CampoTesis = (typeof CAMPOS_TESIS)[number];
 
-const numONull = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+// Un número que el chat mandó como texto ("2.1") se acepta; uno con coma o separadores, no (ambiguo).
+const numONull = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x
+  : typeof x === 'string' && /^-?\d+(\.\d+)?$/.test(x.trim()) ? Number(x.trim()) : null);
+/** Como numONull, pero avisa cuando había algo que no se pudo leer como número. */
+const numConAviso = (x: unknown, campo: string, avisos: string[]): number | null => {
+  const n = numONull(x);
+  if (n === null && x !== null && x !== undefined) avisos.push(`${campo}: «${String(x).slice(0, 30)}» no es un número, queda sin dato`);
+  return n;
+};
 const txtONull = (x: unknown): string | null => (typeof x === 'string' && x.trim() ? x.trim() : null);
 const fechaONull = (x: unknown): string | null => (typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x) ? x : null);
 
@@ -54,29 +63,32 @@ export function normalizarTesis(x: unknown): { tesis: Tesis | null; avisos: stri
   if (typeof x !== 'object' || Array.isArray(x)) return { tesis: null, avisos: ['tesis: no es un objeto'] };
   const o = x as Record<string, unknown>;
   const avisos: string[] = [];
-  const moneda = o.monedaFundamentals === 'ARS' ? 'ARS' : o.monedaFundamentals === 'USD' ? 'USD' : null;
-  if (!moneda) avisos.push(`monedaFundamentals inválida («${String(o.monedaFundamentals)}»): se toma USD`);
+  const m = typeof o.monedaFundamentals === 'string' ? o.monedaFundamentals.trim().toUpperCase() : '';
+  const moneda = m === 'ARS' ? 'ARS' : m === 'USD' ? 'USD' : null;
+  if (!moneda) avisos.push(`monedaFundamentals inválida («${String(o.monedaFundamentals)}»): sin moneda no se calculan P/E ni potencial`);
   const gatillos: Gatillo[] = [];
   for (const g of Array.isArray(o.gatillos) ? o.gatillos : []) {
     const gg = (g ?? {}) as Record<string, unknown>;
     const umbral = numONull(gg.umbral);
     const op = gg.operador === '>=' || gg.operador === '<=' ? gg.operador : null;
     if (!txtONull(gg.texto) || !op || umbral === null) { avisos.push(`gatillo descartado (forma inválida): ${JSON.stringify(g).slice(0, 80)}`); continue; }
-    gatillos.push({ texto: txtONull(gg.texto)!, metrica: txtONull(gg.metrica) ?? '', operador: op, umbral, valorActual: numONull(gg.valorActual) });
+    gatillos.push({ texto: txtONull(gg.texto)!, metrica: txtONull(gg.metrica) ?? '', operador: op, umbral, valorActual: numConAviso(gg.valorActual, `gatillo «${txtONull(gg.texto)}»`, avisos) });
   }
+  const repetidas = new Set<string>();
+  for (const k of gatillos.map(claveGatillo)) { if (repetidas.has(k)) avisos.push(`gatillo repetido: ${k}`); repetidas.add(k); }
   const ev = (o.proximoEvento ?? {}) as Record<string, unknown>;
   const fuentes = (Array.isArray(o.fuentes) ? o.fuentes : [])
     .map(f => (typeof f === 'string' ? { texto: f, fecha: null } : { texto: txtONull((f as Record<string, unknown>)?.texto) ?? '', fecha: fechaONull((f as Record<string, unknown>)?.fecha) }))
     .filter(f => f.texto);
   return {
     tesis: {
-      monedaFundamentals: moneda ?? 'USD',
-      epsGuiaMin: numONull(o.epsGuiaMin), epsGuiaMax: numONull(o.epsGuiaMax),
+      monedaFundamentals: moneda,
+      epsGuiaMin: numConAviso(o.epsGuiaMin, 'epsGuiaMin', avisos), epsGuiaMax: numConAviso(o.epsGuiaMax, 'epsGuiaMax', avisos),
       epsPeriodo: txtONull(o.epsPeriodo) ?? (typeof o.epsPeriodo === 'number' ? String(o.epsPeriodo) : null),
-      precioObjetivoConsenso: numONull(o.precioObjetivoConsenso), analistas: numONull(o.analistas),
+      precioObjetivoConsenso: numConAviso(o.precioObjetivoConsenso, 'precioObjetivoConsenso', avisos), analistas: numONull(o.analistas),
       recomendacionConsenso: txtONull(o.recomendacionConsenso),
       gatillos,
-      proximoEvento: { fecha: fechaONull(ev.fecha), tipo: ev.tipo === 'balance' ? 'balance' : 'otro', texto: txtONull(ev.texto) ?? '' },
+      proximoEvento: { fecha: fechaONull(ev.fecha), tipo: typeof ev.tipo === 'string' && ev.tipo.trim().toLowerCase() === 'balance' ? 'balance' : 'otro', texto: txtONull(ev.texto) ?? '' },
       cortoPlazo: txtONull(o.cortoPlazo) ?? '', medianoPlazo: txtONull(o.medianoPlazo) ?? '', riesgoPrincipal: txtONull(o.riesgoPrincipal) ?? '',
       fuentes, fechaDatos: fechaONull(o.fechaDatos),
     },
@@ -153,13 +165,19 @@ export function calcularTesis(
   let motivo: string | null = null;
   if (!precio || !(precio.valor > 0)) motivo = 'sin_precio';
   else if (opciones.esCedear) motivo = 'cedear_sin_ratio';
+  else if (t.monedaFundamentals === null) motivo = 'sin_moneda';
   else if (precio.moneda === t.monedaFundamentals) precioEnMoneda = precio.valor;
   else if (opciones.tc && opciones.tc > 0) precioEnMoneda = precio.moneda === 'ARS' ? precio.valor / opciones.tc : precio.valor * opciones.tc;
   else motivo = 'sin_tc';
 
   const eps = t.epsGuiaMin !== null && t.epsGuiaMax !== null ? (t.epsGuiaMin + t.epsGuiaMax) / 2
     : t.epsGuiaMin ?? t.epsGuiaMax;
-  const pe = precioEnMoneda !== null && eps !== null && eps > 0 ? precioEnMoneda / eps : null;
+  const pe = precioEnMoneda !== null && eps !== null && eps > 0 && (t.epsGuiaMin ?? 1) > 0 && (t.epsGuiaMax ?? 1) > 0 ? precioEnMoneda / eps : null;
+  // EPS negativo en un extremo del rango: el promedio no es un P/E con sentido.
+  if (motivo === null && precioEnMoneda !== null) {
+    if (eps === null) motivo = 'sin_eps';
+    else if (eps <= 0 || (t.epsGuiaMin ?? 1) <= 0 || (t.epsGuiaMax ?? 1) <= 0) motivo = 'eps_no_positivo';
+  }
   const potencial = precioEnMoneda !== null && precioEnMoneda > 0 && t.precioObjetivoConsenso !== null ? t.precioObjetivoConsenso / precioEnMoneda - 1 : null;
   const gatillos = t.gatillos.map(g => ({
     ...g,
@@ -173,8 +191,10 @@ export function calcularTesis(
 
 export type SenalTesis = { id: 'evento_proximo' | 'gatillo_tesis'; texto: string; desde: string; nivel: 'info' | 'atencion' };
 /**
- * Estado de un gatillo entre lecturas. `desde` = desde cuándo está en ese estado; `cambio` = ese
- * estado salió de una TRANSICIÓN real (cumplido ↔ no cumplido), no de la primera vez que se vio.
+ * Estado de un gatillo entre lecturas. `cumplido` = el último estado CONOCIDO (una lectura sin dato
+ * no lo pisa: cumplido → sin dato → no cumplido es un cambio). `desde` = desde cuándo está en ese
+ * estado; `cambio` = ese estado salió de una TRANSICIÓN real (cumplido ↔ no cumplido), no de la
+ * primera vez que se vio.
  */
 export type EstadoGatillo = { clave: string; cumplido: boolean | null; desde: string; cambio: boolean };
 
@@ -182,7 +202,8 @@ export const DIAS_EVENTO_PROXIMO = 7;
 /** Una señal de gatillo se muestra durante esta cantidad de días desde que cambió. */
 export const DIAS_SENAL_GATILLO = 10;
 
-export const claveGatillo = (g: Pick<Gatillo, 'metrica' | 'operador' | 'umbral'>) => `${g.metrica}|${g.operador}|${g.umbral}`;
+/** Incluye el texto: dos gatillos sin `metrica` con el mismo umbral no se pisan entre sí. */
+export const claveGatillo = (g: Pick<Gatillo, 'texto' | 'metrica' | 'operador' | 'umbral'>) => `${g.metrica}|${g.operador}|${g.umbral}|${g.texto}`;
 
 /**
  * - "Evento próximo": evento a 7 días o menos (y no pasado), nivel info, `desde` = fecha − 7 días.
@@ -206,13 +227,18 @@ export function senalesDeTesis(
   }
   const prev = new Map(previo.map(e => [e.clave, e]));
   const estado: EstadoGatillo[] = [];
+  const vistas = new Map<string, number>();
   for (const g of calc.gatillos) {
-    const clave = claveGatillo(g);
+    // Un gatillo repetido (misma clave) lleva el número de aparición: cada uno guarda su estado.
+    const base = claveGatillo(g);
+    const n = (vistas.get(base) ?? 0) + 1;
+    vistas.set(base, n);
+    const clave = n === 1 ? base : `${base}#${n}`;
     const antes = prev.get(clave);
     let e: EstadoGatillo;
     if (!antes) e = { clave, cumplido: g.cumplido, desde: hoy, cambio: false };
-    else if (antes.cumplido === g.cumplido) e = antes;
-    else if (antes.cumplido === null || g.cumplido === null) e = { clave, cumplido: g.cumplido, desde: hoy, cambio: false };
+    else if (g.cumplido === null || antes.cumplido === g.cumplido) e = antes;      // sin dato hoy: queda lo último conocido
+    else if (antes.cumplido === null) e = { clave, cumplido: g.cumplido, desde: hoy, cambio: false };  // primer dato
     else e = { clave, cumplido: g.cumplido, desde: hoy, cambio: true };
     estado.push(e);
     if (e.cambio && e.cumplido !== null && dias(e.desde, hoy) <= DIAS_SENAL_GATILLO) {

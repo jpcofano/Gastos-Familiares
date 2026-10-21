@@ -89,6 +89,35 @@ console.log('\n=== señales de §5: evento próximo y gatillo de tesis ===');
   t('las señales de la tesis llegan a indicadoresPosicion.senales', !!ind.senales?.some(s => s.id === 'gatillo_tesis') && !!ind.senales?.some(s => s.id === 'evento_proximo'));
 }
 
+console.log('\n=== arreglos de la revisión de H5 ===');
+{
+  const m = normalizarTesis({ ...delChat, monedaFundamentals: 'ars', proximoEvento: { fecha: '2026-10-24', tipo: 'Balance', texto: '' }, epsGuiaMin: '2.5' }).tesis as Tesis;
+  t('moneda y tipo sin importar mayúsculas; un número en texto se lee', m.monedaFundamentals === 'ARS' && m.proximoEvento.tipo === 'balance' && m.epsGuiaMin === 2.5);
+  const inv = normalizarTesis({ ...delChat, monedaFundamentals: 'EUR' });
+  t('moneda inválida → null (no se asume USD) y P/E con motivo sin_moneda',
+    inv.tesis?.monedaFundamentals === null && calcularTesis(inv.tesis!, { valor: 50, moneda: 'USD' }, { tc: 1500, hoy: '2026-10-20' }).motivo === 'sin_moneda');
+  t('EPS negativo en el rango → P/E null con motivo', (() => { const c = calcularTesis({ ...T, epsGuiaMin: -1, epsGuiaMax: 3 }, { valor: 50, moneda: 'USD' }, { tc: 1, hoy: '2026-10-20' }); return c.pe === null && c.motivo === 'eps_no_positivo'; })());
+  t('sin EPS → P/E null con motivo sin_eps', calcularTesis({ ...T, epsGuiaMin: null, epsGuiaMax: null }, { valor: 50, moneda: 'USD' }, { tc: 1, hoy: '2026-10-20' }).motivo === 'sin_eps');
+  // Dos gatillos con la misma métrica vacía y el mismo umbral: cada uno con su estado.
+  const dos: Tesis = { ...T, gatillos: [
+    { texto: 'X', metrica: '', operador: '>=', umbral: 1, valorActual: 2 },
+    { texto: 'Y', metrica: '', operador: '>=', umbral: 1, valorActual: 0 },
+  ] };
+  const c = calcularTesis(dos, { valor: 50, moneda: 'USD' }, { tc: 1, hoy: '2026-10-20' });
+  const e1 = senalesDeTesis(c, dos, [], '2026-10-20');
+  const e2 = senalesDeTesis(c, dos, e1.estado, '2026-10-21');
+  t('gatillos de igual métrica y umbral no se pisan: sin cambios, sin señal', !e2.senales.some(x => x.id === 'gatillo_tesis') && new Set(e1.estado.map(x => x.clave)).size === 2);
+  // cumplido → sin dato → no cumplido: es un cambio.
+  const g = (v: number | null): Tesis => ({ ...T, gatillos: [{ texto: 'Z', metrica: 'z', operador: '>=', umbral: 1, valorActual: v }] });
+  const calc = (v: number | null) => calcularTesis(g(v), { valor: 50, moneda: 'USD' }, { tc: 1, hoy: '2026-10-20' });
+  const a1 = senalesDeTesis(calc(2), g(2), [], '2026-10-20');
+  const a2 = senalesDeTesis(calc(null), g(null), a1.estado, '2026-10-21');
+  const a3 = senalesDeTesis(calc(0), g(0), a2.estado, '2026-10-22');
+  t('cumplido → sin dato → no cumplido: sale "dejó de cumplirse"', a2.estado[0].cumplido === true && a3.senales.some(x => x.id === 'gatillo_tesis' && x.texto.includes('dejó de cumplirse')));
+  const r = tesisDeItems([{ ticker: 'PAMP', resultado: { tesis: delChat } }, { ticker: 'A/B', tesis: delChat }]);
+  t('tesis dentro de "resultado" → se importa con aviso; ticker con "/" → aviso, no se guarda', r.tesis.length === 1 && r.tesis[0].ticker === 'PAMP' && r.avisos.some(x => x.includes('dentro de "resultado"')) && r.avisos.some(x => x.startsWith('A/B')));
+}
+
 console.log('\n=== prompt del Chat 2 ===');
 {
   const conT = buildPromptPosicionesV3({ fecha: '2026-10-20', materiales: [], menores: [], panorama: {}, conTesis: ['YPFD'], tesisPrevias: {} });

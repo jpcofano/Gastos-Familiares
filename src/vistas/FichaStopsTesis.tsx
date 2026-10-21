@@ -188,6 +188,9 @@ const MOTIVO_TXT: Record<string, string> = {
   sin_precio: 'sin precio del día',
   sin_tc: 'sin tipo de cambio para pasar de moneda',
   cedear_sin_ratio: 'CEDEAR: falta el ratio con el subyacente',
+  sin_moneda: 'el chat no dijo en qué moneda están los fundamentals',
+  sin_eps: 'sin EPS de guía',
+  eps_no_positivo: 'EPS negativo o cero en la guía',
 };
 
 export function SeccionTesis({ ticker, ind, doc, onGuardada }: {
@@ -302,7 +305,7 @@ function EditorTesis({ doc, onGuardada }: { doc: DocTesis; onGuardada: (d: DocTe
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gf-gray-100)', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={sub}>Lo que cambies queda marcado como tuyo: el próximo Chat 2 no lo pisa (si trae otro dato, lo muestra aparte).</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
-        {([['epsGuiaMin', `EPS mín. (${t.monedaFundamentals})`], ['epsGuiaMax', `EPS máx. (${t.monedaFundamentals})`], ['precioObjetivoConsenso', 'Precio objetivo de consenso']] as const).map(([k, l]) => (
+        {([['epsGuiaMin', `EPS mín. (${t.monedaFundamentals ?? 'moneda s/d'})`], ['epsGuiaMax', `EPS máx. (${t.monedaFundamentals ?? 'moneda s/d'})`], ['precioObjetivoConsenso', 'Precio objetivo de consenso']] as const).map(([k, l]) => (
           <label key={k} style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>{l}
             <input inputMode="decimal" value={b[k]} onChange={e => setB({ ...b, [k]: e.target.value })} style={input} />
           </label>

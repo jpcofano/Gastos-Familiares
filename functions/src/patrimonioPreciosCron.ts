@@ -7,7 +7,7 @@ import { FieldValue, type DocumentReference, type Firestore } from 'firebase-adm
 import * as PP from './patrimonioPrecios';
 import * as RP from './preciosRespaldo';
 import type { ClientePPI } from './ppiApi';
-import { calcularTesis, senalesDeTesis, type DocTesis, type EstadoGatillo } from './compartido/tesis';
+import { calcularTesis, normalizarTesis, senalesDeTesis, type DocTesis, type EstadoGatillo } from './compartido/tesis';
 import { tcDelDia } from './carteraVivaCron';
 
 export type ObjetivoPrecio = {
@@ -573,13 +573,23 @@ async function contextoStops(
   const docTesis = (await refInd.firestore.collection('tesisPosicion').doc(o.ticker).get()).data() as DocTesis | undefined;
   let senalesTesis: PP.ContextoStops['senalesTesis'] = [];
   const extra: Record<string, unknown> = {};
-  if (docTesis?.tesis) {
-    const calc = calcularTesis(docTesis.tesis, { valor: precio.cierre, moneda: precio.moneda }, { tc: precio.tc, hoy: precio.fecha, esCedear: o.tipo === 'cedear' });
-    const previoGatillos = Array.isArray(d.estadoGatillosTesis) ? (d.estadoGatillosTesis as EstadoGatillo[]) : [];
-    const r = senalesDeTesis(calc, docTesis.tesis, previoGatillos, precio.fecha);
-    senalesTesis = r.senales;
-    extra.tesisCalculo = JSON.parse(JSON.stringify({ ...calc, fecha: precio.fecha }));
-    extra.estadoGatillosTesis = r.estado;
+  // El cliente puede escribir `tesisPosicion` con cualquier forma: se normaliza antes de calcular y
+  // un error acá solo saltea la tesis (precios, indicadores y stops del ticker siguen).
+  const tesis = docTesis?.tesis ? normalizarTesis(docTesis.tesis).tesis : null;
+  if (tesis) {
+    try {
+      // Días al evento contra HOY en Argentina, no contra la última fecha de la serie (puede venir atrasada).
+      const calc = calcularTesis(tesis, { valor: precio.cierre, moneda: precio.moneda }, { tc: precio.tc, hoy: hoyART(), esCedear: o.tipo === 'cedear' });
+      const previoGatillos = Array.isArray(d.estadoGatillosTesis) ? (d.estadoGatillosTesis as EstadoGatillo[]) : [];
+      const r = senalesDeTesis(calc, tesis, previoGatillos, precio.fecha);
+      senalesTesis = r.senales;
+      extra.tesisCalculo = JSON.parse(JSON.stringify({ ...calc, fecha: precio.fecha }));
+      extra.estadoGatillosTesis = r.estado;
+    } catch (e) {
+      console.warn(`[precios] ${o.docId}: tesis salteada: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  } else if (d.tesisCalculo) {
+    extra.tesisCalculo = null;   // se borró la tesis: que no quede un cálculo viejo
   }
   const previo: PP.PrevioStops = {
     stops: (d.stops as PP.Stops | null | undefined) ?? null,

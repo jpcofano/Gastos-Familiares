@@ -5607,9 +5607,14 @@ export const importarAnalisisIA = onCall(
               ? `posiciones: ${importados} importadas, ${erroresPorTicker.length} con error (${erroresPorTicker.join('; ')})`
               : `posiciones: ${importados} importadas`);
             // F9.196 H5 — la tesis por acción (bloque hermano de "resultado"). Sin tesis: nada.
-            const rT = await importarTesis(db2, items as Array<{ ticker?: unknown; tesis?: unknown }>, meta as unknown as Record<string, unknown>);
-            if (rT.importadas || rT.avisos.length) {
-              partes.push(`tesis: ${rT.importadas}${rT.distintos ? ` (${rT.distintos} campo(s) editados por vos con otro dato del chat)` : ''}${rT.avisos.length ? ` · avisos: ${rT.avisos.slice(0, 5).join('; ')}` : ''}`);
+            // Fail-soft: un error de la tesis no frena sectorial, agenda ni manuales.
+            try {
+              const rT = await importarTesis(db2, items as Array<{ ticker?: unknown; tesis?: unknown; resultado?: unknown }>, meta as unknown as Record<string, unknown>);
+              if (rT.importadas || rT.avisos.length) {
+                partes.push(`tesis: ${rT.importadas}${rT.distintos ? ` (${rT.distintos} campo(s) editados por vos con otro dato del chat)` : ''}${rT.avisos.length ? ` · avisos: ${rT.avisos.slice(0, 5).join('; ')}` : ''}`);
+              }
+            } catch (e) {
+              partes.push(`tesis: error (${e instanceof Error ? e.message : String(e)})`);
             }
           } else {
             partes.push('posiciones: sin datos');
