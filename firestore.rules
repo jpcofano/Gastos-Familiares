@@ -206,8 +206,28 @@ service cloud.firestore {
       allow read: if esDueno();
       allow write: if esDueno() && id.matches('balanz_[0-9]+');
     }
-    // F9.196 §3 — movimientos por cuenta (archivo de Balanz, carga manual; PPI vía Admin SDK).
+    // F9.196 §3 — movimientos por cuenta (archivo de Balanz, carga manual). Los de PPI
+    // (`ppimov_*`, origen 'ppi_api') los escribe SOLO `sincronizarPPI` con Admin SDK: el cliente no
+    // puede crearlos, pisarlos ni borrarlos.
     match /movimientosCuenta/{id} {
+      allow read: if esDueno();
+      allow create, update: if esDueno()
+        && !id.matches('ppimov_.*')
+        && request.resource.data.origen != 'ppi_api';
+      allow delete: if esDueno() && !id.matches('ppimov_.*');
+    }
+    // F9.196 H2a — la cartera viva la calcula `actualizarCarteraViva` (Functions); el cliente lee.
+    match /carteraViva/{id} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
+    // F9.196 Addendum 2 §C — estado del apareo automático (Functions) y las decisiones de Juan
+    // sobre lo que no apareó (aporte / retiro / interna).
+    match /flujosAuto/{id} {
+      allow read: if esDueno();
+      allow write: if false;
+    }
+    match /decisionesFlujo/{clave} {
       allow read, write: if esDueno();
     }
     match /cafciCarteras/{id} {

@@ -63,6 +63,21 @@ import {
 } from '../datos/patrimonioDeclaraciones';
 import PatrimonioIngesta from './PatrimonioIngesta';
 import PatrimonioBalanz from './PatrimonioBalanz';
+import { posicionesDeCarteraViva } from '../datos/patrimonioCarteraViva';
+import { cargarCarteraViva, sincronizarPPIAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
+
+/** F9.196 H2a — el valor de hoy como dato aparte para el informe (que sigue sobre la corrida). */
+function resumenValorDeHoy(cv: DocCarteraViva | null) {
+  if (!cv) return null;
+  return {
+    nota: 'Dato aparte: el análisis de arriba es sobre la corrida; esto es la cartera valuada hoy (cartera viva).',
+    totalUsd: cv.totalUsd, calculadoEnISO: cv.calculadaEnISO,
+    ultimaCarga: { fecha: cv.fechaCorrida, totalUsd: cv.totalCargaUsd },
+    efectoPreciosUsd: cv.efectoPreciosUsd, efectoDolarUsd: cv.efectoDolarUsd, efectoMovimientosUsd: cv.efectoMovimientosUsd,
+    mep: cv.tc ? { valor: cv.tc.valor, fecha: cv.tc.fechaCotizacion, viejo: cv.tc.viejo } : null,
+    frescura: cv.frescura,
+  };
+}
 // F9.190 — informe v2 (contexto con el motor de riesgo) y señales de mercado de la reserva.
 import {
   contextoInformeV3, contextoPosicionesV3, evaluarSenales, UMBRALES_SENALES,
@@ -1478,8 +1493,111 @@ function PoliticaCriptoCard({ onToast }: { onToast: (texto: string, error: boole
   );
 }
 
-function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
+// ── F9.196 H2a — Hero "Valor de hoy (estimado)" ──────────────────────────────
+// El número grande es la cartera viva (`carteraViva/ultima`): cada cuenta con su mejor fuente y el
+// precio y el MEP del día. Abajo, la última carga y la diferencia separada en precios, dólar y
+// movimientos, más una línea de frescura por cuenta. Las inconsistencias se muestran, no se corrigen.
+function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
+  cv: DocCarteraViva; fijosUsd: number; tc: number;
+  onActualizado: () => void; onToast: (texto: string, error: boolean) => void;
+}) {
+  const $ = useDinero();
+  const [ocupado, setOcupado] = useState<'ppi' | 'recalcular' | null>(null);
+  const [verInconsistencias, setVerInconsistencias] = useState(false);
+  const mep = cv.tc?.valor ?? tc;
+  const diferencia = cv.totalUsd - cv.totalCargaUsd;
+  const precioSinDolar = cv.efectoPreciosUsd - cv.efectoDolarUsd;
+  const signo = (x: number) => (x >= 0 ? '+' : '−');
+  const efecto = (x: number) => `${signo(x)}${$.usd(Math.abs(x))}`;
+  const calculada = cv.calculadaEnISO ? new Date(Date.parse(cv.calculadaEnISO) - 3 * 3600_000).toISOString() : '';
+
+  async function correr(cual: 'ppi' | 'recalcular') {
+    setOcupado(cual);
+    try {
+      if (cual === 'ppi') {
+        const r = await sincronizarPPIAhora();
+        await recalcularCarteraViva();
+        onToast(`PPI sincronizado: ${r.posiciones} posiciones, ${r.movimientos} movimientos. Valor de hoy recalculado.`, false);
+      } else {
+        await recalcularCarteraViva();
+        onToast('Valor de hoy recalculado.', false);
+      }
+      onActualizado();
+    } catch (e) {
+      onToast(`${cual === 'ppi' ? 'No se pudo sincronizar PPI' : 'No se pudo recalcular'}: ${String((e as Error)?.message ?? e)}`, true);
+    } finally {
+      setOcupado(null);
+    }
+  }
+
+  const boton = (cual: 'ppi' | 'recalcular', texto: string) => (
+    <button
+      onClick={() => correr(cual)}
+      disabled={ocupado !== null}
+      style={{ background: 'rgba(255,255,255,.14)', border: 'none', borderRadius: 8, padding: '7px 10px', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: ocupado ? 'default' : 'pointer', fontFamily: 'var(--font-base)', opacity: ocupado && ocupado !== cual ? .5 : 1 }}
+    >
+      {ocupado === cual ? 'Actualizando…' : texto}
+    </button>
+  );
+
+  return (
+    <div style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 20, padding: '22px 20px' }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', opacity: .6 }}>
+          Valor de hoy (estimado)
+        </div>
+        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-1px', margin: '4px 0 2px', fontVariantNumeric: 'tabular-nums' }}>
+          {$.usd(cv.totalUsd)}
+        </div>
+        {!$.privado && (
+          <div style={{ fontSize: 12, opacity: .5, fontVariantNumeric: 'tabular-nums', marginBottom: 8 }}>{$.ars(cv.totalUsd, mep)}</div>
+        )}
+        <div style={{ fontSize: 12, opacity: .75, fontVariantNumeric: 'tabular-nums' }}>
+          Última carga {fmtFecha(cv.fechaCorrida)}: {$.usd(cv.totalCargaUsd)}
+          <span style={{ marginLeft: 6, fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#f87171' }}>{efecto(diferencia)}</span>
+        </div>
+        <div style={{ fontSize: 11, opacity: .6, fontVariantNumeric: 'tabular-nums', marginTop: 3, lineHeight: 1.5 }}>
+          precios {efecto(precioSinDolar)} · dólar {efecto(cv.efectoDolarUsd)} · movimientos {efecto(cv.efectoMovimientosUsd)}
+        </div>
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', margin: '14px 0 10px' }} />
+      <div style={{ fontSize: 11, opacity: .7, lineHeight: 1.55 }}>
+        {cv.frescura.map((l, i) => <div key={i}>{l}</div>)}
+        {calculada && <div style={{ opacity: .7 }}>Calculado {fmtFecha(calculada.slice(0, 10))} {calculada.slice(11, 16)}</div>}
+      </div>
+      {cv.inconsistencias.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 11 }}>
+          <button onClick={() => setVerInconsistencias(v => !v)} style={{ background: 'none', border: 'none', padding: 0, color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+            {cv.inconsistencias.length} inconsistencia(s) {verInconsistencias ? '▴' : '▾'}
+          </button>
+          {verInconsistencias && (
+            <ul style={{ margin: '4px 0 0', paddingLeft: 16, opacity: .8, lineHeight: 1.45 }}>
+              {cv.inconsistencias.map((x, i) => <li key={i}>{x}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', margin: '12px 0 10px' }} />
+      <div style={{ textAlign: 'center', opacity: .65 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', marginBottom: 3 }}>Patrimonio total (hoy)</div>
+        <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{$.usd(cv.totalUsd + fijosUsd)}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+        {boton('ppi', 'Sincronizar PPI ahora')}
+        {boton('recalcular', 'Recalcular')}
+      </div>
+    </div>
+  );
+}
+
+function ResumenTab({ M, Mhoy, carteraViva, onCarteraViva, posicionesCorrida, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
+  /** F9.196 H2a — métricas sobre la cartera viva (pesos, riesgo); `M` es la corrida. */
+  Mhoy: PatMetrics;
+  carteraViva: DocCarteraViva | null;
+  onCarteraViva: () => void;
+  /** La corrida (para la card cripto hasta H2c); `posiciones` es la cartera viva si existe. */
+  posicionesCorrida: Posicion[];
   activosFijos: ActivoFijo[];
   posiciones: Posicion[];
   manuales: PosicionManual[];
@@ -1521,15 +1639,20 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
   const corrPrev = historial.length > 1 ? historial[1] : null;
   const deltaInv = corrPrev ? M.total - corrPrev.totalInvertibleUsd : null;
 
+  // F9.196 H2a — riesgos sobre el valor de hoy (Mhoy).
   const riesgos: { k: string; v: number; b: ReturnType<typeof banda>; extra?: string }[] = [
-    { k: 'Nombre más grande', v: M.top1, b: banda('nombre', M.top1), extra: M.nombreTop.ticker },
-    { k: 'Sector top',        v: M.sectorTop.pct, b: banda('sector', M.sectorTop.pct), extra: M.sectorTop.nombre },
-    { k: 'Cripto (clase)',    v: M.cripto, b: banda('cripto', M.cripto) },
+    { k: 'Nombre más grande', v: Mhoy.top1, b: banda('nombre', Mhoy.top1), extra: Mhoy.nombreTop.ticker },
+    { k: 'Sector top',        v: Mhoy.sectorTop.pct, b: banda('sector', Mhoy.sectorTop.pct), extra: Mhoy.sectorTop.nombre },
+    { k: 'Cripto (clase)',    v: Mhoy.cripto, b: banda('cripto', Mhoy.cripto) },
   ];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* 1. Hero negro */}
+      {carteraViva && (
+        <HeroValorDeHoy cv={carteraViva} fijosUsd={fijosUsd} tc={tc} onActualizado={onCarteraViva} onToast={onToast} />
+      )}
+      {/* 1. Hero negro — sin cartera viva calculada todavía: el de la corrida */}
+      {!carteraViva && (
       <div style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 20, padding: '22px 20px' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', opacity: .6 }}>
@@ -1576,7 +1699,18 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
         <div style={{ textAlign: 'center', fontSize: 10, opacity: .35, marginTop: 10 }}>
           TC ${Math.round(tc).toLocaleString('es-AR')}
         </div>
+        <div style={{ textAlign: 'center', marginTop: 10 }}>
+          <button
+            onClick={() => recalcularCarteraViva()
+              .then(() => { onToast('Valor de hoy calculado.', false); onCarteraViva(); })
+              .catch(e => onToast(`No se pudo calcular el valor de hoy: ${String((e as Error)?.message ?? e)}`, true))}
+            style={{ background: 'rgba(255,255,255,.14)', border: 'none', borderRadius: 8, padding: '7px 10px', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+          >
+            Calcular valor de hoy
+          </button>
+        </div>
       </div>
+      )}
 
       {/* 2. Riesgos */}
       <Card>
@@ -1601,7 +1735,7 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
       {/* 3. Composición por sector */}
       <Card>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Composición por sector</div>
-        <CompBar M={M} />
+        <CompBar M={Mhoy} />
       </Card>
 
       {/* 4. Evolución entre corridas */}
@@ -1656,7 +1790,8 @@ function ResumenTab({ M, tc, fechaCorrida, activosFijos, historial, flujos, info
       <DeclaracionesCard posiciones={posiciones} manuales={manuales} factores={factores} />
       <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} factores={factores} />
       <ReservaCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} />
-      <CriptoCard posiciones={posiciones} pesoClase={M.cripto} />
+      {/* Cripto: la corrida hasta H2c (sincronización de Bitfinex). */}
+      <CriptoCard posiciones={posicionesCorrida} pesoClase={M.cripto} />
 
       {/* 5. Informe PDF */}
       <Card>
@@ -4773,6 +4908,9 @@ export default function Patrimonio() {
   } | null>(null);
 
   const [showIngesta,      setShowIngesta]      = useState(false);
+  // F9.196 H2a — cartera viva (`carteraViva/ultima`, la escribe actualizarCarteraViva).
+  const [carteraViva, setCarteraViva] = useState<DocCarteraViva | null>(null);
+  useEffect(() => { cargarCarteraViva().then(setCarteraViva).catch(e => { console.warn('[carteraViva]', e); setCarteraViva(null); }); }, []);
   // F9.196 Addendum 2 §A — "Actualizar Balanz" (Mis Instrumentos → cuentasVivas).
   const [showBalanz,       setShowBalanz]       = useState(false);
   const [showModalFijo,    setShowModalFijo]    = useState(false);
@@ -5106,7 +5244,8 @@ export default function Patrimonio() {
       bases: senales?.bases ?? null,
       perfil: null,   // pendiente F9.192: UI de perfil del titular
     };
-    if (parte === 'estrategia') return contextoInformeV3(entrada);
+    // F9.196 H2a — el informe sigue sobre la corrida; el valor de hoy va como DATO APARTE.
+    if (parte === 'estrategia') return { ...contextoInformeV3(entrada), valorDeHoy: resumenValorDeHoy(carteraViva) };
 
     // Parte 2: lo último importado de la parte 1, leído fresco de Firestore (no del estado, que
     // puede no haberse refrescado todavía). Fail-soft: sin panorama, el prompt lo avisa.
@@ -5321,6 +5460,12 @@ export default function Patrimonio() {
   const pendingReviewCount = decisiones.filter(d => revisionPendiente(d) !== null).length;
 
   const M = todasPosiciones.length > 0 ? calcMetrics(todasPosiciones) : null;
+  // F9.196 H2a — pesos, riesgo y reserva sobre la cartera viva (el valor de HOY). Evolución,
+  // Benchmark, informe IA, Plan, Optimización y decisiones siguen sobre la corrida (`M`).
+  const posicionesVivas = carteraViva ? posicionesDeCarteraViva(carteraViva, carteraViva.fechaCorrida) : null;
+  const posicionesHoy = posicionesVivas && posicionesVivas.length ? posicionesVivas : posiciones;
+  const todasHoy = [...posicionesHoy, ...posicionesManuales.map(manualToPosicion)];
+  const Mhoy = todasHoy.length > 0 ? calcMetrics(todasHoy) : M;
   const metricasJson: Record<string, unknown> = M
     ? { top1: M.top1, top3: M.top3, top5: M.top5, hhi: M.hhi, sectorTop: M.sectorTop,
         paisAr: M.paisAr, cripto: M.cripto, rvPct: M.rvPct, total: M.total, totalManualesUsd }
@@ -5330,7 +5475,7 @@ export default function Patrimonio() {
     // F9.121 — base única de toda la vista: el portfolio invertible. No `patrimTotal`: la
     // pantalla ya muestra chips de % calculados sobre M.total (pesoEnCartera, pct(x/total)), y
     // con otra base el monto convertido y el chip de la misma fila darían dos números distintos.
-    <BaseDineroCtx.Provider value={M?.total ?? 0}>
+    <BaseDineroCtx.Provider value={Mhoy?.total ?? M?.total ?? 0}>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* Cabecera */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -5422,7 +5567,9 @@ export default function Patrimonio() {
         <>
           {tab === 'resumen' && (
             <ResumenTab
-              M={M} tc={tc} fechaCorrida={fechaCorrida}
+              M={M} Mhoy={Mhoy ?? M} carteraViva={carteraViva} posicionesCorrida={posiciones}
+              onCarteraViva={() => { cargarCarteraViva().then(setCarteraViva).catch(() => setCarteraViva(null)); }}
+              tc={tc} fechaCorrida={fechaCorrida}
               activosFijos={activosFijos}
               historial={historial}
               flujos={flujos}
@@ -5430,7 +5577,7 @@ export default function Patrimonio() {
               generandoInforme={generandoInforme}
               onGenerarInforme={handleGenerarInforme}
               onToast={(texto, error) => setToast({ texto, error })}
-              posiciones={posiciones}
+              posiciones={posicionesHoy}
               manuales={posicionesManuales}
               topesRiesgo={topesRiesgo}
               riesgoConfigurado={riesgoConfigurado}
@@ -5439,7 +5586,7 @@ export default function Patrimonio() {
           )}
           {tab === 'tenencias' && (
             <TenenciasTab
-              M={M} posiciones={posiciones} manuales={posicionesManuales} fechaCorrida={fechaCorrida}
+              M={Mhoy ?? M} posiciones={posicionesHoy} manuales={posicionesManuales} fechaCorrida={fechaCorrida}
               indicadores={indicadores}
               analisisCache={analisisCache}
               configIA={configIA}
@@ -5456,7 +5603,7 @@ export default function Patrimonio() {
               }}
             />
           )}
-          {tab === 'riesgo'    && <RiesgoTab M={M} posiciones={todasPosiciones} />}
+          {tab === 'riesgo'    && <RiesgoTab M={Mhoy ?? M} posiciones={todasHoy} />}
           {tab === 'benchmark' && (
             <BenchmarkTab posiciones={todasPosiciones} carteras={cafciCarteras} mappings={cafciMappings} universo={universoCafci} />
           )}

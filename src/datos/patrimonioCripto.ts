@@ -83,9 +83,9 @@ export function grupoCripto(ticker: string): GrupoCripto {
 }
 
 // ── Lectura (espejo de functions/src/criptoPrecios.ts) ─────────────────────────
-export type PrecioCripto = { valor: number | null; fuente: string | null; error: string | null };
-export type SondeoCripto = { fuente: string; url: string; status: number; error: string | null };
-export type LecturaCripto = { leidoEnISO: string; precios: Record<string, PrecioCripto>; sondeo: SondeoCripto[] };
+// F9.196 H2 — PrecioCripto, SondeoCripto y LecturaCripto viven en ./compartido/tiposPatrimonio.
+import type { PrecioCripto, SondeoCripto, LecturaCripto } from './compartido/tiposPatrimonio';
+export type { PrecioCripto, SondeoCripto, LecturaCripto } from './compartido/tiposPatrimonio';
 export type BaseBtc = { valor: number; fecha: string; fuente: string | null };
 export type BasesCripto = { btc: BaseBtc | null };
 export type DiaCripto = { fecha: string; valorSistemaUsd: number; completo: boolean };
@@ -136,7 +136,8 @@ export type EvaluacionCripto = {
 const EPS = 1e-9;
 
 // `leidoEnISO` está en UTC: después de las 21:00 ART su fecha ya es mañana. Argentina es UTC−3 fijo.
-export const fechaArgentina = (iso: string) => new Date(Date.parse(iso) - 3 * 3600_000).toISOString().slice(0, 10);
+export { fechaArgentina } from './compartido/tiposPatrimonio';
+import { fechaArgentina } from './compartido/tiposPatrimonio';
 
 export function evaluarSistemaCripto(args: {
   posiciones: Posicion[];

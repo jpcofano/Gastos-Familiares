@@ -128,7 +128,7 @@ Los números de comprobante van como `#`.
 | `Ret. Bs. Ps.…`, `Ret Bs. Ps.…`, `Retenciones Div. <t>` | 5 | `Ret. Bs. Ps. Dividendo TRAN` | retención (gasto) |
 | `Split / <t>` | 5 | `Split / CEPU` | split. ⚠ El `ticker` de la fila viene equivocado (GD30, GD38) |
 | `Movimiento Manual / Vencimiento Plazo Comunicación A 8042` | 16 | — | ajuste de caja en dólares CV7000 |
-| `Movimiento Manual / Fracción Split <t>` | 6 | `… / Fracción Split CEPU` | ajuste de caja por fracción de split |
+| `Movimiento Manual / Fracción …` | 6 | `… / Fracción Split CEPU` (5) y `… / Fracción Dividendo TXAR` (1) | ajuste de caja por fracción de split o de dividendo |
 | `Movimiento Manual / Débito/Crédito - Compensación de monedas` | 4 | — | conversión entre subcuentas de dólar |
 | `Movimiento Manual / Gastos CVSA Split <t>` | 1 | — | gasto |
 

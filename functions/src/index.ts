@@ -44,6 +44,9 @@ import { cerrarAlVencer } from './cierreAlVencer';
 import { rescatarCuitContraparte } from './cuit';
 import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
 import { correrActualizacionPrecios } from './patrimonioPreciosCron';
+import { clientePPIDeInstancia, type ClientePPI } from './ppiApi';
+import { sincronizarPPI as sincronizarPPIConCliente } from './ppiSincronizacion';
+import { actualizarCarteraViva as actualizarCarteraVivaEn } from './carteraVivaCron';
 import { backfillTc } from './tcBackfill';
 // F9.190 §2 — señales de mercado de la reserva: módulo puro, la red se inyecta.
 import { leerMercado, resolverBases, type Bases } from './senalesMercado';
@@ -58,6 +61,24 @@ setGlobalOptions({ region: 'southamerica-east1' });
 const db            = getFirestore();
 const storage       = getStorage();
 const anthropicKey  = defineSecret('ANTHROPIC_API_KEY');
+// F9.196 H2a — PPI, solo lectura (ver functions/src/ppiApi.ts). Se cargan con
+// `firebase functions:secrets:set <NOMBRE>`; nunca van en el código ni en un .env del repo.
+const ppiApiKey           = defineSecret('PPI_API_KEY');
+const ppiApiSecret        = defineSecret('PPI_API_SECRET');
+const ppiAuthorizedClient = defineSecret('PPI_AUTHORIZED_CLIENT');
+const ppiClientKey        = defineSecret('PPI_CLIENT_KEY');
+const ppiAccountNumber    = defineSecret('PPI_ACCOUNT_NUMBER');
+const SECRETOS_PPI = [ppiApiKey, ppiApiSecret, ppiAuthorizedClient, ppiClientKey, ppiAccountNumber];
+
+/** Cliente de PPI de la instancia (token cacheado 8 h), o null si falta algún secreto. */
+function clientePPI(): ClientePPI | null {
+  const cred = {
+    authorizedClient: ppiAuthorizedClient.value().trim(), clientKey: ppiClientKey.value().trim(),
+    apiKey: ppiApiKey.value().trim(), apiSecret: ppiApiSecret.value().trim(),
+  };
+  if (!cred.authorizedClient || !cred.clientKey || !cred.apiKey || !cred.apiSecret) return null;
+  return clientePPIDeInstancia(cred);
+}
 
 function hoyArgentinaISO(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
@@ -2511,20 +2532,85 @@ export const cerrarObligacionesAlVencer = onSchedule(
 // F9.141 — serie de precios diaria e indicadores por posición. Corre después del cierre
 // de BYMA. Fuente data912 (pública, sin API key, sin SLA): el cron degrada sin romper —
 // un ticker que falla no aborta el resto y NUNCA se pisa una serie buena con un error.
+// F9.196 H2a — si data912 falla o no tiene la especie, el precio sale de PPI (MarketData/Current).
 export const actualizarPreciosDiarios = onSchedule(
   {
     schedule: '0 18 * * 1-5',
     timeZone: 'America/Argentina/Buenos_Aires',
     region: 'southamerica-east1',
     timeoutSeconds: 540,
+    secrets: SECRETOS_PPI,
   },
   async () => {
-    const r = await correrActualizacionPrecios(db, { escribir: true });
+    const ppi = clientePPI();
+    if (!ppi) console.warn('[actualizarPreciosDiarios] sin secretos de PPI: no hay respaldo de precios');
+    const r = await correrActualizacionPrecios(db, { escribir: true, ppi });
     const porEstado: Record<string, number> = {};
     for (const x of r.resultados) porEstado[x.estadoSerie] = (porEstado[x.estadoSerie] ?? 0) + 1;
     console.log(`[actualizarPreciosDiarios] corrida=${r.fechaCorrida} objetivos=${r.objetivos} ` +
       `estados=${JSON.stringify(porEstado)} fallos=${r.fallos.length}`);
     for (const f of r.fallos) console.error(`[actualizarPreciosDiarios] ${f.ticker}: ${f.error}`);
+  },
+);
+
+// ── F9.196 H2a — sincronización de PPI y cartera viva ─────────────────────────
+
+async function correrSincronizacionPPI() {
+  const ppi = clientePPI();
+  const cuenta = ppiAccountNumber.value().trim();
+  if (!ppi || !cuenta) throw new Error('Faltan secretos de PPI (PPI_API_KEY, PPI_API_SECRET, PPI_AUTHORIZED_CLIENT, PPI_CLIENT_KEY, PPI_ACCOUNT_NUMBER)');
+  const r = await sincronizarPPIConCliente(db, ppi, cuenta);
+  console.log(`[sincronizarPPI] ${r.posiciones} posiciones · ${r.movimientos} movimientos (${r.dias} días) · clases ${JSON.stringify(r.porClase)} · flujos ${JSON.stringify(r.flujos)}`);
+  return r;
+}
+
+// Días hábiles 18:10 ART, después de actualizarPreciosDiarios (18:00).
+export const sincronizarPPI = onSchedule(
+  {
+    schedule: '10 18 * * 1-5',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+    timeoutSeconds: 300,
+    secrets: SECRETOS_PPI,
+  },
+  async () => {
+    try { await correrSincronizacionPPI(); }
+    catch (e) { console.error(`[sincronizarPPI] falló: ${e instanceof Error ? e.message : String(e)}`); }
+  },
+);
+
+// Botón "Sincronizar PPI ahora" (solo el dueño).
+export const sincronizarPPIAhora = onCall(
+  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 300, secrets: SECRETOS_PPI },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+    try { return await correrSincronizacionPPI(); }
+    catch (e) { throw new HttpsError('internal', e instanceof Error ? e.message : String(e)); }
+  },
+);
+
+// Días hábiles 18:20 ART, después de la sincronización de PPI (18:10).
+export const actualizarCarteraViva = onSchedule(
+  {
+    schedule: '20 18 * * 1-5',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+    timeoutSeconds: 120,
+  },
+  async () => { await actualizarCarteraVivaEn(db); },
+);
+
+// Botón "Recalcular valor de hoy" (solo el dueño).
+export const recalcularCarteraViva = onCall(
+  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+    const doc = await actualizarCarteraVivaEn(db);
+    return { ok: !!doc, totalUsd: doc?.totalUsd ?? null };
   },
 );
 

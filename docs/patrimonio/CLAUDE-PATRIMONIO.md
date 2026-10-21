@@ -1145,6 +1145,58 @@ cada fuente. Una transferencia entre cuentas propias no es flujo.
 - Los movimientos `inferido` nunca son flujo.
 - Un monto en pesos sin TC para su fecha va a `sinTc`: no se inventa la conversión.
 
+## Sincronización de PPI y valor de hoy (F9.196 H2a) — contrato
+
+### Código compartido entre cliente y Functions
+`armarCarteraViva`, `resolverTcCarteraViva`, los movimientos, los flujos automáticos y la tabla de
+PPI viven en `src/datos/compartido/`. Hay una copia **idéntica byte a byte** en
+`functions/src/compartido/`, porque `functions/` no puede importar de `src/`. El original es el de
+`src/`: se edita ahí y se copia con `npx tsx scripts/verificarCopiasIdenticas.ts --copiar`. Sin
+`--copiar`, el script falla si las copias difieren. Los módulos de siempre (`src/datos/patrimonio…`)
+re-exportan desde `compartido/`.
+
+### `sincronizarPPI` (cron de días hábiles a las 18:10, más el botón "Sincronizar PPI ahora")
+- **Cliente:** `functions/src/ppiApi.ts`, solo lectura, con lista blanca (las rutas de §0 más
+  `Configuration/*`). Credenciales en secretos de Firebase (`PPI_*`). Token cacheado 8 h, refresh
+  con el Bearer anterior, y un 400 en el login se trata como credenciales inválidas.
+- **`cuentasVivas/ppi`:** posiciones de `BalancesAndPositions`, con sector y país de la corrida.
+  La caja es la fila INMEDIATA de cada moneda (Pesos → ARS; CCL y MEP → USD). Guarda
+  `costoPromedio` (de `ppc`) y `costoSospechoso` cuando costo y precio difieren más de 5×:
+  PAMP, TGSU2, TRAN e YPFD, por la escala de antes de los splits. **Ese costo no entra en ningún
+  cálculo**; el costo de esas especies sale de los movimientos.
+- **`movimientosCuenta`:** se clasifican con `FAMILIAS_PPI`, las 16 familias de textos medidas
+  sobre 3 años (0 `para_revisar`). Lo que no está en la tabla queda `para_revisar` con el texto
+  crudo. Ids `ppimov_<hash>` deterministas. La primera corrida trae 3 años; las siguientes, 10 días.
+- **Si falla:** `cuentasVivas/ppi.error` guarda el mensaje crudo, se conserva la última lectura
+  buena y la frescura dice "sin sincronizar desde dd/mm".
+- **Flujos (§C):** después de cada sincronización corre el apareo sobre los depósitos y retiros de
+  todas las fuentes. Lo que no aparea queda en `flujosAuto/estado.pendientes`. Las decisiones de
+  Juan van en `decisionesFlujo/{clave}`; las de aporte o retiro se escriben en `flujosPatrimonio`
+  como `auto_<hash>`.
+
+### Precios: PPI de respaldo de data912
+data912 sigue siendo la fuente principal. Si no trae el precio de la especie (acción AR, CEDEAR,
+bono u ON), sale de `MarketData/Current` de PPI a 24 hs. La escala (`nominalInPrice`) se pide una
+vez por identidad y queda en `indicadoresPosicion.escalaPPI`. Si esa consulta falla, el precio va
+crudo y actúa la guarda `escala_dudosa`. Cada precio del día queda en `indicadoresPosicion.precioDia`
+con su `fuente` (`data912` o `ppi`).
+
+### `actualizarCarteraViva` (cron de días hábiles a las 18:20, más el botón "Recalcular")
+Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `frescura`.
+- PPI sale de la API y Balanz de su archivo o de la corrida.
+- Bitfinex, Nexo y Lemon salen de la corrida, y Bitfinex pasa a la API en H2c.
+- FCI sale de la corrida: el valor cuotaparte del día de CAFCI todavía no se usa.
+- El dólar es el MEP del día (Addendum 1).
+
+### Qué usa el valor de hoy
+- El hero de Resumen muestra "Valor de hoy (estimado)". Abajo van la última carga, la diferencia
+  separada en precios, dólar y movimientos, y la frescura.
+- **Pesos, riesgo y reserva** se calculan sobre la cartera viva (`Mhoy`), y también la base del
+  modo privacidad.
+- **Evolución, Benchmark, informe IA, Plan, Optimización y decisiones** siguen con la corrida. El
+  informe recibe el valor de hoy como dato aparte (`valorDeHoy`).
+- La card cripto sigue con la corrida hasta H2c.
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.

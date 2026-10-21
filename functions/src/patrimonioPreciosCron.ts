@@ -5,6 +5,8 @@
 // El motor (routing, splits, indicadores) está en ./patrimonioPrecios.
 import { FieldValue, type DocumentReference, type Firestore } from 'firebase-admin/firestore';
 import * as PP from './patrimonioPrecios';
+import * as RP from './preciosRespaldo';
+import type { ClientePPI } from './ppiApi';
 
 export type ObjetivoPrecio = {
   ticker: string;
@@ -231,7 +233,7 @@ export function dolarizarSerie(
  */
 export async function correrActualizacionPrecios(
   db: Firestore,
-  { escribir }: { escribir: boolean },
+  { escribir, ppi = null }: { escribir: boolean; ppi?: ClientePPI | null },
 ): Promise<Resumen> {
   const { objetivos, totalUsd, fechaCorrida, fechasCorrida } = await objetivosDePrecio(db);
   if (!objetivos.length) {
@@ -254,7 +256,7 @@ export async function correrActualizacionPrecios(
   for (const o of objetivos) {
     try {
       const r = await actualizarUnTicker(
-        db, o, live, totalUsd, tcHoy, tcSerie, escribir, { fechaCorrida, fechasCorrida });
+        db, o, live, totalUsd, tcHoy, tcSerie, escribir, { fechaCorrida, fechasCorrida }, ppi);
       resultados.push(r);
       if (r.cobertura === 'con_serie' || r.motivo === 'fuente_sin_serie') await dormir(PAUSA_MS);
     } catch (e) {
@@ -325,6 +327,7 @@ async function actualizarUnTicker(
   tcSerie: Map<string, number>,
   escribir: boolean,
   corridas: { fechaCorrida: string | null; fechasCorrida: string[] },
+  ppi: ClientePPI | null = null,
 ): Promise<ResultadoTicker> {
   const refPrecios = db.collection('preciosDiarios').doc(o.docId);
   const refInd = db.collection('indicadoresPosicion').doc(o.docId);
@@ -377,6 +380,11 @@ async function actualizarUnTicker(
   const panelBajado = live.has(spec.live);
   const precioLive = panelBajado ? (live.get(spec.live)!.get(simbolo) ?? null) : null;
   const campoPrecioLive = panelBajado ? { precioLive } : {};
+  // F9.196 H2a — el precio del día con su fuente: data912; si falla o no tiene la especie, PPI.
+  const respaldo = await respaldoPPI(refInd, o, spec.live, precioLive, ppi, escribir);
+  const precioDia = RP.elegirPrecioDia({ data912: precioLive, monedaSerie, ppi: respaldo, hoy: hoyART() });
+  const campoPrecioDia = precioDia ? { precioDia } : {};
+  if (precioDia?.fuente === 'ppi') console.log(`[precios] ${o.docId}: sin precio de data912, se usa PPI ${precioDia.precio} (escala ${precioDia.escala ?? 'desconocida'})`);
 
   // Sin endpoint histórico para el tipo (ON: /historical/corp/ da 404).
   if (!spec.historical) {
@@ -389,7 +397,7 @@ async function actualizarUnTicker(
       },
       {
         estadoSerie: 'sin_serie', motivo: 'sin_historico', precio: precioLive, monedaSerie,
-        puntosDisponibles: 0, semaforos: sinDatos,
+        puntosDisponibles: 0, semaforos: sinDatos, ...campoPrecioDia,
       },
     );
     return {
@@ -413,6 +421,7 @@ async function actualizarUnTicker(
     // vaciar la base.
     if (PP.decidirEscritura(serieCruda, teniaSerie) === 'conservar') {
       if (escribir) await refPrecios.set({ ...base, ...campoPrecioLive, ultimoIntentoFallido: status }, { merge: true });
+      if (escribir && precioDia) await refInd.set({ ...base, ...campoPrecioDia }, { merge: true });
       const d = previo.data() ?? {};
       return {
         ticker: o.ticker, docId: o.docId, cobertura: 'con_serie', estadoSerie: (d.estadoSerie as PP.EstadoSerie) ?? 'limpia',
@@ -430,7 +439,7 @@ async function actualizarUnTicker(
       },
       {
         estadoSerie: 'sin_serie', motivo: 'fuente_sin_serie', precio: precioLive, monedaSerie,
-        puntosDisponibles: 0, semaforos: sinDatos,
+        puntosDisponibles: 0, semaforos: sinDatos, ...campoPrecioDia,
       },
     );
     return {
@@ -479,7 +488,7 @@ async function actualizarUnTicker(
     },
     {
       calculadoEnISO: new Date().toISOString(),
-      estadoSerie: estado, monedaSerie, motivo: null,
+      estadoSerie: estado, monedaSerie, motivo: null, ...campoPrecioDia,
       pesoEnCartera: peso, ruedasParaSalir: ruedas,
       ...ind,
       semaforos: { ...retirados, ...PP.calcSemaforos(ind, PP.claseUmbral(o.tipo, o.paisRiesgo), peso) },
@@ -491,6 +500,47 @@ async function actualizarUnTicker(
     puntos: ind.puntosDisponibles, saltosPendientes: saltos.length,
     splitsAplicados: aplicados.length, motivo: null,
   };
+}
+
+/**
+ * F9.196 H2a — precio de PPI cuando data912 no lo trajo. Solo acciones AR, CEDEARs, bonos y ONs
+ * (`tipoPPI`). La escala se pide una sola vez por identidad y se guarda; si esa consulta falla, el
+ * precio va igual, sin escala (la guarda de la cartera viva hace el resto). Un error de PPI nunca
+ * corta la actualización: se loguea (ruta y status, sin tokens) y se sigue sin respaldo.
+ */
+async function respaldoPPI(
+  refInd: DocumentReference,
+  o: ObjetivoPrecio,
+  panelLive: PP.PanelLive,
+  precioLive: number | null,
+  ppi: ClientePPI | null,
+  escribir: boolean,
+): Promise<{ precio: number; escala: number | null } | null> {
+  if (precioLive !== null || !ppi) return null;
+  const tipo = RP.tipoPPI(o.tipo, o.paisRiesgo, panelLive);
+  if (!tipo) return null;
+  const identidad = PP.claveIdentidad(o);
+  const previo = (await refInd.get()).data() ?? {};
+  let escala = RP.escalaVigente(previo.escalaPPI, identidad);
+  if (escala === null) {
+    try {
+      escala = RP.escalaDeBusqueda(await ppi.get(`MarketData/SearchInstrument?Ticker=${encodeURIComponent(o.ticker)}`), o.ticker, tipo);
+      if (escala !== null && escribir) {
+        const escalaPPI: RP.EscalaPPI = { identidad, nominalInPrice: escala, consultadoEnISO: new Date().toISOString() };
+        await refInd.set({ escalaPPI }, { merge: true });
+      }
+    } catch (e) {
+      console.warn(`[precios] ${o.docId}: SearchInstrument de PPI falló, precio sin escala: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  try {
+    const c = RP.precioDeCurrent(await ppi.get(
+      `MarketData/Current?Ticker=${encodeURIComponent(o.ticker)}&Type=${tipo}&Settlement=${RP.PLAZO_PPI}`));
+    return c ? { precio: c.precio, escala } : null;
+  } catch (e) {
+    console.warn(`[precios] ${o.docId}: respaldo de PPI falló: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
 }
 
 /**

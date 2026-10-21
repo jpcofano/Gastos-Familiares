@@ -2531,6 +2531,10 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `itemsEsperados` se suscribe una vez en `ItemsEsperadosContext` (AppShell), compartido por Resumen, Comprobantes y ConfigEsperados. `movimientos` suscribe por vista (`useMovimientosDelMes`). Colecciones quasi-estáticas (subcategorias, etiquetas, config/familia): one-shot. `diccionario` + `reglasNormalizacion`: one-shot conjunto en `DiccionarioContext` (Promise.all al montar AppShell), ~479 entradas de seed + entradas creadas por el trigger de aprendizaje (crece con el uso) + 7 reglas en memoria para el clasificador (normalización on-write).
 - Backup diario de Firestore a GCS configurado en F0.
 - `serviceAccountKey.json` SIEMPRE gitignored. Si se filtra, Google revoca la key.
+- **Código compartido cliente ↔ Functions (F9.196 H2):** `src/datos/compartido/` tiene una copia
+  idéntica byte a byte en `functions/src/compartido/` (functions/ no importa de src/). Se edita el
+  original de `src/` y se copia con `npx tsx scripts/verificarCopiasIdenticas.ts --copiar`; sin
+  `--copiar`, el script falla si difieren (cubre también el normalizador).
 - El normalizador de descripciones (`normalizar()` + reglas de `reglasNormalizacion`) existe en TRES copias idénticas: `scripts/seed/utils/normalize.ts` (canónico, usado por el seed), `src/datos/normalizador.ts` (cliente) y `functions/src/normalizador.ts` (trigger de aprendizaje). Paquetes independientes, no se importan cruzados — sync manual si cambia el algoritmo.
 - El formato de `numeroComprobante` para altas manuales (`YYYY-MM-<slug>`) vive en DOS lugares:
   el prompt de extracción (lo genera el modelo) y `generarNumeroManual()` en AltaMovimiento.tsx.

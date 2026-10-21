@@ -19,7 +19,9 @@ import { manualToPosicion } from './patrimonioMetricas';
 // crisis. Es la unidad de los shocks y de las betas.
 export type Bloque = 'accionesAr' | 'accionesGlobal' | 'cripto' | 'soberanoAr' | 'rentaFijaPesos' | 'cash';
 
-export const STABLECOINS = new Set(['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD']);
+// F9.196 H2 — definido en ./compartido/tiposPatrimonio (compartido con las Functions).
+export { STABLECOINS } from './compartido/tiposPatrimonio';
+import { STABLECOINS } from './compartido/tiposPatrimonio';
 
 export const BLOQUE_LABEL: Record<Bloque, string> = {
   accionesAr:     'Acciones AR',

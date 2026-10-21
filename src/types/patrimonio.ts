@@ -1,35 +1,10 @@
 // Tipos del contrato de patrimonio (F9.84 / F9.90).
 // NO mezclar con src/types/index.ts (gastos). Colecciones propias, aislamiento total.
 
-export type PosicionTipo = 'accion' | 'bono' | 'on' | 'cedear' | 'fci' | 'cripto' | 'cash';
-export type PaisRiesgo = 'AR' | 'global';
-
-// Posición tal como viene del .txt (campos del schema)
-export type PosicionRaw = {
-  cuenta: string;
-  titular: string | null;
-  ticker: string;
-  tipo: PosicionTipo;
-  sector: string;
-  pais_riesgo: PaisRiesgo;
-  moneda_origen: 'ARS' | 'USD';
-  valor_origen: number;
-  cantidad: number | null;
-  fuente: string;
-  revisar: boolean;
-  // F9.189 §2 — qué mirar, en una frase. Opcional: los .txt anteriores no lo traen y validan igual.
-  motivo_revisar?: string | null;
-};
-
-// Posición enriquecida (valorUsd calculado, persistida en Firestore)
-export type Posicion = PosicionRaw & {
-  valorUsd: number;
-  tcUsado: number | null;
-  fechaCorrida: string;
-  // F9.189 §3 — vino con `revisar: true` y Juan la dio por vista en el Paso 3 (queda `revisar: false`).
-  // Estado de la app, no del resumen: el export no lo incluye.
-  revisadoEnIngesta?: boolean;
-};
+// F9.196 H2 — definidos en src/datos/compartido/tiposPatrimonio.ts (código compartido con las
+// Functions). Se re-exportan acá para que los imports de siempre sigan andando.
+import type { PosicionTipo, PaisRiesgo, PosicionRaw, Posicion, PosicionManual } from '../datos/compartido/tiposPatrimonio';
+export type { PosicionTipo, PaisRiesgo, PosicionRaw, Posicion, PosicionManual } from '../datos/compartido/tiposPatrimonio';
 
 export type MetaCorrida = {
   fecha_corrida: string;
@@ -49,22 +24,6 @@ export type ActivoFijo = {
   nombre: string;
   valorUsd: number;
   pais: string;
-  notas: string;
-};
-
-// Posición cargada manualmente (planes de empleado, cuentas sin API).
-// Entra al análisis de riesgo (métricas, semáforos, HHI) — distinto a ActivoFijo.
-export type PosicionManual = {
-  id: string;
-  ticker: string;
-  nombre: string;
-  cantidad: number;
-  valorUsd: number;
-  fechaValuacion: string; // YYYY-MM-DD
-  tipo: 'accion';
-  sector: string;
-  pais_riesgo: PaisRiesgo;
-  cuenta: string;
   notas: string;
 };
 

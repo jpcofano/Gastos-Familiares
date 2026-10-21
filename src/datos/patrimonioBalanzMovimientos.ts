@@ -7,7 +7,7 @@
 //
 // ⛔ No se inventan reglas: lo que no matchea la tabla queda `para_revisar` con el texto crudo.
 import type { Posicion, PosicionTipo } from '../types/patrimonio';
-import type { MovimientoCuenta } from './patrimonioMovimientos';
+import { hashId, type MovimientoCuenta } from './patrimonioMovimientos';
 import { cuentaDeComitente } from './patrimonioBalanzArchivo';
 
 export const ENCABEZADOS_MOVIMIENTOS_BALANZ = [
@@ -122,16 +122,8 @@ export function idsAnulados(filas: FilaMovBalanz[], comitente: string, anuladas:
   return filas.filter(f => anuladas.has(f.fila) && f.clase === 'retiro').map(f => idFilaBalanz(comitente, f));
 }
 
-/** Hash determinista (FNV-1a de 2 × 32 bits) para ids de Firestore. Sin crypto: puro y sincrónico. */
-export function hashId(s: string): string {
-  let h1 = 0x811c9dc5, h2 = 0x01000193 ^ 0x5bd1e995;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ c, 0x5bd1e995) >>> 0;
-  }
-  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
-}
+// F9.196 H2 — `hashId` vive en ./compartido/patrimonioMovimientos (lo usan también las Functions).
+export { hashId };
 
 /**
  * Lee las filas del archivo. Falla con el nombre del encabezado si falta alguno. Las filas
