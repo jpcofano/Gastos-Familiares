@@ -1,8 +1,8 @@
 // F9.196 H2a — `actualizarCarteraViva` (base §2 + Addendum 1): arma la cartera viva y la guarda en
 // `carteraViva/ultima`, con la composición por cuenta y la frescura de cada parte.
 //
-// Fuentes por cuenta: PPI por API (`cuentasVivas/ppi`); Balanz por archivo (`cuentasVivas/balanz_*`)
-// o la corrida; Bitfinex, Nexo y Lemon por la corrida (Bitfinex pasa a API en H2c); las manuales; FCI
+// Fuentes por cuenta: PPI por API (`cuentasVivas/ppi`); Bitfinex por API (`cuentasVivas/bitfinex`,
+// H2c); Balanz por archivo (`cuentasVivas/balanz_*`) o la corrida; Nexo y Lemon por la corrida; las manuales; FCI
 // por la corrida. Precio del día: `indicadoresPosicion.precioDia` (data912 o PPI) o, si no hay, el
 // último cierre. Dólar: `resolverTcCarteraViva` (MEP de dolarapi del día; si no, tcDiario, viejo).
 //
@@ -56,7 +56,7 @@ export function frescuraCartera(
   const out: string[] = [];
   for (const c of cv.cuentas) {
     const v = vivas.get(c.cuenta);
-    if (v?.fuente === 'ppi_api') {
+    if (v?.fuente === 'ppi_api' || v?.fuente === 'bitfinex_api') {
       out.push(v.error
         ? `${c.cuenta}: sin sincronizar desde ${ddmm(fechaArg(v.leidoEn))} (último error: ${v.error.slice(0, 80)})`
         : `${c.cuenta}: API ${cuando(v.leidoEn)}`);

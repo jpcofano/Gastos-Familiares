@@ -47,6 +47,8 @@ import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 import { clientePPIDeInstancia, type ClientePPI } from './ppiApi';
 import { sincronizarPPI as sincronizarPPIConCliente } from './ppiSincronizacion';
 import { actualizarCarteraViva as actualizarCarteraVivaEn } from './carteraVivaCron';
+import { crearClienteBitfinex } from './bitfinexApi';
+import { sincronizarBitfinex as sincronizarBitfinexConCliente } from './bitfinexSincronizacion';
 import { backfillTc } from './tcBackfill';
 // F9.190 §2 — señales de mercado de la reserva: módulo puro, la red se inyecta.
 import { leerMercado, resolverBases, type Bases } from './senalesMercado';
@@ -69,6 +71,10 @@ const ppiAuthorizedClient = defineSecret('PPI_AUTHORIZED_CLIENT');
 const ppiClientKey        = defineSecret('PPI_CLIENT_KEY');
 const ppiAccountNumber    = defineSecret('PPI_ACCOUNT_NUMBER');
 const SECRETOS_PPI = [ppiApiKey, ppiApiSecret, ppiAuthorizedClient, ppiClientKey, ppiAccountNumber];
+// F9.196 H2c — Bitfinex, key de SOLO LECTURA (ver functions/src/bitfinexApi.ts).
+const bitfinexApiKey    = defineSecret('BITFINEX_API_KEY');
+const bitfinexApiSecret = defineSecret('BITFINEX_API_SECRET');
+const SECRETOS_BITFINEX = [bitfinexApiKey, bitfinexApiSecret];
 
 /** Cliente de PPI de la instancia (token cacheado 8 h), o null si falta algún secreto. */
 function clientePPI(): ClientePPI | null {
@@ -2600,6 +2606,43 @@ export const actualizarCarteraViva = onSchedule(
     timeoutSeconds: 120,
   },
   async () => { await actualizarCarteraVivaEn(db); },
+);
+
+// ── F9.196 H2c — sincronización de Bitfinex ───────────────────────────────────
+
+async function correrSincronizacionBitfinex() {
+  const key = bitfinexApiKey.value().trim(), secret = bitfinexApiSecret.value().trim();
+  if (!key || !secret) throw new Error('Faltan secretos de Bitfinex (BITFINEX_API_KEY, BITFINEX_API_SECRET)');
+  const r = await sincronizarBitfinexConCliente(db, crearClienteBitfinex({ key, secret }));
+  console.log(`[sincronizarBitfinex] ${r.posiciones} activos · ${r.movimientos} movimientos · ${r.prestamos} préstamos de funding · para revisar ${r.paraRevisar} · flujos ${JSON.stringify(r.flujos)}`);
+  return r;
+}
+
+// Todos los días 09:20 ART, después de leerPreciosCripto (09:15).
+export const sincronizarBitfinex = onSchedule(
+  {
+    schedule: '20 9 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    region: 'southamerica-east1',
+    timeoutSeconds: 300,
+    secrets: SECRETOS_BITFINEX,
+  },
+  async () => {
+    try { await correrSincronizacionBitfinex(); }
+    catch (e) { console.error(`[sincronizarBitfinex] falló: ${e instanceof Error ? e.message : String(e)}`); }
+  },
+);
+
+// Botón "Sincronizar Bitfinex ahora" (solo el dueño).
+export const sincronizarBitfinexAhora = onCall(
+  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 300, secrets: SECRETOS_BITFINEX },
+  async (request) => {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
+    const email = request.auth.token.email?.toLowerCase();
+    if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+    try { return await correrSincronizacionBitfinex(); }
+    catch (e) { throw new HttpsError('internal', e instanceof Error ? e.message : String(e)); }
+  },
 );
 
 // Botón "Recalcular valor de hoy" (solo el dueño).

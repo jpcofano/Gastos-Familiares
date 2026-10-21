@@ -64,7 +64,7 @@ import {
 import PatrimonioIngesta from './PatrimonioIngesta';
 import PatrimonioBalanz from './PatrimonioBalanz';
 import { posicionesDeCarteraViva } from '../datos/patrimonioCarteraViva';
-import { cargarCarteraViva, sincronizarPPIAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
+import { cargarCarteraViva, sincronizarPPIAhora, sincronizarBitfinexAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
 
 /** F9.196 H2a — el valor de hoy como dato aparte para el informe (que sigue sobre la corrida). */
 function resumenValorDeHoy(cv: DocCarteraViva | null) {
@@ -1502,7 +1502,7 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
   onActualizado: () => void; onToast: (texto: string, error: boolean) => void;
 }) {
   const $ = useDinero();
-  const [ocupado, setOcupado] = useState<'ppi' | 'recalcular' | null>(null);
+  const [ocupado, setOcupado] = useState<'ppi' | 'bitfinex' | 'recalcular' | null>(null);
   const [verInconsistencias, setVerInconsistencias] = useState(false);
   const mep = cv.tc?.valor ?? tc;
   const diferencia = cv.totalUsd - cv.totalCargaUsd;
@@ -1511,10 +1511,13 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
   const efecto = (x: number) => `${signo(x)}${$.usd(Math.abs(x))}`;
   const calculada = cv.calculadaEnISO ? new Date(Date.parse(cv.calculadaEnISO) - 3 * 3600_000).toISOString() : '';
 
-  async function correr(cual: 'ppi' | 'recalcular') {
+  async function correr(cual: 'ppi' | 'bitfinex' | 'recalcular') {
     setOcupado(cual);
     try {
-      if (cual === 'ppi') {
+      if (cual === 'bitfinex') {
+        const r = await sincronizarBitfinexAhora();
+        onToast(`Bitfinex sincronizado: ${r.posiciones} activos, ${r.movimientos} movimientos${r.paraRevisar ? `, ${r.paraRevisar} para revisar` : ''}. Valor de hoy recalculado.`, false);
+      } else if (cual === 'ppi') {
         const r = await sincronizarPPIAhora();
         await recalcularCarteraViva();
         onToast(`PPI sincronizado: ${r.posiciones} posiciones, ${r.movimientos} movimientos. Valor de hoy recalculado.`, false);
@@ -1524,13 +1527,13 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
       }
       onActualizado();
     } catch (e) {
-      onToast(`${cual === 'ppi' ? 'No se pudo sincronizar PPI' : 'No se pudo recalcular'}: ${String((e as Error)?.message ?? e)}`, true);
+      onToast(`${cual === 'ppi' ? 'No se pudo sincronizar PPI' : cual === 'bitfinex' ? 'No se pudo sincronizar Bitfinex' : 'No se pudo recalcular'}: ${String((e as Error)?.message ?? e)}`, true);
     } finally {
       setOcupado(null);
     }
   }
 
-  const boton = (cual: 'ppi' | 'recalcular', texto: string) => (
+  const boton = (cual: 'ppi' | 'bitfinex' | 'recalcular', texto: string) => (
     <button
       onClick={() => correr(cual)}
       disabled={ocupado !== null}
@@ -1584,6 +1587,7 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
       </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
         {boton('ppi', 'Sincronizar PPI ahora')}
+        {boton('bitfinex', 'Sincronizar Bitfinex ahora')}
         {boton('recalcular', 'Recalcular')}
       </div>
     </div>
@@ -1790,8 +1794,9 @@ function ResumenTab({ M, Mhoy, carteraViva, onCarteraViva, posicionesCorrida, tc
       <DeclaracionesCard posiciones={posiciones} manuales={manuales} factores={factores} />
       <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} factores={factores} />
       <ReservaCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} />
-      {/* Cripto: la corrida hasta H2c (sincronización de Bitfinex). */}
-      <CriptoCard posiciones={posicionesCorrida} pesoClase={M.cripto} />
+      {/* F9.196 H2c — cripto: las cantidades de Bitfinex salen de `cuentasVivas/bitfinex` vía la cartera
+          viva (que sincronizarBitfinex recalcula al terminar); sin cartera viva, la corrida. */}
+      <CriptoCard posiciones={posiciones.some(p => p.fuente === 'cartera_viva') ? posiciones : posicionesCorrida} pesoClase={Mhoy.cripto} />
 
       {/* 5. Informe PDF */}
       <Card>

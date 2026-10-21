@@ -1197,6 +1197,26 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
   informe recibe el valor de hoy como dato aparte (`valorDeHoy`).
 - La card cripto sigue con la corrida hasta H2c.
 
+## Sincronización de Bitfinex (F9.196 H2c) — contrato
+
+- **`sincronizarBitfinex`:** cron diario a las 09:20, después de la lectura de precios cripto,
+  más el botón "Sincronizar Bitfinex ahora".
+- **Cliente:** `functions/src/bitfinexApi.ts`, solo `auth/r/*`, con secretos `BITFINEX_*`. Firma
+  HMAC-SHA384 con body `{}`. El **nonce es en milisegundos y no se cambia nunca**. Va a 1 llamada
+  por segundo como máximo y sin `limit`, paginando de a 25 con `end`.
+- **`cuentasVivas/bitfinex`:** posiciones por activo, sumando las billeteras exchange, margin y
+  funding (lo prestado sigue en la billetera funding). El USD fiat va a la caja. Guarda
+  `porBilletera` y `prestamos`.
+- **Funding:** el lector es tolerante. Una fila con forma desconocida queda `para_revisar` sin
+  romper nada. La forma se confirma la primera vez que Juan preste.
+- **`movimientosCuenta`** (ids `bfxmov_<ID del asiento>`):
+  - categoría 101: depósito en especie;
+  - categoría 104: retiro en especie;
+  - categoría 28: renta (interés de funding);
+  - la 51 (transferencia entre billeteras propias) no es ni movimiento ni flujo.
+- Al terminar corre los flujos automáticos (regla de cripto: mismo activo, 3 días o menos) y
+  recalcula la cartera viva. La card cripto toma de ahí las cantidades de Bitfinex.
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.

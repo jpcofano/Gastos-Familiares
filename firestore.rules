@@ -207,14 +207,14 @@ service cloud.firestore {
       allow write: if esDueno() && id.matches('balanz_[0-9]+');
     }
     // F9.196 §3 — movimientos por cuenta (archivo de Balanz, carga manual). Los de PPI
-    // (`ppimov_*`, origen 'ppi_api') los escribe SOLO `sincronizarPPI` con Admin SDK: el cliente no
-    // puede crearlos, pisarlos ni borrarlos.
+    // (`ppimov_*`, origen 'ppi_api') y Bitfinex (`bfxmov_*`, origen 'bitfinex_api') los escriben
+    // SOLO las sincronizaciones con Admin SDK: el cliente no puede crearlos, pisarlos ni borrarlos.
     match /movimientosCuenta/{id} {
       allow read: if esDueno();
       allow create, update: if esDueno()
-        && !id.matches('ppimov_.*')
-        && request.resource.data.origen != 'ppi_api';
-      allow delete: if esDueno() && !id.matches('ppimov_.*');
+        && !id.matches('(ppimov|bfxmov)_.*')
+        && !(request.resource.data.origen in ['ppi_api', 'bitfinex_api']);
+      allow delete: if esDueno() && !id.matches('(ppimov|bfxmov)_.*');
     }
     // F9.196 H2a — la cartera viva la calcula `actualizarCarteraViva` (Functions); el cliente lee.
     match /carteraViva/{id} {

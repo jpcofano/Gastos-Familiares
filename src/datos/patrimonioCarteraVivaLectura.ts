@@ -18,6 +18,12 @@ export async function sincronizarPPIAhora() {
   return (await _sincronizarPPI()).data;
 }
 
+const _sincronizarBitfinex = httpsCallable<void, { posiciones: number; movimientos: number; prestamos: number; paraRevisar: number }>(functions, 'sincronizarBitfinexAhora');
+/** F9.196 H2c — "Sincronizar Bitfinex ahora". Al terminar, la Function ya recalculó la cartera viva. */
+export async function sincronizarBitfinexAhora() {
+  return (await _sincronizarBitfinex()).data;
+}
+
 const _recalcular = httpsCallable<void, { ok: boolean; totalUsd: number | null }>(functions, 'recalcularCarteraViva');
 export async function recalcularCarteraViva() {
   return (await _recalcular()).data;

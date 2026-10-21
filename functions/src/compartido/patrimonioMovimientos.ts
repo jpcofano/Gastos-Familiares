@@ -10,7 +10,7 @@
 import type { PosicionTipo, PaisRiesgo } from './tiposPatrimonio';
 
 export type TipoMovimiento = 'venta' | 'compra' | 'retiro' | 'deposito' | 'renta';
-export type OrigenMovimiento = 'ppi_api' | 'archivo_balanz' | 'manual';
+export type OrigenMovimiento = 'ppi_api' | 'bitfinex_api' | 'archivo_balanz' | 'manual';
 
 /** Forma de §3. `montoNeto` siempre positivo: el signo lo pone el tipo (ver `efectoMovimiento`). */
 export type MovimientoCuenta = {
