@@ -1244,6 +1244,32 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
     su `desde` y visible 10 días. Un gatillo nuevo no es un cambio.
   - Entran por `senalesTesis`. El estado se guarda en `indicadoresPosicion.estadoGatillosTesis`.
 
+## Card "Acciones a mirar" y ficha reordenada (F9.196 H6, diseño 3) — contrato
+
+- **Card en Resumen**, debajo de Reserva y señales (`AccionesAMirarCard` +
+  `src/datos/patrimonioAccionesAMirar.ts`):
+  - Muestra solo excepciones, en el orden de §7: stop tocado, stop cerca, señal nueva de atención,
+    gatillo que cambió y evento a 7 días o menos.
+  - Formato de fila: logo, ticker, precio, variación del día (los dos últimos cierres de
+    `historialStops`) y, en una segunda línea, el detalle (stop ATR y distancia, SMA200, evento).
+  - Sin excepciones: "Ninguna acción cerca de un stop ni con señales nuevas · N acciones revisadas
+    hoy HH:MM".
+- **Deep link:** tocar una fila pone `fichaAbierta` y cambia a Tenencias, que expande ese ticker y
+  hace scroll hasta `#ficha-<identidad>`.
+- **Ficha** (`FichaPosicion` + `FichaStopsTesis.tsx`), en el orden de §7:
+  1. encabezado (precio y variación, valor de hoy, peso, cuentas, fuente del precio del día);
+  2. stops (barra con precio, stop ATR, SMA50 y SMA200, y mini gráfico SVG de `historialStops`),
+     con la etiqueta fija "Niveles de referencia, no órdenes";
+  3. chips de señales (las nuevas, resaltadas);
+  4. tesis: P/E, potencial y días al evento en grande, gatillos ✓/✗, textos con fuentes y fecha, y
+     el botón Editar (los campos editados quedan `editadoPorJuan`);
+  5. indicadores técnicos, plegados;
+  6. análisis IA completo, plegado.
+- **Tenencias:** orden por peso, "cerca del stop primero" o variación, más un buscador por ticker,
+  manteniendo la agrupación por identidad.
+- **Textos:** ninguno es una orden; describen niveles y señales. Sin push, campana ni "acción
+  sugerida".
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.

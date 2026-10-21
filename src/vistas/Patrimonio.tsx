@@ -65,6 +65,10 @@ import PatrimonioIngesta from './PatrimonioIngesta';
 import PatrimonioBalanz from './PatrimonioBalanz';
 import { posicionesDeCarteraViva } from '../datos/patrimonioCarteraViva';
 import { cargarTodasLasTesis } from '../datos/patrimonioTesis';
+import type { DocTesis } from '../datos/compartido/tesis';
+import { accionesAMirar, ordenarTenencias, type OrdenTenencias } from '../datos/patrimonioAccionesAMirar';
+import AccionesAMirarCard from './AccionesAMirarCard';
+import { Plegable } from './FichaStopsTesis';
 import { cargarCarteraViva, sincronizarPPIAhora, sincronizarBitfinexAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
 
 /** F9.196 H2a — el valor de hoy como dato aparte para el informe (que sigue sobre la corrida). */
@@ -1595,7 +1599,7 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
   );
 }
 
-function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, posicionesCorrida, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
+function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, posicionesCorrida, indicadores, identidadesHoy, onAbrirFicha, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   /** F9.196 H2a — métricas sobre la cartera viva (pesos, riesgo); `M` es la corrida. */
   Mhoy: PatMetrics;
@@ -1605,6 +1609,10 @@ function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, pos
   onCarteraViva: () => void;
   /** La corrida (para la card cripto hasta H2c); `posiciones` es la cartera viva si existe. */
   posicionesCorrida: Posicion[];
+  /** F9.196 H6 — para "Acciones a mirar". */
+  indicadores: Map<string, IndicadoresPosicion>;
+  identidadesHoy: Set<string>;
+  onAbrirFicha: (identidad: string) => void;
   activosFijos: ActivoFijo[];
   posiciones: Posicion[];
   manuales: PosicionManual[];
@@ -1802,6 +1810,11 @@ function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, pos
       <DeclaracionesCard posiciones={posiciones} manuales={manuales} factores={factores} />
       <RiesgoCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} configurado={riesgoConfigurado} factores={factores} />
       <ReservaCard posiciones={posiciones} manuales={manuales} topes={topesRiesgo} />
+      {/* F9.196 H6 — debajo de Reserva y señales: solo excepciones, en el orden de §7. */}
+      {(() => {
+        const a = accionesAMirar(indicadores, identidadesHoy);
+        return <AccionesAMirarCard filas={a.filas} revisadas={a.revisadas} calculadoEnISO={a.calculadoEnISO} privado={$.privado} onAbrir={onAbrirFicha} />;
+      })()}
       {/* F9.196 H2c — cripto: las cantidades de Bitfinex salen de `cuentasVivas/bitfinex` vía la cartera
           viva (que sincronizarBitfinex recalcula al terminar); sin cartera viva, la corrida. */}
       <CriptoCard posiciones={posiciones.some(p => p.fuente === 'cartera_viva') ? posiciones : posicionesCorrida} pesoClase={Mhoy.cripto} />
@@ -1914,14 +1927,20 @@ function agruparPorIdentidad(filas: FilaTenencia[]): Array<[string, PosicionFich
       cantidad: typeof p.cantidad === 'number' ? p.cantidad : null,
       valorUsd: p.valorUsd,
       monedaOrigen: f.origen === 'corrida' ? f.pos.moneda_origen : 'USD',
+      deCarteraViva: f.origen === 'corrida' && f.pos.fuente === 'cartera_viva',
     });
   }
   return [...m.entries()].sort((a, b) =>
     b[1].reduce((s, x) => s + x.valorUsd, 0) - a[1].reduce((s, x) => s + x.valorUsd, 0));
 }
 
-function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, analisisCache, configIA, onAnalizar, onAbrirChat, agenda, sectorial }: {
+function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, analisisCache, configIA, onAnalizar, onAbrirChat, agenda, sectorial, fichaAbierta, onFichaConsumida, tesisMap, onTesisGuardada }: {
   M: PatMetrics; posiciones: Posicion[]; manuales: PosicionManual[]; fechaCorrida: string;
+  /** F9.196 H6 — deep link desde "Acciones a mirar": la identidad cuya ficha hay que abrir. */
+  fichaAbierta: string | null;
+  onFichaConsumida: () => void;
+  tesisMap: Record<string, DocTesis>;
+  onTesisGuardada: (d: DocTesis) => void;
   indicadores: Map<string, IndicadoresPosicion>;
   analisisCache: Record<string, AnalisisPosicion>;
   configIA: ConfigIA;
@@ -1933,6 +1952,9 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
   const $ = useDinero();
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set());
   const [analizando, setAnalizando] = useState<Set<string>>(new Set());
+  // F9.196 H6 — orden y buscador, manteniendo la agrupación por identidad.
+  const [orden, setOrden] = useState<OrdenTenencias>('peso');
+  const [busqueda, setBusqueda] = useState('');
 
   // Consolidar por ticker usando valorUsd ya calculado (no re-suma)
   const byTickerMap = new Map<string, ConsolidadoTicker>();
@@ -1956,8 +1978,23 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
     if (fila.origen === 'corrida' && fila.pos.revisar) entry.tieneRevisar = true;
     if (fila.origen === 'manual' && fechaCorrida && fila.pm.fechaValuacion < fechaCorrida) entry.tieneStale = true;
   }
-  const consolidados = Array.from(byTickerMap.values()).sort((a, b) => b.totalUsd - a.totalUsd);
-  const totalInvertible = consolidados.reduce((s, c) => s + c.totalUsd, 0);
+  const todosConsolidados = Array.from(byTickerMap.values())
+    .map(c => ({ ...c, identidades: agruparPorIdentidad(c.filas).map(([i]) => i) }));
+  const consolidados = ordenarTenencias(todosConsolidados, orden, indicadores, busqueda);
+  const totalInvertible = todosConsolidados.reduce((s, c) => s + c.totalUsd, 0);
+
+  // F9.196 H6 — deep link: expandir el ticker de esa identidad y hacer scroll hasta su ficha.
+  useEffect(() => {
+    if (!fichaAbierta) return;
+    const c = todosConsolidados.find(x => x.identidades.includes(fichaAbierta));
+    if (c) {
+      setBusqueda('');
+      setExpandidos(prev => new Set(prev).add(c.ticker));
+      setTimeout(() => document.getElementById(`ficha-${fichaAbierta}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    }
+    onFichaConsumida();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fichaAbierta]);
 
   function toggle(ticker: string) {
     setExpandidos(prev => {
@@ -1975,8 +2012,30 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
         <CompBar M={M} />
       </Card>
 
+      {/* F9.196 H6 — buscador y orden */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <input
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+          placeholder="Buscar ticker"
+          aria-label="Buscar ticker"
+          style={{ padding: '9px 12px', borderRadius: 10, border: '1px solid var(--gf-gray-200)', fontSize: 14, fontFamily: 'var(--font-base)', background: 'var(--color-surface)', color: 'var(--color-text)' }}
+        />
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {([['peso', 'Peso'], ['stop', 'Cerca del stop primero'], ['variacion', 'Variación']] as const).map(([k, l]) => (
+            <button key={k} onClick={() => setOrden(k)} style={{
+              padding: '6px 11px', borderRadius: 999, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 700,
+              background: orden === k ? 'var(--gf-ink)' : 'var(--gf-gray-100)', color: orden === k ? '#fff' : 'var(--color-text-sec)',
+            }}>{l}</button>
+          ))}
+        </div>
+      </div>
+
       {/* Lista consolidada por ticker */}
       <Card padding="0">
+        {consolidados.length === 0 && (
+          <div style={{ padding: '14px', fontSize: 12.5, color: 'var(--color-text-sec)' }}>Ningún ticker coincide con «{busqueda}».</div>
+        )}
         {consolidados.map((c, idx) => {
           const exp    = expandidos.has(c.ticker);
           const cuentas = new Set(c.filas.map(f => f.origen === 'corrida' ? f.pos.cuenta : f.pm.cuenta)).size;
@@ -2072,15 +2131,20 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
                       ticker le daría al plan de empleado los indicadores del CEDEAR. Es el
                       defecto que F9.141.1 cerró en el escritor; no se reintroduce en el lector. */}
                   {agruparPorIdentidad(c.filas).map(([ident, fichaFilas]) => (
-                    <FichaPosicion
-                      key={ident}
-                      ident={ident}
-                      filas={fichaFilas}
-                      ind={indicadores.get(ident) ?? null}
-                      privado={$.privado}
-                    />
+                    <div key={ident} id={`ficha-${ident}`} style={{ scrollMarginTop: 12 }}>
+                      <FichaPosicion
+                        ident={ident}
+                        filas={fichaFilas}
+                        ind={indicadores.get(ident) ?? null}
+                        privado={$.privado}
+                        tesis={tesisMap[c.ticker] ?? null}
+                        onTesisGuardada={onTesisGuardada}
+                      />
+                    </div>
                   ))}
-                  {/* F9.93: Análisis IA por ticker */}
+                  {/* F9.93: Análisis IA por ticker. F9.196 H6: plegado (es lo de consulta, va al final). */}
+                  <div style={{ padding: '0 10px 10px' }}>
+                  <Plegable titulo="ANÁLISIS IA COMPLETO">
                   <AnalisisIASection
                     ticker={c.ticker}
                     totalUsd={c.totalUsd}
@@ -2112,6 +2176,8 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
                     agenda={agenda}
                     sectorial={sectorial}
                   />
+                  </Plegable>
+                  </div>
                 </div>
               )}
             </div>
@@ -2126,7 +2192,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--gf-gray-400)', textAlign: 'center' }}>
-        {posiciones.length} posiciones corrida · {manuales.length} manuales · {consolidados.length} tickers · foto al {fmtFecha(fechaCorrida)}
+        {posiciones.length} {posiciones.some(p => p.fuente === 'cartera_viva') ? 'posiciones (valor de hoy)' : 'posiciones corrida'} · {manuales.length} manuales · {todosConsolidados.length} tickers · carga del {fmtFecha(fechaCorrida)}
       </div>
     </div>
   );
@@ -4923,6 +4989,10 @@ export default function Patrimonio() {
   const [showIngesta,      setShowIngesta]      = useState(false);
   // F9.196 H2a — cartera viva (`carteraViva/ultima`, la escribe actualizarCarteraViva).
   const [carteraViva, setCarteraViva] = useState<DocCarteraViva | null>(null);
+  // F9.196 H6 — deep link a la ficha y tesis por ticker (una lectura por montaje).
+  const [fichaAbierta, setFichaAbierta] = useState<string | null>(null);
+  const [tesisMap, setTesisMap] = useState<Record<string, DocTesis>>({});
+  useEffect(() => { cargarTodasLasTesis().then(setTesisMap).catch(e => console.warn('[tesis]', e)); }, []);
   useEffect(() => { cargarCarteraViva().then(setCarteraViva).catch(e => { console.warn('[carteraViva]', e); setCarteraViva(null); }); }, []);
   // Después de una corrida nueva o de importar Balanz: recalcular el valor de hoy (fail-soft).
   const recalcularYRecargarCarteraViva = () => {
@@ -5491,6 +5561,7 @@ export default function Patrimonio() {
   const posicionesHoy = posicionesVivas && posicionesVivas.length ? posicionesVivas : posiciones;
   const todasHoy = [...posicionesHoy, ...posicionesManuales.map(manualToPosicion)];
   const Mhoy = todasHoy.length > 0 ? calcMetrics(todasHoy) : M;
+  const identidadesHoy = new Set(todasHoy.map(p => `${p.ticker}|${p.tipo}|${p.pais_riesgo}`));
   const metricasJson: Record<string, unknown> = M
     ? { top1: M.top1, top3: M.top3, top5: M.top5, hhi: M.hhi, sectorTop: M.sectorTop,
         paisAr: M.paisAr, cripto: M.cripto, rvPct: M.rvPct, total: M.total, totalManualesUsd }
@@ -5592,6 +5663,8 @@ export default function Patrimonio() {
         <>
           {tab === 'resumen' && (
             <ResumenTab
+              indicadores={indicadores} identidadesHoy={identidadesHoy}
+              onAbrirFicha={ident => { setFichaAbierta(ident); setTab('tenencias'); }}
               M={M} Mhoy={Mhoy ?? M} carteraViva={cvVigente} carteraVivaVieja={!!carteraViva && !cvVigente ? carteraViva.fechaCorrida : null} posicionesCorrida={posiciones}
               onCarteraViva={() => { cargarCarteraViva().then(setCarteraViva).catch(() => setCarteraViva(null)); }}
               tc={tc} fechaCorrida={fechaCorrida}
@@ -5612,6 +5685,8 @@ export default function Patrimonio() {
           {tab === 'tenencias' && (
             <TenenciasTab
               M={Mhoy ?? M} posiciones={posicionesHoy} manuales={posicionesManuales} fechaCorrida={fechaCorrida}
+              fichaAbierta={fichaAbierta} onFichaConsumida={() => setFichaAbierta(null)}
+              tesisMap={tesisMap} onTesisGuardada={d => setTesisMap(prev => ({ ...prev, [d.ticker]: d }))}
               indicadores={indicadores}
               analisisCache={analisisCache}
               configIA={configIA}

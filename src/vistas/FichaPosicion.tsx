@@ -1,4 +1,9 @@
-// F9.144 — Ficha de posición: TENENCIA → INDICADORES → DIAGNÓSTICO.
+// F9.144 — Ficha de posición. F9.196 H6 (base §7, diseño 3): de lo más importante a lo de consulta:
+//   1. encabezado (precio del día y variación, valor de hoy, peso, cuentas, frescura del precio);
+//   2. stops (barra + mini gráfico de 60 ruedas, "Niveles de referencia, no órdenes");
+//   3. señales; 4. tesis; 5. indicadores técnicos PLEGADOS (el análisis IA, plegado, lo monta Tenencias).
+//
+// Antes: TENENCIA → INDICADORES → DIAGNÓSTICO.
 //
 // Todo lo que se muestra sale de Firestore y es verificable contra `preciosDiarios`. La ficha NO
 // calcula ni recalcula nada: pinta `indicadoresPosicion` tal como lo dejó el cron de F9.141. Si un
@@ -11,6 +16,9 @@ import { Card } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import { motivoDeAusencia, LEYENDA_SEMAFOROS, ETIQUETA_SEMAFORO, ETIQUETA_CAMPO_SEMAFORO } from '../datos/patrimonioPrecios';
 import type { IndicadoresPosicion, Semaforo, PosicionTipo } from '../types/patrimonio';
+import type { DocTesis } from '../datos/compartido/tesis';
+import { variacionDia } from '../datos/patrimonioAccionesAMirar';
+import { SeccionStops, SeccionSenales, SeccionTesis, Plegable } from './FichaStopsTesis';
 
 // ── Mínimos de ventana ────────────────────────────────────────────────────────
 // GEMELO DECLARADO de functions/src/patrimonioPrecios.ts (`RUEDAS` + las ventanas de cada
@@ -220,13 +228,18 @@ export type PosicionFicha = {
   cantidad: number | null;
   valorUsd: number;
   monedaOrigen: string;
+  /** F9.196 H6 — el valor sale de la cartera viva (valor de hoy), no de la corrida. */
+  deCarteraViva?: boolean;
 };
 
-export default function FichaPosicion({ ident, filas, ind, privado }: {
+export default function FichaPosicion({ ident, filas, ind, privado, tesis = null, onTesisGuardada }: {
   ident: string;                       // "TICKER|tipo|pais", para el encabezado cuando hay ambigüedad
   filas: PosicionFicha[];              // las posiciones de ESA identidad (puede haber varias cuentas)
   ind: IndicadoresPosicion | null;
   privado: boolean;
+  /** F9.196 H5/H6 — la tesis de este ticker (`tesisPosicion`), si hay. */
+  tesis?: DocTesis | null;
+  onTesisGuardada?: (d: DocTesis) => void;
 }) {
   const primera = filas[0];
   const totalUsd = filas.reduce((s, f) => s + f.valorUsd, 0);
@@ -284,7 +297,14 @@ export default function FichaPosicion({ ident, filas, ind, privado }: {
             nota={ind.fechaUltimoPrecio ? `al ${fmtFecha(ind.fechaUltimoPrecio)}` : undefined}
           />
         ) : null}
-        <Fila label="Valor actual" valor={privado ? '•••' : `U$S ${fmtNum(totalUsd, 0)}`} />
+        {ind && variacionDia(ind) !== null && (
+          <Fila label="Variación" valor={fmtPct(variacionDia(ind)!)} nota="último cierre" />
+        )}
+        {/* F9.196 H2a — frescura del precio: de qué fuente salió el precio del día. */}
+        {ind?.precioDia && (
+          <Fila label="Precio del día" valor={ind.precioDia.fuente === 'ppi' ? 'PPI (respaldo)' : 'data912'} nota={`al ${fmtFecha(ind.precioDia.fecha)}`} />
+        )}
+        <Fila label={primera.deCarteraViva ? 'Valor de hoy' : 'Valor actual'} valor={privado ? '•••' : `U$S ${fmtNum(totalUsd, 0)}`} />
         {ind?.pesoEnCartera !== null && ind?.pesoEnCartera !== undefined && (
           <Fila label="Peso en cartera" valor={`${(ind.pesoEnCartera * 100).toFixed(2)}%`} semaforo={ind.semaforos?.peso} />
         )}
@@ -303,7 +323,14 @@ export default function FichaPosicion({ ident, filas, ind, privado }: {
         )}
       </Card>
 
-      {/* ── INDICADORES ───────────────────────────────────────────────────── */}
+      {/* ── F9.196 H6: STOPS → SEÑALES → TESIS ───────────────────────────── */}
+      <SeccionStops ind={ind} privado={privado} />
+      <SeccionSenales ind={ind} />
+      <SeccionTesis ticker={primera.ticker} ind={ind} doc={tesis} onGuardada={d => onTesisGuardada?.(d)} />
+
+      {/* ── INDICADORES (plegados, §7) ─────────────────────────────────────── */}
+      {tieneDatos && ind && (
+      <Plegable titulo="INDICADORES TÉCNICOS">
       {tieneDatos && ind && (
         <Card padding="12px">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
@@ -384,6 +411,8 @@ export default function FichaPosicion({ ident, filas, ind, privado }: {
             como verde. <strong>CALC</strong> = calculado por la app sobre la serie de precios.
           </div>
         </Card>
+      )}
+      </Plegable>
       )}
     </div>
   );
