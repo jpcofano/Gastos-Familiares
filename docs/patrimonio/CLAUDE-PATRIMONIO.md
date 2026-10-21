@@ -364,6 +364,13 @@ Implementación en cadena (cada una depende de la anterior):
   - Contrato completo abajo, en "Precios y serie diaria".
   - Verificación: `scripts/verificarF9149.ts`. Auditoría previa: `scripts/auditF9149.ts`.
 
+- **F9.196** — Acciones, stops y cartera viva *(código cerrado el 21/10/2026; falta el deploy)*
+  - H1/H1b clientes PPI y Bitfinex · H4 stops y señales · H2a sincronización de PPI y valor de hoy ·
+    H2b/H3b/H3c Balanz por archivo y flujos automáticos · H2c Bitfinex · H5 tesis · H6 card
+    "Acciones a mirar" y ficha reordenada.
+  - Contratos abajo, en las secciones "F9.196 …".
+  - Verificación: `scripts/verificarF9196.ts` y `functions/src/{ppiApi,h2a,h2c,h5,patrimonioStops}.test.ts`.
+
 Fases pendientes:
   *(Era "F9.142" en este roadmap; renumerada porque F9.142/F9.143 quedaron tomadas por el
   trabajo de CAFCI.)*
@@ -1243,6 +1250,15 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
   - "Gatillo de tesis": un gatillo que pasa a cumplirse o deja de cumplirse, nivel atención, con
     su `desde` y visible 10 días. Un gatillo nuevo no es un cambio.
   - Entran por `senalesTesis`. El estado se guarda en `indicadoresPosicion.estadoGatillosTesis`.
+- **Arreglos de la revisión (a94b327):**
+  - La clave de un gatillo incluye su texto; los repetidos llevan número de aparición.
+  - Una lectura sin dato no pisa el último estado conocido: cumplido → sin dato → no cumplido es
+    un cambio.
+  - `monedaFundamentals` inválida queda en null (motivo `sin_moneda`), nunca se asume USD. P/E
+    también da `sin_eps` y `eps_no_positivo`.
+  - Días al evento contra hoy en Argentina.
+  - La edición de Juan escribe solo el campo (`updateDoc` con `tesis.<campo>`). La importación va
+    en transacción con `mergeFields`, y su error no frena el resto de `importarAnalisisIA`.
 
 ## Card "Acciones a mirar" y ficha reordenada (F9.196 H6, diseño 3) — contrato
 

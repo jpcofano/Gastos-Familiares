@@ -14,6 +14,14 @@ import {
   type MovimientoCuenta,
 } from '../src/datos/patrimonioMovimientos';
 import type { LecturaCripto } from '../src/datos/patrimonioCripto';
+// F9.196 cierre — H2 (sincronizaciones y valor de hoy), H5 (tesis) y H6 (card y orden de Tenencias).
+import { planSincronizacionPPI, ventanaDesde } from '../functions/src/ppiSincronizacion';
+import { planSincronizacionBitfinex } from '../functions/src/bitfinexSincronizacion';
+import { armarDocCarteraViva } from '../functions/src/carteraVivaCron';
+import { elegirPrecioDia, escalaData912 } from '../functions/src/preciosRespaldo';
+import { normalizarTesis, fusionarTesis, editarTesis, calcularTesis, type Tesis } from '../src/datos/compartido/tesis';
+import { accionesAMirar, ordenarTenencias } from '../src/datos/patrimonioAccionesAMirar';
+import type { IndicadoresPosicion } from '../src/types/patrimonio';
 
 let fallas = 0;
 const ok = (cond: boolean, msg: string, detalle?: unknown) => {
@@ -215,6 +223,68 @@ console.log('\n=== §2 resto de la definición por cuenta ===');
   // Venta mayor a la tenencia: se muestra, no se corrige sola.
   const excede = armarCarteraViva(corrida, [], [mov({ tipo: 'venta', ticker: 'GGAL', cantidad: 150, montoNeto: 900_000 })], precios(6_000), null, [], tcHoy);
   ok(tenencia(excede, 'GGAL') === -50 && excede.inconsistencias.some(i => i.includes('−50') || i.includes('-50')), 'venta mayor a la tenencia: queda la diferencia a la vista', excede.inconsistencias);
+}
+
+console.log('\n=== H2: sincronización de PPI y Bitfinex, y valor de hoy (sintéticos) ===');
+{
+  const balances = {
+    groupedAvailability: [{ currency: 'Dolar Billete | MEP', availability: [{ name: 'MEP', symbol: 'USD', amount: 100, settlement: 'INMEDIATA' }] }],
+    groupedInstruments: [{ name: 'ACCIONES', instruments: [{ ticker: 'GGAL', currency: 'Pesos', price: 6000, quantity: 10, amount: 60000, ppc: { ppcValue: 5000 } }] }],
+  };
+  const movs = [{ agreementDate: '2026-10-15', settlementDate: '2026-10-16', currency: 'Pesos', amount: -60000, price: 6000, description: 'COMPRA GGAL', ticker: 'GGAL', quantity: 10, balance: 0 }];
+  const p1 = planSincronizacionPPI({ cuenta: 'PPI XXXXX', balances, movements: movs, leidoEnISO: '2026-10-20T21:10:00Z', clasificar: () => ({ sector: 'bancos', pais_riesgo: 'AR' }) });
+  const p2 = planSincronizacionPPI({ cuenta: 'PPI XXXXX', balances, movements: movs, leidoEnISO: '2026-10-21T21:10:00Z', clasificar: () => ({ sector: 'bancos', pais_riesgo: 'AR' }) });
+  ok(p1.cuentaViva.saldos?.USD === 100 && p1.movimientos.length === 1 && p1.movimientos[0].id === p2.movimientos[0].id, 'PPI: caja INMEDIATA, movimiento clasificado e id idéntico al re-sincronizar');
+  ok(ventanaDesde({ historialCompleto: true, leidoEn: '2026-10-01T00:00:00Z' }, Date.parse('2026-10-20T21:00:00Z')).dias > 10, 'PPI: tras días sin sincronizar, la ventana cubre el hueco');
+  const bfx = planSincronizacionBitfinex({
+    wallets: [['exchange', 'BTC', 0.1, 0, 0.1, null, null], ['exchange', 'UST', 5, 0, 5, null, null]],
+    funding: [{ origen: 'credits', body: [] }],
+    ledgers: [{ categoria: 101, filas: [[1, 'UST', 'exchange', Date.UTC(2026, 9, 1), null, 5, 5, null, 'Deposit']] }],
+    leidoEnISO: '2026-10-21T12:20:00Z', precioUsd: () => 80000,
+  });
+  ok(bfx.cuentaViva.posiciones.length === 2 && bfx.movimientos[0].ticker === 'USDT' && bfx.movimientos[0].tipo === 'deposito', 'Bitfinex: billeteras por activo y depósito en especie');
+  ok(elegirPrecioDia({ data912: 88_000, monedaSerie: 'ARS', escalaData912: escalaData912('bono', null), ppi: null, hoy: '2026-10-20' })?.precio === 880
+    && elegirPrecioDia({ data912: null, monedaSerie: 'ARS', ppi: { precio: 5765, escala: 1 }, hoy: '2026-10-20' })?.fuente === 'ppi', 'precios: bonos de data912 a 1 VN; respaldo de PPI cuando data912 falla');
+  const doc = armarDocCarteraViva({
+    fechaCorrida: '2026-10-13', posiciones: corridaBase, cuentasVivas: [], movimientos: [], cripto: null, manuales: [],
+    indicadores: [{ ticker: 'GGAL', tipo: 'accion', paisRiesgo: 'AR', precioDia: { precio: 6500, moneda: 'ARS', fecha: '2026-10-20', fuente: 'data912' } }],
+    tc: { valor: 1544.1, fuente: 'dolarapi-bolsa', fechaCotizacion: '2026-10-20', viejo: false },
+  }, '2026-10-20T21:20:00.000Z');
+  ok(doc.frescura.some(l => l.startsWith('Balanz 402665: carga 13/10')) && doc.frescura.some(l => l.startsWith('MEP $1.544, hoy')) && cerca(doc.efectoPreciosUsd + doc.efectoMovimientosUsd, doc.totalUsd - doc.totalCargaUsd),
+    'cron de cartera viva: frescura por cuenta y diferencia = precios + movimientos', doc.frescura);
+}
+
+console.log('\n=== H5: tesis por acción (sintéticos) ===');
+{
+  const t = normalizarTesis({ monedaFundamentals: 'USD', epsGuiaMin: 2, epsGuiaMax: 3, precioObjetivoConsenso: 60, gatillos: [{ texto: 'x ≥ 1', metrica: 'x', operador: '>=', umbral: 1, valorActual: 2 }], proximoEvento: { fecha: '2026-10-24', tipo: 'balance', texto: '' }, cortoPlazo: '', medianoPlazo: '', riesgoPrincipal: '', fuentes: [], fechaDatos: '2026-10-19' }).tesis as Tesis;
+  const c = calcularTesis(t, { valor: 75_000, moneda: 'ARS' }, { tc: 1500, hoy: '2026-10-20' });
+  ok(cerca(c.pe, 20, 1e-9) && cerca(c.potencial, 0.2, 1e-9) && c.gatillos[0].cumplido === true && c.diasAlEvento === 4, 'P/E con MEP, potencial, gatillo y días al evento');
+  const editado = editarTesis(fusionarTesis(null, 'YPFD', t), 'precioObjetivoConsenso', 55);
+  const re = fusionarTesis(editado, 'YPFD', { ...t, precioObjetivoConsenso: 70 });
+  ok(re.tesis.precioObjetivoConsenso === 55 && re.distintoDelChat.precioObjetivoConsenso === 70, 'el campo editado por Juan no se pisa y el del chat queda aparte');
+}
+
+console.log('\n=== H6: Acciones a mirar y orden de Tenencias (sintéticos) ===');
+{
+  const ind = (ticker: string, estado: 'tocado' | 'cerca' | 'ok', dist: number, senales: IndicadoresPosicion['senales'] = []): [string, IndicadoresPosicion] => [`${ticker}|accion|AR`, {
+    ticker, tipo: 'accion', paisRiesgo: 'AR', precio: 100, monedaSerie: 'ARS', calculadoEnISO: '2026-10-20T21:00:00Z',
+    stops: { estado, distStopAtrPct: dist, stopAtr: 95, estadoSma200: 'encima' } as IndicadoresPosicion['stops'],
+    senales, historialStops: [{ fecha: '2026-10-19', cierre: 102, stopAtr: 95, sma50: null, sma200: null }, { fecha: '2026-10-20', cierre: 100, stopAtr: 95, sma50: null, sma200: null }],
+  } as unknown as IndicadoresPosicion];
+  const m = new Map([
+    ind('OKA', 'ok', 0.3),
+    ind('EVE', 'ok', 0.2, [{ id: 'evento_proximo', texto: 'Balance en 4 días', desde: '2026-10-17', nivel: 'info', nueva: false }]),
+    ind('CER', 'cerca', 0.02),
+    ind('TOC', 'tocado', -0.01),
+    ind('GAT', 'ok', 0.25, [{ id: 'gatillo_tesis', texto: 'Gatillo de tesis cumplido: x', desde: '2026-10-20', nivel: 'atencion', nueva: true }]),
+  ]);
+  const a = accionesAMirar(m, new Set(m.keys()));
+  ok(a.filas.map(f => f.ticker).join(',') === 'TOC,CER,GAT,EVE' && a.revisadas === 5, 'solo excepciones, en el orden de §7 (tocado, cerca, gatillo, evento)', a.filas.map(f => f.ticker));
+  ok(cerca(a.filas[0].variacionDia, 100 / 102 - 1, 1e-9) && a.filas.find(f => f.ticker === 'EVE')!.detalle.includes('Balance en 4 días'), 'fila: variación del día y detalle de la segunda línea');
+  ok(accionesAMirar(new Map([ind('OKA', 'ok', 0.3)]), new Set(['OKA|accion|AR'])).filas.length === 0, 'sin excepciones → la card muestra "Ninguna acción…" (0 filas, 1 revisada)');
+  const xs = [...m.keys()].map((k, i) => ({ ticker: k.split('|')[0], totalUsd: 100 - i, identidades: [k] }));
+  ok(ordenarTenencias(xs, 'stop', m)[0].ticker === 'TOC' && ordenarTenencias(xs, 'peso', m)[0].ticker === 'OKA' && ordenarTenencias(xs, 'peso', m, 'ce').map(x => x.ticker).join() === 'CER',
+    'Tenencias: "cerca del stop primero", peso y buscador por ticker');
 }
 
 console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);

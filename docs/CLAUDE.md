@@ -2075,6 +2075,31 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   **Pendiente de cierre manual:** deploy (`functions:leerPreciosCripto,functions:leerPreciosCriptoAhora,hosting,firestore:rules`)
   → revisar la política en Config → declarar Nexo / Nexo 2 / Bitfinex como `credito` desde la card →
   "Actualizar" y leer en "Fuentes:" cuál respondió desde Functions.
+- F9.196 (acciones, stops y cartera viva) — **cerrada el 21/10/2026 (código; falta el deploy)**.
+  Ver `docs/prompts/F9.196-acciones-stops-cartera-viva.md` (base), los addenda y los prompts de
+  cada hito en `docs/prompts/F9.196-*.md`, y el contrato en `docs/patrimonio/CLAUDE-PATRIMONIO.md`
+  (secciones "F9.196 …"). Hitos:
+  - **H1 / H1b** — clientes de PPI y Bitfinex (`functions/src/ppiApi.ts`, `bitfinexApi.ts`): lista
+    blanca de rutas de solo lectura, tokens tapados en logs, timeouts. Confirmados en vivo el 20/10.
+  - **H4** — stops ATR con trinquete, SMA 50/200 y señales de §5 en `indicadoresPosicion`.
+  - **H2a** — `sincronizarPPI` (cron 18:10 + callable `sincronizarPPIAhora`) → `cuentasVivas/ppi`
+    y `movimientosCuenta` (`ppimov_*`); `actualizarCarteraViva` (cron 18:20 + callable
+    `recalcularCarteraViva`) → `carteraViva/ultima`; hero "valor de hoy" en Resumen; respaldo de
+    precio por MarketData de PPI cuando data912 falla.
+  - **H2b / H3b / H3c** — Balanz por archivo (Mis Instrumentos y Movimientos), aportes y retiros
+    automáticos (`flujosAuto`, `decisionesFlujo`, `flujosPatrimonio auto_*`).
+  - **H2c** — `sincronizarBitfinex` (cron 09:20 + callable `sincronizarBitfinexAhora`).
+  - **H5** — tesis por acción en el Chat 2 parte 2 → `tesisPosicion/{ticker}`; P/E, potencial,
+    gatillos y días al evento en el cron de precios; señales "Evento próximo" y "Gatillo de tesis".
+  - **H6** — card "Acciones a mirar" en Resumen, ficha reordenada (stops → señales → tesis →
+    indicadores y análisis IA plegados), Tenencias con orden y buscador.
+  Código compartido en `src/datos/compartido/` (copia en `functions/src/compartido/`,
+  `scripts/verificarCopiasIdenticas.ts`). Verificación: `npx tsx scripts/verificarF9196.ts` (cubre
+  H1–H6 con datos sintéticos) y los bancos `functions/src/{ppiApi,h2a,h2c,h5,patrimonioStops}.test.ts`.
+  `tsc`: 41 → 41, 0 en `functions/`. **Pendiente de cierre manual:** secretos `PPI_*` (5) y
+  `BITFINEX_*` (2) antes del deploy (`actualizarPreciosDiarios` ahora los declara) → deploy de
+  rules + functions + hosting → permiso de Cloud Run invoker para los callables nuevos → probar en la
+  app (ver el reporte de cierre).
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
@@ -2637,6 +2662,16 @@ Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracio
 Inflación en esperados/proyecciones ARS (fase propia, futura): los `itemsEsperados` con `moneda: "ARS"` tienen `montoEsperado` estático. Para proyecciones reales habría que ajustar por inflación mensual (INDEC IPC). Opciones: campo `ajusteInflacion: boolean` + factor mensual en `/config/familia`, o bien dejar que el usuario actualice `montoEsperado` manualmente cada N meses. No se implementa hasta que el caso de uso sea claro.
 
 ## Backlog (post F5.3)
+- **F9.196 — lo que queda después del cierre del código.**
+  - Deploy (secretos `PPI_*` y `BITFINEX_*` primero; después rules, functions y hosting) y permiso
+    de Cloud Run invoker para `sincronizarPPIAhora`, `recalcularCarteraViva` y
+    `sincronizarBitfinexAhora`.
+  - Confirmar en vivo: funding de Bitfinex (hoy vacío) y la escala de data912 para bonos y ONs
+    (se asume por 100 VN).
+  - UI para `decisionesFlujo` (los movimientos sin par quedan en `flujosAuto/estado.pendientes`).
+  - CEDEARs: P/E y potencial necesitan el ratio con el subyacente (hoy `cedear_sin_ratio`).
+  - Binance, Lemon y Nexo por API: fuera de F9.196.
+  - F9.197: no empezada.
 - **F6.6 — PWA share-target (compartir desde el celular).**
   Paridad con el sistema viejo (12_ShareTemp.gs: carpeta Drive temporal + token + TTL). En Firebase
   colapsa: share-target llama a subirEntrante → `entrantes` (F6.7: router detecta tipo y rutea a
@@ -3345,7 +3380,8 @@ Prompt de extracción: `src/datos/patrimonioPromptExtraccion.ts` (F9.145 — ún
 de `docs/patrimonio/` quedó como nota que apunta acá).
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
-**Implementado hasta F9.101.** Detalle completo en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
+**Implementado hasta F9.196** (código cerrado el 21/10/2026; falta el deploy). Detalle completo en
+`docs/patrimonio/CLAUDE-PATRIMONIO.md`.
 
 ### Una corrida es el estado completo a una fecha (F9.189 §1)
 
