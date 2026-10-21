@@ -418,12 +418,24 @@ export type PanoramaParte1 = {
   agenda: { fecha: string | null; evento: string; tickers?: string[] }[] | null;
 };
 
-export function contextoPosicionesV3(e: EntradaContextoV3, panorama: PanoramaParte1) {
+/**
+ * @param tesisPrevias F9.196 H5 — la última tesis guardada por ticker (`tesisPosicion`), para que el
+ *   chat la actualice. Opcional: sin ella el prompt pide la tesis igual.
+ */
+export function contextoPosicionesV3(e: EntradaContextoV3, panorama: PanoramaParte1, tesisPrevias: Record<string, unknown> = {}) {
   const v3 = contextoInformeV3(e);
   // Factor de cada ticker, del motor (el mismo que pinta "Riesgo y escenarios").
   const factorDe = new Map<string, string>();
   for (const f of v3.riesgo.exposicionPorFactor?.porFactor ?? []) for (const t of f.tickers) factorDe.set(t, f.factor);
   const conFactor = <T extends { ticker: string }>(x: T) => ({ ...x, factor: factorDe.get(x.ticker) ?? null });
+  // F9.196 H5 — la tesis se pide solo para las ACCIONES y CEDEARs materiales.
+  const tiposDe = new Map<string, Set<string>>();
+  for (const p of [...e.posiciones, ...e.manuales.map(m => ({ ticker: m.ticker, tipo: m.tipo as string }))]) {
+    if (!tiposDe.has(p.ticker)) tiposDe.set(p.ticker, new Set());
+    tiposDe.get(p.ticker)!.add(p.tipo);
+  }
+  const conTesis = v3.materiales.map(m => m.ticker)
+    .filter(t => [...(tiposDe.get(t) ?? [])].some(tipo => tipo === 'accion' || tipo === 'cedear'));
   return {
     version: VERSION_CONTEXTO_V3,
     parte: 'posiciones' as const,
@@ -437,6 +449,8 @@ export function contextoPosicionesV3(e: EntradaContextoV3, panorama: PanoramaPar
     // F9.195 — el cron de precios valúa las manuales (cantidad × precio live). Al modelo solo le
     // llegan las que quedaron viejas (> DIAS_MANUAL_VIEJA): es el respaldo, no el camino normal.
     manuales: v3.manuales.filter(m => diasEntre(m.fechaValuacion, v3.fecha) > DIAS_MANUAL_VIEJA),
+    conTesis,
+    tesisPrevias: Object.fromEntries(conTesis.filter(t => tesisPrevias[t] !== undefined).map(t => [t, tesisPrevias[t]])),
   };
 }
 

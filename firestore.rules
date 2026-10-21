@@ -230,6 +230,11 @@ service cloud.firestore {
     match /decisionesFlujo/{clave} {
       allow read, write: if esDueno();
     }
+    // F9.196 H5 — tesis por acción. La importa importarAnalisisIA (Admin SDK) y Juan la edita desde
+    // la ficha (los campos editados quedan `editadoPorJuan` y la importación no los pisa).
+    match /tesisPosicion/{ticker} {
+      allow read, write: if esDueno();
+    }
     match /cafciCarteras/{id} {
       allow read, write: if esDueno();
     }

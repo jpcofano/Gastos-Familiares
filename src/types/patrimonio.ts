@@ -1,6 +1,7 @@
 // Tipos del contrato de patrimonio (F9.84 / F9.90).
 // NO mezclar con src/types/index.ts (gastos). Colecciones propias, aislamiento total.
 
+import type { CalculoTesis } from '../datos/compartido/tesis';
 // F9.196 H2 — definidos en src/datos/compartido/tiposPatrimonio.ts (código compartido con las
 // Functions). Se re-exportan acá para que los imports de siempre sigan andando.
 import type { PosicionTipo, PaisRiesgo, PosicionRaw, Posicion, PosicionManual } from '../datos/compartido/tiposPatrimonio';
@@ -134,6 +135,10 @@ export type IndicadoresPosicion = {
     fecha: string; stopAtr: number | null; sma50: number | null; sma200: number | null; cierre: number;
   }> | null;
   senales?: SenalPosicion[] | null;
+  // F9.196 H2a — precio del día con su fuente (data912 o PPI), por unidad de cantidad.
+  precioDia?: { precio: number; moneda: 'ARS' | 'USD'; fecha: string; fuente: 'data912' | 'ppi'; escala: number | null } | null;
+  // F9.196 H5 — cálculos de la tesis con el cierre del día (P/E, potencial, gatillos, días al evento).
+  tesisCalculo?: (CalculoTesis & { fecha: string }) | null;
 };
 
 /** F9.196 §4 — espejo de `Stops` de functions/src/patrimonioPrecios.ts. */

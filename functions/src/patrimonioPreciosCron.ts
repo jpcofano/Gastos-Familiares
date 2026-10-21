@@ -7,6 +7,8 @@ import { FieldValue, type DocumentReference, type Firestore } from 'firebase-adm
 import * as PP from './patrimonioPrecios';
 import * as RP from './preciosRespaldo';
 import type { ClientePPI } from './ppiApi';
+import { calcularTesis, senalesDeTesis, type DocTesis, type EstadoGatillo } from './compartido/tesis';
+import { tcDelDia } from './carteraVivaCron';
 
 export type ObjetivoPrecio = {
   ticker: string;
@@ -248,6 +250,8 @@ export async function correrActualizacionPrecios(
   }
   const live = await bajarPanelesLive(panelesLive);
   const tcHoy = await tcHoyAdmin(db);
+  // F9.196 H5 — el MEP del día (resolverTcCarteraViva) para pasar el precio a la moneda de la tesis.
+  const tcTesis = (await tcDelDia(db, new Date().toISOString()).catch(() => null))?.valor ?? tcHoy;
   const tcSerie = await serieTcDeMercado(db);   // F9.148 §4 — una sola lectura para todos
 
   const resultados: ResultadoTicker[] = [];
@@ -256,7 +260,7 @@ export async function correrActualizacionPrecios(
   for (const o of objetivos) {
     try {
       const r = await actualizarUnTicker(
-        db, o, live, totalUsd, tcHoy, tcSerie, escribir, { fechaCorrida, fechasCorrida }, ppi);
+        db, o, live, totalUsd, tcHoy, tcSerie, escribir, { fechaCorrida, fechasCorrida }, ppi, tcTesis);
       resultados.push(r);
       if (r.cobertura === 'con_serie' || r.motivo === 'fuente_sin_serie') await dormir(PAUSA_MS);
     } catch (e) {
@@ -328,6 +332,7 @@ async function actualizarUnTicker(
   escribir: boolean,
   corridas: { fechaCorrida: string | null; fechasCorrida: string[] },
   ppi: ClientePPI | null = null,
+  tcTesis: number | null = null,
 ): Promise<ResultadoTicker> {
   const refPrecios = db.collection('preciosDiarios').doc(o.docId);
   const refInd = db.collection('indicadoresPosicion').doc(o.docId);
@@ -472,7 +477,11 @@ async function actualizarUnTicker(
   // conversión se descarta entera (`dolarizarSerie` devuelve null) y la performance queda en
   // pesos, dicho en `monedaPerformance`. Nunca una serie con agujeros.
   const serieUsd = monedaSerie === 'USD' ? null : dolarizarSerie(util, tcSerie);
-  const stops = PP.llevaStops(o.tipo) ? await contextoStops(refInd, o, corridas) : undefined;
+  const ultimoPunto = PP.soloBuenos(util).slice(-1)[0];
+  const cs = PP.llevaStops(o.tipo) && ultimoPunto
+    ? await contextoStops(refInd, o, corridas, { cierre: ultimoPunto.c, moneda: monedaSerie, fecha: ultimoPunto.f, tc: tcTesis })
+    : null;
+  const stops = cs?.ctx;
   const ind = PP.calcIndicadores(util, { serieUsd, yaEnUsd: monedaSerie === 'USD', stops });
   const peso = totalUsd > 0 ? o.valorUsd / totalUsd : null;
   const ruedas = ruedasParaSalir(o.valorUsd, ind.montoOperadoProm30d, monedaSerie, tcHoy);
@@ -494,6 +503,7 @@ async function actualizarUnTicker(
       calculadoEnISO: new Date().toISOString(),
       estadoSerie: estado, monedaSerie, motivo: null, ...campoPrecioDia,
       pesoEnCartera: peso, ruedasParaSalir: ruedas,
+      ...(cs?.extra ?? {}),
       ...ind,
       semaforos: { ...retirados, ...PP.calcSemaforos(ind, PP.claseUmbral(o.tipo, o.paisRiesgo), peso) },
     },
@@ -555,8 +565,22 @@ async function contextoStops(
   refInd: DocumentReference,
   o: ObjetivoPrecio,
   corridas: { fechaCorrida: string | null; fechasCorrida: string[] },
-): Promise<PP.ContextoStops> {
+  precio: { cierre: number; moneda: 'ARS' | 'USD'; fecha: string; tc: number | null },
+): Promise<{ ctx: PP.ContextoStops; extra: Record<string, unknown> }> {
   const d = (await refInd.get()).data() ?? {};
+  // F9.196 H5 — tesis: P/E, potencial, gatillos y días al evento con el cierre del día, y las
+  // señales "Evento próximo" y "Gatillo de tesis" (§5) por `senalesTesis`.
+  const docTesis = (await refInd.firestore.collection('tesisPosicion').doc(o.ticker).get()).data() as DocTesis | undefined;
+  let senalesTesis: PP.ContextoStops['senalesTesis'] = [];
+  const extra: Record<string, unknown> = {};
+  if (docTesis?.tesis) {
+    const calc = calcularTesis(docTesis.tesis, { valor: precio.cierre, moneda: precio.moneda }, { tc: precio.tc, hoy: precio.fecha, esCedear: o.tipo === 'cedear' });
+    const previoGatillos = Array.isArray(d.estadoGatillosTesis) ? (d.estadoGatillosTesis as EstadoGatillo[]) : [];
+    const r = senalesDeTesis(calc, docTesis.tesis, previoGatillos, precio.fecha);
+    senalesTesis = r.senales;
+    extra.tesisCalculo = JSON.parse(JSON.stringify({ ...calc, fecha: precio.fecha }));
+    extra.estadoGatillosTesis = r.estado;
+  }
   const previo: PP.PrevioStops = {
     stops: (d.stops as PP.Stops | null | undefined) ?? null,
     historialStops: Array.isArray(d.historialStops) ? (d.historialStops as PP.LecturaStop[]) : [],
@@ -568,7 +592,7 @@ async function contextoStops(
     corridasPresente: o.corridas, fechasCorrida: corridas.fechasCorrida,
   });
   if (reinicio) console.log(`[precios] ${o.docId}: trinquete del stop ATR reiniciado (${reinicio})`);
-  return { identidad, fechaCorrida: corridas.fechaCorrida, previo, reinicio };
+  return { ctx: { identidad, fechaCorrida: corridas.fechaCorrida, previo, reinicio, senalesTesis }, extra };
 }
 
 /** Ruedas necesarias para liquidar la posición al monto operado promedio. */

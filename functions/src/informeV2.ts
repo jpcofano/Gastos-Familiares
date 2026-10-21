@@ -250,6 +250,9 @@ export function buildPromptPosicionesV3(contexto: Record<string, unknown>): stri
   const fecha = typeof contexto['fecha'] === 'string' ? contexto['fecha'] : null;
   const panorama = (contexto['panorama'] ?? {}) as Record<string, unknown>;
   const sinPanorama = !panorama['sectorial'] && !panorama['diagnostico'];
+  // F9.196 H5 — tesis por acción: solo para las acciones y CEDEARs materiales (`conTesis`). Un
+  // contexto viejo sin `conTesis` no pide tesis (el formato de siempre sigue andando).
+  const conTesis = Array.isArray(contexto['conTesis']) ? (contexto['conTesis'] as unknown[]).filter(x => typeof x === 'string') as string[] : [];
 
   return `Sos un analista de carteras especializado en Argentina y mercados globales. Trabajás para el titular de una cartera familiar. La decisión es siempre suya.${fecha ? ` Hoy es ${fecha}.` : ''}
 Este es el informe PARTE 2 de 2: una ficha por posición. El panorama de la cartera completa (parte 1) ya está hecho y viene abajo en PANORAMA: usalo como contexto y no lo repitas.${sinPanorama ? '\nATENCIÓN: PANORAMA vino vacío (la parte 1 no se corrió o no se importó). Trabajá igual, pero mencioná en cada "situacionActual" solo lo que verifiques vos.' : ''}
@@ -281,25 +284,37 @@ ${j('menores')}
 
 POSICIONES MANUALES SIN VALUACIÓN RECIENTE (la app las valúa sola todos los días hábiles; acá llegan solo las que quedaron viejas — si viene [], devolvé "manuales": []):
 ${j('manuales')}
-
+${conTesis.length ? `
+TESIS: para estas acciones y CEDEARs (${conTesis.length}): ${conTesis.join(', ')}. La última tesis guardada de cada una (para actualizarla, no para copiarla):
+${j('tesisPrevias')}
+` : ''}
 ═══ QUÉ DEVOLVER ═══
 1) "posiciones":
    - "analisis": una entrada por posición MATERIAL, en orden de peso, máx. 130 palabras por resultado (sin contar fuentes):
        queEs (1 frase); situacionActual (2-3 frases con info de hoy); riesgos (2); rolEnCartera (1 frase: qué aporta o qué concentra, usando "factor" y los desvíos de política); queHariaEnCadaCaso (2 casos condicionales; OJO: acá la clave de las opciones es "acciones", no "opciones"); fuentes (≤ 2 URLs).
    - "notas": para posiciones MENORES, una línea SOLO si hay una novedad relevante; si no, se omite.
-2) "manuales": solo para las que vinieron arriba: último cierre verificado; valorUsd = cantidad × precioUnitarioUsd. Si no se verifica → null en precio y valor.
+2) "manuales": solo para las que vinieron arriba: último cierre verificado; valorUsd = cantidad × precioUnitarioUsd. Si no se verifica → null en precio y valor.${conTesis.length ? `
+3) "tesis": en cada entrada de "analisis" de un ticker de la lista TESIS, un bloque "tesis" al lado de "resultado" (para los demás tickers, no lo pongas). Reglas:
+   - Datos CON FUENTE Y FECHA (en "fuentes" y "fechaDatos"). Si no hay dato, va null; NUNCA inventar.
+   - Lenguaje condicional, como el resto del informe ("si se confirma X, …").
+   - Sin precio objetivo propio: solo el consenso publicado (precioObjetivoConsenso), como dato.
+   - EPS y precio objetivo por acción del MISMO instrumento y en "monedaFundamentals". No calcules P/E ni potencial: los calcula la app con el precio del día.
+   - "gatillos": condiciones medibles de la tesis (métrica, operador ">=" o "<=", umbral y el valor actual si lo encontrás, si no null).` : ''}
 
 ═══ FORMATO ═══
 Respondé ÚNICAMENTE con UN bloque \`\`\`json, sin texto afuera ni comentarios adentro, con esta forma exacta:
 {
   "posiciones": {
-    "analisis": [{ "ticker": "…", "resultado": { "queEs": "…", "situacionActual": "…", "riesgos": ["…", "…"], "rolEnCartera": "…", "queHariaEnCadaCaso": [{ "caso": "…", "acciones": ["…", "…"], "costo": "…" }], "fuentes": ["…"] } }],
+    "analisis": [{ "ticker": "…", "resultado": { "queEs": "…", "situacionActual": "…", "riesgos": ["…", "…"], "rolEnCartera": "…", "queHariaEnCadaCaso": [{ "caso": "…", "acciones": ["…", "…"], "costo": "…" }], "fuentes": ["…"] }${conTesis.length ? `, "tesis": ${ESQUEMA_TESIS}` : ''} }],
     "notas": [{ "ticker": "…", "nota": "…" }]
   },
   "manuales": [{ "id": "…", "ticker": "…", "precioUnitarioUsd": 0, "valorUsd": 0, "fechaPrecio": "YYYY-MM-DD", "fuente": "…" }]
 }
 ${CIERRE_V3}`;
 }
+
+/** F9.196 §6 — forma exacta del bloque `tesis` del Chat 2. */
+export const ESQUEMA_TESIS = `{ "monedaFundamentals": "USD" | "ARS", "epsGuiaMin": 0 | null, "epsGuiaMax": 0 | null, "epsPeriodo": "2026" | null, "precioObjetivoConsenso": 0 | null, "analistas": 0 | null, "recomendacionConsenso": "…" | null, "gatillos": [{ "texto": "…", "metrica": "…", "operador": ">=" | "<=", "umbral": 0, "valorActual": 0 | null }], "proximoEvento": { "fecha": "YYYY-MM-DD" | null, "tipo": "balance" | "otro", "texto": "…" }, "cortoPlazo": "…", "medianoPlazo": "…", "riesgoPrincipal": "…", "fuentes": [{ "texto": "…", "fecha": "YYYY-MM-DD" }], "fechaDatos": "YYYY-MM-DD" }`;
 
 /** F9.194 — despacho por parte. Sin `parte` (bundle de F9.191) se trata como estrategia. */
 export function buildPromptV3(contexto: Record<string, unknown>): string {

@@ -64,6 +64,7 @@ import {
 import PatrimonioIngesta from './PatrimonioIngesta';
 import PatrimonioBalanz from './PatrimonioBalanz';
 import { posicionesDeCarteraViva } from '../datos/patrimonioCarteraViva';
+import { cargarTodasLasTesis } from '../datos/patrimonioTesis';
 import { cargarCarteraViva, sincronizarPPIAhora, sincronizarBitfinexAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
 
 /** F9.196 H2a — el valor de hoy como dato aparte para el informe (que sigue sobre la corrida). */
@@ -5268,17 +5269,19 @@ export default function Patrimonio() {
 
     // Parte 2: lo último importado de la parte 1, leído fresco de Firestore (no del estado, que
     // puede no haberse refrescado todavía). Fail-soft: sin panorama, el prompt lo avisa.
-    const [glob, sec, age] = await Promise.all([
+    const [glob, sec, age, tesisPrevias] = await Promise.all([
       cargarUltimoGlobal().catch(() => null),
       cargarUltimoSectorial().catch(() => null),
       cargarUltimaAgenda().catch(() => null),
+      // F9.196 H5 — la última tesis de cada acción, para que el Chat 2 la actualice (fail-soft).
+      cargarTodasLasTesis().then(m => Object.fromEntries(Object.entries(m).map(([t, d]) => [t, d.tesis]))).catch(() => ({})),
     ]);
     return contextoPosicionesV3(entrada, {
       generadoEnISO: glob?.generadoEnISO ?? sec?.generadoEnISO ?? null,
       diagnostico: glob?.resultado.diagnostico ?? null,
       sectorial: sec?.resultado ?? null,
       agenda: age ? age.eventos.map(ev => ({ fecha: ev.fecha, evento: ev.evento, tickers: ev.tickers })) : null,
-    });
+    }, tesisPrevias);
   }
 
   async function handleAbrirChatCompleto(parte: 'estrategia' | 'posiciones' = 'estrategia') {

@@ -1217,6 +1217,33 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
 - Al terminar corre los flujos automáticos (regla de cripto: mismo activo, 3 días o menos) y
   recalcula la cartera viva. La card cripto toma de ahí las cantidades de Bitfinex.
 
+## Tesis por acción (F9.196 H5) — contrato
+
+- **El Chat 2 propone, la app calcula y Juan edita.** El prompt de la parte 2 (`buildPromptPosicionesV3`)
+  pide un bloque `tesis`, con la forma de §6 (`ESQUEMA_TESIS`), al lado de `resultado`. Solo lo pide
+  para las acciones y CEDEARs materiales (`contextoPosicionesV3.conTesis`), y le pasa la última
+  tesis guardada para que la actualice.
+- **Reglas del prompt:** datos con fuente y fecha; `null` si no hay dato; lenguaje condicional; sin
+  precio objetivo propio, solo el consenso publicado. Los informes viejos, sin `tesis`, importan
+  igual.
+- **Dónde se guarda:** `tesisPosicion/{ticker}` (`src/datos/compartido/tesis.ts`). Un campo con
+  `editadoPorJuan` no lo pisa la importación siguiente; si el chat trae otro valor, queda en
+  `distintoDelChat` ("dato del chat distinto: X").
+- **Cálculos** (`calcularTesis`, con el cierre del día en el cron de precios, en
+  `indicadoresPosicion.tesisCalculo`):
+  - P/E = precio ÷ promedio del EPS. Si las monedas no coinciden, el precio se pasa con el MEP de
+    `resolverTcCarteraViva`.
+  - Potencial = consenso ÷ precio − 1.
+  - Cada gatillo se marca cumplido según su operador.
+  - Se calculan los días al evento.
+  - ⚠ En un **CEDEAR**, P/E y potencial quedan en null (`cedear_sin_ratio`): el precio es del
+    certificado y los fundamentals son del subyacente.
+- **Señales (§5):**
+  - "Evento próximo": a 7 días o menos, nivel info.
+  - "Gatillo de tesis": un gatillo que pasa a cumplirse o deja de cumplirse, nivel atención, con
+    su `desde` y visible 10 días. Un gatillo nuevo no es un cambio.
+  - Entran por `senalesTesis`. El estado se guarda en `indicadoresPosicion.estadoGatillosTesis`.
+
 ## Decisiones cerradas — no re-litigar
 
 - Vara USD; horizonte 1–3 años; postura crecer aunque oscile.

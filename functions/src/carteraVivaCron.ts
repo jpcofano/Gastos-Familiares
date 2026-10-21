@@ -107,7 +107,7 @@ export function armarDocCarteraViva(e: EntradasCarteraViva, ahoraISO: string): D
 }
 
 /** El MEP del día (Addendum 1): dolarapi, con tcDiario de respaldo. Nunca escribe en tcDiario. */
-async function tcDelDia(db: Firestore, ahoraISO: string): Promise<TcCarteraViva | null> {
+export async function tcDelDia(db: Firestore, ahoraISO: string): Promise<TcCarteraViva | null> {
   let api: { status: number; body: unknown } | null = null;
   try {
     const res = await fetch('https://dolarapi.com/v1/dolares/bolsa', { signal: AbortSignal.timeout(10_000) });

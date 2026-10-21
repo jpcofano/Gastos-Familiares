@@ -48,6 +48,7 @@ import { clientePPIDeInstancia, type ClientePPI } from './ppiApi';
 import { sincronizarPPI as sincronizarPPIConCliente, flujosSinRomper } from './ppiSincronizacion';
 import { actualizarCarteraViva as actualizarCarteraVivaEn } from './carteraVivaCron';
 import { crearClienteBitfinex } from './bitfinexApi';
+import { importarTesis } from './tesisImport';
 import { sincronizarBitfinex as sincronizarBitfinexConCliente } from './bitfinexSincronizacion';
 import { backfillTc } from './tcBackfill';
 // F9.190 §2 — señales de mercado de la reserva: módulo puro, la red se inyecta.
@@ -5605,6 +5606,11 @@ export const importarAnalisisIA = onCall(
             partes.push(erroresPorTicker.length > 0
               ? `posiciones: ${importados} importadas, ${erroresPorTicker.length} con error (${erroresPorTicker.join('; ')})`
               : `posiciones: ${importados} importadas`);
+            // F9.196 H5 — la tesis por acción (bloque hermano de "resultado"). Sin tesis: nada.
+            const rT = await importarTesis(db2, items as Array<{ ticker?: unknown; tesis?: unknown }>, meta as unknown as Record<string, unknown>);
+            if (rT.importadas || rT.avisos.length) {
+              partes.push(`tesis: ${rT.importadas}${rT.distintos ? ` (${rT.distintos} campo(s) editados por vos con otro dato del chat)` : ''}${rT.avisos.length ? ` · avisos: ${rT.avisos.slice(0, 5).join('; ')}` : ''}`);
+            }
           } else {
             partes.push('posiciones: sin datos');
           }
