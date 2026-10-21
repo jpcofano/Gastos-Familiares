@@ -1594,11 +1594,13 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
   );
 }
 
-function ResumenTab({ M, Mhoy, carteraViva, onCarteraViva, posicionesCorrida, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
+function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, posicionesCorrida, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   /** F9.196 H2a — métricas sobre la cartera viva (pesos, riesgo); `M` es la corrida. */
   Mhoy: PatMetrics;
   carteraViva: DocCarteraViva | null;
+  /** Fecha de corrida de una cartera viva desactualizada (calculada sobre otra corrida), o null. */
+  carteraVivaVieja: string | null;
   onCarteraViva: () => void;
   /** La corrida (para la card cripto hasta H2c); `posiciones` es la cartera viva si existe. */
   posicionesCorrida: Posicion[];
@@ -1704,6 +1706,11 @@ function ResumenTab({ M, Mhoy, carteraViva, onCarteraViva, posicionesCorrida, tc
           TC ${Math.round(tc).toLocaleString('es-AR')}
         </div>
         <div style={{ textAlign: 'center', marginTop: 10 }}>
+          {carteraVivaVieja && (
+            <div style={{ fontSize: 11, opacity: .7, marginBottom: 6 }}>
+              El valor de hoy guardado es de la carga del {fmtFecha(carteraVivaVieja)}: recalculalo con la corrida nueva.
+            </div>
+          )}
           <button
             onClick={() => recalcularCarteraViva()
               .then(() => { onToast('Valor de hoy calculado.', false); onCarteraViva(); })
@@ -4916,6 +4923,13 @@ export default function Patrimonio() {
   // F9.196 H2a — cartera viva (`carteraViva/ultima`, la escribe actualizarCarteraViva).
   const [carteraViva, setCarteraViva] = useState<DocCarteraViva | null>(null);
   useEffect(() => { cargarCarteraViva().then(setCarteraViva).catch(e => { console.warn('[carteraViva]', e); setCarteraViva(null); }); }, []);
+  // Después de una corrida nueva o de importar Balanz: recalcular el valor de hoy (fail-soft).
+  const recalcularYRecargarCarteraViva = () => {
+    recalcularCarteraViva()
+      .then(() => cargarCarteraViva())
+      .then(setCarteraViva)
+      .catch(e => console.warn('[carteraViva] no se pudo recalcular:', e));
+  };
   // F9.196 Addendum 2 §A — "Actualizar Balanz" (Mis Instrumentos → cuentasVivas).
   const [showBalanz,       setShowBalanz]       = useState(false);
   const [showModalFijo,    setShowModalFijo]    = useState(false);
@@ -5467,7 +5481,10 @@ export default function Patrimonio() {
   const M = todasPosiciones.length > 0 ? calcMetrics(todasPosiciones) : null;
   // F9.196 H2a — pesos, riesgo y reserva sobre la cartera viva (el valor de HOY). Evolución,
   // Benchmark, informe IA, Plan, Optimización y decisiones siguen sobre la corrida (`M`).
-  const posicionesVivas = carteraViva ? posicionesDeCarteraViva(carteraViva, carteraViva.fechaCorrida) : null;
+  // Una cartera viva calculada sobre OTRA corrida (Juan ingirió una nueva y todavía no se recalculó)
+  // no se usa: pesos y riesgo vuelven a la corrida hasta recalcular.
+  const cvVigente = carteraViva && carteraViva.fechaCorrida === fechaCorrida ? carteraViva : null;
+  const posicionesVivas = cvVigente ? posicionesDeCarteraViva(cvVigente, cvVigente.fechaCorrida) : null;
   const posicionesHoy = posicionesVivas && posicionesVivas.length ? posicionesVivas : posiciones;
   const todasHoy = [...posicionesHoy, ...posicionesManuales.map(manualToPosicion)];
   const Mhoy = todasHoy.length > 0 ? calcMetrics(todasHoy) : M;
@@ -5572,7 +5589,7 @@ export default function Patrimonio() {
         <>
           {tab === 'resumen' && (
             <ResumenTab
-              M={M} Mhoy={Mhoy ?? M} carteraViva={carteraViva} posicionesCorrida={posiciones}
+              M={M} Mhoy={Mhoy ?? M} carteraViva={cvVigente} carteraVivaVieja={!!carteraViva && !cvVigente ? carteraViva.fechaCorrida : null} posicionesCorrida={posiciones}
               onCarteraViva={() => { cargarCarteraViva().then(setCarteraViva).catch(() => setCarteraViva(null)); }}
               tc={tc} fechaCorrida={fechaCorrida}
               activosFijos={activosFijos}
@@ -5779,7 +5796,7 @@ export default function Patrimonio() {
           activosFijos={activosFijos}
           totalManualesUsd={totalManualesUsd}
           metricasJson={metricasJson}
-          onConfirmado={() => { setShowIngesta(false); cargar(); setToastIngestaOk(true); }}
+          onConfirmado={() => { setShowIngesta(false); cargar(); setToastIngestaOk(true); recalcularYRecargarCarteraViva(); }}
           onClose={() => setShowIngesta(false)}
         />
       )}
@@ -5790,7 +5807,7 @@ export default function Patrimonio() {
           indicadores={indicadores}
           tc={tc}
           fechaCorrida={fechaCorrida}
-          onGuardado={texto => { setShowBalanz(false); setToast({ texto, error: false }); }}
+          onGuardado={texto => { setShowBalanz(false); setToast({ texto, error: false }); recalcularYRecargarCarteraViva(); }}
           onClose={() => setShowBalanz(false)}
         />
       )}

@@ -18,6 +18,43 @@ import type { ClientePPI } from './ppiApi';
 
 export const DIAS_PRIMERA = 1095;
 export const DIAS_SIGUIENTES = 10;
+/** Solapamiento con la última lectura buena, para no dejar huecos si hubo días sin sincronizar. */
+export const DIAS_SOLAPAMIENTO = 3;
+
+/**
+ * Desde cuándo pedir movimientos. Sin historial completo: 3 años. Con historial: lo que sea más
+ * viejo entre "hace 10 días" y "la última lectura buena − 3 días", así una racha de fallas (por
+ * ejemplo credenciales vencidas) no deja un hueco permanente. Nunca más de 3 años.
+ */
+export function ventanaDesde(previo: { historialCompleto?: unknown; leidoEn?: unknown } | null, ahoraMs: number): { desdeMs: number; dias: number } {
+  const tope = ahoraMs - DIAS_PRIMERA * 86_400_000;
+  if (!previo || previo.historialCompleto !== true) return { desdeMs: tope, dias: DIAS_PRIMERA };
+  let desdeMs = ahoraMs - DIAS_SIGUIENTES * 86_400_000;
+  const ultima = typeof previo.leidoEn === 'string' ? Date.parse(previo.leidoEn) : NaN;
+  if (Number.isFinite(ultima)) desdeMs = Math.min(desdeMs, ultima - DIAS_SOLAPAMIENTO * 86_400_000);
+  desdeMs = Math.max(desdeMs, tope);
+  return { desdeMs, dias: Math.ceil((ahoraMs - desdeMs) / 86_400_000) };
+}
+
+/** Distancia máxima, en días, entre un movimiento y el tcDiario que lo convierte. */
+export const TC_DISTANCIA_MAX_DIAS = 5;
+
+/**
+ * El TC de un movimiento del día F. `tcDiario[D]` guarda el cierre de D−1, así que se usa el doc
+ * del día SIGUIENTE más cercano y, si no hay, el anterior más cercano, siempre a
+ * `TC_DISTANCIA_MAX_DIAS` días o menos. Más lejos: null (va a `sinTc`, no se inventa).
+ */
+export function crearTcDe(tc: Map<string, number>): (fecha: string) => number | null {
+  const fechas = [...tc.keys()].filter(f => (tc.get(f) ?? 0) > 0).sort();
+  const dias = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
+  return (f: string) => {
+    const sig = fechas.find(x => x > f);
+    if (sig && dias(sig, f) <= TC_DISTANCIA_MAX_DIAS) return tc.get(sig)!;
+    const ant = [...fechas].reverse().find(x => x <= f);
+    if (ant && dias(ant, f) <= TC_DISTANCIA_MAX_DIAS) return tc.get(ant)!;
+    return null;
+  };
+}
 
 export type DocCuentaVivaPPI = CuentaViva & {
   fuente: 'ppi_api';
@@ -96,9 +133,9 @@ export async function sincronizarPPI(
   const ref = db.collection('cuentasVivas').doc('ppi');
   try {
     const previo = await ref.get();
-    const dias = previo.exists && previo.data()?.historialCompleto === true ? DIAS_SIGUIENTES : DIAS_PRIMERA;
+    const { desdeMs, dias } = ventanaDesde(previo.exists ? (previo.data() ?? null) : null, ahora());
     const hoy = fechaArg(ahora());
-    const desde = fechaArg(ahora() - dias * 86_400_000);
+    const desde = fechaArg(desdeMs);
     const q = `accountNumber=${encodeURIComponent(numeroCuenta)}`;
     const balances = await cliente.get(`Account/BalancesAndPositions?${q}`);
     const movements = await cliente.get(`Account/Movements?${q}&dateFrom=${desde}&dateTo=${hoy}`);
@@ -106,9 +143,11 @@ export async function sincronizarPPI(
       cuenta, balances, movements, leidoEnISO: new Date(ahora()).toISOString(),
       clasificar: await clasificadorDeCorrida(db, cuenta),
     });
-    await ref.set({ ...limpio(plan.cuentaViva), sincronizadoEn: FieldValue.serverTimestamp(), errorEn: null });
+    // Primero los movimientos y DESPUÉS la cuenta viva con `historialCompleto: true`: si la escritura
+    // de movimientos falla a mitad, la próxima corrida vuelve a pedir la ventana entera.
     await escribirMovimientos(db, plan.movimientos);
-    const flujos = await actualizarFlujosAutomaticos(db);
+    await ref.set({ ...limpio(plan.cuentaViva), sincronizadoEn: FieldValue.serverTimestamp(), errorEn: null });
+    const flujos = await flujosSinRomper(db, 'sincronizarPPI');
     return { ...plan.resumen, dias, flujos };
   } catch (e) {
     // La última lectura buena se conserva (merge): la card muestra "PPI sin sincronizar desde dd/mm".
@@ -119,7 +158,20 @@ export async function sincronizarPPI(
 
 // ── Flujos automáticos (Addendum 2 §C) ───────────────────────────────────────
 
-export type ResumenFlujos = { internas: number; pendientes: number; flujos: number; sinTc: number };
+export type ResumenFlujos = { internas: number; pendientes: number; flujos: number; sinTc: number; error?: string };
+
+/**
+ * Los flujos corren aparte: si fallan, NO marcan como fallida la sincronización de la cuenta (que
+ * ya se leyó bien). El error queda en el log y en el resumen.
+ */
+export async function flujosSinRomper(db: Firestore, quien: string): Promise<ResumenFlujos> {
+  try { return await actualizarFlujosAutomaticos(db); }
+  catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.error(`[${quien}] flujos automáticos: ${error}`);
+    return { internas: 0, pendientes: 0, flujos: 0, sinTc: 0, error };
+  }
+}
 
 /**
  * Depósitos y retiros de TODAS las fuentes (PPI, Balanz, …) → apareo de transferencias internas y
@@ -128,10 +180,13 @@ export type ResumenFlujos = { internas: number; pendientes: number; flujos: numb
  * con id determinista (`auto_<hash>`) y el movimiento queda con su `flujoId`.
  */
 export async function actualizarFlujosAutomaticos(db: Firestore): Promise<ResumenFlujos> {
-  const [movSnap, decSnap, tcSnap] = await Promise.all([
+  const [movSnap, decSnap, tcSnap, autoSnap] = await Promise.all([
     db.collection('movimientosCuenta').where('tipo', 'in', ['deposito', 'retiro']).get(),
     db.collection('decisionesFlujo').get(),
-    db.collection('tcDiario').orderBy(FieldPath.documentId(), 'desc').limit(1500).get(),
+    // tcDiario entero (~1.200 docs, sin huecos desde 2023-06-01): un movimiento viejo no puede caer
+    // en un TC de otra época.
+    db.collection('tcDiario').orderBy(FieldPath.documentId()).get(),
+    db.collection('flujosPatrimonio').where('automatico', '==', true).get(),
   ]);
   const movimientos: MovimientoCuenta[] = movSnap.docs.map(d => ({ ...(d.data() as MovimientoCuenta), id: d.id }));
   const decisiones: Record<string, DecisionFlujo> = {};
@@ -139,17 +194,7 @@ export async function actualizarFlujosAutomaticos(db: Firestore): Promise<Resume
     const v = d.data().decision;
     if (v === 'aporte' || v === 'retiro' || v === 'interna') decisiones[d.id] = v;
   }
-  const tc = new Map(tcSnap.docs.map(d => [d.id, Number(d.data().tcUsdArs)] as const));
-  // tcDiario[D] guarda el cierre de D−1: el TC de un movimiento del día F es el doc del día siguiente
-  // o, si no está, el más cercano anterior.
-  const fechasTc = [...tc.keys()].sort();
-  const tcDe = (f: string) => {
-    const sig = fechasTc.find(x => x > f);
-    const v = sig ? tc.get(sig) : undefined;
-    if (v && v > 0) return v;
-    const ant = [...fechasTc].reverse().find(x => x <= f);
-    return ant ? tc.get(ant) ?? null : null;
-  };
+  const tcDe = crearTcDe(new Map(tcSnap.docs.map(d => [d.id, Number(d.data().tcUsdArs)] as const)));
   const r = flujosAutomaticos(movimientos, decisiones, tcDe);
   const claves = new Map(movimientos.map((m, i) => [m, clavesDe(movimientos)[i]] as const));
   const resumen = (m: MovimientoCuenta) => ({
@@ -157,16 +202,35 @@ export async function actualizarFlujosAutomaticos(db: Firestore): Promise<Resume
     montoNeto: m.montoNeto, ticker: m.ticker ?? null, cantidad: m.cantidad ?? null, origen: m.origen,
   });
 
-  const batch = db.batch();
+  // Escrituras en lotes de 400 (el límite de Firestore es 500 por batch).
+  type Op = (b: FirebaseFirestore.WriteBatch) => void;
+  const ops: Op[] = [];
+  const vigentes = new Set<string>();
   for (const f of r.flujos) {
     const id = `auto_${hashId(f.movimientoClave)}`;
-    batch.set(db.collection('flujosPatrimonio').doc(id), {
+    vigentes.add(id);
+    ops.push(b => b.set(db.collection('flujosPatrimonio').doc(id), {
       fecha: new Date(`${f.fecha}T12:00:00-03:00`), tipo: f.tipo, montoUsd: f.montoUsd, cuenta: f.cuenta,
       nota: `${f.nota} · automático (F9.196 §C)`, automatico: true, movimientoClave: f.movimientoClave,
-    }, { merge: true });
+    }, { merge: true }));
     const mov = movimientos.find(m => (claves.get(m) ?? m.id) === f.movimientoClave);
-    if (mov?.id) batch.set(db.collection('movimientosCuenta').doc(mov.id), { flujoId: id }, { merge: true });
+    if (mov?.id) ops.push(b => b.set(db.collection('movimientosCuenta').doc(mov.id!), { flujoId: id }, { merge: true }));
   }
+  // Un flujo automático que dejó de corresponder (ahora aparea como interno, Juan cambió la
+  // decisión, o el movimiento se borró) se BORRA, y su movimiento pierde el `flujoId`.
+  for (const d of autoSnap.docs) {
+    if (vigentes.has(d.id)) continue;
+    ops.push(b => b.delete(d.ref));
+    for (const m of movimientos.filter(x => x.flujoId === d.id && x.id)) {
+      ops.push(b => b.set(db.collection('movimientosCuenta').doc(m.id!), { flujoId: FieldValue.delete() }, { merge: true }));
+    }
+  }
+  for (let i = 0; i < ops.length; i += 400) {
+    const b = db.batch();
+    for (const op of ops.slice(i, i + 400)) op(b);
+    await b.commit();
+  }
+  const batch = db.batch();
   batch.set(db.collection('flujosAuto').doc('estado'), {
     calculadoEn: FieldValue.serverTimestamp(),
     pendientes: r.pendientes.map(p => ({ ...resumen(p.movimiento), sugerido: p.sugerido })),

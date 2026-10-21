@@ -382,7 +382,11 @@ async function actualizarUnTicker(
   const campoPrecioLive = panelBajado ? { precioLive } : {};
   // F9.196 H2a — el precio del día con su fuente: data912; si falla o no tiene la especie, PPI.
   const respaldo = await respaldoPPI(refInd, o, spec.live, precioLive, ppi, escribir);
-  const precioDia = RP.elegirPrecioDia({ data912: precioLive, monedaSerie, ppi: respaldo, hoy: hoyART() });
+  const escalaGuardada = (o.tipo === 'bono' || o.tipo === 'on')
+    ? RP.escalaVigente(((await refInd.get()).data() ?? {}).escalaPPI, PP.claveIdentidad(o)) : null;
+  const precioDia = RP.elegirPrecioDia({
+    data912: precioLive, monedaSerie, escalaData912: RP.escalaData912(o.tipo, escalaGuardada), ppi: respaldo, hoy: hoyART(),
+  });
   const campoPrecioDia = precioDia ? { precioDia } : {};
   if (precioDia?.fuente === 'ppi') console.log(`[precios] ${o.docId}: sin precio de data912, se usa PPI ${precioDia.precio} (escala ${precioDia.escala ?? 'desconocida'})`);
 
@@ -515,7 +519,7 @@ async function respaldoPPI(
   precioLive: number | null,
   ppi: ClientePPI | null,
   escribir: boolean,
-): Promise<{ precio: number; escala: number | null } | null> {
+): Promise<{ precio: number; escala: number | null; fechaISO: string | null } | null> {
   if (precioLive !== null || !ppi) return null;
   const tipo = RP.tipoPPI(o.tipo, o.paisRiesgo, panelLive);
   if (!tipo) return null;
@@ -536,7 +540,7 @@ async function respaldoPPI(
   try {
     const c = RP.precioDeCurrent(await ppi.get(
       `MarketData/Current?Ticker=${encodeURIComponent(o.ticker)}&Type=${tipo}&Settlement=${RP.PLAZO_PPI}`));
-    return c ? { precio: c.precio, escala } : null;
+    return c ? { precio: c.precio, escala, fechaISO: c.fechaISO } : null;
   } catch (e) {
     console.warn(`[precios] ${o.docId}: respaldo de PPI falló: ${e instanceof Error ? e.message : String(e)}`);
     return null;

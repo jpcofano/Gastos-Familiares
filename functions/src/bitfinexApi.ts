@@ -43,7 +43,7 @@ export function crearNonceMs(ahora: () => number = Date.now): () => string {
   };
 }
 
-export type FetchBitfinex = (url: string, init: { method: string; headers: Record<string, string>; body: string }) =>
+export type FetchBitfinex = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) =>
   Promise<{ status: number; text(): Promise<string> }>;
 
 export function crearClienteBitfinex(
@@ -64,6 +64,7 @@ export function crearClienteBitfinex(
     const cuerpo = JSON.stringify(body);
     const n = nonce();
     const res = await f(BASE_BITFINEX + endpoint, {
+      signal: AbortSignal.timeout(15_000),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json', 'bfx-nonce': n, 'bfx-apikey': cred.key,

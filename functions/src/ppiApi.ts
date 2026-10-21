@@ -51,7 +51,7 @@ export class ErrorPPI extends Error {
 }
 
 export type CredencialesPPI = { authorizedClient: string; clientKey: string; apiKey: string; apiSecret: string };
-export type FetchPPI = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) =>
+export type FetchPPI = (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }) =>
   Promise<{ status: number; text(): Promise<string> }>;
 
 /** Tapa todo lo que parezca token en un cuerpo, para mensajes de error. */
@@ -77,7 +77,10 @@ export function crearClientePPI(cred: CredencialesPPI, opciones: { fetchImpl?: F
 
   async function pedir(metodo: Metodo, ruta: string, headers: Record<string, string>, body?: unknown) {
     if (!rutaPermitidaPPI(metodo, ruta)) throw new RutaProhibidaPPI(metodo, ruta);
+    // Timeout propio: si PPI cuelga, no se come el tiempo del cron (el respaldo se usa justo cuando
+    // data912 está caído y todas las especies van a PPI).
     const res = await f(BASE_PPI + ruta.replace(/^\/+/, ''), {
+      signal: AbortSignal.timeout(15_000),
       method: metodo,
       headers: { ...headers, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -107,7 +110,7 @@ export function crearClientePPI(cred: CredencialesPPI, opciones: { fetchImpl?: F
     if (!t.refresh) return login();
     const r = await pedir('POST', 'Account/RefreshToken', { ...comunes(), Authorization: `Bearer ${t.access}` }, { refreshToken: t.refresh });
     if (r.status !== 200) return login();
-    return aToken(r.json);
+    try { return aToken(r.json); } catch { return login(); }
   }
 
   async function vigente(): Promise<Token> {

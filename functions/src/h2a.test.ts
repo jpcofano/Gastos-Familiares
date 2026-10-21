@@ -5,8 +5,8 @@
 import {
   FAMILIAS_PPI, clasificarDescripcionPPI, leerMovimientosPPI, movimientosDePPI, leerPosicionesPPI,
 } from './compartido/clasificacionPPI';
-import { planSincronizacionPPI } from './ppiSincronizacion';
-import { tipoPPI, escalaVigente, escalaDeBusqueda, precioDeCurrent, elegirPrecioDia } from './preciosRespaldo';
+import { planSincronizacionPPI, ventanaDesde, crearTcDe } from './ppiSincronizacion';
+import { tipoPPI, escalaVigente, escalaDeBusqueda, precioDeCurrent, elegirPrecioDia, escalaData912 } from './preciosRespaldo';
 import { armarDocCarteraViva, preciosDesdeIndicadores, frescuraCartera } from './carteraVivaCron';
 import { posicionesDeCarteraViva, type CuentaViva } from './compartido/patrimonioCarteraViva';
 import type { Posicion } from './compartido/tiposPatrimonio';
@@ -177,6 +177,50 @@ console.log('\n=== cron de cartera viva (datos sintéticos) ===');
   t('indicador sin precio → no entra (no se inventa)', Object.keys(p.porIdentidad).length === 0);
   const pv = posicionesDeCarteraViva(doc, F);
   t('posicionesDeCarteraViva: las líneas valuadas como Posicion (para pesos, riesgo y reserva)', pv.length === doc.lineas.filter(l => l.valorUsd !== null && l.tipo).length && pv.every(x => x.fuente === 'cartera_viva'));
+}
+
+console.log('\n=== regresiones de la revisión de dd04a2e ===');
+{
+  const ahora = Date.parse('2026-11-10T21:10:00Z');
+  const primera = ventanaDesde(null, ahora);
+  t('sin historial → 3 años', primera.dias === 1095);
+  const normal = ventanaDesde({ historialCompleto: true, leidoEn: '2026-11-09T21:10:00Z' }, ahora);
+  t('con historial y lectura de ayer → 10 días', normal.dias === 10);
+  const hueco = ventanaDesde({ historialCompleto: true, leidoEn: '2026-10-21T21:10:00Z' }, ahora);
+  t('2: 20 días sin sincronizar → pide desde la última lectura buena − 3 días (sin hueco)', hueco.dias === 23 && new Date(hueco.desdeMs).toISOString().slice(0, 10) === '2026-10-18', hueco);
+  t('...y nunca más de 3 años', ventanaDesde({ historialCompleto: true, leidoEn: '2019-01-01T00:00:00Z' }, ahora).dias === 1095);
+
+  const tcDe = crearTcDe(new Map([['2024-01-10', 900], ['2024-01-12', 910], ['2026-10-20', 1544]]));
+  t('3: tcDe usa el doc del día siguiente (convención D−1)', tcDe('2024-01-11') === 910);
+  t('3: un movimiento lejos de todo tcDiario → null (va a sinTc, no al TC de otra época)', tcDe('2021-06-01') === null && tcDe('2025-06-01') === null);
+  t('3: a 5 días o menos, el más cercano', tcDe('2026-10-17') === 1544);
+
+  const bono = elegirPrecioDia({ data912: 88_500, monedaSerie: 'ARS', escalaData912: escalaData912('bono', null), ppi: null, hoy: '2026-10-20' });
+  t('6: bono de data912 (cada 100 VN) → por 1 VN, con la escala guardada', bono?.precio === 885 && bono.escala === 100);
+  t('6: acciones y CEDEARs no se tocan; la escala de PPI manda si está', escalaData912('accion', null) === 1 && escalaData912('on', 1) === 1);
+  const ppiViejo = elegirPrecioDia({ data912: null, monedaSerie: 'ARS', ppi: { precio: 100, escala: 1, fechaISO: '2026-10-15T17:00:00-03:00' }, hoy: '2026-10-20' });
+  t('8: el precio de PPI lleva la fecha de su cotización, no la de la corrida', ppiViejo?.fecha === '2026-10-15');
+  const p = preciosDesdeIndicadores([{ ticker: 'GD30', tipo: 'bono', paisRiesgo: 'AR', precio: 88_000, monedaSerie: 'ARS', fechaUltimoPrecio: '2026-10-19' }], '2026-10-20');
+  t('6: el último cierre de un bono también se normaliza a 1 VN', p.porIdentidad['GD30|bono|AR']?.precio === 880);
+
+  // 5: una línea de la API leída hoy no se revalúa con un precio más viejo.
+  const F = '2026-10-13';
+  const viva: CuentaViva = {
+    cuenta: 'PPI XXXXX', fuente: 'ppi_api', leidoEn: '2026-10-20T21:10:00.000Z',
+    posiciones: [{ cuenta: 'PPI XXXXX', titular: null, ticker: 'GGAL', tipo: 'accion', sector: 'x', pais_riesgo: 'AR', moneda_origen: 'ARS', valor_origen: 1_200_000, cantidad: 200, fuente: 'ppi_api', revisar: false }],
+  };
+  const doc = armarDocCarteraViva({
+    fechaCorrida: F, posiciones: [], cuentasVivas: [viva], movimientos: [], cripto: null, manuales: [],
+    indicadores: [{ ticker: 'GGAL', tipo: 'accion', paisRiesgo: 'AR', precio: 5000, monedaSerie: 'ARS', fechaUltimoPrecio: '2026-10-14' }],
+    tc: { valor: 1500, fuente: 'dolarapi-bolsa', fechaCotizacion: '2026-10-20', viejo: false },
+  }, '2026-10-20T21:20:00.000Z');
+  const g = doc.lineas.find(l => l.ticker === 'GGAL')!;
+  t('5: precio del 14/10 no pisa la valuación de la API del 20/10', g.precio === 'api' && g.valorOrigen === 1_200_000, g);
+  t('inconsistencias sin repetidos', new Set(doc.inconsistencias).size === doc.inconsistencias.length);
+
+  const movRaro = leerMovimientosPPI([fila('Dividendo en efectivo / BMA', { amount: 10, currency: 'Euros' })]);
+  t('moneda desconocida en un movimiento → no se registra en pesos (queda en monedasDesconocidas)',
+    movRaro.monedasDesconocidas.length === 1 && movimientosDePPI(movRaro.filas, 'PPI XXXXX').length === 0);
 }
 
 console.log(`\n${ok} OK, ${fail} FAIL`);

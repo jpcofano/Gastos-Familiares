@@ -15,6 +15,8 @@ import {
   type CarteraViva, type CuentaViva, type PreciosCarteraViva, type PrecioDia, type TcCarteraViva,
 } from './compartido/patrimonioCarteraViva';
 import type { MovimientoCuenta } from './compartido/patrimonioMovimientos';
+import type { PosicionTipo } from './compartido/tiposPatrimonio';
+import { escalaData912, escalaVigente } from './preciosRespaldo';
 
 const fechaArg = (iso: string) => new Date(Date.parse(iso) - 3 * 3600_000).toISOString().slice(0, 10);
 const horaArg = (iso: string) => new Date(Date.parse(iso) - 3 * 3600_000).toISOString().slice(11, 16);
@@ -24,6 +26,7 @@ export type DocIndicador = {
   ticker: string; tipo: string; paisRiesgo: string;
   precio?: number | null; monedaSerie?: 'ARS' | 'USD' | null; fechaUltimoPrecio?: string | null;
   precioDia?: { precio: number; moneda: 'ARS' | 'USD'; fecha: string; fuente: string } | null;
+  escalaPPI?: { identidad?: string; nominalInPrice?: number } | null;
 };
 
 /**
@@ -37,7 +40,9 @@ export function preciosDesdeIndicadores(docs: DocIndicador[], hoy: string): Prec
     if (d.precioDia && d.precioDia.precio > 0) {
       porIdentidad[k] = { precio: d.precioDia.precio, moneda: d.precioDia.moneda, fecha: d.precioDia.fecha };
     } else if (typeof d.precio === 'number' && d.precio > 0 && d.monedaSerie && d.fechaUltimoPrecio) {
-      porIdentidad[k] = { precio: d.precio, moneda: d.monedaSerie, fecha: d.fechaUltimoPrecio };
+      // El último cierre de la serie viene en la escala de data912: bonos y ONs cada 100 VN.
+      const esc = escalaData912(d.tipo as PosicionTipo, escalaVigente(d.escalaPPI, k));
+      porIdentidad[k] = { precio: d.precio / esc, moneda: d.monedaSerie, fecha: d.fechaUltimoPrecio };
     }
   }
   return { hoy, porIdentidad };

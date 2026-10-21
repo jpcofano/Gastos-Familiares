@@ -197,6 +197,8 @@ export const idMovimientoPPI = (f: FilaMovPPI) => `ppimov_${hashId(`${clavePPI(f
 export function movimientosDePPI(filas: FilaMovPPI[], cuenta: string): MovimientoCuenta[] {
   const out: MovimientoCuenta[] = [];
   for (const f of filas) {
+    // Moneda desconocida: no se registra en pesos por defecto (queda en `monedasDesconocidas`).
+    if (f.monedaCruda && !f.moneda) continue;
     const base: MovimientoCuenta = {
       id: idMovimientoPPI(f), fecha: f.fecha, cuenta, moneda: f.moneda ?? 'ARS', origen: 'ppi_api',
       tipo: 'deposito', montoNeto: Math.abs(f.importe), nota: f.descripcion, subcuenta: f.monedaCruda || null,

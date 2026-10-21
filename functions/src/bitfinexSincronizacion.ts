@@ -16,7 +16,7 @@ import { STABLECOINS, type PosicionRaw } from './compartido/tiposPatrimonio';
 import type { CuentaViva } from './compartido/patrimonioCarteraViva';
 import type { MovimientoCuenta } from './compartido/patrimonioMovimientos';
 import type { ClienteBitfinex } from './bitfinexApi';
-import { escribirMovimientos, actualizarFlujosAutomaticos, type ResumenFlujos } from './ppiSincronizacion';
+import { escribirMovimientos, flujosSinRomper, ventanaDesde, type ResumenFlujos } from './ppiSincronizacion';
 import { actualizarCarteraViva } from './carteraVivaCron';
 
 export const CUENTA_BITFINEX = 'Bitfinex';   // el mismo texto que en las corridas
@@ -198,8 +198,8 @@ export async function sincronizarBitfinex(db: Firestore, cliente: ClienteBitfine
   const ref = db.collection('cuentasVivas').doc('bitfinex');
   try {
     const previo = await ref.get();
-    const primera = !(previo.exists && previo.data()?.historialCompleto === true);
-    const desdeMs = ahora() - (primera ? 1095 : 10) * 86_400_000;
+    // Misma ventana que PPI: 3 años la primera vez; después, sin huecos si hubo días sin sincronizar.
+    const { desdeMs, dias } = ventanaDesde(previo.exists ? (previo.data() ?? null) : null, ahora());
     const lectura = (await db.collection('criptoLectura').doc('ultima').get()).data()?.lectura as
       { precios?: Record<string, { valor: number | null }> } | undefined;
     const precioUsd = (t: string) => lectura?.precios?.[t]?.valor ?? null;
@@ -211,12 +211,13 @@ export async function sincronizarBitfinex(db: Firestore, cliente: ClienteBitfine
     }
     const ledgers: Array<{ categoria: 101 | 104 | 28; filas: unknown[] }> = [];
     for (const categoria of [CATEGORIAS_LEDGER.deposito, CATEGORIAS_LEDGER.retiro, CATEGORIAS_LEDGER.interes]) {
-      ledgers.push({ categoria, filas: await ledgerPaginado(cliente, categoria, desdeMs, primera ? 40 : 4) });
+      ledgers.push({ categoria, filas: await ledgerPaginado(cliente, categoria, desdeMs, dias > 30 ? 40 : 4) });
     }
     const plan = planSincronizacionBitfinex({ wallets, funding, ledgers, leidoEnISO: new Date(ahora()).toISOString(), precioUsd });
-    await ref.set({ ...JSON.parse(JSON.stringify(plan.cuentaViva)), sincronizadoEn: FieldValue.serverTimestamp(), errorEn: null });
+    // Movimientos primero; la cuenta viva (con `historialCompleto: true`) al final.
     await escribirMovimientos(db, plan.movimientos);
-    const flujos = await actualizarFlujosAutomaticos(db);
+    await ref.set({ ...JSON.parse(JSON.stringify(plan.cuentaViva)), sincronizadoEn: FieldValue.serverTimestamp(), errorEn: null });
+    const flujos = await flujosSinRomper(db, 'sincronizarBitfinex');
     // Las cantidades de la card cripto salen de la cartera viva: se recalcula ya, no a las 18:20.
     await actualizarCarteraViva(db, ahora).catch(e => console.error(`[sincronizarBitfinex] cartera viva: ${e instanceof Error ? e.message : String(e)}`));
     return {

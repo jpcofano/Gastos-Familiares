@@ -45,7 +45,7 @@ import { rescatarCuitContraparte } from './cuit';
 import { extraerItemsCartera, extraerFechaCartera, normalizarEspecie } from './cafciHtml';
 import { correrActualizacionPrecios } from './patrimonioPreciosCron';
 import { clientePPIDeInstancia, type ClientePPI } from './ppiApi';
-import { sincronizarPPI as sincronizarPPIConCliente } from './ppiSincronizacion';
+import { sincronizarPPI as sincronizarPPIConCliente, flujosSinRomper } from './ppiSincronizacion';
 import { actualizarCarteraViva as actualizarCarteraVivaEn } from './carteraVivaCron';
 import { crearClienteBitfinex } from './bitfinexApi';
 import { sincronizarBitfinex as sincronizarBitfinexConCliente } from './bitfinexSincronizacion';
@@ -2564,7 +2564,12 @@ export const actualizarPreciosDiarios = onSchedule(
 async function correrSincronizacionPPI() {
   const ppi = clientePPI();
   const cuenta = ppiAccountNumber.value().trim();
-  if (!ppi || !cuenta) throw new Error('Faltan secretos de PPI (PPI_API_KEY, PPI_API_SECRET, PPI_AUTHORIZED_CLIENT, PPI_CLIENT_KEY, PPI_ACCOUNT_NUMBER)');
+  if (!ppi || !cuenta) {
+    const error = 'Faltan secretos de PPI (PPI_API_KEY, PPI_API_SECRET, PPI_AUTHORIZED_CLIENT, PPI_CLIENT_KEY, PPI_ACCOUNT_NUMBER)';
+    // Visible en la app (frescura "sin sincronizar"), no solo en el log.
+    await db.collection('cuentasVivas').doc('ppi').set({ fuente: 'ppi_api', error, errorEn: FieldValue.serverTimestamp() }, { merge: true });
+    throw new Error(error);
+  }
   const r = await sincronizarPPIConCliente(db, ppi, cuenta);
   console.log(`[sincronizarPPI] ${r.posiciones} posiciones · ${r.movimientos} movimientos (${r.dias} días) · clases ${JSON.stringify(r.porClase)} · flujos ${JSON.stringify(r.flujos)}`);
   return r;
@@ -2605,14 +2610,22 @@ export const actualizarCarteraViva = onSchedule(
     region: 'southamerica-east1',
     timeoutSeconds: 120,
   },
-  async () => { await actualizarCarteraVivaEn(db); },
+  async () => {
+    // Los flujos automáticos corren también acá: si PPI falla, los de Balanz no quedan sin recalcular.
+    await flujosSinRomper(db, 'actualizarCarteraViva');
+    await actualizarCarteraVivaEn(db);
+  },
 );
 
 // ── F9.196 H2c — sincronización de Bitfinex ───────────────────────────────────
 
 async function correrSincronizacionBitfinex() {
   const key = bitfinexApiKey.value().trim(), secret = bitfinexApiSecret.value().trim();
-  if (!key || !secret) throw new Error('Faltan secretos de Bitfinex (BITFINEX_API_KEY, BITFINEX_API_SECRET)');
+  if (!key || !secret) {
+    const error = 'Faltan secretos de Bitfinex (BITFINEX_API_KEY, BITFINEX_API_SECRET)';
+    await db.collection('cuentasVivas').doc('bitfinex').set({ cuenta: 'Bitfinex', fuente: 'bitfinex_api', error, errorEn: FieldValue.serverTimestamp() }, { merge: true });
+    throw new Error(error);
+  }
   const r = await sincronizarBitfinexConCliente(db, crearClienteBitfinex({ key, secret }));
   console.log(`[sincronizarBitfinex] ${r.posiciones} activos · ${r.movimientos} movimientos · ${r.prestamos} préstamos de funding · para revisar ${r.paraRevisar} · flujos ${JSON.stringify(r.flujos)}`);
   return r;

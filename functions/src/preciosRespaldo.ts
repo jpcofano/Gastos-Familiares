@@ -53,12 +53,29 @@ export function precioDeCurrent(body: unknown): { precio: number; fechaISO: stri
 }
 
 export type PrecioDiaGuardado = {
+  /** Por UNIDAD de cantidad (bonos y ONs por 1 VN), como `PrecioDia` de la cartera viva. */
   precio: number;
   moneda: 'ARS' | 'USD';
-  fecha: string;                    // YYYY-MM-DD (Argentina)
+  fecha: string;                    // YYYY-MM-DD (Argentina): la del precio, no la de la corrida
   fuente: 'data912' | 'ppi';
-  /** PPI: el `nominalInPrice` por el que se dividió (null = sin escala conocida, precio crudo). */
+  /** Por cuánto se dividió el precio de la fuente (100 = cotiza cada 100 VN; null = sin escala conocida, crudo). */
   escala: number | null;
+};
+
+/**
+ * Escala del precio de data912: bonos y ONs cotizan cada 100 VN (convención de BYMA, la misma que
+ * `nominalInPrice` = 100 de PPI para la ON TLCPO), acciones y CEDEARs por unidad. Si PPI dio la
+ * escala de esa especie, manda la de PPI. ⚠ Para confirmar con un bono en vivo; si estuviera mal,
+ * la guarda `escala_dudosa` de la cartera viva lo marca y usa la valuación de la carga.
+ */
+export function escalaData912(tipo: PosicionTipo, escalaPPI: number | null): number {
+  if (tipo !== 'bono' && tipo !== 'on') return 1;
+  return escalaPPI ?? 100;
+}
+
+const fechaArgDeISO = (iso: string | null): string | null => {
+  const ms = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(ms) ? new Date(ms - 3 * 3600_000).toISOString().slice(0, 10) : null;
 };
 
 /**
@@ -68,15 +85,19 @@ export type PrecioDiaGuardado = {
 export function elegirPrecioDia(args: {
   data912: number | null;
   monedaSerie: 'ARS' | 'USD';
-  ppi: { precio: number; escala: number | null } | null;
+  /** Escala del precio de data912 (ver `escalaData912`). Default 1. */
+  escalaData912?: number;
+  ppi: { precio: number; escala: number | null; fechaISO?: string | null } | null;
   hoy: string;
 }): PrecioDiaGuardado | null {
   if (args.data912 !== null && args.data912 > 0) {
-    return { precio: args.data912, moneda: args.monedaSerie, fecha: args.hoy, fuente: 'data912', escala: null };
+    const escala = args.escalaData912 && args.escalaData912 > 0 ? args.escalaData912 : 1;
+    return { precio: args.data912 / escala, moneda: args.monedaSerie, fecha: args.hoy, fuente: 'data912', escala: escala === 1 ? null : escala };
   }
   if (args.ppi) {
     const precio = args.ppi.escala ? args.ppi.precio / args.ppi.escala : args.ppi.precio;
-    return { precio, moneda: 'ARS', fecha: args.hoy, fuente: 'ppi', escala: args.ppi.escala };
+    // La fecha es la de la cotización de PPI (una ON ilíquida puede traer un precio de días atrás).
+    return { precio, moneda: 'ARS', fecha: fechaArgDeISO(args.ppi.fechaISO ?? null) ?? args.hoy, fuente: 'ppi', escala: args.ppi.escala };
   }
   return null;
 }

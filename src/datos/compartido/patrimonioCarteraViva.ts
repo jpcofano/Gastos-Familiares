@@ -380,8 +380,10 @@ export function armarCarteraViva(
   // 5) Valuación final de la salida.
   for (const l of salida) {
     if (l.precio === 'api' && l.cantidad !== null) {
+      // Solo un precio de la MISMA fecha que la lectura de la API (o posterior) la revalúa: un último
+      // cierre más viejo pisaría la valuación de hoy de la propia fuente.
       const pd = filaDe(l) ? precioDe(filaDe(l)!) : null;
-      if (pd) valuar(l, filaDe(l));
+      if (pd && pd.fecha >= (l.precioFecha ?? '')) valuar(l, filaDe(l));
       else l.valorUsd = aUsd(l.valorOrigen, l.moneda);
       continue;
     }
@@ -452,7 +454,8 @@ export function armarCarteraViva(
       ...salida.map(({ tcCarga: _a, v0: _b, vp: _c, monedaVp: _f, unitCarga: _d, esCarga: _e, ...l }) => l),
       ...lineasManuales,
     ],
-    inconsistencias,
+    // `valuar` corre dos veces por fila de la carga (para `vp` y para la salida): sin repetidos.
+    inconsistencias: [...new Set(inconsistencias)],
   };
 }
 
