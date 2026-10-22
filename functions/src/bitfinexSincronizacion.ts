@@ -15,9 +15,9 @@ import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 import { STABLECOINS, type PosicionRaw } from './compartido/tiposPatrimonio';
 import type { CuentaViva } from './compartido/patrimonioCarteraViva';
 import type { MovimientoCuenta } from './compartido/patrimonioMovimientos';
-import type { ClienteBitfinex } from './bitfinexApi';
+import { preciosPublicosBitfinex, type ClienteBitfinex, type PedirPublico } from './bitfinexApi';
 import { escribirMovimientos, flujosSinRomper, ventanaDesde, type ResumenFlujos } from './ppiSincronizacion';
-import { actualizarCarteraViva } from './carteraVivaCron';
+import { actualizarCarteraViva, lecturaCriptoDeDoc } from './carteraVivaCron';
 
 export const CUENTA_BITFINEX = 'Bitfinex';   // el mismo texto que en las corridas
 /** Códigos de Bitfinex → ticker de la app (F9.195). */
@@ -67,7 +67,7 @@ export function leerBilleteras(body: unknown, precioUsd: (ticker: string) => num
       cuenta: CUENTA_BITFINEX, titular: null, ticker: t, tipo: 'cripto',
       sector: estable ? 'stablecoin' : 'cripto', pais_riesgo: 'global',
       moneda_origen: 'USD', valor_origen: px !== null ? Math.round(q * px * 100) / 100 : 0, cantidad: q,
-      fuente: 'bitfinex_api', revisar: px === null, motivo_revisar: px === null ? `Sin precio de ${t} en criptoLectura al sincronizar` : null,
+      fuente: 'bitfinex_api', revisar: px === null, motivo_revisar: px === null ? `Sin precio de ${t} en criptoLectura ni en el ticker público de Bitfinex al sincronizar` : null,
     });
   }
   return { posiciones, saldos: { ARS: 0, USD: Math.round(usd * 100) / 100 }, paraRevisar, porBilletera };
@@ -192,7 +192,35 @@ async function ledgerPaginado(cliente: ClienteBitfinex, categoria: number, desde
   return out;
 }
 
-export async function sincronizarBitfinex(db: Firestore, cliente: ClienteBitfinex, ahora: () => number = Date.now): Promise<{
+/**
+ * F9.196 nota de revisión 2 — los activos (de billeteras y ledgers) que no tienen precio en
+ * `criptoLectura`: se piden al ticker público de Bitfinex. USD fiat y stablecoins no (valen 1).
+ */
+export function tickersSinPrecio(
+  wallets: unknown, ledgers: Array<{ filas: unknown[] }>, precioLectura: (t: string) => number | null,
+): string[] {
+  const monedas: string[] = [];
+  if (Array.isArray(wallets)) for (const w of wallets) if (Array.isArray(w) && typeof w[1] === 'string') monedas.push(w[1]);
+  for (const l of ledgers) for (const f of l.filas) if (Array.isArray(f) && typeof f[1] === 'string') monedas.push(f[1]);
+  const out = new Set<string>();
+  for (const m of monedas) {
+    if (ESTABLES_FIAT.has(m.toUpperCase())) continue;
+    const t = tickerApp(m);
+    if (STABLECOINS.has(t) || precioLectura(t) !== null) continue;
+    out.add(t);
+  }
+  return [...out].sort();
+}
+
+/** Precio en USD: el de `criptoLectura`; si falta, el del ticker público de Bitfinex; si no, null. */
+export const precioConRespaldo = (lectura: (t: string) => number | null, publicos: Record<string, number>) =>
+  (t: string): number | null => lectura(t) ?? publicos[t] ?? null;
+
+export async function sincronizarBitfinex(
+  db: Firestore, cliente: ClienteBitfinex, ahora: () => number = Date.now,
+  /** Lectura pública de precios (inyectable para tests). */
+  pedirPublico?: PedirPublico,
+): Promise<{
   posiciones: number; movimientos: number; prestamos: number; paraRevisar: number; flujos: ResumenFlujos;
   /** F9.196.1 Addendum 1 B — por qué no se pudo recalcular la cartera viva (null = se recalculó). */
   carteraError: string | null;
@@ -202,9 +230,9 @@ export async function sincronizarBitfinex(db: Firestore, cliente: ClienteBitfine
     const previo = await ref.get();
     // Misma ventana que PPI: 3 años la primera vez; después, sin huecos si hubo días sin sincronizar.
     const { desdeMs, dias } = ventanaDesde(previo.exists ? (previo.data() ?? null) : null, ahora());
-    const lectura = (await db.collection('criptoLectura').doc('ultima').get()).data()?.lectura as
-      { precios?: Record<string, { valor: number | null }> } | undefined;
-    const precioUsd = (t: string) => lectura?.precios?.[t]?.valor ?? null;
+    // Nota de revisión 2: `criptoLectura/ultima` tiene `precios` en la raíz (antes se leía `.lectura`).
+    const lectura = lecturaCriptoDeDoc((await db.collection('criptoLectura').doc('ultima').get()).data());
+    const precioLectura = (t: string) => lectura?.precios?.[t]?.valor ?? null;
 
     const wallets = await cliente.leer('auth/r/wallets');
     const funding: Array<{ origen: PrestamoFunding['origen']; body: unknown }> = [];
@@ -215,6 +243,12 @@ export async function sincronizarBitfinex(db: Firestore, cliente: ClienteBitfine
     for (const categoria of [CATEGORIAS_LEDGER.deposito, CATEGORIAS_LEDGER.retiro, CATEGORIAS_LEDGER.interes]) {
       ledgers.push({ categoria, filas: await ledgerPaginado(cliente, categoria, desdeMs, dias > 30 ? 40 : 4) });
     }
+    // Lo que no tiene precio en criptoLectura: ticker público de Bitfinex (un pedido). Si tampoco hay,
+    // la posición queda en 0 con `revisar` y la cartera viva la valúa a la carga, con aviso.
+    const faltan = tickersSinPrecio(wallets, ledgers, precioLectura);
+    const publicos = faltan.length ? await preciosPublicosBitfinex(faltan, pedirPublico) : { precios: {}, error: null };
+    if (publicos.error) console.warn(`[sincronizarBitfinex] ticker público de Bitfinex: ${publicos.error}`);
+    const precioUsd = precioConRespaldo(precioLectura, publicos.precios);
     const plan = planSincronizacionBitfinex({ wallets, funding, ledgers, leidoEnISO: new Date(ahora()).toISOString(), precioUsd });
     // Movimientos primero; la cuenta viva (con `historialCompleto: true`) al final.
     await escribirMovimientos(db, plan.movimientos);

@@ -7,7 +7,8 @@ import {
 } from './compartido/clasificacionPPI';
 import { planSincronizacionPPI, ventanaDesde, crearTcDe } from './ppiSincronizacion';
 import { tipoPPI, escalaVigente, escalaDeBusqueda, precioDeCurrent, elegirPrecioDia, escalaData912 } from './preciosRespaldo';
-import { armarDocCarteraViva, preciosDesdeIndicadores, frescuraCartera, desdeVentanaTc, ultimosTc, TC_VENTANA_DIAS, TC_ULTIMOS } from './carteraVivaCron';
+import { armarDocCarteraViva, preciosDesdeIndicadores, frescuraCartera, desdeVentanaTc, ultimosTc, TC_VENTANA_DIAS, TC_ULTIMOS, lecturaCriptoDeDoc } from './carteraVivaCron';
+import { armarCarteraViva, flujosRealesUsd } from './compartido/patrimonioCarteraViva';
 import { posicionesDeCarteraViva, resolverTcCarteraViva, type CuentaViva } from './compartido/patrimonioCarteraViva';
 import type { Posicion } from './compartido/tiposPatrimonio';
 
@@ -188,6 +189,47 @@ console.log('\n=== cron de cartera viva (datos sintéticos) ===');
   t('Balanz: viernes contra lunes (1 día hábil) → sin aviso', unDia.includes('Balanz 999001: tenencia del 19/10 · caja al 16/10'), unDia);
   const sinCaja = frescuraCartera(cvBalanz, [viva('2026-10-21T17:42:00-03:00')], null, '2026-10-21T21:20:00.000Z');
   t('Balanz sin archivo de Movimientos: "caja de la carga"', sinCaja.includes('Balanz 999001: tenencia del 21/10 · caja de la carga'), sinCaja);
+  // F9.196 nota de revisión 2 — cripto sin precio y resto sin explicar.
+  {
+    const raiz = lecturaCriptoDeDoc({ leidoEnISO: '2026-10-22T12:15:00Z', precios: { BTC: { valor: 108_000, fuente: 'bitfinex', error: null } }, sondeo: [], bases: {}, cantidadesDeFecha: '2026-10-13' });
+    const vieja = lecturaCriptoDeDoc({ lectura: { leidoEnISO: '2026-10-22T12:15:00Z', precios: { BTC: { valor: 1, fuente: 'x', error: null } }, sondeo: [] } });
+    t('nota 2: criptoLectura con precios en la raíz (como la escribe leerYGuardarCripto) se lee; la forma anidada también; vacío → null',
+      raiz?.precios.BTC.valor === 108_000 && vieja?.precios.BTC.valor === 1 && lecturaCriptoDeDoc(undefined) === null && lecturaCriptoDeDoc({ bases: {} }) === null);
+    const fr = frescuraCartera({ cuentas: [], tc: null } as unknown as Parameters<typeof frescuraCartera>[0], [], null, '2026-10-22T21:20:00.000Z');
+    t('nota 2: sin lectura cripto, la frescura lo dice', fr.includes('Cripto: sin lectura de precios'), fr);
+
+    // Punto 3: una línea de API con cantidad y valor 0, sin precio del día.
+    const corridaB = { fecha: '2026-10-13', posiciones: [
+      { cuenta: 'Bitfinex', ticker: 'BTC', tipo: 'cripto', sector: 'cripto', pais_riesgo: 'global', moneda_origen: 'USD', valor_origen: 10_000, cantidad: 0.1, valorUsd: 10_000, revisar: false },
+    ] } as unknown as Parameters<typeof armarCarteraViva>[0];
+    const vivaB = { cuenta: 'Bitfinex', fuente: 'bitfinex_api', leidoEn: '2026-10-22T12:20:00Z', error: null, saldos: { ARS: 0, USD: 0 }, posiciones: [
+      { cuenta: 'Bitfinex', titular: null, ticker: 'BTC', tipo: 'cripto', sector: 'cripto', pais_riesgo: 'global', moneda_origen: 'USD', valor_origen: 0, cantidad: 0.12, fuente: 'bitfinex_api', revisar: true },
+      { cuenta: 'Bitfinex', titular: null, ticker: 'XYZ', tipo: 'cripto', sector: 'cripto', pais_riesgo: 'global', moneda_origen: 'USD', valor_origen: 0, cantidad: 5, fuente: 'bitfinex_api', revisar: true },
+    ] } as unknown as Parameters<typeof armarCarteraViva>[1][number];
+    const cvB = armarCarteraViva(corridaB, [vivaB], [], { hoy: '2026-10-22', porIdentidad: {} }, null, [], null);
+    const btcB = cvB.lineas.find(l => l.ticker === 'BTC')!;
+    const xyzB = cvB.lineas.find(l => l.ticker === 'XYZ')!;
+    t('nota 2: API en 0 sin precio → a la carga (0,12 × 100.000 = 12.000, estado corrida) con inconsistencia',
+      btcB.valorUsd === 12_000 && btcB.precio === 'corrida' && cvB.inconsistencias.includes('Bitfinex BTC: sin precio, valuado a la carga'), { btcB, inc: cvB.inconsistencias });
+    t('nota 2: sin precio ni carga → queda en 0, pero nunca en silencio', xyzB.valorUsd === 0 && cvB.inconsistencias.includes('Bitfinex XYZ: sin precio ni carga, queda en 0'));
+    const conPrecio = armarCarteraViva(corridaB, [vivaB], [], { hoy: '2026-10-22', porIdentidad: {} },
+      { leidoEnISO: '2026-10-22T13:00:00Z', precios: { BTC: { valor: 110_000, fuente: 'bitfinex', error: null } }, sondeo: [] } as unknown as Parameters<typeof armarCarteraViva>[4], [], null);
+    t('nota 2: con precio del día cripto, se usa ese (no la carga) y no hay aviso', conPrecio.lineas.find(l => l.ticker === 'BTC')!.valorUsd === 13_200 && !conPrecio.inconsistencias.some(x => x.startsWith('Bitfinex BTC')));
+
+    // Punto 5: movimientos reales vs sin explicar.
+    const movs = [
+      { id: 'a', cuenta: 'PPI X', tipo: 'deposito', fecha: '2026-10-15', moneda: 'USD', montoNeto: 1000, origen: 'ppi_api' },
+      { id: 'b', cuenta: 'PPI X', tipo: 'retiro', fecha: '2026-10-16', moneda: 'ARS', montoNeto: -150_000, origen: 'ppi_api' },
+      { id: 'c', cuenta: 'PPI X', tipo: 'deposito', fecha: '2026-10-10', moneda: 'USD', montoNeto: 999, origen: 'ppi_api' },
+      { id: 'd', cuenta: 'Balanz 1', tipo: 'compra', fecha: '2026-10-15', moneda: 'USD', montoNeto: -500, origen: 'archivo_balanz', ticker: 'GGAL', cantidad: 1 },
+      { id: 'e', cuenta: 'Balanz 1', tipo: 'deposito', fecha: '2026-10-20', moneda: 'USD', montoNeto: 77, origen: 'archivo_balanz', inferido: true },
+    ] as unknown as Parameters<typeof flujosRealesUsd>[0];
+    t('nota 2: flujos reales = depósitos − retiros desde el corte, en USD (ARS con el MEP; sin compras, inferidos ni anteriores al corte)',
+      Math.abs(flujosRealesUsd(movs, { fecha: '2026-10-13' }, 1500) - (1000 - 100)) < 1e-9 && flujosRealesUsd(movs, { fecha: '2026-10-13' }, null) === 1000);
+    const cvM = armarCarteraViva(corridaB, [], movs, { hoy: '2026-10-22', porIdentidad: {} }, null, [], { valor: 1500, fuente: 'dolarapi-bolsa', fechaCotizacion: '2026-10-22', viejo: false });
+    t('nota 2: efectoMovimientos = flujos + sin explicar', cvM.efectoFlujosUsd === 900 && Math.abs((cvM.efectoFlujosUsd ?? 0) + (cvM.efectoSinExplicarUsd ?? 0) - cvM.efectoMovimientosUsd) < 0.011, { m: cvM.efectoMovimientosUsd, f: cvM.efectoFlujosUsd, s: cvM.efectoSinExplicarUsd });
+  }
+
   // F9.196 nota de revisión 1 — tcDelDia sin índice compuesto: rango ascendente + recorte en memoria.
   t('tcDiario: la ventana arranca 20 días corridos antes de hoy en Argentina', TC_VENTANA_DIAS === 20 && desdeVentanaTc('2026-10-22T02:00:00Z') === '2026-10-01' && desdeVentanaTc('2026-10-22T15:00:00Z') === '2026-10-02');
   const asc = Array.from({ length: 14 }, (_, i) => ({ fecha: `2026-10-${String(i + 2).padStart(2, '0')}`, tcUsdArs: 1500 + i }));

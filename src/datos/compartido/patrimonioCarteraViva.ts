@@ -136,7 +136,15 @@ export type CarteraViva = {
    */
   efectoPreciosUsd: number;
   efectoDolarUsd: number;
+  /** Total − valor a precios de hoy de la carga: es un RESTO (flujos + lo que no se explica). */
   efectoMovimientosUsd: number;
+  /**
+   * F9.196 nota de revisión 2 — la parte de `efectoMovimientosUsd` que son depósitos y retiros REALES
+   * (`movimientosCuenta`) desde el corte de cada cuenta, en USD. Ausente en documentos viejos.
+   */
+  efectoFlujosUsd?: number;
+  /** `efectoMovimientosUsd − efectoFlujosUsd`: lo que ni los precios ni los flujos explican. */
+  efectoSinExplicarUsd?: number;
   cuentas: CuentaCarteraViva[];
   lineas: LineaViva[];
   /** Lo que no cuadra o no se pudo valuar. Se muestra; no se corrige solo (decisión de Juan). */
@@ -162,6 +170,27 @@ type Trabajo = LineaViva & {
   unitCarga: number | null;
   esCarga: boolean;
 };
+
+/**
+ * F9.196 nota de revisión 2 — depósitos (+) y retiros (−) REALES desde el corte de cada cuenta, en
+ * USD: los de `movimientosCuenta` (no los inferidos entre dos "Mis Instrumentos"). Lo que está en
+ * pesos se pasa con el MEP de hoy; sin MEP, queda afuera. Una transferencia entre cuentas propias
+ * suma un retiro y un depósito: se cancela sola.
+ */
+export function flujosRealesUsd(
+  movimientos: MovimientoCuenta[], corrida: Pick<CorridaBase, 'fecha' | 'fechaPorCuenta'>, tcHoy: number | null,
+): number {
+  let total = 0;
+  for (const m of movimientos) {
+    if (m.inferido || (m.tipo !== 'deposito' && m.tipo !== 'retiro')) continue;
+    if (!movimientoVigente(m, corrida.fechaPorCuenta?.[m.cuenta] ?? corrida.fecha)) continue;
+    const monto = Math.abs(m.montoNeto);
+    const usd = m.moneda === 'USD' ? monto : tcHoy && tcHoy > 0 ? monto / tcHoy : null;
+    if (usd === null) continue;
+    total += m.tipo === 'deposito' ? usd : -usd;
+  }
+  return total;
+}
 
 export function armarCarteraViva(
   corrida: CorridaBase,
@@ -383,8 +412,22 @@ export function armarCarteraViva(
       // Solo un precio de la MISMA fecha que la lectura de la API (o posterior) la revalúa: un último
       // cierre más viejo pisaría la valuación de hoy de la propia fuente.
       const pd = filaDe(l) ? precioDe(filaDe(l)!) : null;
-      if (pd && pd.fecha >= (l.precioFecha ?? '')) valuar(l, filaDe(l));
-      else l.valorUsd = aUsd(l.valorOrigen, l.moneda);
+      if (pd && pd.fecha >= (l.precioFecha ?? '')) { valuar(l, filaDe(l)); continue; }
+      // Nota de revisión 2: la API trajo tenencia pero valor 0 (no tenía precio) y no hay precio del
+      // día: se valúa con el precio unitario de la CARGA de ese ticker en esa cuenta. Nunca 0 en silencio.
+      if (l.cantidad > 0 && l.valorOrigen === 0 && l.tipo !== 'cash') {
+        const carga = trabajo.find(c => c.esCarga && c.cuenta === l.cuenta && norm(c.ticker) === norm(l.ticker) && c.unitCarga !== null && c.unitCarga > 0);
+        if (carga) {
+          l.moneda = carga.moneda;
+          l.valorOrigen = l.cantidad * carga.unitCarga!;
+          l.precio = 'corrida';
+          l.precioFecha = corrida.fechaPorCuenta?.[l.cuenta] ?? corrida.fecha;
+          inconsistencias.push(`${l.cuenta} ${l.ticker}: sin precio, valuado a la carga`);
+        } else {
+          inconsistencias.push(`${l.cuenta} ${l.ticker}: sin precio ni carga, queda en 0`);
+        }
+      }
+      l.valorUsd = aUsd(l.valorOrigen, l.moneda);
       continue;
     }
     valuar(l, filaDe(l));
@@ -441,6 +484,8 @@ export function armarCarteraViva(
   }
 
   const redondo = (x: number) => Math.round(x * 100) / 100;
+  const efectoMovimientosUsd = redondo(totalUsd - totalVp);
+  const efectoFlujosUsd = redondo(flujosRealesUsd(movimientos, corrida, tcHoy));
   return {
     tc,
     tcViejo: tc?.viejo ?? true,
@@ -448,7 +493,9 @@ export function armarCarteraViva(
     totalCargaUsd: redondo(totalCargaUsd),
     efectoPreciosUsd: redondo(totalVp - totalCargaUsd),
     efectoDolarUsd: redondo(efectoDolarUsd),
-    efectoMovimientosUsd: redondo(totalUsd - totalVp),
+    efectoMovimientosUsd,
+    efectoFlujosUsd,
+    efectoSinExplicarUsd: redondo(efectoMovimientosUsd - efectoFlujosUsd),
     cuentas,
     lineas: [
       ...salida.map(({ tcCarga: _a, v0: _b, vp: _c, monedaVp: _f, unitCarga: _d, esCarga: _e, ...l }) => l),

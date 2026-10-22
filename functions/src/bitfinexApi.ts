@@ -14,6 +14,7 @@
 // microsegundos y se vuelve atrás, el nonce baja y Bitfinex rechaza la key. Dentro de la instancia
 // es `max(Date.now(), último + 1)`.
 import * as crypto from 'crypto';
+import { urlBitfinex, parseBitfinex } from './criptoPrecios';
 
 export const BASE_BITFINEX = 'https://api.bitfinex.com/v2/';
 const RUTA_LECTURA = /^auth\/r\/[A-Za-z0-9_:\-]+(\/[A-Za-z0-9_:\-]+)*$/;
@@ -89,6 +90,44 @@ export function crearClienteBitfinex(
 }
 
 export type ClienteBitfinex = ReturnType<typeof crearClienteBitfinex>;
+
+// ── Lectura PÚBLICA (F9.196 nota de revisión 2) ────────────────────────────────
+// Lista blanca de lectura pública: solo `api-pub.bitfinex.com/v2/tickers?symbols=…` con símbolos
+// `tXXXUSD` / `tXXXX:USD`. Sin key, sin firma, sin nonce (no toca el candado ni la key de Juan).
+const RUTA_PUBLICA = /^https:\/\/api-pub\.bitfinex\.com\/v2\/tickers\?symbols=t[A-Z0-9]+:?USD(,t[A-Z0-9]+:?USD)*$/;
+
+export function rutaPublicaPermitidaBitfinex(url: string): boolean {
+  return RUTA_PUBLICA.test(url);
+}
+
+export type PedirPublico = (url: string) => Promise<{ status: number; body: unknown }>;
+
+const pedirPublicoFetch: PedirPublico = async url => {
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000), headers: { Accept: 'application/json' } });
+  const texto = await res.text();
+  let body: unknown = texto;
+  try { body = JSON.parse(texto); } catch { /* queda como texto */ }
+  return { status: res.status, body };
+};
+
+/**
+ * Último precio en USD (LAST_PRICE) de cada ticker en el ticker público de Bitfinex. Un pedido para
+ * todos. Lo que no viene queda afuera; un error de red o de status devuelve `{}` con el error (no tira).
+ */
+export async function preciosPublicosBitfinex(
+  tickers: string[], pedir: PedirPublico = pedirPublicoFetch,
+): Promise<{ precios: Record<string, number>; error: string | null }> {
+  const ts = [...new Set(tickers.map(t => t.trim().toUpperCase()).filter(Boolean))].sort();
+  if (!ts.length) return { precios: {}, error: null };
+  const url = urlBitfinex(ts);
+  if (!rutaPublicaPermitidaBitfinex(url)) throw new RutaProhibidaBitfinex(url);
+  try {
+    const r = parseBitfinex(await pedir(url), ts);
+    return { precios: r.precios, error: r.error };
+  } catch (e) {
+    return { precios: {}, error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 /** Nonce compartido por todos los clientes de la instancia (nunca dos llamadas con el mismo). */
 const nonceDeInstancia = crearNonceMs();

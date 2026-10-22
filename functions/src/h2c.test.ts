@@ -2,8 +2,9 @@
 // lector tolerante de funding, billeteras, ledgers e idempotencia. Sin red ni Firestore.
 // Correr: npx tsx functions/src/h2c.test.ts   → exit 1 si algo falla.
 import * as crypto from 'crypto';
-import { crearClienteBitfinex, rutaPermitidaBitfinex, RutaProhibidaBitfinex, ErrorBitfinex, firmarBitfinex, crearNonceMs, type FetchBitfinex } from './bitfinexApi';
-import { leerBilleteras, leerFunding, movimientoDeLedger, planSincronizacionBitfinex, CATEGORIAS_LEDGER } from './bitfinexSincronizacion';
+import { crearClienteBitfinex, rutaPermitidaBitfinex, RutaProhibidaBitfinex, ErrorBitfinex, firmarBitfinex, crearNonceMs, type FetchBitfinex,
+  rutaPublicaPermitidaBitfinex, preciosPublicosBitfinex } from './bitfinexApi';
+import { leerBilleteras, leerFunding, movimientoDeLedger, planSincronizacionBitfinex, CATEGORIAS_LEDGER, tickersSinPrecio, precioConRespaldo } from './bitfinexSincronizacion';
 import { aparearTransferencias } from './compartido/patrimonioFlujosAuto';
 import { conCandado, tomarCandado, DURACION_CANDADO_MS, type DbCandado } from './candado';
 
@@ -197,6 +198,31 @@ function t(rotulo: string, cond: boolean, detalle?: unknown) {
     let err: unknown = null;
     try { await c.leer('auth/r/wallets'); } catch (e) { err = e; }
     t('pasado el plazo de la corrida no sale ninguna llamada', llamadas === 0 && err instanceof Error);
+  }
+
+  console.log('\n=== F9.196 nota de revisión 2: precio de respaldo del ticker público ===');
+  {
+    t('lista blanca pública: solo api-pub tickers tXXXUSD / tXXXX:USD',
+      rutaPublicaPermitidaBitfinex('https://api-pub.bitfinex.com/v2/tickers?symbols=tBTCUSD,tAAVE:USD')
+      && !rutaPublicaPermitidaBitfinex('https://api.bitfinex.com/v2/auth/r/wallets')
+      && !rutaPublicaPermitidaBitfinex('https://api-pub.bitfinex.com/v2/tickers?symbols=tBTCUSD&x=1')
+      && !rutaPublicaPermitidaBitfinex('https://api-pub.bitfinex.com/v2/candles/trade:1m:tBTCUSD/hist'));
+    let urlPedida = '';
+    const pedir = async (url: string) => { urlPedida = url; return { status: 200, body: [['tBTCUSD', 0, 0, 0, 0, 0, 0, 108_000], ['tSOLUSD', 0, 0, 0, 0, 0, 0, 180]] }; };
+    const pub = await preciosPublicosBitfinex(['btc', 'SOL', 'XYZ'], pedir);
+    t('ticker público: un pedido, LAST_PRICE por activo; lo que no viene queda afuera', pub.precios.BTC === 108_000 && pub.precios.SOL === 180 && pub.precios.XYZ === undefined && urlPedida.includes('tBTCUSD,tSOLUSD,tXYZUSD'), { pub, urlPedida });
+    const caido = await preciosPublicosBitfinex(['BTC'], async () => { throw new Error('ECONNRESET'); });
+    t('ticker público caído → {} con el error (no tira)', Object.keys(caido.precios).length === 0 && caido.error === 'ECONNRESET');
+    const wallets = [['exchange', 'BTC', 0.1, 0, 0.1, null, null], ['exchange', 'UST', 50, 0, 50, null, null], ['exchange', 'USD', 10, 0, 10, null, null], ['funding', 'SOL', 3, 0, 3, null, null]];
+    const ledgers = [{ categoria: 101, filas: [[1, 'ETH', 'exchange', 0, null, 1, 1, null, 'Deposit']] }];
+    const lect = (tk: string) => (tk === 'ETH' ? 3000 : null);
+    t('tickersSinPrecio: los de billeteras y ledgers sin precio en criptoLectura (sin USD ni stablecoins)', JSON.stringify(tickersSinPrecio(wallets, ledgers, lect)) === JSON.stringify(['BTC', 'SOL']));
+    const precio = precioConRespaldo(lect, { BTC: 108_000 });
+    const plan = planSincronizacionBitfinex({ wallets, funding: [], ledgers: [], leidoEnISO: '2026-10-22T12:20:00Z', precioUsd: precio });
+    const btc = plan.cuentaViva.posiciones.find(p => p.ticker === 'BTC')!;
+    const sol = plan.cuentaViva.posiciones.find(p => p.ticker === 'SOL')!;
+    t('sin criptoLectura, el ticker público valúa (BTC 0,1 × 108.000 = 10.800, sin revisar)', btc.valor_origen === 10_800 && !btc.revisar, btc);
+    t('sin ninguno de los dos: valor 0 con revisar y el motivo', sol.valor_origen === 0 && sol.revisar && /ni en el ticker público/.test(sol.motivo_revisar ?? ''), sol);
   }
 
   console.log(`\n${ok} OK, ${fail} FAIL`);

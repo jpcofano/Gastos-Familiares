@@ -85,7 +85,7 @@ export function frescuraCartera(
       out.push(`${c.cuenta}: carga ${c.fechaBase ? ddmm(c.fechaBase) : '—'}${c.movimientosAplicados ? ` + ${c.movimientosAplicados} movimientos` : ''}`);
     }
   }
-  if (cripto) out.push(`Cripto: lectura ${cuando(cripto.leidoEnISO)}`);
+  out.push(cripto ? `Cripto: lectura ${cuando(cripto.leidoEnISO)}` : 'Cripto: sin lectura de precios');
   out.push(cv.tc
     ? (cv.tc.viejo
       ? `MEP $${Math.round(cv.tc.valor).toLocaleString('es-AR')} del ${ddmm(cv.tc.fechaCotizacion)} (viejo)`
@@ -114,6 +114,20 @@ export function armarDocCarteraViva(e: EntradasCarteraViva, ahoraISO: string): D
     { fecha: e.fechaCorrida, posiciones: e.posiciones }, e.cuentasVivas, e.movimientos, precios, e.cripto, e.manuales, e.tc,
   );
   return { ...cv, fechaCorrida: e.fechaCorrida, calculadaEnISO: ahoraISO, frescura: frescuraCartera(cv, e.cuentasVivas, e.cripto, ahoraISO) };
+}
+
+/**
+ * F9.196 nota de revisión 2 — `criptoLectura/ultima` como la escribe `leerYGuardarCripto`
+ * (functions/src/index.ts): `{ ...lectura, bases, cantidadesDeFecha }`, o sea `leidoEnISO`, `precios`
+ * y `sondeo` en la RAÍZ del documento (igual que lo lee el cliente, src/datos/patrimonioCriptoLectura.ts).
+ * Antes los lectores de Functions buscaban `data().lectura`, que no existe: nunca veían un precio.
+ * Se tolera también la forma anidada, por si quedó algún documento viejo.
+ */
+export function lecturaCriptoDeDoc(d: Record<string, unknown> | undefined | null): LecturaCripto | null {
+  if (!d) return null;
+  const x = (d.precios && typeof d.precios === 'object' ? d : d.lectura) as Partial<LecturaCripto> | undefined;
+  if (!x || !x.precios || typeof x.precios !== 'object' || typeof x.leidoEnISO !== 'string' || !x.leidoEnISO) return null;
+  return { leidoEnISO: x.leidoEnISO, precios: x.precios, sondeo: Array.isArray(x.sondeo) ? x.sondeo : [] };
 }
 
 /**
@@ -175,7 +189,7 @@ export async function actualizarCarteraViva(db: Firestore, ahora: () => number =
     cuentasVivas: vivas.docs.map(d => d.data() as CuentaViva).filter(c => typeof c.leidoEn === 'string' && Array.isArray(c.posiciones)),
     movimientos: movs.docs.map(d => ({ ...(d.data() as MovimientoCuenta), id: d.id })),
     indicadores: inds.docs.map(d => d.data() as DocIndicador),
-    cripto: ((cri.data()?.lectura ?? null) as LecturaCripto | null),
+    cripto: lecturaCriptoDeDoc(cri.data()),
     manuales: man.docs.map(d => ({ ...(d.data() as PosicionManual), id: d.id })),
     tc,
   }, ahoraISO);

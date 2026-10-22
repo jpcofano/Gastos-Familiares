@@ -1593,7 +1593,14 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
           <span style={{ marginLeft: 6, fontWeight: 700, color: diferencia >= 0 ? '#4ade80' : '#f87171' }}>{efecto(diferencia)}</span>
         </div>
         <div style={{ fontSize: 11, opacity: .6, fontVariantNumeric: 'tabular-nums', marginTop: 3, lineHeight: 1.5 }}>
-          precios {efecto(precioSinDolar)} · dólar {efecto(cv.efectoDolarUsd)} · movimientos {efecto(cv.efectoMovimientosUsd)}
+          precios {efecto(precioSinDolar)} · dólar {efecto(cv.efectoDolarUsd)}
+          {/* Nota de revisión 2: el resto se separa en movimientos reales y lo que no se explica. */}
+          {cv.efectoFlujosUsd !== undefined && cv.efectoSinExplicarUsd !== undefined ? (
+            <>
+              <div>movimientos {efecto(cv.efectoFlujosUsd)} <span style={{ opacity: .7 }}>(depósitos y retiros desde la carga)</span></div>
+              <div>sin explicar {efecto(cv.efectoSinExplicarUsd)}</div>
+            </>
+          ) : <> · resto {efecto(cv.efectoMovimientosUsd)}</>}
         </div>
       </div>
       <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', margin: '14px 0 10px' }} />
