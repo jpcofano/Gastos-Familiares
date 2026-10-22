@@ -2127,11 +2127,28 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   - **H6** — escala de data912 verificada: bonos, letras y ONs por 100 VN
     (`docs/patrimonio/data912-escala.md`).
 
-  `tsc`: 41 → 41, 0 en `functions/`. **Pendiente de cierre manual:**
-  1. Deploy: rules (por `locks`), después functions, después hosting. No hay permisos nuevos de
-     Cloud Run.
-  2. Volver a subir el "Mis Instrumentos" de la 402665.
-  3. Tocar "Aplicar" en "Para decidir".
+  **Addendum 1** (`docs/prompts/F9.196.1-addendum-1.md`, corrida nocturna del 21/10). Va en el
+  mismo deploy:
+  - **A** — `BotonesSincronizar` (Sincronizar PPI, Sincronizar Bitfinex y Recalcular / Calcular
+    valor de hoy) en los dos heroes. Un `internal` sin texto se muestra como "No respondió la
+    función…" (`mensajeDeErrorCallable`).
+  - **B** — ningún llamador muestra éxito con `ok: false`: `exigirRecalculoOk` en
+    `src/datos/patrimonioRecalcular.ts` y `recalcularCarteraViva()` del cliente. Además,
+    `sincronizarBitfinex` devuelve `carteraError` en vez de tragarse el fallo de la cartera.
+  - **C** — la escala de data912 queda fija en 100 para bonos y ONs. La de PPI va solo con el
+    precio de PPI.
+  - **Prueba con los archivos reales de Balanz** (`scripts/probarVistaBalanzReal.ts`, local):
+    - la 402665 del 21/10 sale ARS y da el total del export en dólares (−0,03%), con los costos del
+      20/10 en USD;
+    - la 1120830 sale USD.
+
+  `tsc`: 41 → 41, 0 en `functions/`.
+
+  **Pendiente de cierre manual:** seguir `docs/prompts/F9.196.1-deploy.md`, que tiene las reglas,
+  las 9 Functions por nombre, el hosting, la comprobación de Cloud Run y las pruebas en orden.
+  Después:
+  1. Volver a subir el "Mis Instrumentos" de la 402665 en dólares.
+  2. Tocar "Aplicar" en "Para decidir".
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
@@ -2695,15 +2712,13 @@ Inflación en esperados/proyecciones ARS (fase propia, futura): los `itemsEspera
 
 ## Backlog (post F5.3)
 - **F9.196 / F9.196.1 — lo que queda.**
-  - Deploy de F9.196.1: rules (`locks`), después functions, después hosting. Después:
+  - Deploy de F9.196.1 y del Addendum 1, juntos: ver `docs/prompts/F9.196.1-deploy.md`. Después:
     - volver a subir el "Mis Instrumentos" de la 402665 (quedó inflado por el archivo en pesos del
       21/10);
     - tocar "Aplicar" en "Para decidir".
   - Funding de Bitfinex: se confirma con el primer préstamo activo.
-  - PAMP, TGSU2, TRAN e YPFD siguen con `costoSospechoso`: PPI no registró los splits. Decidir si se
-    carga a mano su costo en USD.
-  - `escalaData912` usa la escala de PPI si la hay. Si PPI diera 1 para un bono, data912 quedaría
-    100 veces alto: decidir si se fija en 100.
+  - PAMP, TGSU2, TRAN e YPFD siguen con `costoSospechoso`: PPI no registró los splits. Juan decidió
+    el 21/10 dejarlas así por ahora.
   - xlsx 0.18.5 (`package.json`): pasar a la versión de la CDN de SheetJS (decisión 17).
   - Binance, Lemon y Nexo por API: fuera.
   - F9.197: no empezada.
@@ -3415,8 +3430,8 @@ Prompt de extracción: `src/datos/patrimonioPromptExtraccion.ts` (F9.145 — ún
 de `docs/patrimonio/` quedó como nota que apunta acá).
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
-**Implementado hasta F9.196.1** (F9.196 deployada el 21/10/2026; F9.196.1 con el código cerrado el
-22/10/2026, falta su deploy). Detalle completo en
+**Implementado hasta F9.196.1 + Addendum 1** (F9.196 deployada el 21/10/2026; F9.196.1 y el
+Addendum 1 con el código cerrado el 22/10/2026, falta su deploy: `docs/prompts/F9.196.1-deploy.md`). Detalle completo en
 `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
 
 ### Una corrida es el estado completo a una fecha (F9.189 §1)

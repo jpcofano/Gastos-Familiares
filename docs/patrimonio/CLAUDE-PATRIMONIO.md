@@ -1210,6 +1210,27 @@ cada fuente. Una transferencia entre cuentas propias no es flujo.
   es la exportación de "Mis Instrumentos" y la caja, `cajaAnclada.hasta`. Si difieren en más de 1
   día hábil, se agrega "⚠ fechas distintas".
 
+### Botones, respuesta de `recalcularCarteraViva` y escala de data912 (F9.196.1 Addendum 1)
+
+- **A — `BotonesSincronizar`** (`src/vistas/Patrimonio.tsx`): Sincronizar PPI, Sincronizar Bitfinex
+  y Recalcular ("Calcular valor de hoy" en el hero de la corrida).
+  - Va en los dos heroes: si el primer cálculo falla, igual se puede sincronizar.
+  - Los errores pasan por `mensajeDeErrorCallable` (`src/datos/patrimonioRecalcular.ts`):
+    - un `internal` sin texto → "No respondió la función…";
+    - `deadline-exceeded` → aviso de tiempo;
+    - el resto → el mensaje real.
+- **B — `ok: false` nunca es éxito.** `recalcularCarteraViva` devuelve `{ ok, totalUsd, error?,
+  flujos }`, y con `ok: false` siempre trae su motivo (también "no hay una corrida vigente").
+  - En el cliente, `recalcularCarteraViva()` pasa la respuesta por `exigirRecalculoOk`: con
+    `ok: false` tira con el mensaje real. Un error de los flujos vuelve aparte (`avisoFlujos`), sin
+    tapar el resultado.
+  - `recalcularCarteraVivaCrudo()` es para "Para decidir", que necesita el detalle.
+  - `sincronizarBitfinex` devuelve `carteraError` en vez de tragarse el fallo de la cartera.
+  - Si PPI o Bitfinex sincronizaron pero la cartera falló, el toast dice las dos cosas.
+- **C — escala de data912 fija:** `escalaData912(tipo)` da 100 para `bono` y `on`, y 1 para el
+  resto. La escala de PPI (`nominalInPrice` / `escalaPPI`) se usa solo para el precio que viene de
+  PPI. Está medido en `docs/patrimonio/data912-escala.md`.
+
 ## Sincronización de PPI y valor de hoy (F9.196 H2a) — contrato
 
 ### Código compartido entre cliente y Functions
@@ -1408,7 +1429,13 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
   - **14.** Una tesis se importa aunque `resultado` no pase la validación.
   - **15.** El análisis de un solo ticker no pide tesis.
 - F9.196.1 §5 (22/10/2026): PPI no registra los splits de PAMP, TGSU2, TRAN ni YPFD
-  (`docs/patrimonio/ppi-splits-medicion.md`). No hay detector de splits y siguen `costoSospechoso`.
+  (`docs/patrimonio/ppi-splits-medicion.md`). No hay detector de splits y siguen `costoSospechoso`
+  (decisión de Juan del 21/10: quedan así por ahora).
+- F9.196.1 Addendum 1 (21/10/2026), decisiones aceptadas por Juan:
+  - **Archivo de Balanz en pesos:** el dólar es el cierre del último día hábil de su fecha.
+  - **"Para decidir":** se ve con las decididas aunque no haya pendientes.
+  - **Escala de data912:** queda fija en 100 para bonos y ONs.
+  - **xlsx:** sigue en el backlog.
 - Set de métricas completo; bandas estándar (ajustables); RV sin semáforo.
 - Historial fechado desde el día uno.
 - Anexo en archivo propio; puntero desde el CLAUDE.md principal.

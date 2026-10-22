@@ -45,7 +45,10 @@ return escalaPPI ?? 100;
   el tipo lo pone el importador o la ingesta (supuesto: `bono`, no verificado para TZXM7). Si es
   `bono`, se busca en `arg_bonds` (`PANEL_POR_TIPO`, `patrimonioPrecios.ts:58`), donde está, y se
   divide por 100 → **coincide**.
-- **Ojo con un detalle:** si PPI guardó una escala para la especie (`escalaPPI`), el código usa esa
+- **Decidido y hecho (F9.196.1 Addendum 1 C):** `escalaData912(tipo)` da 100 fijo para bonos y ONs.
+  La escala de PPI ya no se aplica al precio de data912. Lo que sigue es el análisis que llevó a
+  esa decisión.
+- **Ojo con un detalle (resuelto):** si PPI guardó una escala para la especie (`escalaPPI`), el código usa esa
   escala también para el precio de data912. Lo medido dice que data912 es siempre por 100 en bonos,
   letras y ONs, sin depender de lo que diga PPI. Si alguna especie tuviera `nominalInPrice` = 1 en
   PPI, el precio de data912 quedaría 100 veces alto (el test `functions/src/h2a.test.ts:215` fija
