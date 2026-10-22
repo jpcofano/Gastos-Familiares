@@ -17,12 +17,16 @@ const MEP: TcCarteraViva = { valor: 1549, fuente: 'tcDiario', fechaCotizacion: '
 const CONTROL = ['GD30', 'GD35', 'BPOC7'];
 const FCI_USD = ['BCMMUSDA', 'ESTRA1A'];
 const usd = (n: number) => `US$ ${n.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`;
+let fallas = 0;
+/** Chequeo con exit code: el script falla si algo no da lo esperado (no alcanza con leer la salida). */
+const exigir = (cond: boolean, que: string) => { if (!cond) { fallas++; console.log(`  FALLA: ${que}`); } };
 
 /** El "Mis Instrumentos" de esa comitente y fecha (YYYYMMDD), sin depender de los titulares del nombre. */
 function archivo(comitente: string, fecha: string): string {
-  const f = fs.readdirSync(DIR).find(n => n.includes('MisInstrumentos') && n.includes(`com${comitente}`) && n.includes(fecha) && n.endsWith('.xlsx'));
-  if (!f) throw new Error(`No está el Mis Instrumentos de ${comitente} del ${fecha} en data/balanz-muestras/`);
-  return f;
+  const fs_ = fs.readdirSync(DIR).filter(n => n.includes('MisInstrumentos') && n.includes(`com${comitente}`) && n.includes(fecha) && n.endsWith('.xlsx'));
+  if (!fs_.length) throw new Error(`No está el Mis Instrumentos de ${comitente} del ${fecha} en data/balanz-muestras/`);
+  if (fs_.length > 1) throw new Error(`Hay ${fs_.length} Mis Instrumentos de ${comitente} del ${fecha}: dejá uno solo`);
+  return fs_[0];
 }
 
 async function leer(comitente: string, fecha: string): Promise<ImportacionMisInstrumentos> {
@@ -39,26 +43,33 @@ async function main() {
   const precioRef = new Map(ref.filas.map(f => [f.ticker, f.precioUsd]));
   const precioDe = (p: { ticker: string }) => (precioRef.has(p.ticker) ? { precio: precioRef.get(p.ticker)!, moneda: 'USD' as const, fecha: '2026-10-20' } : null);
   console.log(`Referencia 402665 20/10 (dólares): ${usd(ref.valorUsdBalanz)} · ${ref.filas.length} especies`);
+  exigir(Math.abs(ref.valorUsdBalanz / 30646 - 1) < 0.001, 'la referencia no es el export en dólares del 20/10 (≈ US$ 30.646)');
 
   // 402665 del 21/10 (en pesos).
   const a = await leer('402665', '20261021');
   const dA = detectarVista(a, { precioDe, tc: MEP.valor, previa });
   console.log(`\n402665 21/10: vista detectada ${dA.vista} (método ${dA.metodo}, mediana ${dA.mediana?.toFixed(5)}, ${dA.especiesUsadas} especies) · precios de la app: ${dA.preciosApp?.vista ?? '—'} · anterior: ${dA.importacionAnterior?.vista ?? '—'}`);
+  exigir(dA.vista === 'ARS', `402665 21/10: vista ${dA.vista}, se esperaba ARS`);
   const rA = aplicarVista(a, 'ARS', { mep: MEP, previa });
-  if (!rA.imp) { console.log(`  aplicarVista ARS falló: ${rA.error}`); }
+  if (!rA.imp) { console.log(`  aplicarVista ARS falló: ${rA.error}`); exigir(false, 'aplicarVista ARS'); }
   else {
     const dif = rA.imp.valorUsdBalanz / ref.valorUsdBalanz - 1;
     console.log(`  total convertido: ${usd(rA.imp.valorUsdBalanz)} (esperado ≈ US$ 30.638 ± 1%; contra el export en dólares del 20/10: ${(dif * 100).toFixed(2)}%) · noCuadran ${rA.imp.noCuadran.length} · costoUsdDel ${rA.imp.costoUsdDel}`);
+    exigir(Math.abs(rA.imp.valorUsdBalanz / 30638 - 1) < 0.01 && Math.abs(dif) < 0.01 && rA.imp.noCuadran.length === 0, 'total de la 402665 del 21/10 fuera de ±1%');
     for (const t of FCI_USD) {
       const crudo = a.posiciones.find(p => p.ticker === t)?.valor_origen;
       const conv = rA.imp.posiciones.find(p => p.ticker === t)?.valor_origen;
-      console.log(`  ${t}: archivo ${crudo?.toFixed(2)} → guardado ${conv?.toFixed(2)} ${crudo === conv ? '(sin convertir ✓)' : '(¡CONVERTIDO!)'}`);
+      const igual = crudo !== undefined && crudo === conv;
+      console.log(`  ${t}: archivo ${crudo?.toFixed(2)} → guardado ${conv?.toFixed(2)} ${igual ? '(sin convertir ✓)' : '(¡CONVERTIDO o ausente!)'}`);
+      exigir(igual, `${t} tendría que quedar sin convertir`);
     }
     for (const t of CONTROL) {
       const esperado = ref.costoPromedio[t];
       const salio = rA.imp.costoPromedio[t];
       const enPesos = a.costoPromedio[t];
-      console.log(`  costo ${t}: esperado (USD del 20/10) ${esperado} · salió ${salio} · pesos del archivo ${enPesos} (÷ MEP = ${enPesos !== undefined ? (enPesos / MEP.valor).toFixed(5) : '—'}) ${salio === esperado ? '✓' : '✗'}`);
+      const bien = esperado !== undefined && salio === esperado;
+      console.log(`  costo ${t}: esperado (USD del 20/10) ${esperado} · salió ${salio} · pesos del archivo ${enPesos} (÷ MEP = ${enPesos !== undefined ? (enPesos / MEP.valor).toFixed(5) : '—'}) ${bien ? '✓' : '✗'}`);
+      exigir(bien, `costo de ${t}`);
     }
   }
 
@@ -72,9 +83,13 @@ async function main() {
     previaB = cuentaVivaDeImportacion(b13);
     const dB2 = detectarVista(b, { precioDe, tc: MEP.valor, previa: previaB });
     console.log(`  con la 1120830 del 13/10 (dólares) como anterior: ${dB2.vista} (método ${dB2.metodo}, ${dB2.especiesUsadas} especies) · precios de la app: ${dB2.preciosApp?.vista ?? '—'} · anterior: ${dB2.importacionAnterior?.vista ?? '—'}`);
+    exigir(dB2.vista === 'USD', `1120830 21/10: vista ${dB2.vista} contra su import anterior, se esperaba USD`);
   } catch (e) { console.log(`  (sin la 1120830 del 13/10: ${(e as Error).message})`); }
   const rB = aplicarVista(b, 'USD', { mep: MEP, previa: previaB });
   console.log(`  leída en dólares: ${usd(rB.imp!.valorUsdBalanz)} · tcConversion ${rB.imp!.tcConversion === null ? 'ninguna (sin conversión ✓)' : JSON.stringify(rB.imp!.tcConversion)} · noCuadran ${rB.imp!.noCuadran.length}`);
+  exigir(dB.vista !== 'ARS' && rB.imp!.tcConversion === null && rB.imp!.noCuadran.length === 0, '1120830 21/10 leída en dólares sin conversión');
+  console.log(`\n${fallas === 0 ? 'OK — todo lo esperado' : `${fallas} FALLA(S)`}`);
+  if (fallas) process.exitCode = 1;
 }
 
 main().catch(e => { console.error(e instanceof Error ? e.message : String(e)); process.exit(1); });
