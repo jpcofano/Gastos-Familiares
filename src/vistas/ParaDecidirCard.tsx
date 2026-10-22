@@ -2,12 +2,14 @@
 // (`flujosAuto/estado.pendientes`). Juan elige Aporte, Retiro o Interna; la decisión se guarda en
 // `decisionesFlujo` y se aplica con "Aplicar" (recalcularCarteraViva corre los flujos) o con el cron.
 //
-// Aparece solo si hay pendientes. No decide nada sola: "¿Ya lo cargaste a mano?" solo avisa.
+// Aparece si hay pendientes. Sin pendientes pero con decisiones guardadas queda solo "Decididas"
+// (plegada), para poder corregir una decisión ya aplicada. No decide nada sola: "¿Ya lo cargaste a
+// mano?" solo avisa.
 import { useEffect, useState } from 'react';
 import { Card } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import type { DecisionFlujo } from '../datos/compartido/patrimonioFlujosAuto';
-import { posibleManual } from '../datos/compartido/patrimonioFlujosAuto';
+import { posibleManual, FLUJOS_AUTO_DESDE } from '../datos/compartido/patrimonioFlujosAuto';
 import {
   cargarDecisionesFlujo, cargarEstadoFlujosAuto, guardarDecisionFlujo,
   type DecisionGuardada, type EstadoFlujosAuto, type ResumenMovimientoFlujo, type PendienteResumen,
@@ -45,9 +47,27 @@ export default function ParaDecidirCard({ manuales, privado, onAplicado }: {
     .catch(e => setAviso({ texto: `No se pudo leer: ${e instanceof Error ? e.message : String(e)}`, error: true }));
   useEffect(() => { recargar(); }, []);
 
-  if (!estado || (estado.pendientes.length === 0 && estado.sinTc.length === 0)) return null;
+  if (!estado) return null;
+  // Un estado escrito antes de §1.a (sin `desde`) todavía trae los pendientes de 3 años: se filtran
+  // acá también, y se pide "Aplicar" para recalcularlo.
+  const desde = estado.desde ?? FLUJOS_AUTO_DESDE;
+  const pendientes = estado.pendientes.filter(p => p.fecha >= desde);
+  if (pendientes.length === 0 && estado.sinTc.length === 0 && decisiones.length === 0) return null;
+  const soloDecididas = pendientes.length === 0 && estado.sinTc.length === 0;
   const decididaDe = new Map(decisiones.map(d => [d.clave, d]));
-  const sinDecidir = estado.pendientes.filter(p => !decididaDe.has(p.clave));
+  const sinDecidir = pendientes.filter(p => !decididaDe.has(p.clave));
+  const sinValuacion = pendientes.filter(p => decididaDe.has(p.clave) && p.motivo === 'sin_valuacion');
+  const porAplicar = pendientes.filter(p => decididaDe.has(p.clave) && p.motivo !== 'sin_valuacion');
+  const enPendientes = new Set(pendientes.map(p => p.clave));
+  const conFlujo = estado.clavesConFlujo ? new Set(estado.clavesConFlujo) : null;
+  /** Qué pasó con una decisión: para no mostrar como vigente una que no hace nada. */
+  const estadoDecision = (d: DecisionGuardada): string | null => {
+    if (enPendientes.has(d.clave)) return sinValuacion.some(p => p.clave === d.clave) ? 'sin precio: no entra todavía' : 'por aplicar';
+    if (!conFlujo) return null;
+    if (conFlujo.has(d.clave)) return 'aplicada';
+    if (d.decision === 'interna') return 'aplicada (sin flujo)';
+    return 'sin efecto (anterior al corte, apareada o borrada)';
+  };
 
   async function decidir(m: ResumenMovimientoFlujo, d: DecisionFlujo) {
     setOcupado(m.clave); setAviso(null);
@@ -70,8 +90,12 @@ export default function ParaDecidirCard({ manuales, privado, onAplicado }: {
       onAplicado();
       setAviso(r.flujos?.error
         ? { texto: `Los flujos fallaron: ${r.flujos.error}`, error: true }
-        : { texto: `Aplicado: ${r.flujos?.flujos ?? 0} flujos automáticos, ${r.flujos?.pendientes ?? 0} para decidir.`, error: false });
+        : r.error
+          ? { texto: `Flujos aplicados (${r.flujos?.flujos ?? 0}), pero el valor de hoy no se pudo recalcular: ${r.error}`, error: true }
+          : { texto: `Aplicado: ${r.flujos?.flujos ?? 0} flujos automáticos, ${r.flujos?.pendientes ?? 0} para decidir.`, error: false });
     } catch (e) {
+      // Puede haber cortado el cliente con el server todavía aplicando: se relee igual.
+      await recargar();
       setAviso({ texto: `No se pudo aplicar: ${e instanceof Error ? e.message : String(e)}`, error: true });
     } finally {
       setOcupado(null);
@@ -107,11 +131,18 @@ export default function ParaDecidirCard({ manuales, privado, onAplicado }: {
 
   return (
     <Card>
-      <div style={{ fontSize: 13, fontWeight: 700 }}>Para decidir ({sinDecidir.length})</div>
-      <div style={{ ...sub, marginTop: 2, marginBottom: 8 }}>
-        Depósitos y retiros que no aparearon con otra cuenta tuya. ¿Es plata que entró o salió del patrimonio
-        (aporte o retiro), o una transferencia entre tus cuentas (interna)?
-      </div>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>{soloDecididas ? 'Aportes y retiros automáticos' : `Para decidir (${sinDecidir.length})`}</div>
+      {!soloDecididas && (
+        <div style={{ ...sub, marginTop: 2, marginBottom: 8 }}>
+          Depósitos y retiros que no aparearon con otra cuenta tuya. ¿Es plata que entró o salió del patrimonio
+          (aporte o retiro), o una transferencia entre tus cuentas (interna)?
+        </div>
+      )}
+      {!estado.desde && (
+        <div style={{ ...sub, color: 'var(--gf-out)', marginBottom: 8 }}>
+          Este estado es de antes del corte del {fmtFecha(FLUJOS_AUTO_DESDE)}: tocá "Aplicar" para recalcularlo (lo anterior sin par pasa a historial).
+        </div>
+      )}
 
       {sinDecidir.map((p, i) => {
         const manual = posibleManual({ fecha: p.fecha, cuenta: p.cuenta, montoUsd: p.montoUsd ?? null }, manuales);
@@ -123,12 +154,20 @@ export default function ParaDecidirCard({ manuales, privado, onAplicado }: {
           </div>
         );
       })}
-      {sinDecidir.length === 0 && <div style={sub}>Todo decidido. Tocá "Aplicar" para que entre en los flujos.</div>}
+      {sinDecidir.length === 0 && porAplicar.length > 0 && <div style={sub}>Todo decidido. Tocá "Aplicar" para que entre en los flujos.</div>}
+
+      {sinValuacion.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--gf-gray-400)', letterSpacing: 0.3, marginBottom: 4 }}>DECIDIDOS, SIN PRECIO</div>
+          <div style={sub}>En especie y sin valuación (precio 0 o sin dato): no entran a los flujos hasta que tengan precio.</div>
+          {sinValuacion.map(m => <div key={m.clave} style={{ padding: '4px 0' }}>{fila(m)}</div>)}
+        </div>
+      )}
 
       {estado.sinTc.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--gf-gray-400)', letterSpacing: 0.3, marginBottom: 4 }}>SIN DÓLAR DEL DÍA</div>
-          <div style={sub}>Decididos, pero sin tipo de cambio para su fecha: no se convierten (no se inventa un dólar).</div>
+          <div style={sub}>Decididos, pero sin tipo de cambio para su fecha: no se convierten (no se inventa un dólar). "Aplicar" no los cambia hasta que haya dólar de ese día.</div>
           {estado.sinTc.map(m => <div key={m.clave} style={{ padding: '4px 0' }}>{fila(m)}</div>)}
         </div>
       )}
@@ -138,14 +177,18 @@ export default function ParaDecidirCard({ manuales, privado, onAplicado }: {
           <button onClick={() => setVerDecididas(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--font-base)', fontSize: 12, fontWeight: 700, color: 'var(--color-text-sec)' }}>
             Decididas ({decisiones.length}) <Icon name={verDecididas ? 'chevron-up' : 'chevron-down'} size={13} color="var(--color-text-sec)" />
           </button>
-          {verDecididas && decisiones.map(d => (
-            <div key={d.id} style={{ padding: '6px 0', borderTop: '1px solid var(--gf-gray-100)' }}>
-              {d.resumen ? fila(d.resumen, <span style={{ fontSize: 11.5, fontWeight: 700 }}>{ROTULO[d.decision]}</span>) : <div style={sub}>{d.clave}: {ROTULO[d.decision]}</div>}
-              {cambiando === d.clave && d.resumen
-                ? botones(d.resumen, d.resumen.tipo === 'retiro' ? 'retiro' : 'aporte', d.decision)
-                : <button onClick={() => setCambiando(d.clave)} disabled={!d.resumen} style={{ background: 'none', border: 'none', padding: 0, marginTop: 3, cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: 'var(--color-accent)', fontFamily: 'var(--font-base)' }}>Cambiar</button>}
-            </div>
-          ))}
+          {verDecididas && decisiones.map(d => {
+            const ed = estadoDecision(d);
+            return (
+              <div key={d.id} style={{ padding: '6px 0', borderTop: '1px solid var(--gf-gray-100)' }}>
+                {d.resumen ? fila(d.resumen, <span style={{ fontSize: 11.5, fontWeight: 700 }}>{ROTULO[d.decision]}</span>) : <div style={sub}>{d.clave}: {ROTULO[d.decision]}</div>}
+                {ed && <div style={{ ...sub, marginTop: 2 }}>{ed}</div>}
+                {cambiando === d.clave && d.resumen
+                  ? botones(d.resumen, d.resumen.tipo === 'retiro' ? 'retiro' : 'aporte', d.decision)
+                  : <button onClick={() => setCambiando(d.clave)} disabled={!d.resumen || ocupado !== null} style={{ background: 'none', border: 'none', padding: 0, marginTop: 3, cursor: ocupado ? 'default' : 'pointer', fontSize: 11.5, fontWeight: 700, color: 'var(--color-accent)', fontFamily: 'var(--font-base)' }}>Cambiar</button>}
+              </div>
+            );
+          })}
         </div>
       )}
 

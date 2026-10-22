@@ -158,7 +158,7 @@ export async function sincronizarPPI(
 
 // ── Flujos automáticos (Addendum 2 §C) ───────────────────────────────────────
 
-export type ResumenFlujos = { internas: number; pendientes: number; flujos: number; sinTc: number; historial?: number; error?: string };
+export type ResumenFlujos = { internas: number; pendientes: number; flujos: number; sinTc: number; historial?: number; borrados?: number; error?: string };
 
 /**
  * Los flujos corren aparte: si fallan, NO marcan como fallida la sincronización de la cuenta (que
@@ -199,7 +199,8 @@ export async function actualizarFlujosAutomaticos(db: Firestore): Promise<Resume
   const tcDe = crearTcDe(new Map(tcSnap.docs.map(d => [d.id, Number(d.data().tcUsdArs)] as const)));
   // §1.a — lo anterior a FLUJOS_AUTO_DESDE sin par no es pendiente: ya está en los flujos manuales.
   const r = flujosAutomaticos(movimientos, decisiones, tcDe, FLUJOS_AUTO_DESDE);
-  const claves = new Map(movimientos.map((m, i) => [m, clavesDe(movimientos)[i]] as const));
+  const listaClaves = clavesDe(movimientos);
+  const claves = new Map(movimientos.map((m, i) => [m, listaClaves[i]] as const));
   const resumen = (m: MovimientoCuenta) => ({
     clave: claves.get(m) ?? m.id ?? '', fecha: m.fecha, cuenta: m.cuenta, tipo: m.tipo, moneda: m.moneda,
     montoNeto: m.montoNeto, ticker: m.ticker ?? null, cantidad: m.cantidad ?? null, origen: m.origen,
@@ -221,8 +222,11 @@ export async function actualizarFlujosAutomaticos(db: Firestore): Promise<Resume
   }
   // Un flujo automático que dejó de corresponder (ahora aparea como interno, Juan cambió la
   // decisión, o el movimiento se borró) se BORRA, y su movimiento pierde el `flujoId`.
+  let borrados = 0;
   for (const d of autoSnap.docs) {
     if (vigentes.has(d.id)) continue;
+    borrados++;
+    console.log(`[flujos] se borra ${d.id} (${String(d.get('movimientoClave') ?? '')}): ya no corresponde (interna, otra decisión, anterior a ${FLUJOS_AUTO_DESDE} o movimiento borrado)`);
     ops.push(b => b.delete(d.ref));
     for (const m of movimientos.filter(x => x.flujoId === d.id && x.id)) {
       ops.push(b => b.set(db.collection('movimientosCuenta').doc(m.id!), { flujoId: FieldValue.delete() }, { merge: true }));
@@ -238,15 +242,17 @@ export async function actualizarFlujosAutomaticos(db: Firestore): Promise<Resume
     calculadoEn: FieldValue.serverTimestamp(),
     // `montoUsd` (con el TC de su fecha) para que la pantalla compare contra los flujos manuales.
     pendientes: r.pendientes.map(p => ({
-      ...resumen(p.movimiento), sugerido: p.sugerido,
+      ...resumen(p.movimiento), sugerido: p.sugerido, ...(p.motivo ? { motivo: p.motivo } : {}),
       montoUsd: flujoDeMovimiento(p.movimiento, p.movimiento.moneda === 'ARS' ? tcDe(p.movimiento.fecha) : null).flujo?.montoUsd ?? null,
     })),
     historial: r.historial.length,
     desde: FLUJOS_AUTO_DESDE,
+    // Las claves que hoy generan flujo (para que "Decididas" diga cuáles están aplicadas).
+    clavesConFlujo: r.flujos.map(f => f.movimientoClave),
     internas: r.internas.map(i => ({ retiro: resumen(i.retiro), deposito: resumen(i.deposito), clase: i.clase, dias: i.dias, diferencia: i.diferencia })),
     sinTc: r.sinTc.map(resumen),
     flujos: r.flujos.length,
   });
   await batch.commit();
-  return { internas: r.internas.length, pendientes: r.pendientes.length, flujos: r.flujos.length, sinTc: r.sinTc.length, historial: r.historial.length };
+  return { internas: r.internas.length, pendientes: r.pendientes.length, flujos: r.flujos.length, sinTc: r.sinTc.length, historial: r.historial.length, borrados };
 }

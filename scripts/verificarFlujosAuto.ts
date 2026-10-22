@@ -175,5 +175,34 @@ console.log('\n=== F9.196.1 §1.c: "¿Ya lo cargaste a mano?" e ids de decisión
     'ids de decisión: las claves de PPI, Bitfinex y Balanz son ids válidos; una con "/" va hasheada');
 }
 
+console.log('\n=== arreglos de la revisión de H1 ===');
+{
+  ok(posibleManual({ fecha: '2026-10-21', cuenta: 'Balanz 402665', montoUsd: 1000 }, [{ fecha: '2026-10-21', cuenta: 'Balanz', montoUsd: 1000 }]) === '2026-10-21',
+    '"Balanz" (manual, texto libre) contra "Balanz 402665" → avisa');
+  ok(posibleManual({ fecha: '2026-10-21', cuenta: 'PPI 123', montoUsd: 1000 }, [{ fecha: '2026-10-22', cuenta: null, montoUsd: 1000 }]) === '2026-10-22'
+    && posibleManual({ fecha: '2026-10-21', cuenta: 'PPI 123', montoUsd: 1000 }, [{ fecha: '2026-10-22', cuenta: 'Balanz', montoUsd: 1000 }]) === null,
+    'manual sin cuenta → avisa; de otra plataforma → no');
+  // Retiro un sábado: el depósito del viernes (al revés, −0 hábiles) no le gana al del mismo sábado.
+  const r = mov({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-24', montoNeto: 1000 });
+  const vie = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-23', montoNeto: 1000 });
+  const sab = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-24', montoNeto: 995 });
+  const ap = aparearTransferencias([r, vie, sab]);
+  ok(ap.internas.length === 1 && ap.internas[0].deposito === sab && !Object.is(ap.internas[0].dias, -0), 'a igual distancia gana el sentido normal aunque el inverso dé −0', ap.internas.map(i => i.deposito.fecha));
+  // En especie sin valuación y decidido: queda pendiente con motivo, no como "para decidir".
+  const esp = mov({ cuenta: 'Bitfinex', tipo: 'deposito', fecha: '2026-10-22', montoNeto: 0, ticker: 'XYZ', cantidad: 5, tipoActivo: 'cripto' });
+  const sv = flujosAutomaticos([esp], { [claveMovimiento(esp)]: 'aporte' }, tcDe, FLUJOS_AUTO_DESDE);
+  ok(sv.pendientes.length === 1 && sv.pendientes[0].motivo === 'sin_valuacion' && sv.flujos.length === 0, 'decidido en especie sin precio → pendiente con motivo sin_valuacion');
+  // Rendimiento: 400 retiros × 400 depósitos repartidos en el tiempo; los lejanos se descartan por días corridos.
+  const muchos: MovimientoCuenta[] = [];
+  for (let i = 0; i < 400; i++) {
+    const f = new Date(Date.UTC(2024, 0, 1) + i * 2 * 86_400_000).toISOString().slice(0, 10);
+    muchos.push(mov({ cuenta: 'PPI', tipo: 'retiro', fecha: f, montoNeto: 1000 + i }), mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: f, montoNeto: 5000 + i * 7 }));
+  }
+  const t0 = Date.now();
+  aparearTransferencias(muchos);
+  const ms = Date.now() - t0;
+  ok(ms < 5000, `400 × 400 movimientos en menos de 5 s (${ms} ms)`);
+}
+
 console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);
 if (fallas) process.exit(1);

@@ -111,31 +111,40 @@ export type TransferenciaInterna = {
  * ¿Pueden ser las dos puntas de una transferencia interna? La llegada puede figurar hasta 1 día
  * hábil antes de la salida (1 corrido en cripto, §1.b): `dias` queda en −1. Más que eso, no.
  */
-export function compatibles(r: MovimientoCuenta, d: MovimientoCuenta): { dias: number; diferencia: number } | null {
+export function compatibles(r: MovimientoCuenta, d: MovimientoCuenta): { dias: number; diferencia: number; alReves: boolean } | null {
   if (r.tipo !== 'retiro' || d.tipo !== 'deposito' || r.cuenta === d.cuenta) return null;
   const clase = claseDe(r);
   if (claseDe(d) !== clase) return null;
-  if (d.fecha < r.fecha) {
-    const antes = clase === 'cripto' ? -diasEntre(r.fecha, d.fecha) : -diasHabilesEntre(r.fecha, d.fecha);
-    if (antes > (clase === 'cripto' ? APAREO.diasCriptoAlReves : APAREO.diasHabilesAlReves)) return null;
-  }
+  // Filtros baratos primero (el apareo es retiros × depósitos y los días hábiles se cuentan día
+  // por día): una ventana en días corridos que contiene a la de días hábiles (5 hábiles ≤ 9
+  // corridos; 1 hábil al revés ≤ 3 corridos, lunes contra el viernes anterior), y moneda, monto y
+  // especie antes de contar hábiles.
+  const corridos = diasEntre(r.fecha, d.fecha);
+  if (clase === 'cripto' ? corridos < -APAREO.diasCriptoAlReves || corridos > APAREO.diasCripto : corridos < -3 || corridos > 9) return null;
+  const alReves = d.fecha < r.fecha;
+  // `|| 0` saca el −0 (un retiro de sábado contra el viernes anterior da −0 hábiles).
+  const habiles = () => diasHabilesEntre(r.fecha, d.fecha) || 0;
   if (clase === 'dinero') {
     if (r.moneda !== d.moneda) return null;
     const a = Math.abs(r.montoNeto), b = Math.abs(d.montoNeto);
     const diferencia = Math.max(a, b) > 0 ? Math.abs(a - b) / Math.max(a, b) : 0;
-    const dias = diasHabilesEntre(r.fecha, d.fecha);
-    return diferencia <= APAREO.toleranciaMonto && dias <= APAREO.diasHabilesDinero ? { dias, diferencia } : null;
+    if (diferencia > APAREO.toleranciaMonto) return null;
+    const dias = habiles();
+    if (alReves ? -dias > APAREO.diasHabilesAlReves : dias > APAREO.diasHabilesDinero) return null;
+    return { dias, diferencia, alReves };
   }
   if ((r.ticker ?? '').trim().toUpperCase() !== (d.ticker ?? '').trim().toUpperCase()) return null;
   const sale = Math.abs(r.cantidad ?? 0), llega = Math.abs(d.cantidad ?? 0);
   if (!(sale > 0)) return null;
   const diferencia = (sale - llega) / sale;
   if (clase === 'cripto') {
-    const dias = diasEntre(r.fecha, d.fecha);
-    return diferencia >= 0 && diferencia <= APAREO.toleranciaComisionCripto && dias <= APAREO.diasCripto ? { dias, diferencia } : null;
+    if (!(diferencia >= 0 && diferencia <= APAREO.toleranciaComisionCripto)) return null;
+    return { dias: corridos || 0, diferencia, alReves };
   }
-  const dias = diasHabilesEntre(r.fecha, d.fecha);
-  return Math.abs(diferencia) < 1e-9 && dias <= APAREO.diasHabilesTitulos ? { dias, diferencia } : null;
+  if (Math.abs(diferencia) >= 1e-9) return null;
+  const dias = habiles();
+  if (alReves ? -dias > APAREO.diasHabilesAlReves : dias > APAREO.diasHabilesTitulos) return null;
+  return { dias, diferencia, alReves };
 }
 
 /**
@@ -156,15 +165,15 @@ export function aparearTransferencias(movimientos: MovimientoCuenta[]): {
     .sort((a, b) => movimientos[a].fecha.localeCompare(movimientos[b].fecha) || claves[a].localeCompare(claves[b]));
   const depositos = idx.filter(i => movimientos[i].tipo === 'deposito');
   // Candidatos de cada retiro, ordenados por preferencia.
-  const opciones = new Map<number, Array<{ d: number; dias: number; diferencia: number }>>();
+  const opciones = new Map<number, Array<{ d: number; dias: number; diferencia: number; alReves: boolean }>>();
   for (const r of retiros) {
-    const cs: Array<{ d: number; dias: number; diferencia: number }> = [];
+    const cs: Array<{ d: number; dias: number; diferencia: number; alReves: boolean }> = [];
     for (const d of depositos) {
       const c = compatibles(movimientos[r], movimientos[d]);
       if (c) cs.push({ d, ...c });
     }
     // Más cerca primero (|días|); a igual distancia, el de sentido normal antes que el inverso.
-    cs.sort((x, y) => Math.abs(x.dias) - Math.abs(y.dias) || Number(x.dias < 0) - Number(y.dias < 0)
+    cs.sort((x, y) => Math.abs(x.dias) - Math.abs(y.dias) || Number(x.alReves) - Number(y.alReves)
       || Math.abs(x.diferencia) - Math.abs(y.diferencia) || claves[x.d].localeCompare(claves[y.d]));
     opciones.set(r, cs);
   }
@@ -196,6 +205,8 @@ export type PendienteFlujo = {
   movimiento: MovimientoCuenta;
   /** Lo que el movimiento dice por sí solo; la lista lo ofrece primero, pero decide Juan. */
   sugerido: 'aporte' | 'retiro';
+  /** Decidido por Juan, pero en especie y sin valuación: no entra hasta que tenga precio. */
+  motivo?: 'sin_valuacion';
 };
 
 /**
@@ -224,7 +235,8 @@ export function flujosAutomaticos(
 } {
   // Los movimientos inferidos (diferencias entre dos "Mis Instrumentos") nunca son flujo.
   const reales = movimientos.filter(m => !m.inferido);
-  const claveDe = new Map(reales.map((m, i) => [m, clavesDe(reales)[i]] as const));
+  const clavesReales = clavesDe(reales);
+  const claveDe = new Map(reales.map((m, i) => [m, clavesReales[i]] as const));
   const { internas, sinAparear } = aparearTransferencias(reales);
   const flujos: Array<FlujoPropuesto & { movimientoClave: string }> = [];
   const pendientes: PendienteFlujo[] = [];
@@ -240,7 +252,7 @@ export function flujosAutomaticos(
     const { flujo, motivo } = flujoDeMovimiento(comoFlujo, m.moneda === 'ARS' ? tcDe(m.fecha) : null);
     if (motivo === 'sin_tc') { sinTc.push(m); continue; }
     // Un movimiento en especie sin valuación (precio -1 o 0 en el archivo) no da un flujo de 0: queda pendiente.
-    if (flujo && flujo.montoUsd === 0 && m.ticker) { pendientes.push({ movimiento: m, sugerido: decision === 'retiro' ? 'retiro' : 'aporte' }); continue; }
+    if (flujo && flujo.montoUsd === 0 && m.ticker) { pendientes.push({ movimiento: m, sugerido: decision === 'retiro' ? 'retiro' : 'aporte', motivo: 'sin_valuacion' }); continue; }
     if (flujo) flujos.push({ ...flujo, movimientoClave: clave });
   }
   return { internas, flujos, pendientes, sinTc, historial };
@@ -250,13 +262,21 @@ export function flujosAutomaticos(
  * §1.c — "¿Ya lo cargaste a mano?": un flujo MANUAL de la misma cuenta a ±5 días hábiles y ±1% del
  * monto en USD. Solo avisa; no decide nada. Devuelve la fecha del manual que coincide, o null.
  */
+/**
+ * La cuenta de un flujo manual es texto libre ("Balanz", "IOL", o nada) y la de un movimiento es
+ * "Balanz 402665", "PPI 123…", "Bitfinex": se comparan por la primera palabra, sin mayúsculas.
+ */
+const plataformaDe = (cuenta: string | null | undefined) => (cuenta ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+
 export function posibleManual(
   p: { fecha: string; cuenta: string; montoUsd: number | null },
   manuales: Array<{ fecha: string; cuenta: string | null; montoUsd: number }>,
 ): string | null {
   if (p.montoUsd === null || !(Math.abs(p.montoUsd) > 0)) return null;
   const a = Math.abs(p.montoUsd);
-  const m = manuales.find(f => f.cuenta?.trim() === p.cuenta.trim()
+  const plataforma = plataformaDe(p.cuenta);
+  // Un manual sin cuenta puede ser de cualquiera: también avisa.
+  const m = manuales.find(f => (!plataformaDe(f.cuenta) || plataformaDe(f.cuenta) === plataforma)
     && Math.abs(diasHabilesEntre(p.fecha, f.fecha)) <= APAREO.diasHabilesDinero
     && Math.abs(Math.abs(f.montoUsd) - a) / Math.max(Math.abs(f.montoUsd), a) <= APAREO.toleranciaMonto);
   return m?.fecha ?? null;

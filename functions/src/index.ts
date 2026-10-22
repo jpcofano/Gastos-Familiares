@@ -2684,8 +2684,14 @@ export const recalcularCarteraViva = onCall(
     // F9.196.1 §1.d — los flujos también (como el cron): un Movimientos de Balanz subido desde el
     // cliente, o una decisión de "Para decidir", entra sin esperar al cron de las 18:20.
     const flujos = await flujosSinRomper(db, 'recalcularCarteraViva');
-    const doc = await actualizarCarteraVivaEn(db);
-    return { ok: !!doc, totalUsd: doc?.totalUsd ?? null, flujos };
+    // Si la cartera falla, los flujos ya quedaron aplicados: se devuelve igual, con el error.
+    try {
+      const doc = await actualizarCarteraVivaEn(db);
+      return { ok: !!doc, totalUsd: doc?.totalUsd ?? null, flujos };
+    } catch (e) {
+      console.error(`[recalcularCarteraViva] cartera viva: ${e instanceof Error ? e.message : String(e)}`);
+      return { ok: false, totalUsd: null, flujos, error: e instanceof Error ? e.message : String(e) };
+    }
   },
 );
 

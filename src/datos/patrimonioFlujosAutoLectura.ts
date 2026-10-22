@@ -20,6 +20,8 @@ export type ResumenMovimientoFlujo = {
 
 export type PendienteResumen = ResumenMovimientoFlujo & {
   sugerido: 'aporte' | 'retiro';
+  /** Decidido, pero en especie sin valuación: no entra hasta tener precio. */
+  motivo?: 'sin_valuacion';
   /** Con el TC de su fecha; null si no se pudo valuar. */
   montoUsd?: number | null;
 };
@@ -32,6 +34,8 @@ export type EstadoFlujosAuto = {
   /** §1.a — sin par y anteriores a `desde`: solo se cuentan. */
   historial?: number;
   desde?: string;
+  /** Claves que hoy generan un flujo automático. */
+  clavesConFlujo?: string[];
 };
 
 export type DecisionGuardada = {
