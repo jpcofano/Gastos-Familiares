@@ -4,6 +4,9 @@ import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
 import type { CarteraViva } from './patrimonioCarteraViva';
+import { exigirRecalculoOk, type ResultadoRecalcular } from './patrimonioRecalcular';
+
+export type { ResultadoRecalcular } from './patrimonioRecalcular';
 
 /** Espejo de `DocCarteraViva` (functions/src/carteraVivaCron.ts). */
 export type DocCarteraViva = CarteraViva & { fechaCorrida: string; calculadaEnISO: string; frescura: string[] };
@@ -25,12 +28,19 @@ export async function sincronizarBitfinexAhora() {
   return (await _sincronizarBitfinex()).data;
 }
 
-/** F9.196.1 §1.d — también corre los flujos automáticos y devuelve su resumen. */
-export type ResultadoRecalcular = {
-  ok: boolean; totalUsd: number | null; error?: string;
-  flujos?: { internas: number; pendientes: number; flujos: number; sinTc: number; historial?: number; borrados?: number; error?: string };
-};
+// F9.196.1 §1.d — también corre los flujos automáticos y devuelve su resumen.
 const _recalcular = httpsCallable<void, ResultadoRecalcular>(functions, 'recalcularCarteraViva', { timeout: 120_000 });
-export async function recalcularCarteraViva() {
+
+/** La respuesta tal cual (`ok`, `error`, `flujos`), para quien necesita el detalle ("Para decidir"). */
+export async function recalcularCarteraVivaCrudo(): Promise<ResultadoRecalcular> {
   return (await _recalcular()).data;
+}
+
+/**
+ * Addendum 1 B — recalcula y, si la cartera falló (`ok: false`), TIRA con el mensaje real: ningún
+ * llamador puede mostrarlo como éxito. Devuelve el aviso de los flujos, si fallaron.
+ */
+export async function recalcularCarteraViva(): Promise<{ resultado: ResultadoRecalcular; avisoFlujos: string | null }> {
+  const resultado = await recalcularCarteraVivaCrudo();
+  return { resultado, ...exigirRecalculoOk(resultado) };
 }

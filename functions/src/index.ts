@@ -2688,7 +2688,10 @@ export const recalcularCarteraViva = onCall(
     // Si la cartera falla, los flujos ya quedaron aplicados: se devuelve igual, con el error.
     try {
       const doc = await actualizarCarteraVivaEn(db);
-      return { ok: !!doc, totalUsd: doc?.totalUsd ?? null, flujos };
+      // Addendum 1 B: `ok: false` siempre con su motivo (null = no hay corrida vigente).
+      return doc
+        ? { ok: true, totalUsd: doc.totalUsd, flujos }
+        : { ok: false, totalUsd: null, flujos, error: 'no hay una corrida vigente: cargá una corrida antes de calcular el valor de hoy' };
     } catch (e) {
       console.error(`[recalcularCarteraViva] cartera viva: ${e instanceof Error ? e.message : String(e)}`);
       return { ok: false, totalUsd: null, flujos, error: e instanceof Error ? e.message : String(e) };

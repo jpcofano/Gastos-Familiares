@@ -1516,11 +1516,18 @@ function BotonesSincronizar({ onActualizado, onToast, textoRecalcular = 'Recalcu
         onToast(`Bitfinex sincronizado: ${r.posiciones} activos, ${r.movimientos} movimientos${r.paraRevisar ? `, ${r.paraRevisar} para revisar` : ''}. Valor de hoy recalculado.`, false);
       } else if (cual === 'ppi') {
         const r = await sincronizarPPIAhora();
-        await recalcularCarteraViva();
-        onToast(`PPI sincronizado: ${r.posiciones} posiciones, ${r.movimientos} movimientos. Valor de hoy recalculado.`, false);
+        // PPI ya quedó sincronizado: si después falla la cartera, se dice las dos cosas.
+        let rc: Awaited<ReturnType<typeof recalcularCarteraViva>>;
+        try { rc = await recalcularCarteraViva(); }
+        catch (e) {
+          onToast(`PPI sincronizado (${r.posiciones} posiciones, ${r.movimientos} movimientos), pero no se pudo calcular el valor de hoy: ${mensajeDeErrorCallable(e)}`, true);
+          onActualizado();
+          return;
+        }
+        onToast(`PPI sincronizado: ${r.posiciones} posiciones, ${r.movimientos} movimientos. Valor de hoy recalculado.${rc.avisoFlujos ? ` ⚠ Ojo: ${rc.avisoFlujos}.` : ''}`, false);
       } else {
-        await recalcularCarteraViva();
-        onToast('Valor de hoy recalculado.', false);
+        const rc = await recalcularCarteraViva();
+        onToast(`Valor de hoy recalculado.${rc.avisoFlujos ? ` ⚠ Ojo: ${rc.avisoFlujos}.` : ''}`, false);
       }
       onActualizado();
     } catch (e) {
@@ -5021,11 +5028,18 @@ export default function Patrimonio() {
   useEffect(() => { cargarTodasLasTesis().then(setTesisMap).catch(e => console.warn('[tesis]', e)); }, []);
   useEffect(() => { cargarCarteraViva().then(setCarteraViva).catch(e => { console.warn('[carteraViva]', e); setCarteraViva(null); }); }, []);
   // Después de una corrida nueva o de importar Balanz: recalcular el valor de hoy (fail-soft).
+  // Addendum 1 B: un fallo de la cartera (`ok: false` o error) se avisa con el mensaje real.
   const recalcularYRecargarCarteraViva = () => {
     recalcularCarteraViva()
-      .then(() => cargarCarteraViva())
+      .then(rc => {
+        if (rc.avisoFlujos) setToast({ texto: `Valor de hoy recalculado. ⚠ Ojo: ${rc.avisoFlujos}.`, error: false });
+        return cargarCarteraViva();
+      })
       .then(setCarteraViva)
-      .catch(e => console.warn('[carteraViva] no se pudo recalcular:', e));
+      .catch(e => {
+        console.warn('[carteraViva] no se pudo recalcular:', e);
+        setToast({ texto: `No se pudo calcular el valor de hoy: ${mensajeDeErrorCallable(e)}`, error: true });
+      });
   };
   // F9.196 Addendum 2 §A — "Actualizar Balanz" (Mis Instrumentos → cuentasVivas).
   const [showBalanz,       setShowBalanz]       = useState(false);

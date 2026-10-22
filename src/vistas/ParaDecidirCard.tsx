@@ -14,7 +14,8 @@ import {
   cargarDecisionesFlujo, cargarEstadoFlujosAuto, guardarDecisionFlujo,
   type DecisionGuardada, type EstadoFlujosAuto, type ResumenMovimientoFlujo, type PendienteResumen,
 } from '../datos/patrimonioFlujosAutoLectura';
-import { recalcularCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
+import { recalcularCarteraVivaCrudo } from '../datos/patrimonioCarteraVivaLectura';
+import { mensajeDeErrorCallable } from '../datos/patrimonioRecalcular';
 
 const fmtFecha = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}`;
 const fmtNum = (n: number, dec = 0) => n.toLocaleString('es-AR', { minimumFractionDigits: dec, maximumFractionDigits: dec });
@@ -85,18 +86,19 @@ export default function ParaDecidirCard({ manuales, privado, onAplicado }: {
   async function aplicar() {
     setOcupado('aplicar'); setAviso(null);
     try {
-      const r = await recalcularCarteraViva();
+      const r = await recalcularCarteraVivaCrudo();
       await recargar();
       onAplicado();
+      // Addendum 1 B: `ok: false` nunca se muestra como éxito, con o sin texto de error.
       setAviso(r.flujos?.error
-        ? { texto: `Los flujos fallaron: ${r.flujos.error}`, error: true }
-        : r.error
-          ? { texto: `Flujos aplicados (${r.flujos?.flujos ?? 0}), pero el valor de hoy no se pudo recalcular: ${r.error}`, error: true }
+        ? { texto: `Los flujos fallaron: ${r.flujos.error}${!r.ok ? ` · y el valor de hoy no se pudo recalcular: ${r.error ?? 'sin detalle'}` : ''}`, error: true }
+        : !r.ok
+          ? { texto: `Flujos aplicados (${r.flujos?.flujos ?? 0}), pero el valor de hoy no se pudo recalcular: ${r.error ?? 'sin detalle'}`, error: true }
           : { texto: `Aplicado: ${r.flujos?.flujos ?? 0} flujos automáticos, ${r.flujos?.pendientes ?? 0} para decidir.`, error: false });
     } catch (e) {
       // Puede haber cortado el cliente con el server todavía aplicando: se relee igual.
       await recargar();
-      setAviso({ texto: `No se pudo aplicar: ${e instanceof Error ? e.message : String(e)}`, error: true });
+      setAviso({ texto: `No se pudo aplicar: ${mensajeDeErrorCallable(e)}`, error: true });
     } finally {
       setOcupado(null);
     }

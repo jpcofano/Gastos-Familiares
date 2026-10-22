@@ -29,7 +29,7 @@ import { flujosAutomaticos, aparearTransferencias, FLUJOS_AUTO_DESDE } from '../
 import { conCandado, type DbCandado } from '../functions/src/candado';
 import { frescuraCartera } from '../functions/src/carteraVivaCron';
 // F9.196.1 Addendum 1 — A y B.
-import { mensajeDeErrorCallable } from '../src/datos/patrimonioRecalcular';
+import { mensajeDeErrorCallable, exigirRecalculoOk } from '../src/datos/patrimonioRecalcular';
 
 let fallas = 0;
 const ok = (cond: boolean, msg: string, detalle?: unknown) => {
@@ -380,6 +380,16 @@ console.log('\n=== F9.196.1 Addendum 1 A: mensaje del internal sin texto ===');
   const tiempo = mensajeDeErrorCallable(Object.assign(new Error('deadline-exceeded'), { code: 'functions/deadline-exceeded' }));
   ok(sinTexto.startsWith('No respondió la función') && conTexto === 'Faltan secretos de PPI' && tiempo.startsWith('La función tardó'),
     'internal sin texto → "No respondió la función…"; con texto → el texto real; deadline → aviso de tiempo', { sinTexto, conTexto, tiempo });
+}
+
+console.log('\n=== F9.196.1 Addendum 1 B: ok: false nunca es éxito ===');
+{
+  const tira = (r: Parameters<typeof exigirRecalculoOk>[0]) => { try { exigirRecalculoOk(r); return null; } catch (e) { return (e as Error).message; } };
+  ok(tira({ ok: false, totalUsd: null, error: 'Firestore caído' }) === 'Firestore caído' && tira({ ok: false, totalUsd: null }) === 'sin detalle',
+    'ok: false → tira con el mensaje real (o "sin detalle")');
+  const conFlujos = exigirRecalculoOk({ ok: true, totalUsd: 100, flujos: { internas: 0, pendientes: 0, flujos: 0, sinTc: 0, error: 'timeout' } });
+  ok(tira({ ok: true, totalUsd: 100 }) === null && conFlujos.avisoFlujos === 'los flujos automáticos fallaron: timeout',
+    'ok: true → no tira; si fallaron los flujos, el aviso va aparte');
 }
 
 h0aH4.then(() => {
