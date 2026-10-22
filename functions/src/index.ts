@@ -2666,8 +2666,11 @@ export const recalcularCarteraViva = onCall(
     if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
     const email = request.auth.token.email?.toLowerCase();
     if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
+    // F9.196.1 §1.d — los flujos también (como el cron): un Movimientos de Balanz subido desde el
+    // cliente, o una decisión de "Para decidir", entra sin esperar al cron de las 18:20.
+    const flujos = await flujosSinRomper(db, 'recalcularCarteraViva');
     const doc = await actualizarCarteraVivaEn(db);
-    return { ok: !!doc, totalUsd: doc?.totalUsd ?? null };
+    return { ok: !!doc, totalUsd: doc?.totalUsd ?? null, flujos };
   },
 );
 

@@ -14,7 +14,21 @@
 // ⛔ CÓDIGO COMPARTIDO (F9.196 H2): idéntico byte a byte en src/datos/compartido/ y
 // functions/src/compartido/. Se edita el de src/datos/ y se copia; `scripts/verificarCopiasIdenticas.ts`
 // falla si difieren. Sin imports fuera de esta carpeta.
-import { claveDuplicado, flujoDeMovimiento, type FlujoPropuesto, type MovimientoCuenta } from './patrimonioMovimientos';
+import { claveDuplicado, flujoDeMovimiento, hashId, type FlujoPropuesto, type MovimientoCuenta } from './patrimonioMovimientos';
+
+/**
+ * F9.196.1 §1.a — desde cuándo los movimientos sin par cuentan como aporte o retiro posibles. Es la
+ * fecha del deploy de F9.196: la historia anterior ya está en los flujos MANUALES de F9.96, y la
+ * primera sincronización de PPI trae 3 años. Lo anterior sin par va a `historial` (solo se cuenta):
+ * decidirlo como aporte o retiro duplicaría un flujo manual. El apareo corre igual sobre todo.
+ */
+export const FLUJOS_AUTO_DESDE = '2026-10-21';
+
+/**
+ * Id del documento `decisionesFlujo/{id}` para una clave. Las claves son ids de `movimientosCuenta`
+ * (válidos); una clave con "/" (no debería pasar) va hasheada y la clave queda en el campo `clave`.
+ */
+export const idDecisionFlujo = (clave: string) => (clave.includes('/') ? `h_${hashId(clave)}` : clave);
 
 export const APAREO = {
   /** Dinero: diferencia de monto relativa al mayor de los dos. */
@@ -31,6 +45,13 @@ export const APAREO = {
    * ⚠ La spec no fija la ventana para títulos: se usa la del dinero (5 días hábiles), para confirmar.
    */
   diasHabilesTitulos: 5,
+  /**
+   * F9.196.1 §1.b — el depósito puede figurar hasta 1 día hábil ANTES del retiro (dinero y títulos)
+   * o 1 día corrido (cripto): entre fuentes distintas pasa (concertación contra liquidación, UTC
+   * contra hora argentina). Más que eso, no.
+   */
+  diasHabilesAlReves: 1,
+  diasCriptoAlReves: 1,
 } as const;
 
 export type ClaseMovimiento = 'dinero' | 'cripto' | 'titulos';
@@ -87,15 +108,17 @@ export type TransferenciaInterna = {
 };
 
 /**
- * ¿Pueden ser las dos puntas de una transferencia interna? La llegada nunca es anterior a la salida.
- * ⚠ Interpretación: la spec dice "a 5 días hábiles o menos" sin sentido; se exige que el depósito
- * no sea anterior al retiro.
+ * ¿Pueden ser las dos puntas de una transferencia interna? La llegada puede figurar hasta 1 día
+ * hábil antes de la salida (1 corrido en cripto, §1.b): `dias` queda en −1. Más que eso, no.
  */
 export function compatibles(r: MovimientoCuenta, d: MovimientoCuenta): { dias: number; diferencia: number } | null {
   if (r.tipo !== 'retiro' || d.tipo !== 'deposito' || r.cuenta === d.cuenta) return null;
   const clase = claseDe(r);
   if (claseDe(d) !== clase) return null;
-  if (d.fecha < r.fecha) return null;
+  if (d.fecha < r.fecha) {
+    const antes = clase === 'cripto' ? -diasEntre(r.fecha, d.fecha) : -diasHabilesEntre(r.fecha, d.fecha);
+    if (antes > (clase === 'cripto' ? APAREO.diasCriptoAlReves : APAREO.diasHabilesAlReves)) return null;
+  }
   if (clase === 'dinero') {
     if (r.moneda !== d.moneda) return null;
     const a = Math.abs(r.montoNeto), b = Math.abs(d.montoNeto);
@@ -140,7 +163,9 @@ export function aparearTransferencias(movimientos: MovimientoCuenta[]): {
       const c = compatibles(movimientos[r], movimientos[d]);
       if (c) cs.push({ d, ...c });
     }
-    cs.sort((x, y) => x.dias - y.dias || Math.abs(x.diferencia) - Math.abs(y.diferencia) || claves[x.d].localeCompare(claves[y.d]));
+    // Más cerca primero (|días|); a igual distancia, el de sentido normal antes que el inverso.
+    cs.sort((x, y) => Math.abs(x.dias) - Math.abs(y.dias) || Number(x.dias < 0) - Number(y.dias < 0)
+      || Math.abs(x.diferencia) - Math.abs(y.diferencia) || claves[x.d].localeCompare(claves[y.d]));
     opciones.set(r, cs);
   }
   const duenoDe = new Map<number, number>();   // depósito → retiro
@@ -175,6 +200,8 @@ export type PendienteFlujo = {
 
 /**
  * Los flujos de F9.96 a partir de los movimientos de todas las fuentes.
+ * - `desde` (§1.a, en producción `FLUJOS_AUTO_DESDE`): lo que no aparea y es anterior NO va a
+ *   pendientes ni a flujos: va a `historial` (solo se cuenta). El apareo corre sobre todo.
  * - Pares internos: sin flujo.
  * - Sin par y con decisión de Juan: `aporte` / `retiro` generan el flujo (con el signo que eligió),
  *   `interna` no genera nada.
@@ -187,11 +214,13 @@ export function flujosAutomaticos(
   movimientos: MovimientoCuenta[],
   decisiones: Record<string, DecisionFlujo>,
   tcDe: (fecha: string) => number | null,
+  desde: string | null = null,
 ): {
   internas: TransferenciaInterna[];
   flujos: Array<FlujoPropuesto & { movimientoClave: string }>;
   pendientes: PendienteFlujo[];
   sinTc: MovimientoCuenta[];
+  historial: MovimientoCuenta[];
 } {
   // Los movimientos inferidos (diferencias entre dos "Mis Instrumentos") nunca son flujo.
   const reales = movimientos.filter(m => !m.inferido);
@@ -200,7 +229,9 @@ export function flujosAutomaticos(
   const flujos: Array<FlujoPropuesto & { movimientoClave: string }> = [];
   const pendientes: PendienteFlujo[] = [];
   const sinTc: MovimientoCuenta[] = [];
+  const historial: MovimientoCuenta[] = [];
   for (const m of sinAparear) {
+    if (desde && m.fecha < desde) { historial.push(m); continue; }
     const clave = claveDe.get(m)!;
     const decision = decisiones[clave];
     if (!decision) { pendientes.push({ movimiento: m, sugerido: m.tipo === 'retiro' ? 'retiro' : 'aporte' }); continue; }
@@ -212,5 +243,21 @@ export function flujosAutomaticos(
     if (flujo && flujo.montoUsd === 0 && m.ticker) { pendientes.push({ movimiento: m, sugerido: decision === 'retiro' ? 'retiro' : 'aporte' }); continue; }
     if (flujo) flujos.push({ ...flujo, movimientoClave: clave });
   }
-  return { internas, flujos, pendientes, sinTc };
+  return { internas, flujos, pendientes, sinTc, historial };
+}
+
+/**
+ * §1.c — "¿Ya lo cargaste a mano?": un flujo MANUAL de la misma cuenta a ±5 días hábiles y ±1% del
+ * monto en USD. Solo avisa; no decide nada. Devuelve la fecha del manual que coincide, o null.
+ */
+export function posibleManual(
+  p: { fecha: string; cuenta: string; montoUsd: number | null },
+  manuales: Array<{ fecha: string; cuenta: string | null; montoUsd: number }>,
+): string | null {
+  if (p.montoUsd === null || !(Math.abs(p.montoUsd) > 0)) return null;
+  const a = Math.abs(p.montoUsd);
+  const m = manuales.find(f => f.cuenta?.trim() === p.cuenta.trim()
+    && Math.abs(diasHabilesEntre(p.fecha, f.fecha)) <= APAREO.diasHabilesDinero
+    && Math.abs(Math.abs(f.montoUsd) - a) / Math.max(Math.abs(f.montoUsd), a) <= APAREO.toleranciaMonto);
+  return m?.fecha ?? null;
 }

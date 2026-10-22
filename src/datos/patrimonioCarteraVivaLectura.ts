@@ -24,7 +24,12 @@ export async function sincronizarBitfinexAhora() {
   return (await _sincronizarBitfinex()).data;
 }
 
-const _recalcular = httpsCallable<void, { ok: boolean; totalUsd: number | null }>(functions, 'recalcularCarteraViva');
+/** F9.196.1 §1.d — también corre los flujos automáticos y devuelve su resumen. */
+export type ResultadoRecalcular = {
+  ok: boolean; totalUsd: number | null;
+  flujos?: { internas: number; pendientes: number; flujos: number; sinTc: number; historial?: number; error?: string };
+};
+const _recalcular = httpsCallable<void, ResultadoRecalcular>(functions, 'recalcularCarteraViva');
 export async function recalcularCarteraViva() {
   return (await _recalcular()).data;
 }

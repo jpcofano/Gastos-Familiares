@@ -2,6 +2,7 @@
 // Sin red ni Firestore. Uso: npx tsx scripts/verificarFlujosAuto.ts   → exit 1 si algo falla.
 import {
   aparearTransferencias, flujosAutomaticos, diasHabilesEntre, diasEntre, claveMovimiento, APAREO,
+  FLUJOS_AUTO_DESDE, posibleManual, idDecisionFlujo,
 } from '../src/datos/patrimonioFlujosAuto';
 import type { MovimientoCuenta } from '../src/datos/patrimonioMovimientos';
 
@@ -43,7 +44,9 @@ console.log('\n=== reglas de dinero ===');
     ['misma cuenta → no', { cuenta: 'A' }, false],
     ['5 días hábiles después (26/10) → aparea', { fecha: '2026-10-26' }, true],
     ['6 días hábiles después (27/10) → no', { fecha: '2026-10-27' }, false],
-    ['depósito anterior al retiro → no', { fecha: '2026-10-16' }, false],
+    // F9.196.1 §1.b: hasta 1 día hábil al revés (antes: ningún depósito anterior al retiro).
+    ['depósito 1 día hábil antes (vie 16/10, retiro lun 19/10) → aparea', { fecha: '2026-10-16' }, true],
+    ['depósito 2 días hábiles antes (jue 15/10) → no', { fecha: '2026-10-15' }, false],
   ];
   for (const [rotulo, cambio, espera] of casos) {
     const d = mov({ cuenta: 'B', tipo: 'deposito', fecha: '2026-10-20', montoNeto: 1000, ...cambio });
@@ -122,6 +125,54 @@ console.log('\n=== decisiones de Juan y flujos ===');
   ok(interna.flujos.length === 0 && interna.pendientes.length === 0, 'marcado "interna" por Juan → sin flujo y sale de la lista');
   const alReves = flujosAutomaticos([retiro], { [claveMovimiento(retiro)]: 'aporte' }, tcDe);
   ok(alReves.flujos[0]?.tipo === 'aporte', 'la decisión de Juan manda sobre el tipo del movimiento');
+}
+
+console.log('\n=== F9.196.1 §1.a: fecha de inicio de los flujos automáticos ===');
+{
+  ok(FLUJOS_AUTO_DESDE === '2026-10-21', 'FLUJOS_AUTO_DESDE = 21/10/2026 (deploy de F9.196)');
+  const viejo = mov({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-20', montoNeto: 1000 });
+  const a = flujosAutomaticos([viejo], {}, tcDe, FLUJOS_AUTO_DESDE);
+  ok(a.historial.length === 1 && a.pendientes.length === 0 && a.flujos.length === 0, 'retiro del 20/10 sin par → historial, no pendientes');
+  const decidido = flujosAutomaticos([viejo], { [claveMovimiento(viejo)]: 'retiro' }, tcDe, FLUJOS_AUTO_DESDE);
+  ok(decidido.flujos.length === 0 && decidido.historial.length === 1, 'aunque tenga decisión, lo anterior no genera flujo (ya está en los manuales)');
+  const dep = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-22', montoNeto: 1000 });
+  const b = flujosAutomaticos([viejo, dep], {}, tcDe, FLUJOS_AUTO_DESDE);
+  ok(b.internas.length === 1 && b.historial.length === 0 && b.pendientes.length === 0, 'retiro del 20/10 con depósito del 22/10 → interna (el apareo corre sobre todo)');
+  const nuevo = mov({ cuenta: 'PPI', tipo: 'deposito', fecha: '2026-10-21', montoNeto: 500 });
+  ok(flujosAutomaticos([nuevo], {}, tcDe, FLUJOS_AUTO_DESDE).pendientes.length === 1, 'el día del corte ya cuenta como pendiente');
+  ok(flujosAutomaticos([viejo], {}, tcDe).pendientes.length === 1, 'sin `desde`, como antes');
+}
+
+console.log('\n=== F9.196.1 §1.b: un día al revés ===');
+{
+  const r = mov({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-21', montoNeto: 1000 });
+  const d1 = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-20', montoNeto: 1000 });
+  const d2 = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-19', montoNeto: 1000 });
+  const a = aparearTransferencias([r, d1]);
+  ok(a.internas.length === 1 && a.internas[0].dias === -1, 'depósito un día hábil antes → interna, con dias −1');
+  ok(aparearTransferencias([r, d2]).internas.length === 0, 'dos días hábiles antes → sin par');
+  // A igual distancia (1 día), el de sentido normal antes que el inverso.
+  const despues = mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-22', montoNeto: 1000 });
+  const c = aparearTransferencias([r, d1, despues]);
+  ok(c.internas.length === 1 && c.internas[0].deposito === despues && c.sinAparear.includes(d1), 'a igual distancia, el de sentido normal primero', c.internas.map(i => i.deposito.fecha));
+  // Cripto: 1 día corrido al revés sí, 2 no.
+  const rc = mov({ cuenta: 'Bitfinex', tipo: 'retiro', fecha: '2026-10-21', montoNeto: 0, ticker: 'BTC', cantidad: 0.1, tipoActivo: 'cripto' });
+  const dc = (fecha: string) => mov({ cuenta: 'Nexo', tipo: 'deposito', fecha, montoNeto: 0, ticker: 'BTC', cantidad: 0.0995, tipoActivo: 'cripto' });
+  ok(aparearTransferencias([rc, dc('2026-10-20')]).internas.length === 1 && aparearTransferencias([rc, dc('2026-10-19')]).internas.length === 0,
+    'cripto: 1 día corrido antes → interna; 2 → no');
+}
+
+console.log('\n=== F9.196.1 §1.c: "¿Ya lo cargaste a mano?" e ids de decisión ===');
+{
+  const manuales = [{ fecha: '2026-10-23', cuenta: 'PPI', montoUsd: 1005 }, { fecha: '2026-10-23', cuenta: 'Balanz', montoUsd: 1000 }];
+  ok(posibleManual({ fecha: '2026-10-21', cuenta: 'PPI', montoUsd: 1000 }, manuales) === '2026-10-23', 'manual de la misma cuenta, ±5 días hábiles y ±1% → avisa con su fecha');
+  ok(posibleManual({ fecha: '2026-10-21', cuenta: 'PPI', montoUsd: 900 }, manuales) === null
+    && posibleManual({ fecha: '2026-11-05', cuenta: 'PPI', montoUsd: 1000 }, manuales) === null
+    && posibleManual({ fecha: '2026-10-21', cuenta: 'PPI', montoUsd: null }, manuales) === null,
+    'otro monto, lejos en el tiempo o sin monto en USD → no avisa');
+  ok(idDecisionFlujo('ppimov_abc123') === 'ppimov_abc123' && idDecisionFlujo('bfxmov_99') === 'bfxmov_99'
+    && idDecisionFlujo('balanz_999001_x') === 'balanz_999001_x' && /^h_[0-9a-z]+$/.test(idDecisionFlujo('PPI|2026/10/21|x')),
+    'ids de decisión: las claves de PPI, Bitfinex y Balanz son ids válidos; una con "/" va hasheada');
 }
 
 console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);

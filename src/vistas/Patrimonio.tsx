@@ -69,6 +69,7 @@ import type { DocTesis } from '../datos/compartido/tesis';
 import { accionesAMirar, ordenarTenencias, type OrdenTenencias } from '../datos/patrimonioAccionesAMirar';
 import AccionesAMirarCard from './AccionesAMirarCard';
 import { Plegable } from './FichaStopsTesis';
+import ParaDecidirCard from './ParaDecidirCard';
 import { cargarCarteraViva, sincronizarPPIAhora, sincronizarBitfinexAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
 
 /** F9.196 H2a — el valor de hoy como dato aparte para el informe (que sigue sobre la corrida). */
@@ -4361,7 +4362,9 @@ function PoliticaRiesgoCard({ topes, configurado, onGuardar }: {
   );
 }
 
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onToast, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarFactores, onImportarCafciManual }: {
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onToast, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarFactores, onImportarCafciManual, onFlujosAplicados }: {
+  /** F9.196.1 §1.c — después de "Aplicar" en "Para decidir": recargar flujos y cartera viva. */
+  onFlujosAplicados: () => void;
   activosFijos: ActivoFijo[];
   manuales: PosicionManual[];
   topesRiesgo: TopesRiesgo;
@@ -4388,10 +4391,18 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
   onImportarFactores: () => void;
   onImportarCafciManual: (fondoId: string, claseId: string, json: string) => Promise<ResultadoImportarCafciManual>;
 }) {
+  const $cfg = useDinero();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
+      {/* F9.196.1 §1.c — los depósitos y retiros sin par, arriba de los flujos manuales. */}
+      <ParaDecidirCard
+        manuales={flujos.filter(f => !(f as FlujoPatrimonio & { automatico?: boolean }).automatico)
+          .map(f => ({ fecha: f.fecha.toDate().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' }), cuenta: f.cuenta, montoUsd: f.montoUsd }))}
+        privado={$cfg.privado}
+        onAplicado={onFlujosAplicados}
+      />
       <AportesRetirosCard flujos={flujos} onAdd={onAddFlujo} onEdit={onEditFlujo} />
       <CafciFondosCard configCafci={configCafci} carteras={cafciCarteras} sincronizando={sincronizandoCafci} onSincronizar={onSincronizarCafci} onGuardar={onGuardarConfigCafci} onImportarFondos={onImportarFondosCafci} onImportarMapping={onImportarMappingCafci} onImportarFactores={onImportarFactores} onImportarManual={onImportarCafciManual} />
       <TipoCambioCard />
@@ -5845,6 +5856,10 @@ export default function Patrimonio() {
           )}
           {tab === 'config' && (
             <ConfigTab
+              onFlujosAplicados={() => {
+                cargarFlujos().then(setFlujos).catch(e => console.warn('[flujos]', e));
+                cargarCarteraViva().then(setCarteraViva).catch(e => console.warn('[carteraViva]', e));
+              }}
               activosFijos={activosFijos}
               manuales={posicionesManuales}
               configIA={configIA}
