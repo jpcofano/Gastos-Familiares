@@ -23,8 +23,10 @@ async function main() {
   const fecha = ultima.docs[0]?.get('fechaCorrida') as string | undefined;
   if (!fecha) { console.log('No hay corrida: no hay contra qué comparar.'); return; }
   const corrida = (await db.collection('posicionesPatrimonio').where('fechaCorrida', '==', fecha).get()).docs.map(d => d.data() as PosicionRaw);
-  const tcSnap = await db.collection('tcDiario').orderBy(FieldPath.documentId(), 'desc').limit(1).get();
-  const tc = (tcSnap.docs[0]?.get('tcUsdArs') as number | undefined) ?? null;
+  // Sin índice compuesto (F9.196 nota de revisión 1): rango ascendente de los últimos 20 días, el último en memoria.
+  const desde = new Date(Date.now() - 20 * 86_400_000).toISOString().slice(0, 10);
+  const tcSnap = await db.collection('tcDiario').where(FieldPath.documentId(), '>=', desde).orderBy(FieldPath.documentId()).get();
+  const tc = (tcSnap.docs[tcSnap.docs.length - 1]?.get('tcUsdArs') as number | undefined) ?? null;
 
   console.log(`Corrida del ${fecha} · ${cuentas.length} cuentas vivas de Balanz · TC ${tc ?? 'sin dato'}`);
   for (const c of cuentas) console.log(`  ${c.comitente}: archivo del ${c.exportadoEn} · vista ${c.vista ?? '(sin vista: de antes de §0)'}`);

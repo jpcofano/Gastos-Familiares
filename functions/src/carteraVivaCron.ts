@@ -116,6 +116,26 @@ export function armarDocCarteraViva(e: EntradasCarteraViva, ahoraISO: string): D
   return { ...cv, fechaCorrida: e.fechaCorrida, calculadaEnISO: ahoraISO, frescura: frescuraCartera(cv, e.cuentasVivas, e.cripto, ahoraISO) };
 }
 
+/**
+ * F9.196 nota de revisión 1 — `tcDiario` se lee SIN índice compuesto. `orderBy(documentId, 'desc')`
+ * lo pide, y en producción falló con FAILED_PRECONDITION. Se pide una consulta ascendente por rango
+ * (`documentId >= hoy − 20 días corridos`) y se recorta en memoria a los 10 más nuevos, en orden
+ * descendente: `resolverTcCarteraViva` recibe lo mismo que antes.
+ */
+export const TC_VENTANA_DIAS = 20;
+export const TC_ULTIMOS = 10;
+
+/** El id (YYYY-MM-DD) desde el que se leen los `tcDiario`: hoy en Argentina menos `dias` corridos. */
+export function desdeVentanaTc(ahoraISO: string, dias = TC_VENTANA_DIAS): string {
+  const hoy = fechaArg(ahoraISO);
+  return new Date(Date.parse(`${hoy}T12:00:00Z`) - dias * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** De los docs en orden ASCENDENTE por id, los `n` más nuevos en orden DESCENDENTE (como antes). */
+export function ultimosTc<T>(ascendentes: T[], n = TC_ULTIMOS): T[] {
+  return ascendentes.slice(-n).reverse();
+}
+
 /** El MEP del día (Addendum 1): dolarapi, con tcDiario de respaldo. Nunca escribe en tcDiario. */
 export async function tcDelDia(db: Firestore, ahoraISO: string): Promise<TcCarteraViva | null> {
   let api: { status: number; body: unknown } | null = null;
@@ -125,8 +145,11 @@ export async function tcDelDia(db: Firestore, ahoraISO: string): Promise<TcCarte
   } catch (e) {
     console.warn(`[carteraViva] dolarapi falló, se usa tcDiario: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const snap = await db.collection('tcDiario').orderBy(FieldPath.documentId(), 'desc').limit(10).get();
-  const tcDiario = snap.docs.map(d => ({ fecha: d.id, tcUsdArs: Number(d.data().tcUsdArs) }));
+  const snap = await db.collection('tcDiario')
+    .where(FieldPath.documentId(), '>=', desdeVentanaTc(ahoraISO))
+    .orderBy(FieldPath.documentId())
+    .get();
+  const tcDiario = ultimosTc(snap.docs.map(d => ({ fecha: d.id, tcUsdArs: Number(d.data().tcUsdArs) })));
   return resolverTcCarteraViva(api, tcDiario, ahoraISO);
 }
 

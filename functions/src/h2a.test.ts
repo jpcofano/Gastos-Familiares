@@ -7,8 +7,8 @@ import {
 } from './compartido/clasificacionPPI';
 import { planSincronizacionPPI, ventanaDesde, crearTcDe } from './ppiSincronizacion';
 import { tipoPPI, escalaVigente, escalaDeBusqueda, precioDeCurrent, elegirPrecioDia, escalaData912 } from './preciosRespaldo';
-import { armarDocCarteraViva, preciosDesdeIndicadores, frescuraCartera } from './carteraVivaCron';
-import { posicionesDeCarteraViva, type CuentaViva } from './compartido/patrimonioCarteraViva';
+import { armarDocCarteraViva, preciosDesdeIndicadores, frescuraCartera, desdeVentanaTc, ultimosTc, TC_VENTANA_DIAS, TC_ULTIMOS } from './carteraVivaCron';
+import { posicionesDeCarteraViva, resolverTcCarteraViva, type CuentaViva } from './compartido/patrimonioCarteraViva';
 import type { Posicion } from './compartido/tiposPatrimonio';
 
 let ok = 0, fail = 0;
@@ -188,6 +188,16 @@ console.log('\n=== cron de cartera viva (datos sintéticos) ===');
   t('Balanz: viernes contra lunes (1 día hábil) → sin aviso', unDia.includes('Balanz 999001: tenencia del 19/10 · caja al 16/10'), unDia);
   const sinCaja = frescuraCartera(cvBalanz, [viva('2026-10-21T17:42:00-03:00')], null, '2026-10-21T21:20:00.000Z');
   t('Balanz sin archivo de Movimientos: "caja de la carga"', sinCaja.includes('Balanz 999001: tenencia del 21/10 · caja de la carga'), sinCaja);
+  // F9.196 nota de revisión 1 — tcDelDia sin índice compuesto: rango ascendente + recorte en memoria.
+  t('tcDiario: la ventana arranca 20 días corridos antes de hoy en Argentina', TC_VENTANA_DIAS === 20 && desdeVentanaTc('2026-10-22T02:00:00Z') === '2026-10-01' && desdeVentanaTc('2026-10-22T15:00:00Z') === '2026-10-02');
+  const asc = Array.from({ length: 14 }, (_, i) => ({ fecha: `2026-10-${String(i + 2).padStart(2, '0')}`, tcUsdArs: 1500 + i }));
+  const rec = ultimosTc(asc);
+  const comoAntes = [...asc].sort((x, y) => y.fecha.localeCompare(x.fecha)).slice(0, 10);
+  t('tcDiario: de lo ascendente quedan los 10 más nuevos en orden descendente (lo mismo que el orderBy desc + limit 10 de antes)',
+    TC_ULTIMOS === 10 && JSON.stringify(rec) === JSON.stringify(comoAntes) && ultimosTc(asc.slice(0, 3)).length === 3, rec.map(x => x.fecha));
+  const tcAntes = resolverTcCarteraViva(null, comoAntes, '2026-10-15T21:00:00Z');
+  const tcAhora = resolverTcCarteraViva(null, rec, '2026-10-15T21:00:00Z');
+  t('tcDiario: resolverTcCarteraViva da el mismo resultado con el recorte', JSON.stringify(tcAntes) === JSON.stringify(tcAhora) && tcAhora?.valor === 1513);
   const p = preciosDesdeIndicadores([{ ticker: 'X', tipo: 'accion', paisRiesgo: 'AR', precio: null, monedaSerie: 'ARS', fechaUltimoPrecio: null }], '2026-10-20');
   t('indicador sin precio → no entra (no se inventa)', Object.keys(p.porIdentidad).length === 0);
   const pv = posicionesDeCarteraViva(doc, F);
