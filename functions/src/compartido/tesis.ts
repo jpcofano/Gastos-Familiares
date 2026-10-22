@@ -69,7 +69,7 @@ const fechaONull = (x: unknown): string | null => (typeof x === 'string' && /^\d
  * Normaliza la `tesis` que trae el chat. Tolerante: lo que no tiene la forma esperada queda en null
  * (nunca se inventa) y se informa en `avisos`. Sin `tesis` (informes viejos) devuelve null.
  */
-export function normalizarTesis(x: unknown): { tesis: Tesis | null; avisos: string[] } {
+export function normalizarTesis(x: unknown): { tesis: Tesis | null; avisos: string[]; ratioAusente?: boolean } {
   if (x === undefined || x === null) return { tesis: null, avisos: [] };
   if (typeof x !== 'object' || Array.isArray(x)) return { tesis: null, avisos: ['tesis: no es un objeto'] };
   const o = x as Record<string, unknown>;
@@ -118,6 +118,8 @@ export function normalizarTesis(x: unknown): { tesis: Tesis | null; avisos: stri
       ratioSubyacente,
     },
     avisos,
+    // El chat no mandó el campo (≠ null explícito): la importación conserva el ratio anterior.
+    ratioAusente: o.ratioSubyacente === undefined,
   };
 }
 
@@ -143,13 +145,20 @@ export type DocTesis = {
 const estable = (x: unknown): string => JSON.stringify(x, (_k, v) => (v && typeof v === 'object' && !Array.isArray(v)
   ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]])) : v));
 const igual = (a: unknown, b: unknown) => estable(a) === estable(b);
+/** Igualdad sin depender del orden de las claves (lo que vuelve de Firestore puede venir reordenado). */
+export const igualTesis = igual;
 
 /**
  * La importación del Chat 2 sobre lo que ya había. Un campo con `editadoPorJuan` NO se pisa: si el
  * chat trae otro valor, se guarda en `distintoDelChat` para que Juan decida.
  */
-export function fusionarTesis(previo: DocTesis | null, ticker: string, delChat: Tesis): DocTesis {
+export function fusionarTesis(
+  previo: DocTesis | null, ticker: string, delChat: Tesis,
+  /** F9.196.1 — el chat no mandó `ratioSubyacente` (un informe viejo, o se lo olvidó): queda el anterior. */
+  opciones: { ratioAusente?: boolean } = {},
+): DocTesis {
   const editado = previo?.editadoPorJuan ?? {};
+  if (opciones.ratioAusente && previo) delChat = { ...delChat, ratioSubyacente: previo.tesis.ratioSubyacente ?? null };
   const tesis = { ...delChat } as Record<CampoTesis, unknown>;
   const distintoDelChat: Partial<Record<CampoTesis, unknown>> = {};
   for (const c of CAMPOS_TESIS) {
@@ -233,6 +242,8 @@ export type CalculoTesis = {
   motivoPotencial?: string | null;
   /** §2.a — el ratio con el subyacente que se usó, para que la ficha lo diga. */
   ratioUsado?: RatioSubyacente | null;
+  /** §2.b — consenso ÷ precio (cuántas veces el precio), para explicar `consenso_fuera_de_escala`. */
+  consensoSobrePrecio?: number | null;
   gatillos: Array<Gatillo & { cumplido: boolean | null }>;
   diasAlEvento: number | null;
   /** El precio usado, ya en la moneda de los fundamentals. */
@@ -263,7 +274,9 @@ export function calcularTesis(
   let precioEnMoneda: number | null = null;
   let motivo: string | null = null;
   // §2.a — con ratio, el precio del subyacente = precio local × N; después, la moneda como siempre.
-  const ratio = t.ratioSubyacente ?? null;
+  // Una serie en USD que no es de un CEDEAR ya es la del subyacente (acciones del exterior de
+  // `usa_stocks`): ahí el ratio no se aplica.
+  const ratio = t.ratioSubyacente && (opciones.esCedear || precio?.moneda !== 'USD') ? t.ratioSubyacente : null;
   const base = precio && ratio ? precio.valor * ratio.valor : precio?.valor ?? 0;
   if (!precio || !(precio.valor > 0)) motivo = 'sin_precio';
   else if (opciones.esCedear && !ratio) motivo = 'cedear_sin_ratio';
@@ -281,18 +294,21 @@ export function calcularTesis(
     else if (eps <= 0 || (t.epsGuiaMin ?? 1) <= 0 || (t.epsGuiaMax ?? 1) <= 0) motivo = 'eps_no_positivo';
   }
   if (pe !== null && !(pe > 0 && pe <= PE_MAXIMO)) { pe = null; motivo = 'pe_fuera_de_escala'; }
-  let potencial = precioEnMoneda !== null && precioEnMoneda > 0 && t.precioObjetivoConsenso !== null ? t.precioObjetivoConsenso / precioEnMoneda - 1 : null;
+  // Directo (no potencial + 1): en el borde 0,2 la resta y la suma dan 0,1999… y lo rechazaban.
+  const veces = precioEnMoneda !== null && precioEnMoneda > 0 && t.precioObjetivoConsenso !== null ? t.precioObjetivoConsenso / precioEnMoneda : null;
+  let potencial = veces !== null ? veces - 1 : null;
   let motivoPotencial: string | null = null;
-  if (potencial !== null) {
-    const veces = potencial + 1;
-    if (veces < CONSENSO_SOBRE_PRECIO[0] || veces > CONSENSO_SOBRE_PRECIO[1]) { potencial = null; motivoPotencial = 'consenso_fuera_de_escala'; }
+  if (veces !== null && (veces < CONSENSO_SOBRE_PRECIO[0] - 1e-9 || veces > CONSENSO_SOBRE_PRECIO[1] + 1e-9)) {
+    potencial = null; motivoPotencial = 'consenso_fuera_de_escala';
+    // El mismo error de escala (falta el ratio) afecta al P/E en el otro sentido: tampoco se muestra.
+    if (pe !== null) { pe = null; motivo = 'consenso_fuera_de_escala'; }
   }
   const gatillos = t.gatillos.map(g => ({
     ...g,
     cumplido: g.valorActual === null ? null : g.operador === '>=' ? g.valorActual >= g.umbral : g.valorActual <= g.umbral,
   }));
   const diasAlEvento = t.proximoEvento.fecha ? dias(opciones.hoy, t.proximoEvento.fecha) : null;
-  return { pe, potencial, motivo, motivoPotencial, ratioUsado: ratio, gatillos, diasAlEvento, precioEnMoneda };
+  return { pe, potencial, motivo, motivoPotencial, ratioUsado: precioEnMoneda !== null ? ratio : null, consensoSobrePrecio: veces, gatillos, diasAlEvento, precioEnMoneda };
 }
 
 // ── Señales de §5 que dependen de la tesis ───────────────────────────────────

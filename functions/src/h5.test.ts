@@ -163,6 +163,24 @@ console.log('\n=== F9.196.1 §2: ratio con el subyacente y valores absurdos ==='
     && n3.tesis?.ratioSubyacente === null && !n3.avisos.some(x => x.includes('ratioSubyacente')));
   const ed = fusionarTesis(editarTesis(fusionarTesis(null, 'GGAL', n3.tesis!), 'ratioSubyacente', { valor: 10, tipo: 'adr', fuente: 'Juan', fecha: null }), 'GGAL', n1.tesis!);
   t('el ratio editado por Juan no lo pisa el chat (queda "distinto")', ed.tesis.ratioSubyacente?.fuente === 'Juan' && ed.distintoDelChat.ratioSubyacente !== undefined);
+
+  // Arreglos de la revisión de H2.
+  t('sin ratio y consenso fuera de escala: tampoco se muestra el P/E (mismo error de escala)', sinRatio.pe === null && sinRatio.motivo === 'consenso_fuera_de_escala' && Math.abs((sinRatio.consensoSobrePrecio ?? 0) - 15) < 1e-9, sinRatio);
+  let bordes = 0;
+  for (let i = 1; i <= 500; i++) {
+    const px = 10 + i * 0.37;
+    const c02 = calcularTesis({ ...T, precioObjetivoConsenso: px * 0.2, ratioSubyacente: null }, { valor: px, moneda: 'USD' }, { tc: 1, hoy: '2026-10-20' });
+    if (c02.potencial !== null) bordes++;
+  }
+  t('el borde 0,2 del consenso entra (intervalo cerrado, sin error de redondeo)', bordes === 500, bordes);
+  const usa = calcularTesis({ ...T, ratioSubyacente: { valor: 4, tipo: 'cedear', fuente: 'BYMA', fecha: null } }, { valor: 50, moneda: 'USD' }, { tc: 1500, hoy: '2026-10-20' });
+  t('serie en USD de una acción del exterior: ya es el subyacente, el ratio no se aplica', Math.abs((usa.pe ?? 0) - 20) < 1e-9 && usa.ratioUsado === null, usa);
+  const base = fusionarTesis(null, 'GGAL', n1.tesis!);
+  const sinCampo = normalizarTesis(delChat);
+  const re = fusionarTesis(base, 'GGAL', sinCampo.tesis!, { ratioAusente: sinCampo.ratioAusente });
+  const conNull = normalizarTesis({ ...delChat, ratioSubyacente: null });
+  const re2 = fusionarTesis(base, 'GGAL', conNull.tesis!, { ratioAusente: conNull.ratioAusente });
+  t('un chat sin el campo conserva el ratio anterior; un null explícito lo saca', re.tesis.ratioSubyacente?.valor === 10 && re2.tesis.ratioSubyacente === null && sinCampo.ratioAusente === true && conNull.ratioAusente === false);
 }
 
 console.log('\n=== prompt del Chat 2 ===');

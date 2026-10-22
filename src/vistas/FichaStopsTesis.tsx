@@ -8,7 +8,7 @@ import { Card } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
 import type { IndicadoresPosicion } from '../types/patrimonio';
 import {
-  calcularTesis, claveGatillo, editarTesis, editarValorGatillo, aceptarDatoDelChat, aceptarGatilloDelChat,
+  calcularTesis, claveGatillo, editarTesis, editarValorGatillo, aceptarDatoDelChat, aceptarGatilloDelChat, igualTesis,
   type DocTesis, type CampoTesis,
 } from '../datos/compartido/tesis';
 import { guardarTesis } from '../datos/patrimonioTesis';
@@ -207,6 +207,8 @@ const MOTIVO_TXT: Record<string, string> = {
   pe_fuera_de_escala: 'P/E fuera de escala (más de 300): ¿EPS mal leído o falta el ratio?',
   consenso_fuera_de_escala: 'el consenso está muy lejos del precio: ¿falta el ratio del ADR o del CEDEAR?',
 };
+/** Los motivos que frenan P/E y potencial a la vez (los demás son solo del P/E). */
+const MOTIVOS_DE_LOS_DOS = new Set(['sin_precio', 'sin_tc', 'cedear_sin_ratio', 'sin_moneda']);
 
 /** "1 ADR = 10 acciones" / "10 CEDEARs = 1 acción", con la fuente. */
 const textoRatio = (r: { valor: number; tipo: 'cedear' | 'adr'; fuente: string; fecha: string | null }) =>
@@ -277,6 +279,14 @@ export function SeccionTesis({ ticker, ind, doc, tc, privado = false, onGuardada
     </span>
   ) : null;
   const gatillos = c?.gatillos ?? t.gatillos.map(g => ({ ...g, cumplido: null as boolean | null }));
+  // La nota del potencial: su propio motivo, o uno que frena a los dos; sin consenso, lo dice.
+  const motivoPot = c?.motivoPotencial ?? (c?.motivo && MOTIVOS_DE_LOS_DOS.has(c.motivo) ? c.motivo : null);
+  const notaPotencial = c?.potencial == null && motivoPot
+    ? (motivoPot === 'consenso_fuera_de_escala' && c?.consensoSobrePrecio
+      ? `el consenso está ${fmt(c.consensoSobrePrecio, 1)} veces el precio: ¿falta el ratio del ADR o del CEDEAR?`
+      : MOTIVO_TXT[motivoPot] ?? motivoPot)
+    : c?.potencial == null && t.precioObjetivoConsenso === null ? 'sin consenso publicado'
+      : t.analistas ? `${t.analistas} analistas${t.recomendacionConsenso ? ` · ${t.recomendacionConsenso}` : ''}` : null;
   const camposNum: CampoTesis[] = ['precioObjetivoConsenso', 'epsGuiaMin', 'epsGuiaMax'];
   return (
     <Card padding="12px">
@@ -289,13 +299,17 @@ export function SeccionTesis({ ticker, ind, doc, tc, privado = false, onGuardada
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         <Numero label="P/E" valor={c?.pe != null ? fmt(c.pe, 1) : '—'} nota={c?.pe == null && c?.motivo ? MOTIVO_TXT[c.motivo] ?? c.motivo : t.epsPeriodo ? `EPS ${t.epsPeriodo}` : null} />
-        <Numero label="Potencial al consenso" valor={c?.potencial != null ? fmtPct(c.potencial) : '—'} nota={c?.potencial == null && (c?.motivoPotencial || c?.motivo) ? MOTIVO_TXT[(c.motivoPotencial ?? c.motivo)!] ?? (c.motivoPotencial ?? c.motivo) : t.analistas ? `${t.analistas} analistas${t.recomendacionConsenso ? ` · ${t.recomendacionConsenso}` : ''}` : null} />
+        <Numero label="Potencial al consenso" valor={c?.potencial != null ? fmtPct(c.potencial) : '—'} nota={notaPotencial} />
         <Numero label="Días al evento" valor={c?.diasAlEvento != null && c.diasAlEvento >= 0 ? String(c.diasAlEvento) : '—'} nota={t.proximoEvento.fecha ? `${t.proximoEvento.tipo === 'balance' ? 'Balance' : t.proximoEvento.texto || 'Evento'} ${fmtFecha(t.proximoEvento.fecha)}` : null} />
       </div>
       {distinto('proximoEvento') && <div style={{ marginBottom: 6 }}><span style={sub}>Próximo evento:</span>{distinto('proximoEvento')}</div>}
       {/* §2.a — qué ratio se usó para pasar del precio local al del subyacente. */}
-      {(t.ratioSubyacente ?? null) && <div style={{ ...sub, marginBottom: 6 }}>Ratio usado: {textoRatio(t.ratioSubyacente!)}{distinto('ratioSubyacente')}</div>}
-      {!(t.ratioSubyacente ?? null) && distinto('ratioSubyacente') && <div style={{ marginBottom: 6 }}><span style={sub}>Ratio con el subyacente:</span>{distinto('ratioSubyacente')}</div>}
+      {c?.ratioUsado && <div style={{ ...sub, marginBottom: 6 }}>Ratio usado: {textoRatio(c.ratioUsado)}{distinto('ratioSubyacente')}</div>}
+      {c?.ratioUsado && ind?.tipo && (c.ratioUsado.tipo === 'cedear') !== (ind.tipo === 'cedear') && (
+        <div style={{ ...sub, color: 'var(--gf-out)', marginBottom: 6 }}>⚠ El ratio es de {c.ratioUsado.tipo === 'cedear' ? 'CEDEAR' : 'ADR'} y este instrumento es {ind.tipo === 'cedear' ? 'un CEDEAR' : 'una acción'}: revisalo.</div>
+      )}
+      {!c?.ratioUsado && t.ratioSubyacente && <div style={{ ...sub, marginBottom: 6 }}>Ratio cargado ({textoRatio(t.ratioSubyacente)}), sin usar: {ind?.monedaSerie === 'USD' && ind.tipo !== 'cedear' ? 'la serie ya es la del subyacente' : 'no hay precio en la moneda de los fundamentals'}.{distinto('ratioSubyacente')}</div>}
+      {!c?.ratioUsado && !t.ratioSubyacente && distinto('ratioSubyacente') && <div style={{ marginBottom: 6 }}><span style={sub}>Ratio con el subyacente:</span>{distinto('ratioSubyacente')}</div>}
       {gatillos.length > 0 && (
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--gf-gray-400)', letterSpacing: 0.3, marginBottom: 3 }}>GATILLOS{distinto('gatillos')}</div>
@@ -393,8 +407,14 @@ function EditorTesis({ doc, onGuardada }: { doc: DocTesis; onGuardada: (d: DocTe
       const rv = leer(b.ratioValor, 'Ratio con el subyacente');
       if (rv !== null && !(rv > 0)) throw new Error('Ratio con el subyacente: tiene que ser mayor que 0');
       if (rv !== null && !b.ratioTipo) throw new Error('Ratio con el subyacente: elegí si es de CEDEAR o de ADR');
-      const ratio = rv === null ? null : { valor: rv, tipo: b.ratioTipo as 'cedear' | 'adr', fuente: b.ratioFuente.trim() || 'Juan', fecha: t.ratioSubyacente && t.ratioSubyacente.valor === rv ? t.ratioSubyacente.fecha : null };
-      if (JSON.stringify(ratio) !== JSON.stringify(t.ratioSubyacente ?? null)) d = editarTesis(d, 'ratioSubyacente', ratio);
+      if (rv === null && b.ratioTipo && !t.ratioSubyacente) throw new Error('Ratio con el subyacente: falta el valor (o dejá el tipo vacío)');
+      const previo = t.ratioSubyacente ?? null;
+      const mismo = previo && rv === previo.valor && b.ratioTipo === previo.tipo;
+      // Si no cambió el valor ni el tipo, se conservan la fuente y la fecha (sin "Juan" ni hoy).
+      const ratio = rv === null ? null : mismo
+        ? { ...previo, fuente: b.ratioFuente.trim() || previo.fuente }
+        : { valor: rv, tipo: b.ratioTipo as 'cedear' | 'adr', fuente: b.ratioFuente.trim() || 'Juan', fecha: hoyART() };
+      if (!igualTesis(ratio, previo)) d = editarTesis(d, 'ratioSubyacente', ratio);
       if (d === doc) { onGuardada(doc); return; }
       onGuardada(await guardarTesis(doc, d));
     } catch (e) {
