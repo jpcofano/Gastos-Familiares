@@ -53,7 +53,7 @@ async function main() {
 
   // Tenencia, ppc y precio de hoy de las especies.
   const grupos = ((rbp.body as { groupedInstruments?: Array<{ name?: string; instruments?: Array<Record<string, unknown>> }> } | null)?.groupedInstruments) ?? [];
-  const instrumentos = grupos.flatMap(g => (g.instruments ?? []).map(i => ({ ...i, grupo: g.name })));
+  const instrumentos: Array<Record<string, unknown> & { grupo?: string }> = grupos.flatMap(g => (g.instruments ?? []).map(i => ({ ...i, grupo: g.name })));
 
   // Todas las filas de split (también de otras especies), por el texto.
   const splits = movs.filter(m => /^Split \//.test(String(m.description ?? '')));
