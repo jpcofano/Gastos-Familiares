@@ -173,6 +173,21 @@ console.log('\n=== cron de cartera viva (datos sintéticos) ===');
   t('PPI con error → "sin sincronizar desde dd/mm"', conError.some(l => l.startsWith('PPI XXXXX: sin sincronizar desde 20/10')), conError);
   const viejo = frescuraCartera({ ...doc, tc: { valor: 1530, fuente: 'tcDiario', fechaCotizacion: '2026-10-16', viejo: true } }, [], null, '2026-10-20T21:20:00.000Z');
   t('MEP de respaldo → "del dd/mm (viejo)"', viejo.includes('MEP $1.530 del 16/10 (viejo)'), viejo);
+  // F9.196.1 §4 — Balanz por archivo: las dos fechas a la vista.
+  const cvBalanz = { ...doc, cuentas: [{ cuenta: 'Balanz 999001', fuente: 'cuenta_viva', fechaBase: '2026-10-13' }] } as unknown as typeof doc;
+  const viva = (exportadoEn: string, hasta?: string) => ({
+    cuenta: 'Balanz 999001', fuente: 'archivo_balanz', leidoEn: exportadoEn, exportadoEn, error: null,
+    posiciones: [{ cuenta: 'Balanz 999001', ticker: 'GGAL', tipo: 'accion', sector: 'x', pais_riesgo: 'AR', moneda_origen: 'USD', valor_origen: 100, cantidad: 10, titular: null, revisar: false }],
+    ...(hasta ? { saldos: { ARS: 0, USD: 0 }, cajaAnclada: { estado: 'ok', hasta } } : {}),
+  }) as unknown as Parameters<typeof frescuraCartera>[1][number];
+  const iguales = frescuraCartera(cvBalanz, [viva('2026-10-21T17:42:00-03:00', '2026-10-21')], null, '2026-10-21T21:20:00.000Z');
+  t('Balanz: "tenencia del dd/mm · caja al dd/mm" (fechas iguales, sin aviso)', iguales.includes('Balanz 999001: tenencia del 21/10 · caja al 21/10'), iguales);
+  const distintas = frescuraCartera(cvBalanz, [viva('2026-10-21T17:42:00-03:00', '2026-10-16')], null, '2026-10-21T21:20:00.000Z');
+  t('Balanz: más de 1 día hábil entre las dos → aviso de fechas distintas', distintas.some(l => l.startsWith('Balanz 999001: tenencia del 21/10 · caja al 16/10 · ⚠ fechas distintas')), distintas);
+  const unDia = frescuraCartera(cvBalanz, [viva('2026-10-19T10:00:00-03:00', '2026-10-16')], null, '2026-10-21T21:20:00.000Z');
+  t('Balanz: viernes contra lunes (1 día hábil) → sin aviso', unDia.includes('Balanz 999001: tenencia del 19/10 · caja al 16/10'), unDia);
+  const sinCaja = frescuraCartera(cvBalanz, [viva('2026-10-21T17:42:00-03:00')], null, '2026-10-21T21:20:00.000Z');
+  t('Balanz sin archivo de Movimientos: "caja de la carga"', sinCaja.includes('Balanz 999001: tenencia del 21/10 · caja de la carga'), sinCaja);
   const p = preciosDesdeIndicadores([{ ticker: 'X', tipo: 'accion', paisRiesgo: 'AR', precio: null, monedaSerie: 'ARS', fechaUltimoPrecio: null }], '2026-10-20');
   t('indicador sin precio → no entra (no se inventa)', Object.keys(p.porIdentidad).length === 0);
   const pv = posicionesDeCarteraViva(doc, F);

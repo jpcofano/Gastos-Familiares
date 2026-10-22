@@ -15,6 +15,7 @@ import {
   type CarteraViva, type CuentaViva, type PreciosCarteraViva, type PrecioDia, type TcCarteraViva,
 } from './compartido/patrimonioCarteraViva';
 import type { MovimientoCuenta } from './compartido/patrimonioMovimientos';
+import { diasHabilesEntre } from './compartido/patrimonioFlujosAuto';
 import type { PosicionTipo } from './compartido/tiposPatrimonio';
 import { escalaData912, escalaVigente } from './preciosRespaldo';
 
@@ -66,9 +67,17 @@ export function frescuraCartera(
         ? `${c.cuenta}: sin sincronizar desde ${ddmm(fechaArg(v.leidoEn))} (último error: ${v.error.slice(0, 80)})`
         : `${c.cuenta}: API ${cuando(v.leidoEn)}`);
     } else if (v?.fuente === 'archivo_balanz') {
-      out.push(v.posiciones?.length
-        ? `${c.cuenta}: archivo ${ddmm(fechaArg(v.leidoEn))}${v.saldos ? ' + caja anclada' : ''}`
-        : `${c.cuenta}: carga ${c.fechaBase ? ddmm(c.fechaBase) : '—'} + caja anclada al ${ddmm(fechaArg(v.leidoEn))}`);
+      // F9.196.1 §4 — las dos fechas a la vista: la tenencia es la de exportación de "Mis
+      // Instrumentos" y la caja, la de la última liquidación del archivo de Movimientos
+      // (`cajaAnclada.hasta`). Se acepta que difieran; si es más de 1 día hábil, se avisa.
+      const b = v as CuentaViva & { exportadoEn?: string; cajaAnclada?: { hasta?: string } };
+      const tenencia = v.posiciones?.length ? (b.exportadoEn ?? v.leidoEn).slice(0, 10) : c.fechaBase;
+      const caja = b.cajaAnclada?.hasta ?? null;
+      let linea = `${c.cuenta}: tenencia del ${tenencia ? ddmm(tenencia) : '—'}${v.posiciones?.length ? '' : ' (carga)'} · ${caja ? `caja al ${ddmm(caja)}` : 'caja de la carga'}`;
+      if (tenencia && caja && Math.abs(diasHabilesEntre(tenencia, caja)) > 1) {
+        linea += ' · ⚠ fechas distintas: una operación entre las dos puede estar en una y no en la otra';
+      }
+      out.push(linea);
     } else if (c.fuente === 'manual') {
       out.push(`${c.cuenta}: manual, valuada ${c.fechaBase ? ddmm(c.fechaBase) : '—'}`);
     } else {
