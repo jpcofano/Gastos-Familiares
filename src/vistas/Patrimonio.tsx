@@ -71,6 +71,7 @@ import AccionesAMirarCard from './AccionesAMirarCard';
 import { Plegable } from './FichaStopsTesis';
 import ParaDecidirCard from './ParaDecidirCard';
 import { cargarCarteraViva, sincronizarPPIAhora, sincronizarBitfinexAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
+import { mensajeDeErrorCallable } from '../datos/patrimonioRecalcular';
 
 /** F9.196 H2a — el valor de hoy como dato aparte para el informe (que sigue sobre la corrida). */
 function resumenValorDeHoy(cv: DocCarteraViva | null) {
@@ -1499,23 +1500,13 @@ function PoliticaCriptoCard({ onToast }: { onToast: (texto: string, error: boole
   );
 }
 
-// ── F9.196 H2a — Hero "Valor de hoy (estimado)" ──────────────────────────────
-// El número grande es la cartera viva (`carteraViva/ultima`): cada cuenta con su mejor fuente y el
-// precio y el MEP del día. Abajo, la última carga y la diferencia separada en precios, dólar y
-// movimientos, más una línea de frescura por cuenta. Las inconsistencias se muestran, no se corrigen.
-function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
-  cv: DocCarteraViva; fijosUsd: number; tc: number;
-  onActualizado: () => void; onToast: (texto: string, error: boolean) => void;
+// ── F9.196.1 Addendum 1 A — botones de sincronización, en los dos heroes ───────
+// Van también en el hero de la corrida (sin cartera viva todavía): si el primer cálculo falla, Juan
+// tiene que poder sincronizar PPI y Bitfinex igual.
+function BotonesSincronizar({ onActualizado, onToast, textoRecalcular = 'Recalcular' }: {
+  onActualizado: () => void; onToast: (texto: string, error: boolean) => void; textoRecalcular?: string;
 }) {
-  const $ = useDinero();
   const [ocupado, setOcupado] = useState<'ppi' | 'bitfinex' | 'recalcular' | null>(null);
-  const [verInconsistencias, setVerInconsistencias] = useState(false);
-  const mep = cv.tc?.valor ?? tc;
-  const diferencia = cv.totalUsd - cv.totalCargaUsd;
-  const precioSinDolar = cv.efectoPreciosUsd - cv.efectoDolarUsd;
-  const signo = (x: number) => (x >= 0 ? '+' : '−');
-  const efecto = (x: number) => `${signo(x)}${$.usd(Math.abs(x))}`;
-  const calculada = cv.calculadaEnISO ? new Date(Date.parse(cv.calculadaEnISO) - 3 * 3600_000).toISOString() : '';
 
   async function correr(cual: 'ppi' | 'bitfinex' | 'recalcular') {
     setOcupado(cual);
@@ -1533,7 +1524,7 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
       }
       onActualizado();
     } catch (e) {
-      onToast(`${cual === 'ppi' ? 'No se pudo sincronizar PPI' : cual === 'bitfinex' ? 'No se pudo sincronizar Bitfinex' : 'No se pudo recalcular'}: ${String((e as Error)?.message ?? e)}`, true);
+      onToast(`${cual === 'ppi' ? 'No se pudo sincronizar PPI' : cual === 'bitfinex' ? 'No se pudo sincronizar Bitfinex' : 'No se pudo calcular el valor de hoy'}: ${mensajeDeErrorCallable(e)}`, true);
     } finally {
       setOcupado(null);
     }
@@ -1548,6 +1539,32 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
       {ocupado === cual ? 'Actualizando…' : texto}
     </button>
   );
+
+  return (
+    <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+      {boton('ppi', 'Sincronizar PPI ahora')}
+      {boton('bitfinex', 'Sincronizar Bitfinex ahora')}
+      {boton('recalcular', textoRecalcular)}
+    </div>
+  );
+}
+
+// ── F9.196 H2a — Hero "Valor de hoy (estimado)" ──────────────────────────────
+// El número grande es la cartera viva (`carteraViva/ultima`): cada cuenta con su mejor fuente y el
+// precio y el MEP del día. Abajo, la última carga y la diferencia separada en precios, dólar y
+// movimientos, más una línea de frescura por cuenta. Las inconsistencias se muestran, no se corrigen.
+function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
+  cv: DocCarteraViva; fijosUsd: number; tc: number;
+  onActualizado: () => void; onToast: (texto: string, error: boolean) => void;
+}) {
+  const $ = useDinero();
+  const [verInconsistencias, setVerInconsistencias] = useState(false);
+  const mep = cv.tc?.valor ?? tc;
+  const diferencia = cv.totalUsd - cv.totalCargaUsd;
+  const precioSinDolar = cv.efectoPreciosUsd - cv.efectoDolarUsd;
+  const signo = (x: number) => (x >= 0 ? '+' : '−');
+  const efecto = (x: number) => `${signo(x)}${$.usd(Math.abs(x))}`;
+  const calculada = cv.calculadaEnISO ? new Date(Date.parse(cv.calculadaEnISO) - 3 * 3600_000).toISOString() : '';
 
   return (
     <div style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 20, padding: '22px 20px' }}>
@@ -1591,11 +1608,7 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', marginBottom: 3 }}>Patrimonio total (hoy)</div>
         <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{$.usd(cv.totalUsd + fijosUsd)}</div>
       </div>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
-        {boton('ppi', 'Sincronizar PPI ahora')}
-        {boton('bitfinex', 'Sincronizar Bitfinex ahora')}
-        {boton('recalcular', 'Recalcular')}
-      </div>
+      <BotonesSincronizar onActualizado={onActualizado} onToast={onToast} />
     </div>
   );
 }
@@ -1721,14 +1734,8 @@ function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, pos
               El valor de hoy guardado es de la carga del {fmtFecha(carteraVivaVieja)}: recalculalo con la corrida nueva.
             </div>
           )}
-          <button
-            onClick={() => recalcularCarteraViva()
-              .then(() => { onToast('Valor de hoy calculado.', false); onCarteraViva(); })
-              .catch(e => onToast(`No se pudo calcular el valor de hoy: ${String((e as Error)?.message ?? e)}`, true))}
-            style={{ background: 'rgba(255,255,255,.14)', border: 'none', borderRadius: 8, padding: '7px 10px', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
-          >
-            Calcular valor de hoy
-          </button>
+          {/* F9.196.1 Addendum 1 A — los tres botones también acá: sin cartera viva todavía. */}
+          <BotonesSincronizar onActualizado={onCarteraViva} onToast={onToast} textoRecalcular="Calcular valor de hoy" />
         </div>
       </div>
       )}

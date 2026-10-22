@@ -28,6 +28,8 @@ import { ENCABEZADOS_MIS_INSTRUMENTOS, parsearMisInstrumentos, detectarVista, ap
 import { flujosAutomaticos, aparearTransferencias, FLUJOS_AUTO_DESDE } from '../src/datos/compartido/patrimonioFlujosAuto';
 import { conCandado, type DbCandado } from '../functions/src/candado';
 import { frescuraCartera } from '../functions/src/carteraVivaCron';
+// F9.196.1 Addendum 1 — A y B.
+import { mensajeDeErrorCallable } from '../src/datos/patrimonioRecalcular';
 
 let fallas = 0;
 const ok = (cond: boolean, msg: string, detalle?: unknown) => {
@@ -370,6 +372,15 @@ const h0aH4 = (async () => {
   const fr = frescuraCartera(cv, [viva], null, '2026-10-21T21:20:00.000Z');
   ok(fr.some(l => l.startsWith('Balanz 999001: tenencia del 21/10 · caja al 16/10 · ⚠ fechas distintas')), 'H4: "tenencia del dd/mm · caja al dd/mm" con aviso si difieren más de 1 día hábil', fr);
 })();
+
+console.log('\n=== F9.196.1 Addendum 1 A: mensaje del internal sin texto ===');
+{
+  const sinTexto = mensajeDeErrorCallable(Object.assign(new Error('internal'), { code: 'functions/internal' }));
+  const conTexto = mensajeDeErrorCallable(Object.assign(new Error('Faltan secretos de PPI'), { code: 'functions/internal' }));
+  const tiempo = mensajeDeErrorCallable(Object.assign(new Error('deadline-exceeded'), { code: 'functions/deadline-exceeded' }));
+  ok(sinTexto.startsWith('No respondió la función') && conTexto === 'Faltan secretos de PPI' && tiempo.startsWith('La función tardó'),
+    'internal sin texto → "No respondió la función…"; con texto → el texto real; deadline → aviso de tiempo', { sinTexto, conTexto, tiempo });
+}
 
 h0aH4.then(() => {
   console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);
