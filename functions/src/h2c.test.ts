@@ -5,15 +5,16 @@ import * as crypto from 'crypto';
 import { crearClienteBitfinex, rutaPermitidaBitfinex, RutaProhibidaBitfinex, ErrorBitfinex, firmarBitfinex, crearNonceMs, type FetchBitfinex } from './bitfinexApi';
 import { leerBilleteras, leerFunding, movimientoDeLedger, planSincronizacionBitfinex, CATEGORIAS_LEDGER } from './bitfinexSincronizacion';
 import { aparearTransferencias } from './compartido/patrimonioFlujosAuto';
-import { conCandado, DURACION_CANDADO_MS, type DbCandado } from './candado';
+import { conCandado, tomarCandado, DURACION_CANDADO_MS, type DbCandado } from './candado';
 
 /**
  * Firestore falso para el candado: las transacciones se serializan (como en Firestore, una no ve un
  * estado a medio escribir de la otra). Solo `locks`.
  */
-function firestoreFalso() {
+function firestoreFalso(opciones: { reintentarDespuesDelCommit?: number } = {}) {
   const docs = new Map<string, Record<string, unknown>>();
   let cola: Promise<unknown> = Promise.resolve();
+  let reintentos = opciones.reintentarDespuesDelCommit ?? 0;
   const ref = (id: string) => ({ id });
   const db = {
     collection: (_c: string) => ({ doc: (id: string) => ref(id) }),
@@ -27,6 +28,8 @@ function firestoreFalso() {
         };
         const out = await fn(tx);
         escrituras.forEach(e => e());
+        // Como el SDK ante un error ambiguo en el commit: lo aplicado queda y el callback se reintenta.
+        if (reintentos > 0) { reintentos--; escrituras.length = 0; const otra = await fn(tx); escrituras.forEach(e => e()); return otra; }
         return out;
       });
       cola = p.catch(() => undefined);
@@ -166,6 +169,34 @@ function t(rotulo: string, cond: boolean, detalle?: unknown) {
     docs.set('bitfinex', { hasta: Date.now() + 60_000, quien: 'otro', token: 'y' });
     const c = await correr('boton');
     t('uno vigente de otro bloquea y queda intacto', !c.corrio && (docs.get('bitfinex') as { token?: string } | undefined)?.token === 'y');
+  }
+  {
+    // Revisión de H3: A vence, B lo toma y A libera → el de B queda intacto.
+    const { db, docs } = firestoreFalso();
+    let reloj = 1_000_000;
+    const ahora = () => reloj;
+    const a = await tomarCandado(db, 'bitfinex', 'A', ahora);
+    reloj += DURACION_CANDADO_MS + 1;
+    const b = await tomarCandado(db, 'bitfinex', 'B', ahora);
+    if (a.tomado) await a.liberar();
+    t('el que venció no libera el candado del que lo tomó después', a.tomado && b.tomado && (docs.get('bitfinex') as { quien?: string } | undefined)?.quien === 'B');
+  }
+  {
+    // Un reintento del SDK después de un commit aplicado no deja el candado huérfano ni bloquea al que lo tomó.
+    const { db, docs } = firestoreFalso({ reintentarDespuesDelCommit: 1 });
+    const c = await tomarCandado(db, 'bitfinex', 'cron');
+    t('toma idempotente ante un reintento del SDK', c.tomado && docs.size === 1);
+    if (c.tomado) await c.liberar();
+    t('...y se libera bien', docs.size === 0);
+  }
+  {
+    // Plazo de la corrida: pasado `hastaMs`, el cliente no llama a la API.
+    let llamadas = 0;
+    const f: FetchBitfinex = async () => { llamadas++; return { status: 200, text: async () => '[]' }; };
+    const c = crearClienteBitfinex({ key: 'k', secret: 's' }, { fetchImpl: f, pausaMs: 0, hastaMs: Date.now() - 1 });
+    let err: unknown = null;
+    try { await c.leer('auth/r/wallets'); } catch (e) { err = e; }
+    t('pasado el plazo de la corrida no sale ninguna llamada', llamadas === 0 && err instanceof Error);
   }
 
   console.log(`\n${ok} OK, ${fail} FAIL`);

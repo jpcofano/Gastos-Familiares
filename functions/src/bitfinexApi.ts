@@ -48,7 +48,11 @@ export type FetchBitfinex = (url: string, init: { method: string; headers: Recor
 
 export function crearClienteBitfinex(
   cred: { key: string; secret: string },
-  opciones: { fetchImpl?: FetchBitfinex; nonce?: () => string; pausaMs?: number } = {},
+  opciones: {
+    fetchImpl?: FetchBitfinex; nonce?: () => string; pausaMs?: number;
+    /** F9.196.1 §3 — después de esta hora (ms) no sale ninguna llamada: el candado está por vencer. */
+    hastaMs?: number;
+  } = {},
 ) {
   const f = opciones.fetchImpl ?? (fetch as unknown as FetchBitfinex);
   const nonce = opciones.nonce ?? nonceDeInstancia;
@@ -60,6 +64,9 @@ export function crearClienteBitfinex(
     if (!rutaPermitidaBitfinex(endpoint)) throw new RutaProhibidaBitfinex(endpoint);
     const espera = ultimaLlamada + pausaMs - Date.now();
     if (espera > 0) await new Promise(r => setTimeout(r, espera));
+    if (opciones.hastaMs !== undefined && Date.now() > opciones.hastaMs) {
+      throw new Error(`[bitfinex] se pasó el plazo de la corrida: no se llama a ${endpoint} (el candado está por vencer)`);
+    }
     ultimaLlamada = Date.now();
     const cuerpo = JSON.stringify(body);
     const n = nonce();

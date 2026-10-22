@@ -13,12 +13,13 @@ export async function cargarCarteraViva(): Promise<DocCarteraViva | null> {
   return snap.exists() ? (snap.data() as DocCarteraViva) : null;
 }
 
-const _sincronizarPPI = httpsCallable<void, { posiciones: number; movimientos: number; dias: number }>(functions, 'sincronizarPPIAhora');
+// Timeouts del cliente a la medida de cada Function (el default del SDK, 70 s, corta antes que el server).
+const _sincronizarPPI = httpsCallable<void, { posiciones: number; movimientos: number; dias: number }>(functions, 'sincronizarPPIAhora', { timeout: 300_000 });
 export async function sincronizarPPIAhora() {
   return (await _sincronizarPPI()).data;
 }
 
-const _sincronizarBitfinex = httpsCallable<void, { posiciones: number; movimientos: number; prestamos: number; paraRevisar: number }>(functions, 'sincronizarBitfinexAhora');
+const _sincronizarBitfinex = httpsCallable<void, { posiciones: number; movimientos: number; prestamos: number; paraRevisar: number }>(functions, 'sincronizarBitfinexAhora', { timeout: 300_000 });
 /** F9.196 H2c — "Sincronizar Bitfinex ahora". Al terminar, la Function ya recalculó la cartera viva. */
 export async function sincronizarBitfinexAhora() {
   return (await _sincronizarBitfinex()).data;
@@ -29,7 +30,7 @@ export type ResultadoRecalcular = {
   ok: boolean; totalUsd: number | null; error?: string;
   flujos?: { internas: number; pendientes: number; flujos: number; sinTc: number; historial?: number; borrados?: number; error?: string };
 };
-const _recalcular = httpsCallable<void, ResultadoRecalcular>(functions, 'recalcularCarteraViva');
+const _recalcular = httpsCallable<void, ResultadoRecalcular>(functions, 'recalcularCarteraViva', { timeout: 120_000 });
 export async function recalcularCarteraViva() {
   return (await _recalcular()).data;
 }

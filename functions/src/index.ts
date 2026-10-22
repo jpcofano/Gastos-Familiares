@@ -50,7 +50,7 @@ import { actualizarCarteraViva as actualizarCarteraVivaEn } from './carteraVivaC
 import { crearClienteBitfinex } from './bitfinexApi';
 import { importarTesis } from './tesisImport';
 import { sincronizarBitfinex as sincronizarBitfinexConCliente } from './bitfinexSincronizacion';
-import { conCandado } from './candado';
+import { conCandado, PLAZO_LLAMADAS_MS } from './candado';
 import { backfillTc } from './tcBackfill';
 // F9.190 §2 — señales de mercado de la reserva: módulo puro, la red se inyecta.
 import { leerMercado, resolverBases, type Bases } from './senalesMercado';
@@ -2632,7 +2632,8 @@ async function correrSincronizacionBitfinex(quien: string) {
     await db.collection('cuentasVivas').doc('bitfinex').set({ cuenta: 'Bitfinex', fuente: 'bitfinex_api', error, errorEn: FieldValue.serverTimestamp() }, { merge: true });
     throw new Error(error);
   }
-  const c = await conCandado(db, 'bitfinex', quien, () => sincronizarBitfinexConCliente(db, crearClienteBitfinex({ key, secret })));
+  const c = await conCandado(db, 'bitfinex', quien,
+    () => sincronizarBitfinexConCliente(db, crearClienteBitfinex({ key, secret }, { hastaMs: Date.now() + PLAZO_LLAMADAS_MS })));
   if (!c.corrio) {
     console.log(`[${quien}] ya hay una sincronización de Bitfinex corriendo (${c.quien ?? '?'}, candado hasta ${new Date(c.hasta).toISOString()}): no se llama a la API`);
     return null;

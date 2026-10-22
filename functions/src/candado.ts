@@ -11,6 +11,13 @@
 import type { Firestore } from 'firebase-admin/firestore';
 
 export const DURACION_CANDADO_MS = 6 * 60_000;
+/**
+ * Plazo para la ÚLTIMA llamada a la API dentro de una corrida, contado desde que se tomó el candado:
+ * menos que el vencimiento. En Cloud Run gen2 el `timeoutSeconds` corta la respuesta pero no mata el
+ * proceso; sin este plazo, una corrida que se pasó podría seguir llamando con el candado ya vencido
+ * y tomado por otro (dos clientes con la misma key).
+ */
+export const PLAZO_LLAMADAS_MS = 270_000;
 
 export type Candado =
   | { tomado: true; liberar: () => Promise<void> }
@@ -23,7 +30,9 @@ export async function tomarCandado(db: DbCandado, nombre: string, quien: string,
   const ref = db.collection('locks').doc(nombre);
   const token = `${quien}-${ahora()}-${Math.random().toString(36).slice(2, 10)}`;
   const r = await db.runTransaction(async tx => {
-    const d = (await tx.get(ref)).data() as { hasta?: number; quien?: string } | undefined;
+    const d = (await tx.get(ref)).data() as { hasta?: number; quien?: string; token?: string } | undefined;
+    // Idempotente: si el SDK reintenta después de un commit que sí se aplicó, el candado ya es nuestro.
+    if (d?.token === token) return { tomado: true as const };
     if (d && typeof d.hasta === 'number' && d.hasta > ahora()) return { tomado: false as const, hasta: d.hasta, quien: d.quien ?? null };
     tx.set(ref, { hasta: ahora() + DURACION_CANDADO_MS, quien, token, desde: ahora() });
     return { tomado: true as const };
