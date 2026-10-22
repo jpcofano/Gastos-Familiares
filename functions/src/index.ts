@@ -2639,7 +2639,7 @@ async function correrSincronizacionBitfinex(quien: string) {
     return null;
   }
   const r = c.resultado;
-  console.log(`[${quien}] ${r.posiciones} activos · ${r.movimientos} movimientos · ${r.prestamos} préstamos de funding · para revisar ${r.paraRevisar} · flujos ${JSON.stringify(r.flujos)}`);
+  console.log(`[${quien}] ${r.posiciones} activos · ${r.movimientos} movimientos · ${r.prestamos} préstamos de funding · para revisar ${r.paraRevisar} · flujos ${JSON.stringify(r.flujos)}${r.carteraError ? ` · cartera viva: ${r.carteraError}` : ''}`);
   return r;
 }
 
