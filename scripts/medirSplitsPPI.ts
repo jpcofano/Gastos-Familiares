@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { pedirPPI, leerEnv, sinTokens, BASE_PRODUCCION, BASE_SANDBOX } from './ppiCliente';
+import { clasificarDescripcionPPI } from '../src/datos/compartido/clasificacionPPI';
 
 const REQUERIDAS = ['PPI_API_KEY', 'PPI_API_SECRET', 'PPI_AUTHORIZED_CLIENT', 'PPI_CLIENT_KEY', 'PPI_ACCOUNT_NUMBER', 'PPI_ENTORNO'];
 const SALIDA = path.join(__dirname, '..', 'data', 'ppi-splits');
@@ -48,15 +49,25 @@ async function main() {
   const desde = new Date(hoy.getTime() - 1095 * 86_400_000).toISOString().slice(0, 10);
   const rm = await pedirPPI(base, 'GET', `Account/Movements?${q}&dateFrom=${desde}&dateTo=${hoy.toISOString().slice(0, 10)}`, h);
   guardar('movements-1095d', rm.body);
-  const movs = Array.isArray(rm.body) ? rm.body as Array<Record<string, unknown>> : [];
+  // Sin movimientos no se puede concluir "sin split": se corta.
+  if (rm.status !== 200 || !Array.isArray(rm.body)) { console.error(`[movimientos] HTTP ${rm.status}: sin movimientos no hay medición`); process.exit(1); }
+  const movs = rm.body as Array<Record<string, unknown>>;
   console.log(`[movimientos] HTTP ${rm.status} · ${movs.length} filas desde ${desde}`);
+  // Control: descripciones que el clasificador de producción no reconoce (un split con otro texto,
+  // "Desdoblamiento", "Cambio de VN"… caería acá).
+  const raras = movs.filter(m => clasificarDescripcionPPI(String(m.description ?? '')).familia === null);
+  console.log(`[control] ${raras.length} filas sin familia conocida${raras.length ? ':' : ''}`);
+  for (const m of raras) console.log(`    ${String(m.agreementDate ?? '').slice(0, 10)} · «${m.description}» · ticker ${m.ticker ?? '—'} · quantity ${m.quantity}`);
+  const otrasPalabras = movs.filter(m => /desdobl|cambio de v|valor nominal|canje|conversi[oó]n de acc/i.test(String(m.description ?? '')));
+  console.log(`[control] ${otrasPalabras.length} filas con "desdoblamiento", "cambio de VN", "canje" o similares`);
+  for (const m of otrasPalabras) console.log(`    ${String(m.agreementDate ?? '').slice(0, 10)} · «${m.description}» · ticker ${m.ticker ?? '—'} · quantity ${m.quantity}`);
 
   // Tenencia, ppc y precio de hoy de las especies.
   const grupos = ((rbp.body as { groupedInstruments?: Array<{ name?: string; instruments?: Array<Record<string, unknown>> }> } | null)?.groupedInstruments) ?? [];
   const instrumentos: Array<Record<string, unknown> & { grupo?: string }> = grupos.flatMap(g => (g.instruments ?? []).map(i => ({ ...i, grupo: g.name })));
 
   // Todas las filas de split (también de otras especies), por el texto.
-  const splits = movs.filter(m => /^Split \//.test(String(m.description ?? '')));
+  const splits = movs.filter(m => /^\s*split\b/i.test(String(m.description ?? '')));
   console.log(`\n=== filas "Split /" en 3 años: ${splits.length} ===`);
   for (const s of splits) {
     console.log(`  ${String(s.agreementDate ?? s.settlementDate ?? '').slice(0, 10)} · «${s.description}» · campo ticker ${s.ticker ?? '—'} · quantity ${s.quantity} · amount ${s.amount}`);
@@ -69,10 +80,11 @@ async function main() {
     const cantidad = num(ins?.quantity);
     const precio = num(ins?.price);
     const ppc = num((ins?.ppc as { ppcValue?: unknown } | undefined)?.ppcValue);
+    const monedaPpc = String((ins?.ppc as { currency?: unknown } | undefined)?.currency ?? '—');
     const cociente = precio !== null && ppc ? precio / ppc : null;
     const deLaEspecie = movs.filter(m => String(m.ticker ?? '').toUpperCase() === t || new RegExp(`\\b${t}\\b`).test(String(m.description ?? '')));
-    const splitsT = splits.filter(s => new RegExp(`^Split \\/\\s*${t}\\b`, 'i').test(String(s.description ?? '')));
-    console.log(`\n${t} (${ins?.grupo ?? 'sin posición'}): tenencia hoy ${cantidad ?? '—'} · precio ${precio ?? '—'} · ppc ${ppc ?? '—'} · precio/ppc ${cociente?.toFixed(3) ?? '—'}`);
+    const splitsT = splits.filter(s => new RegExp(`^\\s*split\\b.*\\b${t}\\b`, 'i').test(String(s.description ?? '')));
+    console.log(`\n${t} (${ins?.grupo ?? 'sin posición'}): tenencia hoy ${cantidad ?? '—'} · precio ${precio ?? '—'} · ppc ${ppc ?? '—'} (${monedaPpc}) · precio/ppc ${cociente?.toFixed(3) ?? '—'}`);
     console.log(`  ${deLaEspecie.length} movimientos con la especie en 3 años; ${splitsT.length} filas "Split / ${t}"`);
     for (const m of deLaEspecie.slice(0, 40)) {
       console.log(`    ${String(m.agreementDate ?? '').slice(0, 10)} · «${m.description}» · quantity ${m.quantity} · price ${m.price} · amount ${m.amount}`);
