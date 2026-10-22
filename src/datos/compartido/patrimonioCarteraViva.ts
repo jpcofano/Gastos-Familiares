@@ -414,10 +414,18 @@ export function armarCarteraViva(
       const pd = filaDe(l) ? precioDe(filaDe(l)!) : null;
       if (pd && pd.fecha >= (l.precioFecha ?? '')) { valuar(l, filaDe(l)); continue; }
       // Nota de revisión 2: la API trajo tenencia pero valor 0 (no tenía precio) y no hay precio del
-      // día: se valúa con el precio unitario de la CARGA de ese ticker en esa cuenta. Nunca 0 en silencio.
+      // día. Nota de revisión 3: primero el precio más reciente que haya (más viejo que la lectura de
+      // la API), con su fecha y estado 'viejo'; si no hay ninguno, el precio unitario de la CARGA de
+      // ese ticker en esa cuenta. Nunca 0 en silencio.
       if (l.cantidad > 0 && l.valorOrigen === 0 && l.tipo !== 'cash') {
         const carga = trabajo.find(c => c.esCarga && c.cuenta === l.cuenta && norm(c.ticker) === norm(l.ticker) && c.unitCarga !== null && c.unitCarga > 0);
-        if (carga) {
+        if (pd && pd.precio > 0) {
+          l.moneda = pd.moneda;
+          l.valorOrigen = l.cantidad * pd.precio;
+          l.precio = 'viejo';
+          l.precioFecha = pd.fecha;
+          inconsistencias.push(`${l.cuenta} ${l.ticker}: precio del ${pd.fecha.slice(8, 10)}/${pd.fecha.slice(5, 7)}`);
+        } else if (carga) {
           l.moneda = carga.moneda;
           l.valorOrigen = l.cantidad * carga.unitCarga!;
           l.precio = 'corrida';

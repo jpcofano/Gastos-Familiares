@@ -215,6 +215,14 @@ console.log('\n=== cron de cartera viva (datos sintéticos) ===');
     const conPrecio = armarCarteraViva(corridaB, [vivaB], [], { hoy: '2026-10-22', porIdentidad: {} },
       { leidoEnISO: '2026-10-22T13:00:00Z', precios: { BTC: { valor: 110_000, fuente: 'bitfinex', error: null } }, sondeo: [] } as unknown as Parameters<typeof armarCarteraViva>[4], [], null);
     t('nota 2: con precio del día cripto, se usa ese (no la carga) y no hay aviso', conPrecio.lineas.find(l => l.ticker === 'BTC')!.valorUsd === 13_200 && !conPrecio.inconsistencias.some(x => x.startsWith('Bitfinex BTC')));
+    // Nota de revisión 3: precio cripto más viejo que la lectura de la API → ese precio, 'viejo', antes que la carga.
+    const viejoP = armarCarteraViva(corridaB, [vivaB], [], { hoy: '2026-10-22', porIdentidad: {} },
+      { leidoEnISO: '2026-10-20T12:15:00Z', precios: { BTC: { valor: 105_000, fuente: 'bitfinex', error: null } }, sondeo: [] } as unknown as Parameters<typeof armarCarteraViva>[4], [], null);
+    const btcV = viejoP.lineas.find(l => l.ticker === 'BTC')!;
+    t('nota 3: sin precio del día, el precio cripto más reciente (0,12 × 105.000 = 12.600), estado viejo, con su fecha y "precio del dd/mm"',
+      btcV.valorUsd === 12_600 && btcV.precio === 'viejo' && btcV.precioFecha === '2026-10-20' && viejoP.inconsistencias.includes('Bitfinex BTC: precio del 20/10')
+      && !viejoP.inconsistencias.includes('Bitfinex BTC: sin precio, valuado a la carga'), { btcV, inc: viejoP.inconsistencias });
+    t('nota 3: el que no tiene ningún precio sigue cayendo a la carga o a 0, con su aviso', viejoP.inconsistencias.includes('Bitfinex XYZ: sin precio ni carga, queda en 0'));
 
     // Punto 5: movimientos reales vs sin explicar.
     const movs = [
