@@ -210,9 +210,13 @@ console.log('\n=== regresiones de la revisión de dd04a2e ===');
   t('3: un movimiento lejos de todo tcDiario → null (va a sinTc, no al TC de otra época)', tcDe('2021-06-01') === null && tcDe('2025-06-01') === null);
   t('3: a 5 días o menos, el más cercano', tcDe('2026-10-17') === 1544);
 
-  const bono = elegirPrecioDia({ data912: 88_500, monedaSerie: 'ARS', escalaData912: escalaData912('bono', null), ppi: null, hoy: '2026-10-20' });
+  const bono = elegirPrecioDia({ data912: 88_500, monedaSerie: 'ARS', escalaData912: escalaData912('bono'), ppi: null, hoy: '2026-10-20' });
   t('6: bono de data912 (cada 100 VN) → por 1 VN, con la escala guardada', bono?.precio === 885 && bono.escala === 100);
-  t('6: acciones y CEDEARs no se tocan; la escala de PPI manda si está', escalaData912('accion', null) === 1 && escalaData912('on', 1) === 1);
+  t('6: acciones y CEDEARs no se tocan; bonos y ONs, 100 fijo', escalaData912('accion') === 1 && escalaData912('cedear') === 1 && escalaData912('on') === 100 && escalaData912('bono') === 100);
+  // Addendum 1 C: un bono con escala de PPI = 1 guardada no cambia el precio de data912.
+  const conEscalaPPI = preciosDesdeIndicadores([{ ticker: 'GD30', tipo: 'bono', paisRiesgo: 'AR', precio: 88_000, monedaSerie: 'ARS', fechaUltimoPrecio: '2026-10-19',
+    escalaPPI: { identidad: 'GD30|bono|AR', nominalInPrice: 1, consultadoEnISO: '2026-10-19T12:00:00Z' } } as Parameters<typeof preciosDesdeIndicadores>[0][number]], '2026-10-20');
+  t('C: un bono con escalaPPI = 1 guardada → el precio de data912 sigue ÷ 100', conEscalaPPI.porIdentidad['GD30|bono|AR']?.precio === 880, conEscalaPPI.porIdentidad);
   const ppiViejo = elegirPrecioDia({ data912: null, monedaSerie: 'ARS', ppi: { precio: 100, escala: 1, fechaISO: '2026-10-15T17:00:00-03:00' }, hoy: '2026-10-20' });
   t('8: el precio de PPI lleva la fecha de su cotización, no la de la corrida', ppiViejo?.fecha === '2026-10-15');
   const p = preciosDesdeIndicadores([{ ticker: 'GD30', tipo: 'bono', paisRiesgo: 'AR', precio: 88_000, monedaSerie: 'ARS', fechaUltimoPrecio: '2026-10-19' }], '2026-10-20');

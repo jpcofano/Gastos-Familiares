@@ -17,7 +17,7 @@ import {
 import type { MovimientoCuenta } from './compartido/patrimonioMovimientos';
 import { diasHabilesEntre } from './compartido/patrimonioFlujosAuto';
 import type { PosicionTipo } from './compartido/tiposPatrimonio';
-import { escalaData912, escalaVigente } from './preciosRespaldo';
+import { escalaData912 } from './preciosRespaldo';
 
 const fechaArg = (iso: string) => new Date(Date.parse(iso) - 3 * 3600_000).toISOString().slice(0, 10);
 const horaArg = (iso: string) => new Date(Date.parse(iso) - 3 * 3600_000).toISOString().slice(11, 16);
@@ -41,8 +41,9 @@ export function preciosDesdeIndicadores(docs: DocIndicador[], hoy: string): Prec
     if (d.precioDia && d.precioDia.precio > 0) {
       porIdentidad[k] = { precio: d.precioDia.precio, moneda: d.precioDia.moneda, fecha: d.precioDia.fecha };
     } else if (typeof d.precio === 'number' && d.precio > 0 && d.monedaSerie && d.fechaUltimoPrecio) {
-      // El último cierre de la serie viene en la escala de data912: bonos y ONs cada 100 VN.
-      const esc = escalaData912(d.tipo as PosicionTipo, escalaVigente(d.escalaPPI, k));
+      // El último cierre de la serie viene en la escala de data912: bonos y ONs cada 100 VN (fija:
+      // la escala de PPI no se aplica al precio de data912, Addendum 1 C).
+      const esc = escalaData912(d.tipo as PosicionTipo);
       porIdentidad[k] = { precio: d.precio / esc, moneda: d.monedaSerie, fecha: d.fechaUltimoPrecio };
     }
   }

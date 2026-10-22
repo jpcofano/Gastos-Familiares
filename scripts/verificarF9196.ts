@@ -251,7 +251,7 @@ console.log('\n=== H2: sincronización de PPI y Bitfinex, y valor de hoy (sinté
     leidoEnISO: '2026-10-21T12:20:00Z', precioUsd: () => 80000,
   });
   ok(bfx.cuentaViva.posiciones.length === 2 && bfx.movimientos[0].ticker === 'USDT' && bfx.movimientos[0].tipo === 'deposito', 'Bitfinex: billeteras por activo y depósito en especie');
-  ok(elegirPrecioDia({ data912: 88_000, monedaSerie: 'ARS', escalaData912: escalaData912('bono', null), ppi: null, hoy: '2026-10-20' })?.precio === 880
+  ok(elegirPrecioDia({ data912: 88_000, monedaSerie: 'ARS', escalaData912: escalaData912('bono'), ppi: null, hoy: '2026-10-20' })?.precio === 880
     && elegirPrecioDia({ data912: null, monedaSerie: 'ARS', ppi: { precio: 5765, escala: 1 }, hoy: '2026-10-20' })?.fuente === 'ppi', 'precios: bonos de data912 a 1 VN; respaldo de PPI cuando data912 falla');
   const doc = armarDocCarteraViva({
     fechaCorrida: '2026-10-13', posiciones: corridaBase, cuentasVivas: [], movimientos: [], cripto: null, manuales: [],

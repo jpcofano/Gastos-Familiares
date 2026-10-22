@@ -63,14 +63,14 @@ export type PrecioDiaGuardado = {
 };
 
 /**
- * Escala del precio de data912: bonos y ONs cotizan cada 100 VN (convención de BYMA, la misma que
- * `nominalInPrice` = 100 de PPI para la ON TLCPO), acciones y CEDEARs por unidad. Si PPI dio la
- * escala de esa especie, manda la de PPI. ⚠ Para confirmar con un bono en vivo; si estuviera mal,
- * la guarda `escala_dudosa` de la cartera viva lo marca y usa la valuación de la carga.
+ * Escala del precio de data912: bonos y ONs cotizan cada 100 VN; acciones y CEDEARs, por unidad.
+ * F9.196.1 Addendum 1 C: FIJA en 100 para bonos y ONs, medida en vivo el 21/10/2026 con siete
+ * especies (docs/patrimonio/data912-escala.md). La escala de PPI (`nominalInPrice`, `escalaPPI`)
+ * se usa SOLO para el precio que viene de PPI (`respaldoPPI` / `elegirPrecioDia`), nunca para el de
+ * data912: un `nominalInPrice` distinto de 100 dejaría el precio de data912 100 veces corrido.
  */
-export function escalaData912(tipo: PosicionTipo, escalaPPI: number | null): number {
-  if (tipo !== 'bono' && tipo !== 'on') return 1;
-  return escalaPPI ?? 100;
+export function escalaData912(tipo: PosicionTipo): number {
+  return tipo === 'bono' || tipo === 'on' ? 100 : 1;
 }
 
 const fechaArgDeISO = (iso: string | null): string | null => {

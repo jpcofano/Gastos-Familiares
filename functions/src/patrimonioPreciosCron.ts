@@ -387,10 +387,9 @@ async function actualizarUnTicker(
   const campoPrecioLive = panelBajado ? { precioLive } : {};
   // F9.196 H2a — el precio del día con su fuente: data912; si falla o no tiene la especie, PPI.
   const respaldo = await respaldoPPI(refInd, o, spec.live, precioLive, ppi, escribir);
-  const escalaGuardada = (o.tipo === 'bono' || o.tipo === 'on')
-    ? RP.escalaVigente(((await refInd.get()).data() ?? {}).escalaPPI, PP.claveIdentidad(o)) : null;
+  // Addendum 1 C: la escala de data912 es fija (100 en bonos y ONs); la de PPI va solo con `respaldo`.
   const precioDia = RP.elegirPrecioDia({
-    data912: precioLive, monedaSerie, escalaData912: RP.escalaData912(o.tipo, escalaGuardada), ppi: respaldo, hoy: hoyART(),
+    data912: precioLive, monedaSerie, escalaData912: RP.escalaData912(o.tipo), ppi: respaldo, hoy: hoyART(),
   });
   const campoPrecioDia = precioDia ? { precioDia } : {};
   if (precioDia?.fuente === 'ppi') console.log(`[precios] ${o.docId}: sin precio de data912, se usa PPI ${precioDia.precio} (escala ${precioDia.escala ?? 'desconocida'})`);
