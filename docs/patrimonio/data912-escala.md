@@ -10,6 +10,8 @@
   (`/live/arg_bonds`, 206 símbolos, y `/live/arg_corp`, 645 símbolos), 15 s de timeout, sin reintentos.
 - Campo usado: `c` (el último), el mismo con el que valúa el cron (`patrimonioPreciosCron.ts:150-154`).
 - Referencia: Balanz, ARS por 1 VN, 21/10 a las 17:00-17:02.
+- Criterio del factor (el del script): cociente data912 ÷ Balanz entre 50 y 200 → 100; entre 0,5 y 2
+  → 1; fuera de eso, "raro".
 
 | Especie | Tipo | Panel | data912 `c` | Balanz (1 VN) | data912 ÷ Balanz | Factor |
 |---|---|---|---|---|---|---|
@@ -36,14 +38,19 @@ return escalaPPI ?? 100;
 ```
 
 - **Bonos:** asume 100 → **coincide**.
-- **ONs:** asume 100 → **coincide** (TLCPO).
-- **Letras:** no hay un tipo `letra` (`PosicionTipo`, `functions/src/patrimonioPrecios.ts:10`). Una
-  letra como TZXM7 sale del panel `arg_bonds`, o sea que se carga como `bono` (`PANEL_POR_TIPO`,
-  `patrimonioPrecios.ts:58`) y se divide por 100 → **coincide**.
+- **ONs:** asume 100 → **coincide** en la única ON medida (TLCPO). Es un solo dato: otra ON podría
+  publicarse distinto (no hay razón para pensarlo, pero no está medido).
+- **Letras:** no hay un tipo `letra` (`PosicionTipo`, `functions/src/patrimonioPrecios.ts:10`). PPI
+  mapea `LETRAS` a `bono` (`src/datos/compartido/clasificacionPPI.ts:20`); en Balanz y en la corrida
+  el tipo lo pone el importador o la ingesta (supuesto: `bono`, no verificado para TZXM7). Si es
+  `bono`, se busca en `arg_bonds` (`PANEL_POR_TIPO`, `patrimonioPrecios.ts:58`), donde está, y se
+  divide por 100 → **coincide**.
 - **Ojo con un detalle:** si PPI guardó una escala para la especie (`escalaPPI`), el código usa esa
   escala también para el precio de data912. Lo medido dice que data912 es siempre por 100 en bonos,
   letras y ONs, sin depender de lo que diga PPI. Si alguna especie tuviera `nominalInPrice` = 1 en
-  PPI, el precio de data912 quedaría 100 veces alto (el test `h2a.test.ts:200` fija justamente
-  `escalaData912('on', 1) === 1`). Con TLCPO no pasa, porque PPI también da 100. Lo más seguro sería
+  PPI, el precio de data912 quedaría 100 veces alto (el test `functions/src/h2a.test.ts:215` fija
+  justamente `escalaData912('on', 1) === 1`). La escala de PPI se guarda solo cuando data912 no trajo
+  la especie y se usa el respaldo de PPI (`patrimonioPreciosCron.ts`, `respaldoPPI`), y después no
+  vence: el riesgo es condicional, pero real. Con TLCPO no pasa, porque PPI también da 100. Lo más seguro sería
   que `escalaData912` devuelva 100 fijo para bonos y ONs y dejar la escala de PPI solo para el
   precio de PPI. Es una decisión para tomar: esta medición no cambia código.
