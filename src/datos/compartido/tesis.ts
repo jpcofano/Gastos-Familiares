@@ -17,6 +17,15 @@ export type Gatillo = {
   valorActual: number | null;
 };
 
+/**
+ * F9.196.1 §2.a — cuántas unidades locales equivalen a una del subyacente (la que cubre el consenso):
+ * - CEDEAR: N CEDEARs = 1 acción del exterior (`tipo: 'cedear'`);
+ * - acción local con ADR: 1 ADR = N acciones locales (`tipo: 'adr'`).
+ * En los dos casos, precio del subyacente = precio local × N. Lo trae el Chat 2 CON FUENTE y Juan lo
+ * puede editar. No hay tabla fija en el código: los ratios cambian y un número viejo da un P/E falso.
+ */
+export type RatioSubyacente = { valor: number; tipo: 'cedear' | 'adr'; fuente: string; fecha: string | null };
+
 export type Tesis = {
   /** null = el chat no trajo una moneda válida: P/E y potencial no se calculan (motivo `sin_moneda`). */
   monedaFundamentals: 'USD' | 'ARS' | null;
@@ -33,12 +42,14 @@ export type Tesis = {
   riesgoPrincipal: string;
   fuentes: Array<{ texto: string; fecha: string | null }>;
   fechaDatos: string | null;
+  /** §2.a — null si el consenso es de la acción local (o no hay dato). */
+  ratioSubyacente: RatioSubyacente | null;
 };
 
 export const CAMPOS_TESIS = [
   'monedaFundamentals', 'epsGuiaMin', 'epsGuiaMax', 'epsPeriodo', 'precioObjetivoConsenso', 'analistas',
   'recomendacionConsenso', 'gatillos', 'proximoEvento', 'cortoPlazo', 'medianoPlazo', 'riesgoPrincipal',
-  'fuentes', 'fechaDatos',
+  'fuentes', 'fechaDatos', 'ratioSubyacente',
 ] as const;
 export type CampoTesis = (typeof CAMPOS_TESIS)[number];
 
@@ -76,6 +87,19 @@ export function normalizarTesis(x: unknown): { tesis: Tesis | null; avisos: stri
   }
   const repetidas = new Set<string>();
   for (const k of gatillos.map(claveGatillo)) { if (repetidas.has(k)) avisos.push(`gatillo repetido: ${k}`); repetidas.add(k); }
+  // §2.a — ratio con el subyacente: valor > 0, tipo válido y fuente; si no, null con aviso.
+  let ratioSubyacente: RatioSubyacente | null = null;
+  if (o.ratioSubyacente !== undefined && o.ratioSubyacente !== null) {
+    const r = (typeof o.ratioSubyacente === 'object' ? o.ratioSubyacente : {}) as Record<string, unknown>;
+    const valor = numONull(r.valor);
+    const tipo = typeof r.tipo === 'string' ? r.tipo.trim().toLowerCase() : '';
+    if (valor !== null && valor > 0 && (tipo === 'cedear' || tipo === 'adr')) {
+      ratioSubyacente = { valor, tipo, fuente: txtONull(r.fuente) ?? '', fecha: fechaONull(r.fecha) };
+      if (!ratioSubyacente.fuente) avisos.push('ratioSubyacente sin fuente');
+    } else {
+      avisos.push(`ratioSubyacente inválido (${JSON.stringify(o.ratioSubyacente).slice(0, 60)}): queda sin ratio`);
+    }
+  }
   const ev = (o.proximoEvento ?? {}) as Record<string, unknown>;
   const fuentes = (Array.isArray(o.fuentes) ? o.fuentes : [])
     .map(f => (typeof f === 'string' ? { texto: f, fecha: null } : { texto: txtONull((f as Record<string, unknown>)?.texto) ?? '', fecha: fechaONull((f as Record<string, unknown>)?.fecha) }))
@@ -91,6 +115,7 @@ export function normalizarTesis(x: unknown): { tesis: Tesis | null; avisos: stri
       proximoEvento: { fecha: fechaONull(ev.fecha), tipo: typeof ev.tipo === 'string' && ev.tipo.trim().toLowerCase() === 'balance' ? 'balance' : 'otro', texto: txtONull(ev.texto) ?? '' },
       cortoPlazo: txtONull(o.cortoPlazo) ?? '', medianoPlazo: txtONull(o.medianoPlazo) ?? '', riesgoPrincipal: txtONull(o.riesgoPrincipal) ?? '',
       fuentes, fechaDatos: fechaONull(o.fechaDatos),
+      ratioSubyacente,
     },
     avisos,
   };
@@ -202,13 +227,25 @@ export type CalculoTesis = {
   pe: number | null;
   /** Precio objetivo de consenso ÷ precio − 1. */
   potencial: number | null;
-  /** Por qué no se calculó P/E o potencial, cuando no se pudo. */
+  /** Por qué no se calculó P/E (o ninguno de los dos), cuando no se pudo. */
   motivo: string | null;
+  /** §2.b — por qué no se calculó el potencial cuando el P/E sí (p. ej. `consenso_fuera_de_escala`). */
+  motivoPotencial?: string | null;
+  /** §2.a — el ratio con el subyacente que se usó, para que la ficha lo diga. */
+  ratioUsado?: RatioSubyacente | null;
   gatillos: Array<Gatillo & { cumplido: boolean | null }>;
   diasAlEvento: number | null;
   /** El precio usado, ya en la moneda de los fundamentals. */
   precioEnMoneda: number | null;
 };
+
+/**
+ * §2.b — controles de valores absurdos. El consenso entre 0,2 y 5 veces el precio deja pasar
+ * cualquier potencial publicado razonable (−80% a +400%) y frena el error de escala de un ADR o un
+ * CEDEAR sin ratio (≈ 10 veces). Un P/E de más de 300 no es informativo (y suele ser un EPS mal leído).
+ */
+export const CONSENSO_SOBRE_PRECIO: [number, number] = [0.2, 5];
+export const PE_MAXIMO = 300;
 
 const dias = (desde: string, hasta: string) => Math.round((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86_400_000);
 
@@ -225,28 +262,37 @@ export function calcularTesis(
 ): CalculoTesis {
   let precioEnMoneda: number | null = null;
   let motivo: string | null = null;
+  // §2.a — con ratio, el precio del subyacente = precio local × N; después, la moneda como siempre.
+  const ratio = t.ratioSubyacente ?? null;
+  const base = precio && ratio ? precio.valor * ratio.valor : precio?.valor ?? 0;
   if (!precio || !(precio.valor > 0)) motivo = 'sin_precio';
-  else if (opciones.esCedear) motivo = 'cedear_sin_ratio';
+  else if (opciones.esCedear && !ratio) motivo = 'cedear_sin_ratio';
   else if (t.monedaFundamentals === null) motivo = 'sin_moneda';
-  else if (precio.moneda === t.monedaFundamentals) precioEnMoneda = precio.valor;
-  else if (opciones.tc && opciones.tc > 0) precioEnMoneda = precio.moneda === 'ARS' ? precio.valor / opciones.tc : precio.valor * opciones.tc;
+  else if (precio.moneda === t.monedaFundamentals) precioEnMoneda = base;
+  else if (opciones.tc && opciones.tc > 0) precioEnMoneda = precio.moneda === 'ARS' ? base / opciones.tc : base * opciones.tc;
   else motivo = 'sin_tc';
 
   const eps = t.epsGuiaMin !== null && t.epsGuiaMax !== null ? (t.epsGuiaMin + t.epsGuiaMax) / 2
     : t.epsGuiaMin ?? t.epsGuiaMax;
-  const pe = precioEnMoneda !== null && eps !== null && eps > 0 && (t.epsGuiaMin ?? 1) > 0 && (t.epsGuiaMax ?? 1) > 0 ? precioEnMoneda / eps : null;
+  let pe = precioEnMoneda !== null && eps !== null && eps > 0 && (t.epsGuiaMin ?? 1) > 0 && (t.epsGuiaMax ?? 1) > 0 ? precioEnMoneda / eps : null;
   // EPS negativo en un extremo del rango: el promedio no es un P/E con sentido.
   if (motivo === null && precioEnMoneda !== null) {
     if (eps === null) motivo = 'sin_eps';
     else if (eps <= 0 || (t.epsGuiaMin ?? 1) <= 0 || (t.epsGuiaMax ?? 1) <= 0) motivo = 'eps_no_positivo';
   }
-  const potencial = precioEnMoneda !== null && precioEnMoneda > 0 && t.precioObjetivoConsenso !== null ? t.precioObjetivoConsenso / precioEnMoneda - 1 : null;
+  if (pe !== null && !(pe > 0 && pe <= PE_MAXIMO)) { pe = null; motivo = 'pe_fuera_de_escala'; }
+  let potencial = precioEnMoneda !== null && precioEnMoneda > 0 && t.precioObjetivoConsenso !== null ? t.precioObjetivoConsenso / precioEnMoneda - 1 : null;
+  let motivoPotencial: string | null = null;
+  if (potencial !== null) {
+    const veces = potencial + 1;
+    if (veces < CONSENSO_SOBRE_PRECIO[0] || veces > CONSENSO_SOBRE_PRECIO[1]) { potencial = null; motivoPotencial = 'consenso_fuera_de_escala'; }
+  }
   const gatillos = t.gatillos.map(g => ({
     ...g,
     cumplido: g.valorActual === null ? null : g.operador === '>=' ? g.valorActual >= g.umbral : g.valorActual <= g.umbral,
   }));
   const diasAlEvento = t.proximoEvento.fecha ? dias(opciones.hoy, t.proximoEvento.fecha) : null;
-  return { pe, potencial, motivo, gatillos, diasAlEvento, precioEnMoneda };
+  return { pe, potencial, motivo, motivoPotencial, ratioUsado: ratio, gatillos, diasAlEvento, precioEnMoneda };
 }
 
 // ── Señales de §5 que dependen de la tesis ───────────────────────────────────

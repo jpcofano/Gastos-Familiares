@@ -140,11 +140,37 @@ console.log('\n=== edición por gatillo y "usar el del chat" (revisión de H6) =
   t('mismo valor con otro orden de claves → no queda "distinto"', fusionarTesis(desordenado, 'YPFD', T).distintoDelChat.proximoEvento === undefined);
 }
 
+console.log('\n=== F9.196.1 §2: ratio con el subyacente y valores absurdos ===');
+{
+  // GGAL: consenso del ADR (US$ 60 por ADR, 1 ADR = 10 acciones). Precio local $ 6.000, MEP 1.500.
+  // Sin ratio: precio en USD = 4 → consenso 15 veces el precio → fuera de escala.
+  const ggal: Tesis = { ...T, epsGuiaMin: 4, epsGuiaMax: 6, precioObjetivoConsenso: 60, ratioSubyacente: null };
+  const sinRatio = calcularTesis(ggal, { valor: 6000, moneda: 'ARS' }, { tc: 1500, hoy: '2026-10-20' });
+  t('acción local con consenso del ADR y sin ratio → potencial null, consenso_fuera_de_escala', sinRatio.potencial === null && sinRatio.motivoPotencial === 'consenso_fuera_de_escala', sinRatio);
+  const conRatio = calcularTesis({ ...ggal, ratioSubyacente: { valor: 10, tipo: 'adr', fuente: 'BNY Mellon', fecha: '2026-10-01' } }, { valor: 6000, moneda: 'ARS' }, { tc: 1500, hoy: '2026-10-20' });
+  t('con ratio 10 → precio del ADR US$ 40, potencial +50% y P/E 8', Math.abs((conRatio.potencial ?? 0) - 0.5) < 1e-9 && Math.abs((conRatio.pe ?? 0) - 8) < 1e-9 && conRatio.ratioUsado?.valor === 10, conRatio);
+  // CEDEAR: 20 CEDEARs = 1 acción. CEDEAR $ 3.000 → acción $ 60.000 → US$ 40; EPS 2 → P/E 20.
+  const cedear = calcularTesis({ ...T, epsGuiaMin: 2, epsGuiaMax: 2, precioObjetivoConsenso: 48, ratioSubyacente: { valor: 20, tipo: 'cedear', fuente: 'BYMA', fecha: null } }, { valor: 3000, moneda: 'ARS' }, { tc: 1500, hoy: '2026-10-20', esCedear: true });
+  t('CEDEAR con ratio → P/E calculado (20) y potencial (+20%)', Math.abs((cedear.pe ?? 0) - 20) < 1e-9 && Math.abs((cedear.potencial ?? 0) - 0.2) < 1e-9 && cedear.motivo === null, cedear);
+  t('CEDEAR sin ratio → sigue cedear_sin_ratio', calcularTesis({ ...T, ratioSubyacente: null }, { valor: 3000, moneda: 'ARS' }, { tc: 1500, hoy: '2026-10-20', esCedear: true }).motivo === 'cedear_sin_ratio');
+  const peRaro = calcularTesis({ ...T, epsGuiaMin: 0.01, epsGuiaMax: 0.01, precioObjetivoConsenso: null }, { valor: 50, moneda: 'USD' }, { tc: 1, hoy: '2026-10-20' });
+  t('P/E de más de 300 → null, pe_fuera_de_escala', peRaro.pe === null && peRaro.motivo === 'pe_fuera_de_escala', peRaro);
+  const n1 = normalizarTesis({ ...delChat, ratioSubyacente: { valor: 10, tipo: 'ADR', fuente: 'BNY', fecha: '2026-10-01' } });
+  const n2 = normalizarTesis({ ...delChat, ratioSubyacente: { valor: 0, tipo: 'adr' } });
+  const n3 = normalizarTesis(delChat);
+  t('normalizar: ratio válido (tipo sin importar mayúsculas); valor 0 → null con aviso; sin el campo → null sin aviso',
+    n1.tesis?.ratioSubyacente?.tipo === 'adr' && n1.tesis.ratioSubyacente.valor === 10 && n2.tesis?.ratioSubyacente === null && n2.avisos.some(x => x.includes('ratioSubyacente'))
+    && n3.tesis?.ratioSubyacente === null && !n3.avisos.some(x => x.includes('ratioSubyacente')));
+  const ed = fusionarTesis(editarTesis(fusionarTesis(null, 'GGAL', n3.tesis!), 'ratioSubyacente', { valor: 10, tipo: 'adr', fuente: 'Juan', fecha: null }), 'GGAL', n1.tesis!);
+  t('el ratio editado por Juan no lo pisa el chat (queda "distinto")', ed.tesis.ratioSubyacente?.fuente === 'Juan' && ed.distintoDelChat.ratioSubyacente !== undefined);
+}
+
 console.log('\n=== prompt del Chat 2 ===');
 {
   const conT = buildPromptPosicionesV3({ fecha: '2026-10-20', materiales: [], menores: [], panorama: {}, conTesis: ['YPFD'], tesisPrevias: {} });
   const sinT = buildPromptPosicionesV3({ fecha: '2026-10-20', materiales: [], menores: [], panorama: {} });
   t('con conTesis: pide el bloque "tesis" con la forma de §6 y las reglas', conT.includes(ESQUEMA_TESIS) && conT.includes('NUNCA inventar') && conT.includes('Sin precio objetivo propio') && conT.includes('Lenguaje condicional'));
+  t('el prompt pide ratioSubyacente con fuente y prohíbe inventarlo', ESQUEMA_TESIS.includes('ratioSubyacente') && conT.includes('banco depositario') && conT.includes('NUNCA inventarlo'));
   t('un contexto viejo sin conTesis: el prompt de siempre, sin tesis', !sinT.includes('"tesis"') && !sinT.includes('TESIS:'));
 }
 

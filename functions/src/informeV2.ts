@@ -298,7 +298,8 @@ ${j('tesisPrevias')}
    - Datos CON FUENTE Y FECHA (en "fuentes" y "fechaDatos"). Si no hay dato, va null; NUNCA inventar.
    - Lenguaje condicional, como el resto del informe ("si se confirma X, …").
    - Sin precio objetivo propio: solo el consenso publicado (precioObjetivoConsenso), como dato.
-   - EPS y precio objetivo por acción del MISMO instrumento y en "monedaFundamentals". No calcules P/E ni potencial: los calcula la app con el precio del día.
+   - EPS y precio objetivo por acción del instrumento que cubre el consenso y en "monedaFundamentals". No calcules P/E ni potencial: los calcula la app con el precio del día.
+   - "ratioSubyacente": cuántas unidades locales equivalen a una del instrumento del consenso. Para un CEDEAR: { "valor": N, "tipo": "cedear" } con N CEDEARs = 1 acción (fuente: BYMA o el banco emisor). Para una acción local cuyo consenso es del ADR: { "valor": N, "tipo": "adr" } con 1 ADR = N acciones locales (fuente: el banco depositario). Siempre con "fuente" y "fecha". Si el consenso está en la acción local, null. Si no encontrás el ratio con fuente, null: NUNCA inventarlo.
    - "gatillos": condiciones medibles de la tesis (métrica, operador ">=" o "<=", umbral y el valor actual si lo encontrás, si no null).` : ''}
 
 ═══ FORMATO ═══
@@ -314,7 +315,7 @@ ${CIERRE_V3}`;
 }
 
 /** F9.196 §6 — forma exacta del bloque `tesis` del Chat 2. */
-export const ESQUEMA_TESIS = `{ "monedaFundamentals": "USD" | "ARS", "epsGuiaMin": 0 | null, "epsGuiaMax": 0 | null, "epsPeriodo": "2026" | null, "precioObjetivoConsenso": 0 | null, "analistas": 0 | null, "recomendacionConsenso": "…" | null, "gatillos": [{ "texto": "…", "metrica": "…", "operador": ">=" | "<=", "umbral": 0, "valorActual": 0 | null }], "proximoEvento": { "fecha": "YYYY-MM-DD" | null, "tipo": "balance" | "otro", "texto": "…" }, "cortoPlazo": "…", "medianoPlazo": "…", "riesgoPrincipal": "…", "fuentes": [{ "texto": "…", "fecha": "YYYY-MM-DD" }], "fechaDatos": "YYYY-MM-DD" }`;
+export const ESQUEMA_TESIS = `{ "monedaFundamentals": "USD" | "ARS", "epsGuiaMin": 0 | null, "epsGuiaMax": 0 | null, "epsPeriodo": "2026" | null, "precioObjetivoConsenso": 0 | null, "analistas": 0 | null, "recomendacionConsenso": "…" | null, "gatillos": [{ "texto": "…", "metrica": "…", "operador": ">=" | "<=", "umbral": 0, "valorActual": 0 | null }], "proximoEvento": { "fecha": "YYYY-MM-DD" | null, "tipo": "balance" | "otro", "texto": "…" }, "cortoPlazo": "…", "medianoPlazo": "…", "riesgoPrincipal": "…", "fuentes": [{ "texto": "…", "fecha": "YYYY-MM-DD" }], "fechaDatos": "YYYY-MM-DD", "ratioSubyacente": { "valor": 0, "tipo": "cedear" | "adr", "fuente": "…", "fecha": "YYYY-MM-DD" } | null }`;
 
 /** F9.194 — despacho por parte. Sin `parte` (bundle de F9.191) se trata como estrategia. */
 export function buildPromptV3(contexto: Record<string, unknown>): string {

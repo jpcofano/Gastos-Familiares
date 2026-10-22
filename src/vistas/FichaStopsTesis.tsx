@@ -204,13 +204,19 @@ const MOTIVO_TXT: Record<string, string> = {
   sin_moneda: 'el chat no dijo en qué moneda están los fundamentals',
   sin_eps: 'sin EPS de guía',
   eps_no_positivo: 'EPS negativo o cero en la guía',
+  pe_fuera_de_escala: 'P/E fuera de escala (más de 300): ¿EPS mal leído o falta el ratio?',
+  consenso_fuera_de_escala: 'el consenso está muy lejos del precio: ¿falta el ratio del ADR o del CEDEAR?',
 };
+
+/** "1 ADR = 10 acciones" / "10 CEDEARs = 1 acción", con la fuente. */
+const textoRatio = (r: { valor: number; tipo: 'cedear' | 'adr'; fuente: string; fecha: string | null }) =>
+  `${r.tipo === 'adr' ? `1 ADR = ${fmt(r.valor, Number.isInteger(r.valor) ? 0 : 2)} acciones` : `${fmt(r.valor, Number.isInteger(r.valor) ? 0 : 2)} CEDEARs = 1 acción`}${r.fuente ? `, fuente ${r.fuente}` : ''}${r.fecha ? ` (${fmtFecha(r.fecha)})` : ''}`;
 
 const CAMPO_TXT: Partial<Record<CampoTesis, string>> = {
   monedaFundamentals: 'Moneda de los fundamentals', epsGuiaMin: 'EPS mínimo', epsGuiaMax: 'EPS máximo', epsPeriodo: 'Período del EPS',
   precioObjetivoConsenso: 'Precio objetivo de consenso', analistas: 'Analistas', recomendacionConsenso: 'Recomendación de consenso',
   gatillos: 'Gatillos', proximoEvento: 'Próximo evento', cortoPlazo: 'Corto plazo', medianoPlazo: 'Mediano plazo',
-  riesgoPrincipal: 'Riesgo principal', fuentes: 'Fuentes', fechaDatos: 'Fecha de los datos',
+  riesgoPrincipal: 'Riesgo principal', fuentes: 'Fuentes', fechaDatos: 'Fecha de los datos', ratioSubyacente: 'Ratio con el subyacente',
 };
 
 /** Un valor del chat, legible (sin JSON crudo). */
@@ -283,10 +289,13 @@ export function SeccionTesis({ ticker, ind, doc, tc, privado = false, onGuardada
       </div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         <Numero label="P/E" valor={c?.pe != null ? fmt(c.pe, 1) : '—'} nota={c?.pe == null && c?.motivo ? MOTIVO_TXT[c.motivo] ?? c.motivo : t.epsPeriodo ? `EPS ${t.epsPeriodo}` : null} />
-        <Numero label="Potencial al consenso" valor={c?.potencial != null ? fmtPct(c.potencial) : '—'} nota={t.analistas ? `${t.analistas} analistas${t.recomendacionConsenso ? ` · ${t.recomendacionConsenso}` : ''}` : null} />
+        <Numero label="Potencial al consenso" valor={c?.potencial != null ? fmtPct(c.potencial) : '—'} nota={c?.potencial == null && (c?.motivoPotencial || c?.motivo) ? MOTIVO_TXT[(c.motivoPotencial ?? c.motivo)!] ?? (c.motivoPotencial ?? c.motivo) : t.analistas ? `${t.analistas} analistas${t.recomendacionConsenso ? ` · ${t.recomendacionConsenso}` : ''}` : null} />
         <Numero label="Días al evento" valor={c?.diasAlEvento != null && c.diasAlEvento >= 0 ? String(c.diasAlEvento) : '—'} nota={t.proximoEvento.fecha ? `${t.proximoEvento.tipo === 'balance' ? 'Balance' : t.proximoEvento.texto || 'Evento'} ${fmtFecha(t.proximoEvento.fecha)}` : null} />
       </div>
       {distinto('proximoEvento') && <div style={{ marginBottom: 6 }}><span style={sub}>Próximo evento:</span>{distinto('proximoEvento')}</div>}
+      {/* §2.a — qué ratio se usó para pasar del precio local al del subyacente. */}
+      {(t.ratioSubyacente ?? null) && <div style={{ ...sub, marginBottom: 6 }}>Ratio usado: {textoRatio(t.ratioSubyacente!)}{distinto('ratioSubyacente')}</div>}
+      {!(t.ratioSubyacente ?? null) && distinto('ratioSubyacente') && <div style={{ marginBottom: 6 }}><span style={sub}>Ratio con el subyacente:</span>{distinto('ratioSubyacente')}</div>}
       {gatillos.length > 0 && (
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--gf-gray-400)', letterSpacing: 0.3, marginBottom: 3 }}>GATILLOS{distinto('gatillos')}</div>
@@ -352,6 +361,8 @@ function EditorTesis({ doc, onGuardada }: { doc: DocTesis; onGuardada: (d: DocTe
     precioObjetivoConsenso: t.precioObjetivoConsenso?.toString() ?? '', fechaEvento: t.proximoEvento.fecha ?? '',
     cortoPlazo: t.cortoPlazo ?? '', medianoPlazo: t.medianoPlazo ?? '', riesgoPrincipal: t.riesgoPrincipal ?? '',
     gatillos: t.gatillos.map(g => g.valorActual?.toString() ?? ''),
+    ratioValor: t.ratioSubyacente?.valor?.toString() ?? '', ratioTipo: (t.ratioSubyacente?.tipo ?? '') as '' | 'cedear' | 'adr',
+    ratioFuente: t.ratioSubyacente?.fuente ?? '',
   });
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -378,6 +389,12 @@ function EditorTesis({ doc, onGuardada }: { doc: DocTesis; onGuardada: (d: DocTe
         const v = leer(b.gatillos[i], `Valor de «${g.texto}»`);
         if (v !== g.valorActual) d = editarValorGatillo(d, claveGatillo(g), v);
       });
+      // §2.a — ratio: valor y tipo juntos (vacío = sin ratio); con fuente.
+      const rv = leer(b.ratioValor, 'Ratio con el subyacente');
+      if (rv !== null && !(rv > 0)) throw new Error('Ratio con el subyacente: tiene que ser mayor que 0');
+      if (rv !== null && !b.ratioTipo) throw new Error('Ratio con el subyacente: elegí si es de CEDEAR o de ADR');
+      const ratio = rv === null ? null : { valor: rv, tipo: b.ratioTipo as 'cedear' | 'adr', fuente: b.ratioFuente.trim() || 'Juan', fecha: t.ratioSubyacente && t.ratioSubyacente.valor === rv ? t.ratioSubyacente.fecha : null };
+      if (JSON.stringify(ratio) !== JSON.stringify(t.ratioSubyacente ?? null)) d = editarTesis(d, 'ratioSubyacente', ratio);
       if (d === doc) { onGuardada(doc); return; }
       onGuardada(await guardarTesis(doc, d));
     } catch (e) {
@@ -398,6 +415,21 @@ function EditorTesis({ doc, onGuardada }: { doc: DocTesis; onGuardada: (d: DocTe
         ))}
         <label style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>Fecha del próximo evento
           <input type="date" value={b.fechaEvento} onChange={e => setB({ ...b, fechaEvento: e.target.value })} style={input} />
+        </label>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+        <label style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>Ratio con el subyacente
+          <input inputMode="decimal" value={b.ratioValor} placeholder="vacío = sin ratio" onChange={e => setB({ ...b, ratioValor: e.target.value })} style={input} />
+        </label>
+        <label style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>Tipo
+          <select value={b.ratioTipo} onChange={e => setB({ ...b, ratioTipo: e.target.value as '' | 'cedear' | 'adr' })} style={input}>
+            <option value="">—</option>
+            <option value="cedear">N CEDEARs = 1 acción</option>
+            <option value="adr">1 ADR = N acciones</option>
+          </select>
+        </label>
+        <label style={{ fontSize: 11, color: 'var(--color-text-sec)' }}>Fuente del ratio
+          <input value={b.ratioFuente} onChange={e => setB({ ...b, ratioFuente: e.target.value })} style={input} />
         </label>
       </div>
       {t.gatillos.map((g, i) => (
