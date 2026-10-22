@@ -21,7 +21,7 @@
 // `parsearMisInstrumentos` lee los números tal como vienen; `detectarVista` decide la vista y
 // `aplicarVista` convierte. Los campos `*Usd` de la fila están en USD recién después de aplicarla.
 import type { PosicionRaw, PosicionTipo, PaisRiesgo } from '../types/patrimonio';
-import type { CuentaViva, PrecioDia, TcCarteraViva } from './patrimonioCarteraViva';
+import { diaHabilAnterior, type CuentaViva, type PrecioDia, type TcCarteraViva } from './patrimonioCarteraViva';
 import type { MovimientoCuenta } from './patrimonioMovimientos';
 
 export const ENCABEZADOS_MIS_INSTRUMENTOS = [
@@ -376,7 +376,14 @@ export const esReimportacion = (
 export function movimientosInferidos(
   anteriores: PosicionRaw[] | null,
   imp: ImportacionMisInstrumentos,
+  /**
+   * F9.196.1 §0 — false si lo anterior no es confiable (un archivo en pesos guardado como dólares):
+   * se comparan solo cantidades y el monto se estima con el precio del archivo NUEVO; un ticker que
+   * desapareció queda sin monto (0) en vez de valuarse con precios inflados.
+   */
+  opciones: { preciosAnteriores?: boolean } = {},
 ): MovimientoCuenta[] {
+  const usarAnteriores = opciones.preciosAnteriores !== false;
   if (!anteriores) return [];
   const clave = (p: Pick<PosicionRaw, 'ticker' | 'tipo'>) => `${p.ticker.trim().toUpperCase()}|${p.tipo}`;
   const cant = (xs: PosicionRaw[]) => {
@@ -400,7 +407,7 @@ export function movimientosInferidos(
     const delta = (b?.cantidad ?? 0) - (a?.cantidad ?? 0);
     if (Math.abs(delta) < 1e-9) continue;
     const ref = (b ?? a)!;
-    const unit = b?.unit ?? a?.unit ?? null;
+    const unit = b?.unit ?? (usarAnteriores ? a?.unit ?? null : null);
     const cantidad = Math.abs(delta);
     out.push({
       id: `balanz_${imp.comitente}_${imp.exportadoEn.replace(/\D/g, '').slice(0, 14)}_${k.replace(/[^A-Za-z0-9]/g, '_')}`,
@@ -566,10 +573,37 @@ export function detectarVista(
 
   const base = { preciosApp, importacionAnterior };
   const desconocida: DeteccionVista = { vista: 'desconocida', metodo: null, mediana: null, especiesUsadas: 0, ...base };
-  if (preciosApp && importacionAnterior && preciosApp.vista !== importacionAnterior.vista) return desconocida;
-  const [metodo, r] = preciosApp ? ['precios_app' as const, preciosApp] : importacionAnterior ? ['importacion_anterior' as const, importacionAnterior] : [null, null];
-  if (!r || r.vista === 'fuera_de_banda') return desconocida;
+  // Solo cuentan las referencias que dieron una vista (dentro de banda). Dos que dan vistas distintas
+  // se contradicen; una fuera de banda no dijo nada y no anula a la otra.
+  const validas = ([['precios_app', preciosApp], ['importacion_anterior', importacionAnterior]] as const)
+    .filter((x): x is readonly ['precios_app' | 'importacion_anterior', { vista: VistaBalanz; mediana: number; especies: number }] => !!x[1] && x[1].vista !== 'fuera_de_banda');
+  if (!validas.length) return desconocida;
+  if (validas.length === 2 && validas[0][1].vista !== validas[1][1].vista) return desconocida;
+  const [metodo, r] = validas[0];
   return { vista: r.vista, metodo, mediana: r.mediana, especiesUsadas: r.especies, ...base };
+}
+
+/** Las dos referencias dieron vistas distintas (dentro de banda): para explicar el "desconocida". */
+export const seContradicen = (d: DeteccionVista) => !!d.preciosApp && !!d.importacionAnterior
+  && d.preciosApp.vista !== 'fuera_de_banda' && d.importacionAnterior.vista !== 'fuera_de_banda'
+  && d.preciosApp.vista !== d.importacionAnterior.vista;
+
+/**
+ * Mediana de valorApp ÷ valorGuardado por especie (3 o más), para verificar lo guardado cuando no
+ * hay corrida contra la cual medirlo. null si no alcanza.
+ */
+export function medianaContraApp(
+  posiciones: PosicionRaw[], precioDe: (p: PosicionRaw) => PrecioDia | null, tc: number | null,
+): number | null {
+  const rs: number[] = [];
+  for (const p of posiciones) {
+    const pd = precioDe(p);
+    if (!pd || !p.cantidad || !(p.valor_origen > 0)) continue;
+    if (pd.moneda === 'ARS' && !(tc && tc > 0)) continue;
+    const app = p.cantidad * (pd.moneda === 'USD' ? pd.precio : pd.precio / tc!);
+    if (app > 0) rs.push(app / p.valor_origen);
+  }
+  return rs.length >= MIN_ESPECIES_PRECIOS_APP ? mediana(rs) : null;
 }
 
 /**
@@ -577,12 +611,60 @@ export function detectarVista(
  * con `vista` (ya está en USD). Si es de antes de §0, solo si su total es razonable contra la
  * corrida de esa comitente: un archivo en pesos guardado como dólares la infla ~1.500 veces.
  */
-export function previaConfiable(previa: Pick<CuentaVivaBalanz, 'vista' | 'valorUsdBalanz'> | null, totalCorridaUsd: number): boolean {
-  if (!previa) return false;
-  if (previa.vista) return true;
-  if (!(totalCorridaUsd > 0) || !(previa.valorUsdBalanz > 0)) return false;
-  const r = previa.valorUsdBalanz / totalCorridaUsd;
-  return r <= FACTOR_INFLADA && r >= 1 / FACTOR_INFLADA;
+export type MotivoPrevia = 'con_vista' | 'razonable' | 'inflada' | 'sin_verificar' | 'ninguna';
+
+/**
+ * Por qué lo guardado sirve (o no) de referencia. Sin `vista`: contra la corrida de esa comitente
+ * y, si la comitente no está en la corrida, contra los precios de la app (`medianaApp` =
+ * valorApp ÷ valorGuardado). Lo que no se puede medir queda `sin_verificar` (no se usa, pero no se
+ * dice que esté inflado).
+ */
+export function motivoPrevia(
+  previa: Pick<CuentaVivaBalanz, 'vista' | 'valorUsdBalanz'> | null,
+  totalCorridaUsd: number,
+  medianaApp: number | null = null,
+): MotivoPrevia {
+  if (!previa) return 'ninguna';
+  if (previa.vista) return 'con_vista';
+  if (totalCorridaUsd > 0 && previa.valorUsdBalanz > 0) {
+    const r = previa.valorUsdBalanz / totalCorridaUsd;
+    return r <= FACTOR_INFLADA && r >= 1 / FACTOR_INFLADA ? 'razonable' : 'inflada';
+  }
+  if (medianaApp !== null) {
+    if (medianaApp >= BANDA_VISTA[0] && medianaApp <= BANDA_VISTA[1]) return 'razonable';
+    if (medianaApp < 1 / FACTOR_INFLADA) return 'inflada';
+  }
+  return 'sin_verificar';
+}
+
+export const previaConfiable = (
+  previa: Pick<CuentaVivaBalanz, 'vista' | 'valorUsdBalanz'> | null, totalCorridaUsd: number, medianaApp: number | null = null,
+) => { const m = motivoPrevia(previa, totalCorridaUsd, medianaApp); return m === 'con_vista' || m === 'razonable'; };
+
+/** Último día hábil (lunes a viernes) en o antes de la fecha: el de los precios de un archivo de fin de semana. */
+export function diaHabilHasta(fecha: string): string {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * El MEP del día del archivo (el cierre del último día hábil en o antes de su fecha). Primero el de
+ * la cartera viva si es ese y no es de respaldo; si no, el doc de `tcDiario` que guarda ese cierre
+ * (convención D−1: el doc `X` guarda el cierre de `diaHabilAnterior(X)`). No es un TC viejo: es el
+ * del día de los precios del archivo. Sin ninguno de los dos, null (no se convierte).
+ */
+export function mepDelArchivo(
+  fechaArchivo: string,
+  cv: TcCarteraViva | null,
+  tcDiario: Array<{ id: string; tcUsdArs: number }>,
+): TcCarteraViva | null {
+  const dia = diaHabilHasta(fechaArchivo);
+  if (cv && !cv.viejo && cv.valor > 0 && cv.fechaCotizacion === dia) return cv;
+  const doc = tcDiario
+    .filter(d => d.id > dia && Number.isFinite(d.tcUsdArs) && d.tcUsdArs > 0 && diaHabilAnterior(d.id) === dia)
+    .sort((a, b) => a.id.localeCompare(b.id))[0];
+  return doc ? { valor: doc.tcUsdArs, fuente: 'tcDiario', fechaCotizacion: dia, viejo: false } : null;
 }
 
 /** Una cuenta viva de Balanz que vale más de esto veces la corrida de su comitente está inflada. */
@@ -637,10 +719,13 @@ export function aplicarVista(
     return { imp: { ...imp, vista: 'USD', tcConversion: null, costoUsdDel: imp.exportadoEn }, error: null };
   }
   const mep = ctx.mep;
-  const fechaArchivo = imp.exportadoEn.slice(0, 10);
-  if (!mep || !(mep.valor > 0)) return { imp: null, error: 'El archivo está en pesos y la cartera viva no tiene MEP: no se convierte. Tocá "Calcular valor de hoy" y volvé a subirlo.' };
-  if (mep.viejo || mep.fechaCotizacion !== fechaArchivo) {
-    return { imp: null, error: `El archivo está en pesos (del ${fechaArchivo.slice(8, 10)}/${fechaArchivo.slice(5, 7)}) y el MEP de la cartera viva es del ${mep.fechaCotizacion.slice(8, 10)}/${mep.fechaCotizacion.slice(5, 7)}${mep.viejo ? ' (de respaldo)' : ''}: no se convierte con un dólar de otro día. Tocá "Calcular valor de hoy" el mismo día del archivo, o exportalo en dólares.` };
+  const dia = diaHabilHasta(imp.exportadoEn.slice(0, 10));
+  const ddmm = (f: string) => `${f.slice(8, 10)}/${f.slice(5, 7)}`;
+  if (!mep || !(mep.valor > 0)) {
+    return { imp: null, error: `El archivo está en pesos y no hay MEP del ${ddmm(dia)} (ni en la cartera viva ni en el historial de dólar): no se convierte con un dólar de otro día. Si es de hoy, tocá "Calcular valor de hoy" y volvé a subirlo; si no, exportalo en dólares.` };
+  }
+  if (mep.viejo || mep.fechaCotizacion !== dia) {
+    return { imp: null, error: `El archivo está en pesos (precios del ${ddmm(dia)}) y el MEP disponible es del ${ddmm(mep.fechaCotizacion)}${mep.viejo ? ' (de respaldo)' : ''}: no se convierte con un dólar de otro día. Si es de hoy, tocá "Calcular valor de hoy"; si no, exportalo en dólares.` };
   }
   const tc = mep.valor;
   const filas = imp.filas.map(f => {

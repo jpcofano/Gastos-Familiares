@@ -8,6 +8,7 @@ import {
   clasificacionesDe, cuentaVivaDeImportacion, esMismaImportacion, movimientosInferidos, controlContraApp,
   leerFilasXlsx, numeroCelda, esMasViejo, tiposPorTickerDe, type Clasificacion,
   detectarVista, aplicarVista, previaConfiable, esReimportacion, cuentasBalanzInfladas, totalesPorVista, sigueEnUsd,
+  motivoPrevia, mepDelArchivo, diaHabilHasta, seContradicen,
 } from '../src/datos/patrimonioBalanzArchivo';
 import { armarCarteraViva, type TcCarteraViva } from '../src/datos/patrimonioCarteraViva';
 import { flujoDeMovimiento } from '../src/datos/patrimonioMovimientos';
@@ -285,6 +286,31 @@ const parsear = (filas = tabla(), exportadoEn = EXP) => parsearMisInstrumentos(f
     ok(!esMismaImportacion(guardadoMal, reimp) && esReimportacion(guardadoMal, reimp)
       && esMismaImportacion(cuentaVivaDeImportacion(reimp), reimp),
       'mismo archivo guardado sin vista → "Reimportar"; guardado con la misma vista → no cambia nada');
+
+    // Arreglos de la revisión de H0.
+    // Precios de la app fuera de banda (p. ej. bonos sin normalizar) no anulan la importación anterior.
+    const precioRaro = (p: { ticker: string }) => (precioApp.has(p.ticker) ? { precio: precioApp.get(p.ticker)! * 100, moneda: 'USD' as const, fecha: '2026-10-21' } : null);
+    const dFuera = detectarVista(impArs, { precioDe: precioRaro, tc: MEP, previa: previaUsd });
+    ok(dFuera.vista === 'ARS' && dFuera.metodo === 'importacion_anterior' && dFuera.preciosApp?.vista === 'fuera_de_banda' && !seContradicen(dFuera),
+      'precios de la app fuera de banda + importación anterior válida → la anterior decide (no es contradicción)', dFuera);
+    // MEP del día del archivo: de la cartera viva, de tcDiario (convención D−1), y fin de semana → viernes.
+    ok(diaHabilHasta('2026-10-24') === '2026-10-23' && diaHabilHasta('2026-10-21') === '2026-10-21', 'día hábil en o antes de la fecha');
+    const tcd = [{ id: '2026-10-22', tcUsdArs: 1549 }, { id: '2026-10-23', tcUsdArs: 1560 }, { id: '2026-10-26', tcUsdArs: 1570 }];
+    const m1 = mepDelArchivo('2026-10-21', { valor: 1500, fuente: 'tcDiario', fechaCotizacion: '2026-10-20', viejo: true }, tcd);
+    const m2 = mepDelArchivo('2026-10-24', null, tcd);
+    const m3 = mepDelArchivo('2026-10-21', mep('2026-10-21'), tcd);
+    ok(m1?.valor === 1549 && m1.fechaCotizacion === '2026-10-21' && !m1.viejo && m2?.valor === 1570 && m2.fechaCotizacion === '2026-10-23' && m3?.valor === MEP && mepDelArchivo('2026-10-27', null, tcd) === null,
+      'MEP del archivo: la cartera viva si es de ese día; si no, tcDiario del día hábil siguiente; sin dato, null', { m1, m2, m3 });
+    const sabado = aplicarVista(parsear(tablaArs, '2026-10-24T10:00:00-03:00'), 'ARS', { mep: m2, previa: null });
+    ok(!!sabado.imp && sabado.imp.tcConversion?.fecha === '2026-10-23', 'archivo de un sábado: se convierte con el MEP del viernes (el de sus precios)');
+    // Movimientos inferidos contra lo guardado inflado: sin precios de lo anterior.
+    const sinGGAL = parsear(tabla(FILAS.filter(r => r[0] !== 'GGAL')), '2026-10-22T10:00:00-03:00');
+    const mInfl = movimientosInferidos(guardadoMal.posiciones, sinGGAL, { preciosAnteriores: false });
+    const ventaGGAL = mInfl.find(m => m.ticker === 'GGAL');
+    ok(!!ventaGGAL && ventaGGAL.tipo === 'venta' && ventaGGAL.montoNeto === 0 && mInfl.length === 1, 'contra lo guardado inflado: la venta se infiere por cantidad, sin monto inflado', mInfl.map(m => [m.ticker, m.montoNeto]));
+    // Sin corrida de esa comitente: se mide contra los precios de la app.
+    ok(motivoPrevia(guardadoMal, 0, 1 / MEP) === 'inflada' && motivoPrevia(guardadoMal, 0, 1.01) === 'razonable' && motivoPrevia(guardadoMal, 0, null) === 'sin_verificar' && motivoPrevia(null, 0) === 'ninguna',
+      'lo guardado sin corrida: inflado o razonable contra la app; sin precios, sin verificar (no se dice inflado)');
   }
 
   console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);

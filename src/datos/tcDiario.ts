@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, orderBy, limit, documentId, startAt } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, orderBy, limit, documentId, startAt, startAfter } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
 import { claveSemanaISO } from './patrimonioOptimizacion';
@@ -225,4 +225,14 @@ export async function backfillTcDiario(params: ParamsBackfillTc = {}): Promise<R
   const fn = httpsCallable<ParamsBackfillTc, ResultadoBackfillTc>(functions, 'backfillTcDiario');
   const result = await fn(params);
   return result.data;
+}
+
+/**
+ * F9.196.1 §0 — los docs de `tcDiario` con id posterior a `desde` (los primeros `n`): el que guarda
+ * el cierre de `desde` es el del día hábil siguiente (convención D−1). Para el MEP del día de un
+ * "Mis Instrumentos" en pesos (`mepDelArchivo`).
+ */
+export async function cargarTcDiarioDesde(desde: string, n = 6): Promise<Array<{ id: string; tcUsdArs: number }>> {
+  const snap = await getDocs(query(collection(db, 'tcDiario'), orderBy(documentId()), startAfter(desde), limit(n)));
+  return snap.docs.map(d => ({ id: d.id, tcUsdArs: Number(d.data().tcUsdArs) }));
 }

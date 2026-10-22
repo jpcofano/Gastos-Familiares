@@ -6,7 +6,7 @@
 // escribir esas.
 //
 // La lógica (y la lectura del .xlsx) está en ./patrimonioBalanzArchivo; acá solo hay Firestore.
-import { doc, getDoc, setDoc, updateDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, documentId, getDoc, getDocs, query, setDoc, updateDoc, where, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { MovimientoCuenta } from './patrimonioMovimientos';
 import { idCuentaVivaBalanz, type CuentaVivaBalanz } from './patrimonioBalanzArchivo';
@@ -29,9 +29,18 @@ const limpio = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
  * Instrumentos" no la trae: se CONSERVA de la versión anterior del documento. Si se perdiera, la
  * cuenta volvería en silencio a la caja de la corrida.
  */
-export async function guardarImportacionBalanz(cv: CuentaVivaBalanz, movimientos: MovimientoCuenta[]): Promise<void> {
-  if (movimientos.length + 1 > 450) {
-    throw new Error(`Demasiados movimientos para un solo batch (${movimientos.length}).`);
+export async function guardarImportacionBalanz(
+  cv: CuentaVivaBalanz,
+  movimientos: MovimientoCuenta[],
+  /**
+   * F9.196.1 §0 — los movimientos inferidos por una importación que no era confiable (un archivo en
+   * pesos guardado como dólares) tienen montos inflados: se borran (ids `balanz_<com>_<sello>_*`).
+   */
+  opciones: { borrarInferidosDe?: string } = {},
+): Promise<void> {
+  const aBorrar = opciones.borrarInferidosDe ? await idsInferidosDe(cv.comitente, opciones.borrarInferidosDe) : [];
+  if (movimientos.length + aBorrar.length + 1 > 450) {
+    throw new Error(`Demasiados movimientos para un solo batch (${movimientos.length + aBorrar.length}).`);
   }
   const ref = doc(db, 'cuentasVivas', idCuentaVivaBalanz(cv.comitente));
   const previa = await getDoc(ref);
@@ -43,6 +52,8 @@ export async function guardarImportacionBalanz(cv: CuentaVivaBalanz, movimientos
   };
   const batch = writeBatch(db);
   batch.set(ref, { ...limpio(cv), ...cajaPrevia, importadoEn: serverTimestamp() });
+  const nuevos = new Set(movimientos.map(m => m.id));
+  for (const id of aBorrar) if (!nuevos.has(id)) batch.delete(doc(db, 'movimientosCuenta', id));
   for (const m of movimientos) {
     if (!m.id) throw new Error('Movimiento inferido sin id.');
     batch.set(doc(db, 'movimientosCuenta', m.id), { ...limpio(m), creadoEn: serverTimestamp() }, { merge: true });
@@ -100,4 +111,11 @@ export async function guardarMovimientosBalanz(
     leidoEn: `${caja.hasta}T23:59:59-03:00`, ...campos,
   });
   return { caja: 'creada_sin_tenencia' };
+}
+
+/** Ids de los movimientos inferidos de una importación (`balanz_<comitente>_<sello de exportadoEn>_*`). */
+async function idsInferidosDe(comitente: string, exportadoEn: string): Promise<string[]> {
+  const prefijo = `balanz_${comitente}_${exportadoEn.replace(/\D/g, '').slice(0, 14)}_`;
+  const snap = await getDocs(query(collection(db, 'movimientosCuenta'), where(documentId(), '>=', prefijo), where(documentId(), '<', `${prefijo}\uf8ff`)));
+  return snap.docs.filter(d => d.data().inferido === true).map(d => d.id);
 }

@@ -18,9 +18,11 @@ import {
   detectarArchivoBalanz, parsearNombreBalanz, parsearMisInstrumentos, clasificacionesDe,
   cuentaVivaDeImportacion, esMismaImportacion, movimientosInferidos, controlContraApp,
   cuentaDeComitente, leerFilasXlsx, tiposPorTickerDe, esMasViejo, UMBRAL_CONTROL,
-  detectarVista, aplicarVista, previaConfiable, esReimportacion, totalesPorVista,
-  type ImportacionMisInstrumentos, type ControlBalanz, type CuentaVivaBalanz, type DeteccionVista, type VistaBalanz,
+  detectarVista, aplicarVista, motivoPrevia, medianaContraApp, mepDelArchivo, diaHabilHasta, seContradicen,
+  esReimportacion, totalesPorVista,
+  type ImportacionMisInstrumentos, type ControlBalanz, type CuentaVivaBalanz, type DeteccionVista, type VistaBalanz, type MotivoPrevia,
 } from '../datos/patrimonioBalanzArchivo';
+import { cargarTcDiarioDesde } from '../datos/tcDiario';
 import type { TcCarteraViva } from '../datos/patrimonioCarteraViva';
 import { cargarCuentaVivaBalanz, guardarImportacionBalanz, guardarMovimientosBalanz } from '../datos/patrimonioCuentasVivas';
 import {
@@ -50,6 +52,10 @@ type Lista = {
   base: ImportacionMisInstrumentos;
   /** §0 — la importación anterior, si sirve de referencia (vista y costos en USD). */
   previaRef: CuentaVivaBalanz | null;
+  /** §0 — por qué lo guardado sirve o no de referencia. */
+  motivoPrevia: MotivoPrevia;
+  /** §0 — el MEP del día de los precios del archivo (cartera viva o `tcDiario`), o null. */
+  mepArchivo: TcCarteraViva | null;
   deteccion: DeteccionVista;
   /** La vista con la que se leyó: la detectada o la que eligió Juan; null = todavía sin elegir. */
   vista: VistaBalanz | null;
@@ -129,10 +135,15 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, m
     .map(p => /^Balanz (\d+)$/.exec(p.cuenta)?.[1])
     .filter((x): x is string => !!x))].sort();
 
+  // F9.196.1 §0 — el precio por 1 VN, como el del archivo: `precioDia` (ya normalizado) o, si no
+  // está, el último cierre, que en bonos y ONs viene de data912 por 100 VN (medido: docs/patrimonio/data912-escala.md).
   const precioDe = (p: PosicionRaw) => {
     const ind = indicadores.get(`${p.ticker}|${p.tipo}|${p.pais_riesgo}`);
-    if (!ind || ind.precio === null || !ind.monedaSerie) return null;
-    return { precio: ind.precio, moneda: ind.monedaSerie, fecha: ind.fechaUltimoPrecio ?? '' };
+    if (!ind) return null;
+    if (ind.precioDia && ind.precioDia.precio > 0) return { precio: ind.precioDia.precio, moneda: ind.precioDia.moneda, fecha: ind.precioDia.fecha };
+    if (ind.precio === null || !ind.monedaSerie) return null;
+    const escala = p.tipo === 'bono' || p.tipo === 'on' ? 100 : 1;
+    return { precio: ind.precio / escala, moneda: ind.monedaSerie, fecha: ind.fechaUltimoPrecio ?? '' };
   };
 
   // §0 — el MEP de la cartera viva es la referencia para reconocer y convertir la vista en pesos.
@@ -140,7 +151,7 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, m
 
   /** §0 — arma la entrada para una vista (o sin vista, mientras Juan no elige). Puro sobre `x`. */
   function armar(
-    x: { id: string; nombre: string; base: ImportacionMisInstrumentos; previa: CuentaVivaBalanz | null; previaRef: CuentaVivaBalanz | null; deteccion: DeteccionVista; fechaDelNombre: boolean },
+    x: { id: string; nombre: string; base: ImportacionMisInstrumentos; previa: CuentaVivaBalanz | null; previaRef: CuentaVivaBalanz | null; motivoPrevia: MotivoPrevia; mepArchivo: TcCarteraViva | null; deteccion: DeteccionVista; fechaDelNombre: boolean },
     vista: VistaBalanz | null, elegidaPorJuan: boolean,
   ): Entrada {
     const { base, previa } = x;
@@ -152,7 +163,7 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, m
         bloqueo: 'No pude reconocer si el archivo está en dólares o en pesos: elegilo abajo. Sin elegir, no se guarda.',
       };
     }
-    const r = aplicarVista(base, vista, { mep, previa: x.previaRef });
+    const r = aplicarVista(base, vista, { mep: x.mepArchivo, previa: x.previaRef });
     if (!r.imp) {
       return { ...comun, imp: base, mismo: false, reimportar: false, movimientos: [], control: controlContraApp(base, precioDe, tcRef), bloqueo: r.error };
     }
@@ -166,7 +177,8 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, m
         : null;
     return {
       ...comun, imp, mismo, reimportar, bloqueo,
-      movimientos: mismo || bloqueo ? [] : movimientosInferidos(previa?.posiciones ?? null, imp),
+      // Contra lo guardado no confiable se comparan solo cantidades (sus precios están inflados).
+      movimientos: mismo || bloqueo ? [] : movimientosInferidos(previa?.posiciones ?? null, imp, { preciosAnteriores: !!x.previaRef }),
       // §0.4 — el control corre DESPUÉS de convertir.
       control: controlContraApp(imp, precioDe, tcRef),
     };
@@ -184,22 +196,39 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, m
       const totalCorridaUsd = posicionesCorrida
         .filter(p => p.cuenta === cuenta && p.tipo !== 'cash')
         .reduce((a, p) => a + (p.moneda_origen === 'USD' ? p.valor_origen : tcRef > 0 ? p.valor_origen / tcRef : 0), 0);
-      const previaRef = previaConfiable(previa, totalCorridaUsd) ? previa : null;
+      // Sin corrida de esa comitente, lo guardado se mide contra los precios de la app.
+      const motivo = motivoPrevia(previa, totalCorridaUsd, previa ? medianaContraApp(previa.posiciones, precioDe, tcRef > 0 ? tcRef : null) : null);
+      const previaRef = motivo === 'con_vista' || motivo === 'razonable' ? previa : null;
       const base = parsearMisInstrumentos(filas, {
         comitente, exportadoEn,
-        clasificaciones: clasificacionesDe(previaRef?.posiciones ?? [], posicionesCorrida, cuenta),
+        // Las clasificaciones de lo guardado sirven aunque sus valores estén inflados.
+        clasificaciones: clasificacionesDe(previa?.posiciones ?? [], posicionesCorrida, cuenta),
         tiposPorTicker: tiposPorTickerDe(previa?.posiciones ?? [], posicionesCorrida, cuenta),
       });
       const deteccion = detectarVista(base, { precioDe, tc: tcRef > 0 ? tcRef : null, previa: previaRef });
       const vista = deteccion.vista === 'desconocida' ? null : deteccion.vista;
-      return armar({ id, nombre, base, previa, previaRef, deteccion, fechaDelNombre }, vista, false);
+      // §0 — el MEP del día de los precios del archivo: el de la cartera viva o el de tcDiario.
+      const dia = diaHabilHasta(exportadoEn.slice(0, 10));
+      const tcDiario = mep && !mep.viejo && mep.fechaCotizacion === dia ? [] : await cargarTcDiarioDesde(dia).catch(() => []);
+      const mepArchivo = mepDelArchivo(exportadoEn.slice(0, 10), mep, tcDiario);
+      return armar({ id, nombre, base, previa, previaRef, motivoPrevia: motivo, mepArchivo, deteccion, fechaDelNombre }, vista, false);
     } catch (e) {
       return { id, nombre, estado: 'error', mensaje: e instanceof Error ? e.message : String(e) };
     }
   }
 
-  /** §0 — Juan elige la vista cuando no se pudo reconocer (o la cambia). */
+  /**
+   * §0 — Juan elige la vista cuando no se pudo reconocer (o la cambia). Contra una detección segura
+   * pide confirmación: elegir mal es guardar los pesos como dólares (~1.500 veces) o al revés.
+   */
   function elegirVista(id: string, vista: VistaBalanz) {
+    const x = entradas.find(y => y.id === id);
+    if (!x || x.estado !== 'lista') return;
+    const detectada = x.deteccion.vista;
+    if (detectada !== 'desconocida' && detectada !== vista) {
+      const en = (v: VistaBalanz) => (v === 'ARS' ? 'pesos' : 'dólares');
+      if (!window.confirm(`La app detectó que el archivo está en ${en(detectada)}. ¿Seguro que está en ${en(vista)}? Si no, la cuenta queda guardada con valores ~${Math.round(tcRef || 1500).toLocaleString('es-AR')} veces ${vista === 'USD' ? 'más altos' : 'más bajos'}.`)) return;
+    }
     setEntradas(prev => resolverRepetidas(prev.map(y => (y.id === id && y.estado === 'lista' ? armar(y, vista, true) : y))));
   }
 
@@ -299,7 +328,11 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, m
     setErrorGuardar(null);
     try {
       // Primero "Mis Instrumentos": la caja anclada se escribe sobre la cuenta viva que ese archivo crea.
-      for (const x of aGuardar) await guardarImportacionBalanz(cuentaVivaDeImportacion(x.imp), x.movimientos);
+      for (const x of aGuardar) {
+        // §0 — lo guardado inflado deja movimientos inferidos con montos inflados: se borran.
+        await guardarImportacionBalanz(cuentaVivaDeImportacion(x.imp), x.movimientos,
+          x.previa && x.motivoPrevia === 'inflada' ? { borrarInferidosDe: x.previa.exportadoEn } : {});
+      }
       const textosMov: string[] = [];
       // Del archivo que llega a la fecha más vieja al más nuevo: si hay dos de la misma comitente,
       // la caja que queda es la más nueva (y guardarMovimientosBalanz no deja pisarla con una vieja).
@@ -443,9 +476,10 @@ function LineaVista({ x, tcRef, onElegirVista }: { x: Lista; tcRef: number; onEl
   });
   if (!x.vista || x.elegidaPorJuan) {
     const t = totalesPorVista(x.base, tcRef > 0 ? tcRef : null);
-    const porque = !x.vista && d.preciosApp && d.importacionAnterior && d.preciosApp.vista !== d.importacionAnterior.vista
-      ? ' (los precios de la app y la importación anterior dicen cosas distintas)'
-      : !x.vista && !d.preciosApp && !d.importacionAnterior ? ' (no hay precios de la app ni una importación anterior con qué comparar)' : '';
+    const porque = x.vista ? ''
+      : seContradicen(d) ? ' (los precios de la app y la importación anterior dicen cosas distintas)'
+        : !d.preciosApp && !d.importacionAnterior ? ' (no hay precios de la app ni una importación anterior con qué comparar)'
+          : ' (la comparación no dio ni dólares ni pesos)';
     return (
       <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: x.vista ? 'var(--gf-gray-50)' : 'rgba(245,158,11,.12)', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div>
@@ -494,10 +528,17 @@ function ResumenImportacion({ x, tcRef, onElegirVista }: { x: Lista; tcRef: numb
 
       <LineaVista x={x} tcRef={tcRef} onElegirVista={onElegirVista} />
 
-      {previa && !x.previaRef && (
+      {previa && x.motivoPrevia === 'inflada' && (
         <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: 'rgba(245,158,11,.12)' }}>
-          ⚠ Lo guardado de esta comitente (archivo del {fmtFechaHora(previa.exportadoEn)}) no sirve de referencia: no coincide con la corrida
-          (parece un archivo en pesos guardado como dólares). Este archivo lo reemplaza; no se usan sus costos ni sus precios.
+          ⚠ Lo guardado de esta comitente (archivo del {fmtFechaHora(previa.exportadoEn)}) está inflado: parece un archivo en pesos
+          guardado como dólares. Este archivo lo reemplaza; no se usan sus costos ni sus precios, y se borran los movimientos
+          que se habían inferido con esos precios.
+        </div>
+      )}
+      {previa && x.motivoPrevia === 'sin_verificar' && (
+        <div style={sub}>
+          Lo guardado de esta comitente es de antes de reconocer pesos y dólares y no se pudo verificar (no está en la corrida ni hay
+          precios para comparar): no se usa de referencia ni se toman sus costos.
         </div>
       )}
 

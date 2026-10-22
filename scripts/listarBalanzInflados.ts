@@ -33,6 +33,10 @@ async function main() {
   console.log('\nINFLADAS (volver a subir el archivo después del deploy):');
   for (const x of infladas) {
     console.log(`  balanz_${x.comitente}: ${Math.round(x.sumaCuentaViva).toLocaleString('es-AR')} contra ${Math.round(x.sumaCorrida).toLocaleString('es-AR')} USD de la corrida (×${Math.round(x.factor)}) · archivo del ${x.exportadoEn}`);
+    // Los movimientos que esa importación infirió tienen montos inflados; la reimportación los borra.
+    const prefijo = `balanz_${x.comitente}_${x.exportadoEn.replace(/\D/g, '').slice(0, 14)}_`;
+    const inf = await db.collection('movimientosCuenta').where(FieldPath.documentId(), '>=', prefijo).where(FieldPath.documentId(), '<', `${prefijo}\uf8ff`).get();
+    console.log(`    ${inf.size} movimientos inferidos por esa importación (${prefijo}*)`);
   }
 }
 
