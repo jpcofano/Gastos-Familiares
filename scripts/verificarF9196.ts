@@ -23,6 +23,11 @@ import { normalizarTesis, fusionarTesis, editarTesis, calcularTesis, type Tesis 
 import { accionesAMirar, ordenarTenencias, variacionConFecha, distANivel, taparMontos, cuandoFue } from '../src/datos/patrimonioAccionesAMirar';
 import { leerNumero } from '../src/datos/patrimonioNumeros';
 import type { IndicadoresPosicion } from '../src/types/patrimonio';
+// F9.196.1 — H0 a H4.
+import { ENCABEZADOS_MIS_INSTRUMENTOS, parsearMisInstrumentos, detectarVista, aplicarVista } from '../src/datos/patrimonioBalanzArchivo';
+import { flujosAutomaticos, aparearTransferencias, FLUJOS_AUTO_DESDE } from '../src/datos/compartido/patrimonioFlujosAuto';
+import { conCandado, type DbCandado } from '../functions/src/candado';
+import { frescuraCartera } from '../functions/src/carteraVivaCron';
 
 let fallas = 0;
 const ok = (cond: boolean, msg: string, detalle?: unknown) => {
@@ -299,5 +304,74 @@ console.log('\n=== H6: Acciones a mirar y orden de Tenencias (sintéticos) ===')
     'editor: números como se escriben en Argentina; "45.000" es ambiguo y se rechaza');
 }
 
-console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);
-if (fallas) process.exit(1);
+console.log('\n=== F9.196.1: H0 a H4 (sintéticos) ===');
+const h0aH4 = (async () => {
+  // H0 — la misma cartera en las dos vistas da el mismo valor en USD; el costo en pesos no se convierte.
+  const MEP = 1550;
+  const filas: Array<[string, string, number, number, string]> = [['GGAL', 'Acciones', 100, 4, 'Pesos'], ['GD30', 'Bonos', 1000, 0.57, 'Dólares'], ['VIST', 'Cedears', 50, 2.2, 'Pesos'], ['BCMMUSDA', 'Fondos', 500, 1.02, 'Dólares']];
+  const fila = (ars: boolean) => ([t, tipo, nom, px, mon]: (typeof filas)[number]) => {
+    const enUsd = !ars || (tipo === 'Fondos' && mon === 'Dólares');
+    const p = enUsd ? px : px * MEP;
+    return [t, tipo, t, nom, 0, p, '17:00', 0, enUsd ? px * 0.9 : px * 0.9 * 1000, Math.round(nom * p * 100) / 100, 0, 0, 0, 0, 0, null, mon];
+  };
+  const tabla = (ars: boolean) => [[...ENCABEZADOS_MIS_INSTRUMENTOS], ...filas.map(fila(ars))];
+  const ctx = (exp: string) => ({ comitente: '999001', exportadoEn: exp, clasificaciones: new Map() });
+  const usd = parsearMisInstrumentos(tabla(false), ctx('2026-10-20T18:31:00-03:00'));
+  const ars = parsearMisInstrumentos(tabla(true), ctx('2026-10-21T17:42:00-03:00'));
+  const px = new Map(filas.map(f => [f[0], f[3]]));
+  const precioDe = (p: { ticker: string }) => (px.has(p.ticker) ? { precio: px.get(p.ticker)!, moneda: 'USD' as const, fecha: '2026-10-21' } : null);
+  const det = detectarVista(ars, { precioDe, tc: MEP, previa: null });
+  const rU = aplicarVista(usd, 'USD', { mep: null, previa: null }).imp!;
+  const rA = aplicarVista(ars, 'ARS', { mep: { valor: MEP, fuente: 'dolarapi-bolsa', fechaCotizacion: '2026-10-21', viejo: false }, previa: { costoPromedio: rU.costoPromedio, costoUsdDel: rU.costoUsdDel, exportadoEn: rU.exportadoEn, vista: 'USD' } }).imp!;
+  ok(det.vista === 'ARS' && Math.abs(rA.valorUsdBalanz / rU.valorUsdBalanz - 1) < 0.01 && rA.costoPromedio['GGAL'] === rU.costoPromedio['GGAL'],
+    'H0: vista en pesos reconocida; mismo valor en USD que la de dólares; el costo es el del archivo en dólares', { det: det.vista, u: rU.valorUsdBalanz, a: rA.valorUsdBalanz });
+
+  // H1 — corte de los flujos automáticos y un día al revés.
+  let k = 0;
+  const mov = (m: Partial<MovimientoCuenta> & Pick<MovimientoCuenta, 'cuenta' | 'tipo' | 'fecha' | 'montoNeto'>): MovimientoCuenta => ({ id: `v${++k}`, moneda: 'USD', origen: 'manual', ...m });
+  const viejo = flujosAutomaticos([mov({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-20', montoNeto: 1000 })], {}, () => 1500, FLUJOS_AUTO_DESDE);
+  const alReves = aparearTransferencias([mov({ cuenta: 'PPI', tipo: 'retiro', fecha: '2026-10-21', montoNeto: 1000 }), mov({ cuenta: 'Balanz', tipo: 'deposito', fecha: '2026-10-20', montoNeto: 1000 })]);
+  ok(viejo.historial.length === 1 && viejo.pendientes.length === 0 && alReves.internas.length === 1, 'H1: lo anterior al 21/10 sin par va a historial; un depósito 1 día hábil antes aparea');
+
+  // H2 — ratio con el subyacente y control de escala.
+  const t = normalizarTesis({ monedaFundamentals: 'USD', epsGuiaMin: 4, epsGuiaMax: 6, precioObjetivoConsenso: 60, gatillos: [], proximoEvento: { fecha: null, tipo: 'otro', texto: '' }, cortoPlazo: '', medianoPlazo: '', riesgoPrincipal: '', fuentes: [], fechaDatos: null }).tesis as Tesis;
+  const sin = calcularTesis(t, { valor: 6000, moneda: 'ARS' }, { tc: 1500, hoy: '2026-10-20' });
+  const con = calcularTesis({ ...t, ratioSubyacente: { valor: 10, tipo: 'adr', fuente: 'x', fecha: null } }, { valor: 6000, moneda: 'ARS' }, { tc: 1500, hoy: '2026-10-20' });
+  ok(sin.potencial === null && sin.motivoPotencial === 'consenso_fuera_de_escala' && cerca(con.potencial, 0.5, 1e-9) && cerca(con.pe, 8, 1e-9), 'H2: ADR sin ratio → fuera de escala; con ratio 10 → potencial +50% y P/E 8');
+
+  // H3 — candado: dos corridas simultáneas, una sola llamada.
+  const docs = new Map<string, Record<string, unknown>>();
+  let cola: Promise<unknown> = Promise.resolve();
+  const db = {
+    collection: () => ({ doc: (id: string) => ({ id }) }),
+    runTransaction: <T>(fn: (tx: unknown) => Promise<T>) => {
+      const p = cola.then(async () => {
+        const w: Array<() => void> = [];
+        const out = await fn({
+          get: async (r: { id: string }) => ({ data: () => docs.get(r.id) }),
+          set: (r: { id: string }, v: Record<string, unknown>) => { w.push(() => docs.set(r.id, v)); },
+          delete: (r: { id: string }) => { w.push(() => docs.delete(r.id)); },
+        });
+        w.forEach(x => x());
+        return out;
+      });
+      cola = p.catch(() => undefined);
+      return p;
+    },
+  } as unknown as DbCandado;
+  let llamadas = 0;
+  const correr = () => conCandado(db, 'bitfinex', 'x', async () => { llamadas++; await new Promise(r => setTimeout(r, 20)); });
+  const rs = await Promise.all([correr(), correr()]);
+  ok(llamadas === 1 && rs.filter(r => r.corrio).length === 1 && docs.size === 0, 'H3: dos sincronizaciones de Bitfinex a la vez → una sola llama a la API, y el candado se libera');
+
+  // H4 — las dos fechas de Balanz.
+  const cv = { cuentas: [{ cuenta: 'Balanz 999001', fuente: 'cuenta_viva', fechaBase: '2026-10-13' }], tc: null } as unknown as Parameters<typeof frescuraCartera>[0];
+  const viva = { cuenta: 'Balanz 999001', fuente: 'archivo_balanz', leidoEn: '2026-10-21T17:42:00-03:00', exportadoEn: '2026-10-21T17:42:00-03:00', error: null, posiciones: [{}], saldos: {}, cajaAnclada: { hasta: '2026-10-16' } } as unknown as Parameters<typeof frescuraCartera>[1][number];
+  const fr = frescuraCartera(cv, [viva], null, '2026-10-21T21:20:00.000Z');
+  ok(fr.some(l => l.startsWith('Balanz 999001: tenencia del 21/10 · caja al 16/10 · ⚠ fechas distintas')), 'H4: "tenencia del dd/mm · caja al dd/mm" con aviso si difieren más de 1 día hábil', fr);
+})();
+
+h0aH4.then(() => {
+  console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);
+  if (fallas) process.exit(1);
+});

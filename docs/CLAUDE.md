@@ -2100,6 +2100,38 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
   `BITFINEX_*` (2) antes del deploy (`actualizarPreciosDiarios` ahora los declara) → deploy de
   rules + functions + hosting → permiso de Cloud Run invoker para los callables nuevos → probar en la
   app (ver el reporte de cierre).
+- F9.196.1 (ajustes después del deploy de F9.196) — **código cerrado el 22/10/2026; falta el deploy**.
+  Ver `docs/prompts/F9.196.1-ajustes.md` y los contratos en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
+  Cada hito tuvo revisión independiente y sus arreglos en un commit propio. Hitos:
+  - **H0** — "Mis Instrumentos" de Balanz en dólares o en pesos:
+    - `detectarVista` usa los precios de la app y la importación anterior confiable; si no puede,
+      Juan elige con dos botones.
+    - `aplicarVista` convierte con el MEP del día de los precios del archivo (cartera viva o
+      `tcDiario`); el costo en pesos históricos no se convierte.
+    - Lo guardado inflado no se usa de referencia y sus movimientos inferidos se borran.
+    - `scripts/listarBalanzInflados.ts` (solo lee).
+  - **H1** — flujos automáticos:
+    - desde el 21/10/2026 (`FLUJOS_AUTO_DESDE`); lo anterior sin par va a `historial`;
+    - apareo con hasta 1 día hábil al revés;
+    - card "Para decidir" en Configuración;
+    - `recalcularCarteraViva` también corre los flujos.
+  - **H2** — tesis: `ratioSubyacente` (CEDEAR/ADR, con fuente, editable) y controles
+    `consenso_fuera_de_escala` / `pe_fuera_de_escala`.
+  - **H3** — Bitfinex: candado `locks/bitfinex` en Firestore y `maxInstances: 1` en el cron y el
+    botón.
+  - **H4** — frescura de Balanz: "tenencia del dd/mm · caja al dd/mm", con aviso si difieren en más
+    de 1 día hábil.
+  - **H5** — splits de PPI: se midió en vivo y **no se confirmó** el factor
+    (`docs/patrimonio/ppi-splits-medicion.md`). No hay detector; PAMP, TGSU2, TRAN e YPFD siguen
+    `costoSospechoso`.
+  - **H6** — escala de data912 verificada: bonos, letras y ONs por 100 VN
+    (`docs/patrimonio/data912-escala.md`).
+
+  `tsc`: 41 → 41, 0 en `functions/`. **Pendiente de cierre manual:**
+  1. Deploy: rules (por `locks`), después functions, después hosting. No hay permisos nuevos de
+     Cloud Run.
+  2. Volver a subir el "Mis Instrumentos" de la 402665.
+  3. Tocar "Aplicar" en "Para decidir".
 - F9.92.1 — Resumen: "Revisar pendientes del mes" a check verde en 0 + card Hoy con desglose por
   banco. `PorDiaSeccion`: la fila de pendientes muestra ícono+texto verde "Al día con los gastos
   fijos" (sin badge) cuando `porRevisar === 0`, en vez del badge "0" que no comunicaba nada; con
@@ -2662,15 +2694,18 @@ Ver `scripts/seed/transformers/*.ts` para schemas completos y logica de migracio
 Inflación en esperados/proyecciones ARS (fase propia, futura): los `itemsEsperados` con `moneda: "ARS"` tienen `montoEsperado` estático. Para proyecciones reales habría que ajustar por inflación mensual (INDEC IPC). Opciones: campo `ajusteInflacion: boolean` + factor mensual en `/config/familia`, o bien dejar que el usuario actualice `montoEsperado` manualmente cada N meses. No se implementa hasta que el caso de uso sea claro.
 
 ## Backlog (post F5.3)
-- **F9.196 — lo que queda después del cierre del código.**
-  - Deploy (secretos `PPI_*` y `BITFINEX_*` primero; después rules, functions y hosting) y permiso
-    de Cloud Run invoker para `sincronizarPPIAhora`, `recalcularCarteraViva` y
-    `sincronizarBitfinexAhora`.
-  - Confirmar en vivo: funding de Bitfinex (hoy vacío) y la escala de data912 para bonos y ONs
-    (se asume por 100 VN).
-  - UI para `decisionesFlujo` (los movimientos sin par quedan en `flujosAuto/estado.pendientes`).
-  - CEDEARs: P/E y potencial necesitan el ratio con el subyacente (hoy `cedear_sin_ratio`).
-  - Binance, Lemon y Nexo por API: fuera de F9.196.
+- **F9.196 / F9.196.1 — lo que queda.**
+  - Deploy de F9.196.1: rules (`locks`), después functions, después hosting. Después:
+    - volver a subir el "Mis Instrumentos" de la 402665 (quedó inflado por el archivo en pesos del
+      21/10);
+    - tocar "Aplicar" en "Para decidir".
+  - Funding de Bitfinex: se confirma con el primer préstamo activo.
+  - PAMP, TGSU2, TRAN e YPFD siguen con `costoSospechoso`: PPI no registró los splits. Decidir si se
+    carga a mano su costo en USD.
+  - `escalaData912` usa la escala de PPI si la hay. Si PPI diera 1 para un bono, data912 quedaría
+    100 veces alto: decidir si se fija en 100.
+  - xlsx 0.18.5 (`package.json`): pasar a la versión de la CDN de SheetJS (decisión 17).
+  - Binance, Lemon y Nexo por API: fuera.
   - F9.197: no empezada.
 - **F6.6 — PWA share-target (compartir desde el celular).**
   Paridad con el sistema viejo (12_ShareTemp.gs: carpeta Drive temporal + token + TTL). En Firebase
@@ -3380,7 +3415,8 @@ Prompt de extracción: `src/datos/patrimonioPromptExtraccion.ts` (F9.145 — ún
 de `docs/patrimonio/` quedó como nota que apunta acá).
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
-**Implementado hasta F9.196** (código cerrado el 21/10/2026; falta el deploy). Detalle completo en
+**Implementado hasta F9.196.1** (F9.196 deployada el 21/10/2026; F9.196.1 con el código cerrado el
+22/10/2026, falta su deploy). Detalle completo en
 `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
 
 ### Una corrida es el estado completo a una fecha (F9.189 §1)

@@ -371,6 +371,13 @@ Implementación en cadena (cada una depende de la anterior):
   - Contratos abajo, en las secciones "F9.196 …".
   - Verificación: `scripts/verificarF9196.ts` y `functions/src/{ppiApi,h2a,h2c,h5,patrimonioStops}.test.ts`.
 
+- **F9.196.1** — Ajustes después del deploy *(código cerrado el 22/10/2026; falta el deploy)*
+  - H0 Balanz en dólares o en pesos · H1 flujos desde el 21/10, apareo al revés y "Para decidir" ·
+    H2 ratio CEDEAR/ADR y valores absurdos · H3 candado de Bitfinex · H4 las dos fechas de Balanz ·
+    H5 splits de PPI medidos, sin detector · H6 escala de data912 verificada.
+  - Verificación: `scripts/verificarF9196.ts` (H0–H4 sintéticos), `verificarBalanzArchivo`,
+    `verificarFlujosAuto` y `functions/src/{h2a,h2c,h5}.test.ts`.
+
 Fases pendientes:
   *(Era "F9.142" en este roadmap; renumerada porque F9.142/F9.143 quedaron tomadas por el
   trabajo de CAFCI.)*
@@ -1090,6 +1097,37 @@ diferencia total supera el 2%, se avisa con el detalle por especie. Las especies
 distinta (más de 5×, por ejemplo bonos cotizados cada 100 VN en data912) se listan aparte y no
 entran al total. No corrige nada.
 
+### Vista en dólares o en pesos (F9.196.1 §0)
+
+- Balanz deja exportar "Mis Instrumentos" en la vista en dólares o en pesos.
+  - En pesos, `Precio` y `Valor actual` vienen en pesos del día, salvo los FCI en dólares.
+  - `Precio promedio de compra` y `Valor inicial` vienen en pesos **históricos**.
+  - La columna `Moneda` no cambia entre las dos vistas.
+- **Detección** (`detectarVista`), sobre las filas que no son FCI en dólares. Hay dos referencias:
+  - los precios de la app, con 3 especies o más (por 1 VN: `precioDia`, o el cierre ÷ 100 en bonos
+    y ONs);
+  - la importación anterior **confiable** (con `vista`, o razonable contra la corrida o la app).
+
+  Cuentan solo las referencias que caen dentro de banda. Si se contradicen, o no hay ninguna, la vista
+  queda `'desconocida'`: Juan elige con dos botones y sin elegir no se guarda. Elegir contra una
+  detección segura pide confirmación.
+- **Pesos** (`aplicarVista`):
+  - Se divide por el **MEP del día de los precios del archivo**, que es el último día hábil en o
+    antes de la exportación. Sale de la cartera viva si es de ese día; si no, del `tcDiario` que
+    guarda ese cierre. Sin ese MEP, no se guarda.
+  - El costo no se convierte: queda el `costoPromedio` en USD del último import en dólares.
+    - Si no hay, la especie queda sin costo en USD (`costo_en_pesos_historicos`).
+    - El costo crudo en pesos va a `costoPromedioArs`.
+  - Se guardan `vista`, `tcConversion`, `valorArchivoArs`, `costoMotivo` y `costoUsdDel`.
+- El control contra la app corre **después** de convertir.
+- **Reimportar:** si lo guardado no tiene `vista` (es de antes de §0) o tiene otra, el mismo archivo
+  se puede reimportar.
+- **Lo guardado inflado** (más de 50 veces la corrida):
+  - no sirve de referencia;
+  - sus movimientos inferidos se borran;
+  - contra eso se infiere solo por cantidad.
+  - `scripts/listarBalanzInflados.ts` lo lista. Es de solo lectura.
+
 ## Balanz: archivo de Movimientos (F9.196 Addendum 2 §B) — contrato
 
 `src/datos/patrimonioBalanzMovimientos.ts` (puro) y el mismo botón "Actualizar Balanz".
@@ -1151,6 +1189,26 @@ cada fuente. Una transferencia entre cuentas propias no es flujo.
 - Lo que no aparea queda **pendiente**, sin flujo, hasta que Juan elige aporte, retiro o interna.
 - Los movimientos `inferido` nunca son flujo.
 - Un monto en pesos sin TC para su fecha va a `sinTc`: no se inventa la conversión.
+
+### Ajustes de F9.196.1 (§1)
+
+- **Fecha de inicio:** `FLUJOS_AUTO_DESDE = '2026-10-21'`. Lo que no aparea y es anterior va a
+  `historial`: solo se cuenta (`flujosAuto/estado.historial`) y nunca genera flujo, porque esa época
+  ya está en los flujos manuales. El apareo corre sobre todo.
+- **Al revés:** el depósito puede figurar hasta 1 día hábil antes del retiro (1 corrido en cripto).
+  El orden de preferencia es |días| y, a igual distancia, el sentido normal primero.
+- **Card "Para decidir (N)"** en Configuración, arriba de "Aportes y retiros":
+  - Botones Aporte, Retiro e Interna, con el sugerido primero.
+  - Avisa "¿Ya lo cargaste a mano el dd/mm?" (misma plataforma, ±5 días hábiles, ±1%). Solo avisa.
+  - Muestra aparte los decididos sin precio y los sin dólar del día.
+  - "Decididas" queda plegada, con "Cambiar" y su estado (aplicada, por aplicar, sin precio, sin
+    efecto). Se ve aunque no haya pendientes.
+  - "Aplicar" llama a `recalcularCarteraViva`, que ahora también corre los flujos.
+  - `decisionesFlujo/{clave}`: si la clave tuviera "/", el id va hasheado y la clave queda en el
+    campo `clave`.
+- **Frescura de Balanz (§4):** "Balanz <comitente>: tenencia del dd/mm · caja al dd/mm". La tenencia
+  es la exportación de "Mis Instrumentos" y la caja, `cajaAnclada.hasta`. Si difieren en más de 1
+  día hábil, se agrega "⚠ fechas distintas".
 
 ## Sincronización de PPI y valor de hoy (F9.196 H2a) — contrato
 
@@ -1224,6 +1282,21 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
 - Al terminar corre los flujos automáticos (regla de cripto: mismo activo, 3 días o menos) y
   recalcula la cartera viva. La card cripto toma de ahí las cantidades de Bitfinex.
 
+### Candado y funding (F9.196.1 §3 y §6)
+
+- **Un solo cliente a la vez.** El cron y el botón son servicios de Cloud Run distintos y el nonce
+  es monótono solo dentro de una instancia. Por eso:
+  - Las dos funciones llevan `maxInstances: 1` y además el candado `locks/bitfinex`
+    (`functions/src/candado.ts`).
+  - El candado se toma en una transacción y es idempotente ante reintentos.
+  - Vence a los 6 min; antes de eso, a los 270 s, el cliente deja de llamar.
+  - Se libera al final, también si falla, y solo lo libera quien lo tomó.
+  - Si está tomado: el cron sale sin error y el botón responde `failed-precondition`.
+  - En las Rules, `locks` es `false`: solo lo usa el Admin SDK.
+- **Funding:** hoy está vacío y sin confirmar. Se confirma la primera vez que haya un préstamo
+  activo: la sincronización tiene que mostrar los préstamos (`leerFunding`) y el interés (categoría
+  28 del ledger).
+
 ## Tesis por acción (F9.196 H5) — contrato
 
 - **El Chat 2 propone, la app calcula y Juan edita.** El prompt de la parte 2 (`buildPromptPosicionesV3`)
@@ -1259,6 +1332,21 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
   - Días al evento contra hoy en Argentina.
   - La edición de Juan escribe solo el campo (`updateDoc` con `tesis.<campo>`). La importación va
     en transacción con `mergeFields`, y su error no frena el resto de `importarAnalisisIA`.
+
+### Ratio con el subyacente y valores absurdos (F9.196.1 §2)
+
+- **`ratioSubyacente`:** `{ valor, tipo: 'cedear' | 'adr', fuente, fecha }` o `null`.
+  - CEDEAR: N CEDEARs = 1 acción. ADR: 1 ADR = N acciones locales.
+  - Precio del subyacente = precio local × N; después se pasa a la moneda como siempre.
+  - No se aplica a una serie en USD que no sea de un CEDEAR (esa ya es el subyacente).
+  - Lo trae el Chat 2 con fuente, nunca inventado; Juan lo edita.
+  - Un chat que no manda el campo conserva el ratio anterior; un `null` explícito lo saca.
+  - No hay tabla fija en el código.
+- **Controles** (`CONSENSO_SOBRE_PRECIO = [0,2; 5]`, `PE_MAXIMO = 300`):
+  - Consenso ÷ precio fuera de banda → potencial y P/E en null (`consenso_fuera_de_escala`, "el
+    consenso está X veces el precio").
+  - P/E fuera de (0; 300] → null (`pe_fuera_de_escala`).
+- **Ficha:** dice qué ratio se usó y avisa si el tipo no coincide con el instrumento.
 
 ## Card "Acciones a mirar" y ficha reordenada (F9.196 H6, diseño 3) — contrato
 
@@ -1313,6 +1401,14 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
   no parser por bróker, no online en la app.
 - Conversión ARS→USD por la app vía `tcDiario`.
 - Determinístico en TS; sectorial vía API con toggle.
+- F9.196.1 (decisiones de Juan del 21/10/2026), se mantienen:
+  - **5.** Tolerancias del apareo: 1% de comisión en cripto y 5 días hábiles en títulos.
+  - **7.** Las transferencias en especie de Balanz son en pesos.
+  - **10.** "Letras" de PPI se tratan como `bono`.
+  - **14.** Una tesis se importa aunque `resultado` no pase la validación.
+  - **15.** El análisis de un solo ticker no pide tesis.
+- F9.196.1 §5 (22/10/2026): PPI no registra los splits de PAMP, TGSU2, TRAN ni YPFD
+  (`docs/patrimonio/ppi-splits-medicion.md`). No hay detector de splits y siguen `costoSospechoso`.
 - Set de métricas completo; bandas estándar (ajustables); RV sin semáforo.
 - Historial fechado desde el día uno.
 - Anexo en archivo propio; puntero desde el CLAUDE.md principal.
