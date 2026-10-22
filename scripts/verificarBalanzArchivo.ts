@@ -7,6 +7,7 @@ import {
   ENCABEZADOS_MIS_INSTRUMENTOS, detectarArchivoBalanz, parsearNombreBalanz, parsearMisInstrumentos,
   clasificacionesDe, cuentaVivaDeImportacion, esMismaImportacion, movimientosInferidos, controlContraApp,
   leerFilasXlsx, numeroCelda, esMasViejo, tiposPorTickerDe, type Clasificacion,
+  detectarVista, aplicarVista, previaConfiable, esReimportacion, cuentasBalanzInfladas, totalesPorVista, sigueEnUsd,
 } from '../src/datos/patrimonioBalanzArchivo';
 import { armarCarteraViva, type TcCarteraViva } from '../src/datos/patrimonioCarteraViva';
 import { flujoDeMovimiento } from '../src/datos/patrimonioMovimientos';
@@ -206,6 +207,84 @@ const parsear = (filas = tabla(), exportadoEn = EXP) => parsearMisInstrumentos(f
     const cero = tabla(FILAS.map(r => (r[0] === 'GGAL' ? ['GGAL', 'Acciones', 0, 4.1, '18:04', 'Pesos'] as typeof r : r)));
     const c0 = controlContraApp(parsear(cero), p => (p.ticker === 'GGAL' ? { precio: 4.1 * 1500, moneda: 'ARS', fecha: '' } : null), 1500);
     ok(c0.especies.find(e => e.ticker === 'GGAL')?.nota === 'valor_archivo_cero' && c0.difTotalPct === null, 'L4: valor 0 en el archivo → fuera del total, no infla la diferencia');
+  }
+
+  console.log('\n=== F9.196.1 §0: vista en dólares o en pesos (sintético) ===');
+  {
+    // La misma cartera exportada en las dos vistas. Pesos: precio y valor × MEP del día, salvo los FCI
+    // en dólares; el costo en pesos HISTÓRICOS (cada especie con un dólar distinto).
+    const MEP = 1550;
+    const HIST = [800, 1100, 1490, 950, 499, 1200, 1300, 1000, 1050, 900, 1150, 1250, 1350, 1, 1, 1400, 1450];
+    const EXP_ARS = '2026-10-21T17:42:00-03:00';
+    const filaArs = (r: (typeof FILAS)[number], k: number): unknown[] => {
+      const [t, tipo, nom, px, f, mon] = r;
+      const usd = tipo === 'Fondos' && mon === 'Dólares';
+      const pxA = usd ? px : px * MEP;
+      // Valor actual redondeado a pesos enteros: el redondeo en pesos no tiene que frenar la fila.
+      const va = usd ? Math.round(nom * px * 100) / 100 : Math.round(nom * pxA);
+      const ppc = usd ? px * 0.9 : px * 0.9 * HIST[k];
+      return [t, tipo, `${t} sintético`, nom, 0, pxA, f, 0.05, ppc, va, Math.round(nom * ppc), va * 0.1, 0.01, 0.11, 120, null, mon];
+    };
+    const tablaArs = [[...ENCABEZADOS_MIS_INSTRUMENTOS], ...FILAS.map(filaArs)];
+    const impUsd = parsear();
+    const impArs = parsear(tablaArs, EXP_ARS);
+    const mep = (fecha = '2026-10-21', viejo = false): TcCarteraViva => ({ valor: MEP, fuente: 'dolarapi-bolsa', fechaCotizacion: fecha, viejo });
+    // Precios de la app coherentes con la cartera (en USD por unidad, como una serie en dólares).
+    const precioApp = new Map(FILAS.map(r => [r[0], r[3]]));
+    const precioDe = (p: { ticker: string }) => (precioApp.has(p.ticker) ? { precio: precioApp.get(p.ticker)!, moneda: 'USD' as const, fecha: '2026-10-21' } : null);
+    const sinPrecios = () => null;
+
+    const dU = detectarVista(impUsd, { precioDe, tc: MEP, previa: null });
+    const dA = detectarVista(impArs, { precioDe, tc: MEP, previa: null });
+    ok(dU.vista === 'USD' && dU.metodo === 'precios_app' && dA.vista === 'ARS' && dA.metodo === 'precios_app' && dA.especiesUsadas >= 3,
+      'detecta la vista con los precios de la app (3 o más especies)', { dU, dA });
+
+    const previaUsd = cuentaVivaDeImportacion(aplicarVista(impUsd, 'USD', { mep: null, previa: null }).imp!);
+    const dPrev = detectarVista(impArs, { precioDe: sinPrecios, tc: MEP, previa: previaUsd });
+    ok(dPrev.vista === 'ARS' && dPrev.metodo === 'importacion_anterior', 'sin precios de la app: detecta contra la importación anterior en USD', dPrev);
+
+    const rU = aplicarVista(impUsd, 'USD', { mep: mep(), previa: null });
+    const rA = aplicarVista(impArs, 'ARS', { mep: mep(), previa: previaUsd });
+    ok(!!rU.imp && !!rA.imp && Math.abs(rA.imp!.valorUsdBalanz / rU.imp!.valorUsdBalanz - 1) < 0.01,
+      'las dos lecturas dan el mismo valor en USD (1%)', { usd: rU.imp?.valorUsdBalanz, ars: rA.imp?.valorUsdBalanz });
+    ok(rA.imp!.noCuadran.length === 0, 'el redondeo en pesos no frena filas (se mide después de convertir)', rA.imp!.noCuadran);
+    const fciUsd = rA.imp!.posiciones.find(p => p.ticker === 'BCMMUSDA')!;
+    ok(Math.abs(fciUsd.valor_origen - 1200 * 1.03) < 0.01 && sigueEnUsd(rA.imp!.filas.find(f => f.ticker === 'BCMMUSDA')!), 'el FCI en dólares queda como viene', fciUsd);
+    const ggalArs = impArs.costoPromedio['GGAL'];
+    ok(rA.imp!.costoPromedio['GGAL'] === previaUsd.costoPromedio!['GGAL'] && Math.abs(rA.imp!.costoPromedio['GGAL'] - ggalArs / MEP) > 0.01,
+      'en pesos, el costo en USD es el del import anterior en dólares, no costo ÷ MEP', { usd: rA.imp!.costoPromedio['GGAL'], ars: ggalArs });
+    ok(rA.imp!.costoUsdDel === EXP && rA.imp!.costoPromedioArs!['GGAL'] === ggalArs && rA.imp!.valorArchivoArs!['GGAL'] > 0 && rA.imp!.tcConversion?.valor === MEP,
+      'se guardan vista, MEP usado, valor y costo crudos en pesos, y de qué archivo en dólares sale el costo');
+    const sinPrevia = aplicarVista(impArs, 'ARS', { mep: mep(), previa: null }).imp!;
+    ok(sinPrevia.costoPromedio['GGAL'] === undefined && sinPrevia.costoMotivo!['GGAL'] === 'costo_en_pesos_historicos' && sinPrevia.costoPromedio['BCMMUSDA'] !== undefined,
+      'en pesos sin import anterior en dólares: sin costo en USD (motivo costo_en_pesos_historicos), salvo el FCI en dólares');
+    ok(aplicarVista(impArs, 'ARS', { mep: mep('2026-10-20'), previa: null }).error !== null
+      && aplicarVista(impArs, 'ARS', { mep: mep('2026-10-21', true), previa: null }).error !== null
+      && aplicarVista(impArs, 'ARS', { mep: null, previa: null }).error !== null,
+      'sin MEP del día del archivo (otro día, de respaldo o ninguno): no se convierte');
+
+    const dNada = detectarVista(impArs, { precioDe: sinPrecios, tc: MEP, previa: null });
+    ok(dNada.vista === 'desconocida' && dNada.preciosApp === null && dNada.importacionAnterior === null, 'sin referencias → desconocida (la UI no guarda sin que Juan elija)', dNada);
+    // Contradictorias: la app dice pesos y una "importación anterior" guardada en pesos dice dólares.
+    const previaInflada = { ...previaUsd, posiciones: previaUsd.posiciones.map(p => ({ ...p, valor_origen: p.valor_origen * MEP })) };
+    const dContra = detectarVista(impArs, { precioDe, tc: MEP, previa: previaInflada });
+    ok(dContra.vista === 'desconocida' && dContra.preciosApp?.vista === 'ARS' && dContra.importacionAnterior?.vista === 'USD', 'referencias contradictorias → desconocida', dContra);
+    const tot = totalesPorVista(impArs, MEP);
+    ok(Math.abs(tot.siArs! / rU.imp!.valorUsdBalanz - 1) < 0.01 && tot.siUsd > 1000 * tot.siArs!, 'los dos totales para elegir: "si está en dólares" y "si está en pesos"', tot);
+
+    // Lo ya guardado: el archivo en pesos guardado como dólares antes de §0.
+    const guardadoMal = { ...cuentaVivaDeImportacion(impArs) };
+    delete (guardadoMal as { vista?: unknown }).vista;
+    const corridaUsd = FILAS.map(r => ({ cuenta: `Balanz ${COM}`, tipo: 'bono' as const, moneda_origen: 'USD' as const, valor_origen: Math.round(r[2] * r[3] * 100) / 100 }));
+    const infl = cuentasBalanzInfladas([guardadoMal, cuentaVivaDeImportacion(rU.imp!)], corridaUsd, MEP);
+    ok(infl.length === 1 && infl[0].factor > 50, 'lista la cuenta viva inflada (solo informa)', infl);
+    ok(!previaConfiable(guardadoMal, TOTAL) && previaConfiable(cuentaVivaDeImportacion(rU.imp!), TOTAL) && previaConfiable({ ...guardadoMal, vista: 'USD' }, 0),
+      'lo guardado inflado no sirve de referencia; con vista o razonable, sí');
+    const impArsMismaHora = parsear(tablaArs, guardadoMal.exportadoEn);
+    const reimp = aplicarVista(impArsMismaHora, 'ARS', { mep: mep(), previa: null }).imp!;
+    ok(!esMismaImportacion(guardadoMal, reimp) && esReimportacion(guardadoMal, reimp)
+      && esMismaImportacion(cuentaVivaDeImportacion(reimp), reimp),
+      'mismo archivo guardado sin vista → "Reimportar"; guardado con la misma vista → no cambia nada');
   }
 
   console.log(`\n${fallas === 0 ? 'OK — todo verde' : `${fallas} FALLA(S)`}`);

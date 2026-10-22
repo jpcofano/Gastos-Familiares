@@ -5893,6 +5893,7 @@ export default function Patrimonio() {
           posicionesCorrida={posiciones}
           indicadores={indicadores}
           tc={tc}
+          mep={carteraViva?.tc ?? null}
           fechaCorrida={fechaCorrida}
           onGuardado={texto => { setShowBalanz(false); setToast({ texto, error: false }); recalcularYRecargarCarteraViva(); }}
           onClose={() => setShowBalanz(false)}

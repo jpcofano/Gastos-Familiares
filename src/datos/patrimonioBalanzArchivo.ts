@@ -4,15 +4,24 @@
 // normalizada de `cuentasVivas` (§1). La lectura del archivo y la escritura en Firestore están en
 // src/datos/patrimonioCuentasVivas.ts; la UI en src/vistas/PatrimonioBalanz.tsx.
 //
-// Semántica verificada con las muestras reales (Addendum 2 §A):
+// Semántica verificada con las muestras reales (Addendum 2 §A), para la VISTA EN DÓLARES:
 // - `Valor actual` = Nominales × Precio, en USD, para TODAS las especies (también las que cotizan
 //   en pesos). `Precio` = USD por unidad nominal (bonos por 1 VN, no por 100).
 // - `Precio promedio de compra` = costo promedio en USD por unidad → `costoPromedio`.
 // - `Moneda` es la moneda de COTIZACIÓN del instrumento, no la de `Valor actual`.
 // - No trae caja.
 // - No crea una corrida: alimenta solo la cartera viva (F9.189 §1 sigue intacto).
+//
+// F9.196.1 §0 — Balanz deja exportar la misma planilla en la VISTA EN PESOS (medido con los
+// exports del 20/10 en dólares y del 21/10 en pesos de la misma comitente):
+// - `Precio` y `Valor actual` en pesos del día, salvo los FCI en dólares (`Fondos` + `Dólares`),
+//   que quedan en USD. La columna `Moneda` no cambia.
+// - `Precio promedio de compra` y `Valor inicial` en pesos HISTÓRICOS (cada compra con el dólar de
+//   su fecha): no se convierten con el MEP de hoy.
+// `parsearMisInstrumentos` lee los números tal como vienen; `detectarVista` decide la vista y
+// `aplicarVista` convierte. Los campos `*Usd` de la fila están en USD recién después de aplicarla.
 import type { PosicionRaw, PosicionTipo, PaisRiesgo } from '../types/patrimonio';
-import type { CuentaViva, PrecioDia } from './patrimonioCarteraViva';
+import type { CuentaViva, PrecioDia, TcCarteraViva } from './patrimonioCarteraViva';
 import type { MovimientoCuenta } from './patrimonioMovimientos';
 
 export const ENCABEZADOS_MIS_INSTRUMENTOS = [
@@ -116,8 +125,10 @@ export type FilaMisInstrumentos = {
   valorInicialUsd: number | null;
   monedaCotizacion: 'ARS' | 'USD' | null;
   monedaCruda: string;
-  /** `Valor actual` contra `Nominales × Precio`, en USD. */
+  /** `Valor actual` contra `Nominales × Precio`, en la moneda del archivo (USD después de `aplicarVista`). */
   difRedondeoUsd: number;
+  /** F9.196.1 §0 — vista en pesos: `Valor actual` tal como vino (ARS), antes de convertir. */
+  valorArchivoArs?: number | null;
 };
 
 /** Clasificación ya conocida de un ticker (de la importación anterior o de la corrida). */
@@ -145,6 +156,18 @@ export type ImportacionMisInstrumentos = {
    */
   noCuadran: string[];
   avisos: string[];
+  /** F9.196.1 §0 — vista del archivo; sin `aplicarVista`, los números están como vinieron. */
+  vista?: VistaBalanz;
+  /** Con qué MEP se convirtió la vista en pesos. */
+  tcConversion?: { valor: number; fecha: string; fuente: string } | null;
+  /** Vista en pesos: `Valor actual` crudo en pesos, por ticker. */
+  valorArchivoArs?: Record<string, number>;
+  /** Vista en pesos: `Precio promedio de compra` crudo (pesos históricos), por ticker. Dato, no entra a cálculos en USD. */
+  costoPromedioArs?: Record<string, number>;
+  /** Por qué un ticker quedó sin costo en USD. */
+  costoMotivo?: Record<string, 'costo_en_pesos_historicos'>;
+  /** Exportación (en dólares) de la que salen los costos en USD. */
+  costoUsdDel?: string | null;
 };
 
 /** Tolerancia de redondeo entre `Nominales × Precio` y `Valor actual` (Addendum 2: 1 USD). */
@@ -300,6 +323,13 @@ export type CuentaVivaBalanz = CuentaViva & {
   exportadoEn: string;
   valorUsdBalanz: number;
   paraRevisar: Array<{ ticker: string; motivo: string }>;
+  /** F9.196.1 §0 — ausente en lo guardado antes de reconocer las dos vistas. */
+  vista?: VistaBalanz;
+  tcConversion?: { valor: number; fecha: string; fuente: string } | null;
+  valorArchivoArs?: Record<string, number>;
+  costoPromedioArs?: Record<string, number>;
+  costoMotivo?: Record<string, 'costo_en_pesos_historicos'>;
+  costoUsdDel?: string | null;
 };
 
 export function cuentaVivaDeImportacion(imp: ImportacionMisInstrumentos): CuentaVivaBalanz {
@@ -308,14 +338,31 @@ export function cuentaVivaDeImportacion(imp: ImportacionMisInstrumentos): Cuenta
     posiciones: imp.posiciones, costoPromedio: imp.costoPromedio, error: null,
     comitente: imp.comitente, exportadoEn: imp.exportadoEn,
     valorUsdBalanz: imp.valorUsdBalanz, paraRevisar: imp.paraRevisar,
+    ...(imp.vista ? {
+      vista: imp.vista, tcConversion: imp.tcConversion ?? null,
+      valorArchivoArs: imp.valorArchivoArs ?? {}, costoPromedioArs: imp.costoPromedioArs ?? {},
+      costoMotivo: imp.costoMotivo ?? {}, costoUsdDel: imp.costoUsdDel ?? null,
+    } : {}),
   };
 }
 
-/** Mismo archivo (misma comitente, fecha y hora de exportación) → no cambia nada. */
+/**
+ * Mismo archivo (misma comitente, fecha y hora de exportación) → no cambia nada. F9.196.1 §0: si
+ * lo guardado no tiene `vista` (guardado antes de reconocer pesos y dólares) o tiene otra, NO es el
+ * mismo: se puede reimportar.
+ */
 export const esMismaImportacion = (
-  previa: Pick<CuentaVivaBalanz, 'comitente' | 'exportadoEn'> | null,
-  imp: Pick<ImportacionMisInstrumentos, 'comitente' | 'exportadoEn'>,
-) => !!previa && previa.comitente === imp.comitente && previa.exportadoEn === imp.exportadoEn;
+  previa: Pick<CuentaVivaBalanz, 'comitente' | 'exportadoEn' | 'vista'> | null,
+  imp: Pick<ImportacionMisInstrumentos, 'comitente' | 'exportadoEn' | 'vista'>,
+) => !!previa && previa.comitente === imp.comitente && previa.exportadoEn === imp.exportadoEn
+  && (imp.vista === undefined || previa.vista === imp.vista);
+
+/** Mismo archivo, pero lo guardado es de antes de §0 o de otra vista: se ofrece "Reimportar". */
+export const esReimportacion = (
+  previa: Pick<CuentaVivaBalanz, 'comitente' | 'exportadoEn' | 'vista'> | null,
+  imp: Pick<ImportacionMisInstrumentos, 'comitente' | 'exportadoEn' | 'vista'>,
+) => !!previa && previa.comitente === imp.comitente && previa.exportadoEn === imp.exportadoEn
+  && imp.vista !== undefined && previa.vista !== imp.vista;
 
 /**
  * Diferencias de cantidad contra la importación anterior de la MISMA comitente → `compra` /
@@ -427,5 +474,211 @@ export function controlContraApp(
     totalArchivoUsd: imp.valorUsdBalanz,
     totalArchivoComparableUsd, totalAppComparableUsd, difTotalPct,
     supera: difTotalPct !== null && Math.abs(difTotalPct) > UMBRAL_CONTROL,
+  };
+}
+
+// ── F9.196.1 §0: vista en dólares o en pesos ─────────────────────────────────
+
+export type VistaBalanz = 'USD' | 'ARS';
+
+/** Los FCI en dólares no cambian entre las dos vistas. */
+export const sigueEnUsd = (f: Pick<FilaMisInstrumentos, 'tipoCrudo' | 'monedaCotizacion'>) =>
+  f.tipoCrudo === 'Fondos' && f.monedaCotizacion === 'USD';
+
+/** Especies comparables mínimas para decidir con los precios de la app. */
+export const MIN_ESPECIES_PRECIOS_APP = 3;
+/** Banda alrededor de 1 (o de 1/tc, tc) dentro de la que una mediana decide la vista. */
+const BANDA_VISTA: [number, number] = [0.5, 2];
+
+export type ResultadoMetodo = { vista: VistaBalanz | 'fuera_de_banda'; mediana: number; especies: number } | null;
+
+export type DeteccionVista = {
+  vista: VistaBalanz | 'desconocida';
+  metodo: 'precios_app' | 'importacion_anterior' | null;
+  mediana: number | null;
+  especiesUsadas: number;
+  /** Lo que dio cada referencia (para mostrar por qué quedó desconocida). */
+  preciosApp: ResultadoMetodo;
+  importacionAnterior: ResultadoMetodo;
+};
+
+const mediana = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+
+function clasificar(med: number, usd: [number, number], ars: [number, number] | null): VistaBalanz | 'fuera_de_banda' {
+  if (med >= usd[0] && med <= usd[1]) return 'USD';
+  if (ars && med >= ars[0] && med <= ars[1]) return 'ARS';
+  return 'fuera_de_banda';
+}
+
+/**
+ * ¿En qué vista vino el archivo? Sobre las filas que NO son FCI en dólares (esas no cambian):
+ * - precios de la app (3 o más especies): r = valorApp ÷ valorArchivo; mediana en [0,5; 2] → USD,
+ *   en [0,5 ÷ tc; 2 ÷ tc] → ARS;
+ * - la importación anterior de la misma comitente (guardada en USD), especies con igual cantidad:
+ *   precioNuevo ÷ precioGuardado; en [0,5; 2] → USD, en [0,5 × tc; 2 × tc] → ARS.
+ * Si las dos dan resultado y no coinciden, o la que hay cae fuera de las bandas: 'desconocida'.
+ * Nunca se adivina.
+ */
+export function detectarVista(
+  imp: ImportacionMisInstrumentos,
+  refs: {
+    precioDe: (p: PosicionRaw) => PrecioDia | null;
+    /** MEP de la cartera viva (ARS por USD). Sin él no se puede reconocer la vista en pesos. */
+    tc: number | null;
+    /** Solo una importación anterior CONFIABLE (`previaConfiable`), con sus valores en USD. */
+    previa: Pick<CuentaVivaBalanz, 'posiciones'> | null;
+  },
+): DeteccionVista {
+  const tc = refs.tc && refs.tc > 0 ? refs.tc : null;
+  const filaDe = new Map(imp.filas.map(f => [f.ticker, f]));
+  const cambian = imp.posiciones.filter(p => { const f = filaDe.get(p.ticker); return f && !sigueEnUsd(f); });
+
+  // 1. Precios de la app.
+  const rs: number[] = [];
+  for (const p of cambian) {
+    const pd = refs.precioDe(p);
+    if (!pd || !p.cantidad || !(p.valor_origen > 0)) continue;
+    if (pd.moneda === 'ARS' && !tc) continue;
+    const app = p.cantidad * (pd.moneda === 'USD' ? pd.precio : pd.precio / tc!);
+    if (app > 0) rs.push(app / p.valor_origen);
+  }
+  const preciosApp: ResultadoMetodo = rs.length >= MIN_ESPECIES_PRECIOS_APP
+    ? (() => { const m = mediana(rs); return { vista: clasificar(m, BANDA_VISTA, tc ? [BANDA_VISTA[0] / tc, BANDA_VISTA[1] / tc] : null), mediana: m, especies: rs.length }; })()
+    : null;
+
+  // 2. La importación anterior (en USD), especies con la misma cantidad.
+  const qs: number[] = [];
+  if (refs.previa) {
+    const prev = new Map(refs.previa.posiciones.filter(p => p.cantidad).map(p => [`${p.ticker}|${p.tipo}`, p]));
+    for (const p of cambian) {
+      const a = prev.get(`${p.ticker}|${p.tipo}`);
+      if (!a || !a.cantidad || !p.cantidad || Math.abs(a.cantidad - p.cantidad) > 1e-9 || !(a.valor_origen > 0)) continue;
+      qs.push((p.valor_origen / p.cantidad) / (a.valor_origen / a.cantidad));
+    }
+  }
+  const importacionAnterior: ResultadoMetodo = qs.length >= 1
+    ? (() => { const m = mediana(qs); return { vista: clasificar(m, BANDA_VISTA, tc ? [BANDA_VISTA[0] * tc, BANDA_VISTA[1] * tc] : null), mediana: m, especies: qs.length }; })()
+    : null;
+
+  const base = { preciosApp, importacionAnterior };
+  const desconocida: DeteccionVista = { vista: 'desconocida', metodo: null, mediana: null, especiesUsadas: 0, ...base };
+  if (preciosApp && importacionAnterior && preciosApp.vista !== importacionAnterior.vista) return desconocida;
+  const [metodo, r] = preciosApp ? ['precios_app' as const, preciosApp] : importacionAnterior ? ['importacion_anterior' as const, importacionAnterior] : [null, null];
+  if (!r || r.vista === 'fuera_de_banda') return desconocida;
+  return { vista: r.vista, metodo, mediana: r.mediana, especiesUsadas: r.especies, ...base };
+}
+
+/**
+ * ¿Sirve la importación guardada como referencia (de vista y de costos en USD)? Sí si se guardó
+ * con `vista` (ya está en USD). Si es de antes de §0, solo si su total es razonable contra la
+ * corrida de esa comitente: un archivo en pesos guardado como dólares la infla ~1.500 veces.
+ */
+export function previaConfiable(previa: Pick<CuentaVivaBalanz, 'vista' | 'valorUsdBalanz'> | null, totalCorridaUsd: number): boolean {
+  if (!previa) return false;
+  if (previa.vista) return true;
+  if (!(totalCorridaUsd > 0) || !(previa.valorUsdBalanz > 0)) return false;
+  const r = previa.valorUsdBalanz / totalCorridaUsd;
+  return r <= FACTOR_INFLADA && r >= 1 / FACTOR_INFLADA;
+}
+
+/** Una cuenta viva de Balanz que vale más de esto veces la corrida de su comitente está inflada. */
+export const FACTOR_INFLADA = 50;
+
+/**
+ * §0.6 — solo informa: las `cuentasVivas/balanz_*` cuya suma de `valor_origen` supera 50 veces la
+ * de la corrida de esa comitente (un archivo en pesos guardado como dólares antes de §0).
+ */
+export function cuentasBalanzInfladas(
+  cuentas: Array<Pick<CuentaVivaBalanz, 'comitente' | 'cuenta' | 'posiciones' | 'exportadoEn' | 'vista'>>,
+  corrida: Array<Pick<PosicionRaw, 'cuenta' | 'valor_origen' | 'moneda_origen' | 'tipo'>>,
+  tc: number | null,
+): Array<{ comitente: string; exportadoEn: string; sumaCuentaViva: number; sumaCorrida: number; factor: number }> {
+  const out: Array<{ comitente: string; exportadoEn: string; sumaCuentaViva: number; sumaCorrida: number; factor: number }> = [];
+  for (const c of cuentas) {
+    const suma = c.posiciones.reduce((a, p) => a + (p.valor_origen ?? 0), 0);
+    const sumaCorrida = corrida
+      .filter(p => p.cuenta === c.cuenta && p.tipo !== 'cash')
+      .reduce((a, p) => a + (p.moneda_origen === 'USD' ? p.valor_origen : tc && tc > 0 ? p.valor_origen / tc : 0), 0);
+    if (sumaCorrida > 0 && suma > FACTOR_INFLADA * sumaCorrida) {
+      out.push({ comitente: c.comitente, exportadoEn: c.exportadoEn, sumaCuentaViva: suma, sumaCorrida, factor: suma / sumaCorrida });
+    }
+  }
+  return out;
+}
+
+/** Total del archivo leído de las dos formas, para que Juan elija cuando la vista es desconocida. */
+export function totalesPorVista(imp: ImportacionMisInstrumentos, tc: number | null): { siUsd: number; siArs: number | null } {
+  const siUsd = imp.filas.reduce((a, f) => a + f.valorActualUsd, 0);
+  const siArs = tc && tc > 0 ? imp.filas.reduce((a, f) => a + (sigueEnUsd(f) ? f.valorActualUsd : f.valorActualUsd / tc), 0) : null;
+  return { siUsd: Math.round(siUsd * 100) / 100, siArs: siArs === null ? null : Math.round(siArs * 100) / 100 };
+}
+
+/**
+ * Lee el archivo según su vista.
+ * - 'USD': como siempre; los costos son de este archivo (`costoUsdDel` = su exportación).
+ * - 'ARS': `Precio` y `Valor actual` ÷ MEP del día (salvo FCI en dólares). El costo NO se convierte
+ *   (pesos históricos): se conserva el `costoPromedio` en USD de la importación anterior confiable,
+ *   por ticker; sin él, sin costo en USD (`costo_en_pesos_historicos`) y el crudo en `costoPromedioArs`.
+ *   Sin MEP del día (de la fecha del archivo, no viejo) no se lee: devuelve `error`.
+ */
+export function aplicarVista(
+  imp: ImportacionMisInstrumentos,
+  vista: VistaBalanz,
+  ctx: {
+    mep: TcCarteraViva | null;
+    previa: Pick<CuentaVivaBalanz, 'costoPromedio' | 'costoUsdDel' | 'exportadoEn' | 'vista'> | null;
+  },
+): { imp: ImportacionMisInstrumentos; error: null } | { imp: null; error: string } {
+  if (vista === 'USD') {
+    return { imp: { ...imp, vista: 'USD', tcConversion: null, costoUsdDel: imp.exportadoEn }, error: null };
+  }
+  const mep = ctx.mep;
+  const fechaArchivo = imp.exportadoEn.slice(0, 10);
+  if (!mep || !(mep.valor > 0)) return { imp: null, error: 'El archivo está en pesos y la cartera viva no tiene MEP: no se convierte. Tocá "Calcular valor de hoy" y volvé a subirlo.' };
+  if (mep.viejo || mep.fechaCotizacion !== fechaArchivo) {
+    return { imp: null, error: `El archivo está en pesos (del ${fechaArchivo.slice(8, 10)}/${fechaArchivo.slice(5, 7)}) y el MEP de la cartera viva es del ${mep.fechaCotizacion.slice(8, 10)}/${mep.fechaCotizacion.slice(5, 7)}${mep.viejo ? ' (de respaldo)' : ''}: no se convierte con un dólar de otro día. Tocá "Calcular valor de hoy" el mismo día del archivo, o exportalo en dólares.` };
+  }
+  const tc = mep.valor;
+  const filas = imp.filas.map(f => {
+    if (sigueEnUsd(f)) return { ...f, valorArchivoArs: null };
+    return {
+      ...f, valorArchivoArs: f.valorActualUsd,
+      precioUsd: f.precioUsd / tc, valorActualUsd: f.valorActualUsd / tc,
+      difRedondeoUsd: f.difRedondeoUsd / tc,
+      costoPromedioUsd: null, valorInicialUsd: null,
+    };
+  });
+  const filaDe = new Map(filas.map(f => [f.ticker, f]));
+  const posiciones = imp.posiciones.map(p => {
+    const f = filaDe.get(p.ticker);
+    return f && !sigueEnUsd(f) ? { ...p, valor_origen: p.valor_origen / tc } : p;
+  });
+  const costosPrevios = ctx.previa?.costoPromedio ?? {};
+  const costoPromedio: Record<string, number> = {};
+  const costoPromedioArs: Record<string, number> = {};
+  const costoMotivo: Record<string, 'costo_en_pesos_historicos'> = {};
+  const valorArchivoArs: Record<string, number> = {};
+  for (const f of imp.filas) {
+    if (sigueEnUsd(f)) { if (imp.costoPromedio[f.ticker] !== undefined) costoPromedio[f.ticker] = imp.costoPromedio[f.ticker]; continue; }
+    valorArchivoArs[f.ticker] = f.valorActualUsd;
+    if (imp.costoPromedio[f.ticker] !== undefined) costoPromedioArs[f.ticker] = imp.costoPromedio[f.ticker];
+    if (costosPrevios[f.ticker] !== undefined) costoPromedio[f.ticker] = costosPrevios[f.ticker];
+    else costoMotivo[f.ticker] = 'costo_en_pesos_historicos';
+  }
+  const noCuadran = filas.filter(f => f.difRedondeoUsd > TOLERANCIA_VALOR_USD).map(f =>
+    `${f.ticker}: Nominales × Precio y Valor actual difieren ${f.difRedondeoUsd.toFixed(2)} USD (convertido con el MEP).`);
+  return {
+    imp: {
+      ...imp, filas, posiciones, costoPromedio, noCuadran,
+      valorUsdBalanz: Math.round(filas.reduce((a, f) => a + f.valorActualUsd, 0) * 100) / 100,
+      vista: 'ARS', tcConversion: { valor: tc, fecha: mep.fechaCotizacion, fuente: mep.fuente },
+      valorArchivoArs, costoPromedioArs, costoMotivo,
+      costoUsdDel: ctx.previa ? (ctx.previa.costoUsdDel ?? (ctx.previa.vista === 'ARS' ? null : ctx.previa.exportadoEn)) : null,
+    },
+    error: null,
   };
 }

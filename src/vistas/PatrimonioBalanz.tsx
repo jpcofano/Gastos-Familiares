@@ -5,6 +5,10 @@
 //
 // §B (H3c) — el mismo botón acepta el archivo de Movimientos: sugiere la comitente por tickers
 // (Juan la confirma), clasifica cada fila, registra los movimientos y ancla la caja en la corrida.
+//
+// F9.196.1 §0 — "Mis Instrumentos" puede venir en la vista en dólares o en pesos: se reconoce
+// (`detectarVista`), se convierte (`aplicarVista`) y, si no se puede reconocer, Juan elige con dos
+// botones. Sin elegir, no se guarda.
 import { useRef, useState } from 'react';
 import { Card } from '../design-system/components';
 import { Icon } from '../design-system/Icon';
@@ -14,8 +18,10 @@ import {
   detectarArchivoBalanz, parsearNombreBalanz, parsearMisInstrumentos, clasificacionesDe,
   cuentaVivaDeImportacion, esMismaImportacion, movimientosInferidos, controlContraApp,
   cuentaDeComitente, leerFilasXlsx, tiposPorTickerDe, esMasViejo, UMBRAL_CONTROL,
-  type ImportacionMisInstrumentos, type ControlBalanz, type CuentaVivaBalanz,
+  detectarVista, aplicarVista, previaConfiable, esReimportacion, totalesPorVista,
+  type ImportacionMisInstrumentos, type ControlBalanz, type CuentaVivaBalanz, type DeteccionVista, type VistaBalanz,
 } from '../datos/patrimonioBalanzArchivo';
+import type { TcCarteraViva } from '../datos/patrimonioCarteraViva';
 import { cargarCuentaVivaBalanz, guardarImportacionBalanz, guardarMovimientosBalanz } from '../datos/patrimonioCuentasVivas';
 import {
   parsearMovimientosBalanz, aparearDevoluciones, movimientosDeBalanz, cajaAnclada, sugerirComitente, idsAnulados,
@@ -29,6 +35,8 @@ type Props = {
   indicadores: Map<string, IndicadoresPosicion>;
   /** ARS por USD que usa la vista (último `tcDiario`). */
   tc: number;
+  /** F9.196.1 §0 — MEP de la cartera viva: reconoce la vista en pesos y la convierte (si es del día del archivo). */
+  mep: TcCarteraViva | null;
   /** Fecha de la corrida vigente: ancla la caja del archivo de Movimientos (§B). */
   fechaCorrida: string;
   onGuardado: (texto: string) => void;
@@ -38,6 +46,16 @@ type Props = {
 type Lista = {
   imp: ImportacionMisInstrumentos;
   previa: CuentaVivaBalanz | null;
+  /** §0 — el archivo tal como vino (antes de aplicar la vista), para poder volver a elegirla. */
+  base: ImportacionMisInstrumentos;
+  /** §0 — la importación anterior, si sirve de referencia (vista y costos en USD). */
+  previaRef: CuentaVivaBalanz | null;
+  deteccion: DeteccionVista;
+  /** La vista con la que se leyó: la detectada o la que eligió Juan; null = todavía sin elegir. */
+  vista: VistaBalanz | null;
+  elegidaPorJuan: boolean;
+  /** Mismo archivo que el guardado, pero guardado antes de §0 o con otra vista. */
+  reimportar: boolean;
   mismo: boolean;
   movimientos: MovimientoCuenta[];
   control: ControlBalanz;
@@ -101,7 +119,7 @@ function resolverRepetidas(xs: Entrada[]): Entrada[] {
   });
 }
 
-export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, fechaCorrida, onGuardado, onClose }: Props) {
+export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, mep, fechaCorrida, onGuardado, onClose }: Props) {
   const [entradas, setEntradas] = useState<Entrada[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [errorGuardar, setErrorGuardar] = useState<string | null>(null);
@@ -117,6 +135,43 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
     return { precio: ind.precio, moneda: ind.monedaSerie, fecha: ind.fechaUltimoPrecio ?? '' };
   };
 
+  // §0 — el MEP de la cartera viva es la referencia para reconocer y convertir la vista en pesos.
+  const tcRef = mep && mep.valor > 0 ? mep.valor : tc;
+
+  /** §0 — arma la entrada para una vista (o sin vista, mientras Juan no elige). Puro sobre `x`. */
+  function armar(
+    x: { id: string; nombre: string; base: ImportacionMisInstrumentos; previa: CuentaVivaBalanz | null; previaRef: CuentaVivaBalanz | null; deteccion: DeteccionVista; fechaDelNombre: boolean },
+    vista: VistaBalanz | null, elegidaPorJuan: boolean,
+  ): Entrada {
+    const { base, previa } = x;
+    const comun = { ...x, estado: 'lista' as const, vista, elegidaPorJuan, descartada: null };
+    if (!vista) {
+      return {
+        ...comun, imp: base, mismo: false, reimportar: false, movimientos: [],
+        control: controlContraApp(base, precioDe, tcRef),
+        bloqueo: 'No pude reconocer si el archivo está en dólares o en pesos: elegilo abajo. Sin elegir, no se guarda.',
+      };
+    }
+    const r = aplicarVista(base, vista, { mep, previa: x.previaRef });
+    if (!r.imp) {
+      return { ...comun, imp: base, mismo: false, reimportar: false, movimientos: [], control: controlContraApp(base, precioDe, tcRef), bloqueo: r.error };
+    }
+    const imp = r.imp;
+    const mismo = esMismaImportacion(previa, imp);
+    const reimportar = esReimportacion(previa, imp);
+    const bloqueo = !mismo && esMasViejo(previa, imp)
+      ? `Este archivo (${fmtFechaHora(imp.exportadoEn)}) es más viejo que la importación vigente (${fmtFechaHora(previa!.exportadoEn)}): no se importa.`
+      : imp.noCuadran.length
+        ? `Hay filas donde Nominales × Precio no da el Valor actual (un número mal leído); no se importa: ${imp.noCuadran.join(' · ')}`
+        : null;
+    return {
+      ...comun, imp, mismo, reimportar, bloqueo,
+      movimientos: mismo || bloqueo ? [] : movimientosInferidos(previa?.posiciones ?? null, imp),
+      // §0.4 — el control corre DESPUÉS de convertir.
+      control: controlContraApp(imp, precioDe, tcRef),
+    };
+  }
+
   async function preparar(id: string, nombre: string, filas: unknown[][], comitente: string, exportadoEn: string, fechaDelNombre: boolean): Promise<Entrada> {
     try {
       const leida = await cargarCuentaVivaBalanz(comitente);
@@ -124,25 +179,28 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
       // importación anterior: comparar contra ella inferiría la compra de todas las especies.
       const previa = leida?.posiciones?.length ? leida : null;
       const cuenta = cuentaDeComitente(comitente);
-      const imp = parsearMisInstrumentos(filas, {
+      // §0 — lo guardado sirve de referencia solo si está en USD de verdad (con `vista`, o razonable
+      // contra la corrida): un archivo en pesos guardado antes de §0 está inflado ~1.500 veces.
+      const totalCorridaUsd = posicionesCorrida
+        .filter(p => p.cuenta === cuenta && p.tipo !== 'cash')
+        .reduce((a, p) => a + (p.moneda_origen === 'USD' ? p.valor_origen : tcRef > 0 ? p.valor_origen / tcRef : 0), 0);
+      const previaRef = previaConfiable(previa, totalCorridaUsd) ? previa : null;
+      const base = parsearMisInstrumentos(filas, {
         comitente, exportadoEn,
-        clasificaciones: clasificacionesDe(previa?.posiciones ?? [], posicionesCorrida, cuenta),
+        clasificaciones: clasificacionesDe(previaRef?.posiciones ?? [], posicionesCorrida, cuenta),
         tiposPorTicker: tiposPorTickerDe(previa?.posiciones ?? [], posicionesCorrida, cuenta),
       });
-      const mismo = esMismaImportacion(previa, imp);
-      const bloqueo = !mismo && esMasViejo(previa, imp)
-        ? `Este archivo (${fmtFechaHora(imp.exportadoEn)}) es más viejo que la importación vigente (${fmtFechaHora(previa!.exportadoEn)}): no se importa.`
-        : imp.noCuadran.length
-          ? `Hay filas donde Nominales × Precio no da el Valor actual (un número mal leído); no se importa: ${imp.noCuadran.join(' · ')}`
-          : null;
-      return {
-        id, nombre, estado: 'lista', imp, previa, mismo, fechaDelNombre, bloqueo, descartada: null,
-        movimientos: mismo || bloqueo ? [] : movimientosInferidos(previa?.posiciones ?? null, imp),
-        control: controlContraApp(imp, precioDe, tc),
-      };
+      const deteccion = detectarVista(base, { precioDe, tc: tcRef > 0 ? tcRef : null, previa: previaRef });
+      const vista = deteccion.vista === 'desconocida' ? null : deteccion.vista;
+      return armar({ id, nombre, base, previa, previaRef, deteccion, fechaDelNombre }, vista, false);
     } catch (e) {
       return { id, nombre, estado: 'error', mensaje: e instanceof Error ? e.message : String(e) };
     }
+  }
+
+  /** §0 — Juan elige la vista cuando no se pudo reconocer (o la cambia). */
+  function elegirVista(id: string, vista: VistaBalanz) {
+    setEntradas(prev => resolverRepetidas(prev.map(y => (y.id === id && y.estado === 'lista' ? armar(y, vista, true) : y))));
   }
 
   async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
@@ -252,7 +310,7 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
         textosMov.push(`${x.comitente}: ${x.movimientos.length} movimientos, ${caja}`);
       }
       onGuardado(`Balanz actualizado: ${[
-        ...aGuardar.map(x => `${x.imp.comitente} (${x.imp.posiciones.length} especies)`),
+        ...aGuardar.map(x => `${x.imp.comitente} (${x.imp.posiciones.length} especies${x.imp.vista === 'ARS' ? ', archivo en pesos' : ''})`),
         ...textosMov,
       ].join(' · ')}.`);
     } catch (e) {
@@ -341,7 +399,7 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
               </div>
             )}
 
-            {x.estado === 'lista' && <ResumenImportacion x={x} />}
+            {x.estado === 'lista' && <ResumenImportacion x={x} tcRef={tcRef} onElegirVista={v => elegirVista(x.id, v)} />}
           </Card>
         ))}
 
@@ -370,10 +428,58 @@ export default function PatrimonioBalanz({ posicionesCorrida, indicadores, tc, f
   );
 }
 
-function ResumenImportacion({ x }: { x: Lista }) {
+const METODO_TXT = { precios_app: 'contra los precios de la app', importacion_anterior: 'contra la importación anterior' } as const;
+const ddmm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+
+/** §0 — la línea de arriba: en qué vista vino y cómo se leyó; o los dos botones si no se reconoce. */
+function LineaVista({ x, tcRef, onElegirVista }: { x: Lista; tcRef: number; onElegirVista: (v: VistaBalanz) => void }) {
+  const sub = { fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.45 } as const;
+  const { imp, deteccion: d } = x;
+  const como = x.elegidaPorJuan ? 'elegido por vos'
+    : d.metodo ? `detectado ${METODO_TXT[d.metodo]}: ${d.especiesUsadas} ${d.especiesUsadas === 1 ? 'especie' : 'especies'}` : '';
+  const btn = (activo: boolean) => ({
+    flex: 1, padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)',
+    border: activo ? 'none' : '1px solid var(--gf-gray-200)', background: activo ? 'var(--color-accent)' : 'var(--color-surface)', color: activo ? '#fff' : 'var(--color-text)',
+  });
+  if (!x.vista || x.elegidaPorJuan) {
+    const t = totalesPorVista(x.base, tcRef > 0 ? tcRef : null);
+    const porque = !x.vista && d.preciosApp && d.importacionAnterior && d.preciosApp.vista !== d.importacionAnterior.vista
+      ? ' (los precios de la app y la importación anterior dicen cosas distintas)'
+      : !x.vista && !d.preciosApp && !d.importacionAnterior ? ' (no hay precios de la app ni una importación anterior con qué comparar)' : '';
+    return (
+      <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: x.vista ? 'var(--gf-gray-50)' : 'rgba(245,158,11,.12)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div>
+          {x.vista ? <>Archivo <strong>en {x.vista === 'ARS' ? 'pesos' : 'dólares'}</strong> ({como}).</> : <><strong>¿En qué moneda está el archivo?</strong> No lo pude reconocer{porque}.</>}
+          {' '}Si está en dólares: <strong>{fmtUsd(t.siUsd)}</strong> · si está en pesos: <strong>{t.siArs === null ? 'sin MEP para convertir' : fmtUsd(t.siArs)}</strong>.
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={btn(x.vista === 'USD')} onClick={() => onElegirVista('USD')}>Está en dólares</button>
+          <button style={btn(x.vista === 'ARS')} onClick={() => onElegirVista('ARS')}>Está en pesos</button>
+        </div>
+      </div>
+    );
+  }
+  if (x.vista === 'ARS' && imp.tcConversion) {
+    return (
+      <div style={sub}>
+        Archivo <strong>en pesos</strong>, convertido con el MEP de ${Math.round(imp.tcConversion.valor).toLocaleString('es-AR')} del {ddmm(imp.tcConversion.fecha)} ({como}).
+        {' '}<button onClick={() => onElegirVista('USD')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)', fontFamily: 'var(--font-base)' }}>No, está en dólares</button>
+      </div>
+    );
+  }
+  return (
+    <div style={sub}>
+      Archivo <strong>en {x.vista === 'ARS' ? 'pesos' : 'dólares'}</strong>{como ? ` (${como})` : ''}.
+      {' '}<button onClick={() => onElegirVista(x.vista === 'ARS' ? 'USD' : 'ARS')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: 'var(--color-accent)', fontFamily: 'var(--font-base)' }}>No, está en {x.vista === 'ARS' ? 'dólares' : 'pesos'}</button>
+    </div>
+  );
+}
+
+function ResumenImportacion({ x, tcRef, onElegirVista }: { x: Lista; tcRef: number; onElegirVista: (v: VistaBalanz) => void }) {
   const { imp, control, movimientos, previa, mismo } = x;
   const sub = { fontSize: 12, color: 'var(--color-text-sec)', lineHeight: 1.45 } as const;
   const fueraDelTotal = control.especies.filter(e => e.nota !== null);
+  const sinCostoUsd = Object.keys(imp.costoMotivo ?? {}).length;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
@@ -383,8 +489,23 @@ function ResumenImportacion({ x }: { x: Lista }) {
             Archivo del {fmtFechaHora(imp.exportadoEn)}{x.fechaDelNombre ? '' : ' (fecha del archivo, el nombre no la trae)'} · {imp.filas.length} especies
           </div>
         </div>
-        <div style={{ fontSize: 16, fontWeight: 800, whiteSpace: 'nowrap' }}>{fmtUsd(imp.valorUsdBalanz)}</div>
+        <div style={{ fontSize: 16, fontWeight: 800, whiteSpace: 'nowrap' }}>{x.vista && imp.vista ? fmtUsd(imp.valorUsdBalanz) : '—'}</div>
       </div>
+
+      <LineaVista x={x} tcRef={tcRef} onElegirVista={onElegirVista} />
+
+      {previa && !x.previaRef && (
+        <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: 'rgba(245,158,11,.12)' }}>
+          ⚠ Lo guardado de esta comitente (archivo del {fmtFechaHora(previa.exportadoEn)}) no sirve de referencia: no coincide con la corrida
+          (parece un archivo en pesos guardado como dólares). Este archivo lo reemplaza; no se usan sus costos ni sus precios.
+        </div>
+      )}
+
+      {x.reimportar && (
+        <div style={{ ...sub, fontWeight: 700 }}>
+          Este archivo ya estaba importado{previa?.vista ? ` en la vista en ${previa.vista === 'ARS' ? 'pesos' : 'dólares'}` : ', pero de antes de reconocer pesos y dólares'}: se reimporta.
+        </div>
+      )}
 
       {mismo && (
         <div style={{ ...sub, fontWeight: 700 }}>Este archivo ya está importado (misma comitente, fecha y hora): no cambia nada.</div>
@@ -409,7 +530,7 @@ function ResumenImportacion({ x }: { x: Lista }) {
         </div>
       )}
 
-      <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: control.supera ? 'rgba(245,158,11,.12)' : 'var(--gf-gray-50)' }}>
+      {x.vista && imp.vista && <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: control.supera ? 'rgba(245,158,11,.12)' : 'var(--gf-gray-50)' }}>
         <strong>Control contra la app:</strong>{' '}
         {control.difTotalPct === null
           ? 'la app no tiene precio para comparar ninguna especie.'
@@ -430,7 +551,7 @@ function ResumenImportacion({ x }: { x: Lista }) {
             ))}
           </ul>
         )}
-      </div>
+      </div>}
 
       {(imp.paraRevisar.length > 0 || imp.posiciones.some(p => p.revisar)) && (
         <div style={{ ...sub, padding: '8px 10px', borderRadius: 10, background: 'rgba(245,158,11,.10)' }}>
@@ -446,6 +567,17 @@ function ResumenImportacion({ x }: { x: Lista }) {
         <ul style={{ ...sub, margin: 0, paddingLeft: 18 }}>
           {imp.avisos.map((a, k) => <li key={k}>{a}</li>)}
         </ul>
+      )}
+
+      {imp.vista === 'ARS' && (
+        <div style={sub}>
+          El costo en pesos de Balanz es histórico y no se convierte:{' '}
+          {imp.costoUsdDel
+            ? <>se mantiene el del último archivo en dólares ({ddmm(imp.costoUsdDel)}).</>
+            : <>no hay un archivo en dólares anterior confiable, así que queda sin costo en USD.</>}
+          {sinCostoUsd > 0 && imp.costoUsdDel ? ` ${sinCostoUsd} ${sinCostoUsd === 1 ? 'especie nueva queda' : 'especies nuevas quedan'} sin costo en USD.` : ''}
+          {' '}Para costos al día, exportá en dólares.
+        </div>
       )}
     </div>
   );
