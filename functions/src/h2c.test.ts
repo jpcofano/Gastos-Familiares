@@ -5,6 +5,36 @@ import * as crypto from 'crypto';
 import { crearClienteBitfinex, rutaPermitidaBitfinex, RutaProhibidaBitfinex, ErrorBitfinex, firmarBitfinex, crearNonceMs, type FetchBitfinex } from './bitfinexApi';
 import { leerBilleteras, leerFunding, movimientoDeLedger, planSincronizacionBitfinex, CATEGORIAS_LEDGER } from './bitfinexSincronizacion';
 import { aparearTransferencias } from './compartido/patrimonioFlujosAuto';
+import { conCandado, DURACION_CANDADO_MS, type DbCandado } from './candado';
+
+/**
+ * Firestore falso para el candado: las transacciones se serializan (como en Firestore, una no ve un
+ * estado a medio escribir de la otra). Solo `locks`.
+ */
+function firestoreFalso() {
+  const docs = new Map<string, Record<string, unknown>>();
+  let cola: Promise<unknown> = Promise.resolve();
+  const ref = (id: string) => ({ id });
+  const db = {
+    collection: (_c: string) => ({ doc: (id: string) => ref(id) }),
+    runTransaction: <T>(fn: (tx: unknown) => Promise<T>) => {
+      const p = cola.then(async () => {
+        const escrituras: Array<() => void> = [];
+        const tx = {
+          get: async (r: { id: string }) => { await new Promise(res => setTimeout(res, 5)); const d = docs.get(r.id); return { data: () => (d ? { ...d } : undefined) }; },
+          set: (r: { id: string }, v: Record<string, unknown>) => { escrituras.push(() => docs.set(r.id, v)); },
+          delete: (r: { id: string }) => { escrituras.push(() => docs.delete(r.id)); },
+        };
+        const out = await fn(tx);
+        escrituras.forEach(e => e());
+        return out;
+      });
+      cola = p.catch(() => undefined);
+      return p;
+    },
+  };
+  return { db: db as unknown as DbCandado, docs };
+}
 import type { MovimientoCuenta } from './compartido/patrimonioMovimientos';
 
 let ok = 0, fail = 0;
@@ -113,6 +143,29 @@ function t(rotulo: string, cond: boolean, detalle?: unknown) {
     const llegada: MovimientoCuenta = { id: 'x1', fecha: '2025-10-18', cuenta: 'Nexo', tipo: 'deposito', moneda: 'USD', montoNeto: 583, origen: 'manual', ticker: 'USDT', cantidad: 583.5, tipoActivo: 'cripto' };
     const retiro = p1.movimientos.find(m => m.tipo === 'retiro')!;
     t('el retiro de Bitfinex aparea con su llegada (cripto: mismo activo, comisión ≤ 1%, ≤ 3 días)', aparearTransferencias([retiro, llegada]).internas.length === 1);
+  }
+
+  console.log('\n=== F9.196.1 §3: un solo cliente a la vez (candado locks/bitfinex) ===');
+  {
+    const { db, docs } = firestoreFalso();
+    let llamadas = 0;
+    const f: FetchBitfinex = async () => { llamadas++; await new Promise(r => setTimeout(r, 30)); return { status: 200, text: async () => '[]' }; };
+    const cliente = crearClienteBitfinex({ key: 'k', secret: 's' }, { fetchImpl: f, pausaMs: 0 });
+    const correr = (quien: string) => conCandado(db, 'bitfinex', quien, () => cliente.leer('auth/r/wallets'));
+    const [a, b] = await Promise.all([correr('cron'), correr('boton')]);
+    t('dos corridas simultáneas → una sola llama a la API', llamadas === 1 && [a, b].filter(x => x.corrio).length === 1, { llamadas, a: a.corrio, b: b.corrio });
+    t('la que no corrió sabe quién lo tiene y hasta cuándo', [a, b].some(x => !x.corrio && x.quien !== null && x.hasta > Date.now()));
+    t('al terminar se libera: la siguiente corre', docs.size === 0 && (await correr('boton')).corrio && llamadas === 2);
+    let fallo = false;
+    try { await conCandado(db, 'bitfinex', 'cron', async () => { throw new Error('API caída'); }); } catch { fallo = true; }
+    t('si falla, también se libera', fallo && docs.size === 0);
+    // Un candado vencido (una instancia que murió sin liberar) no bloquea.
+    docs.set('bitfinex', { hasta: Date.now() - 1, quien: 'muerto', token: 'x' });
+    t('un candado vencido no bloquea', (await correr('cron')).corrio && DURACION_CANDADO_MS > 300_000);
+    // Uno vigente de otro sí, y no se lo sacan.
+    docs.set('bitfinex', { hasta: Date.now() + 60_000, quien: 'otro', token: 'y' });
+    const c = await correr('boton');
+    t('uno vigente de otro bloquea y queda intacto', !c.corrio && (docs.get('bitfinex') as { token?: string } | undefined)?.token === 'y');
   }
 
   console.log(`\n${ok} OK, ${fail} FAIL`);

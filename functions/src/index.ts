@@ -50,6 +50,7 @@ import { actualizarCarteraViva as actualizarCarteraVivaEn } from './carteraVivaC
 import { crearClienteBitfinex } from './bitfinexApi';
 import { importarTesis } from './tesisImport';
 import { sincronizarBitfinex as sincronizarBitfinexConCliente } from './bitfinexSincronizacion';
+import { conCandado } from './candado';
 import { backfillTc } from './tcBackfill';
 // F9.190 §2 — señales de mercado de la reserva: módulo puro, la red se inyecta.
 import { leerMercado, resolverBases, type Bases } from './senalesMercado';
@@ -2620,15 +2621,24 @@ export const actualizarCarteraViva = onSchedule(
 
 // ── F9.196 H2c — sincronización de Bitfinex ───────────────────────────────────
 
-async function correrSincronizacionBitfinex() {
+/**
+ * F9.196.1 §3 — con el candado `locks/bitfinex`: el cron y el botón son servicios distintos y, si se
+ * pisan, Bitfinex rechaza la key por nonce chico. Devuelve null si otra sincronización lo tiene.
+ */
+async function correrSincronizacionBitfinex(quien: string) {
   const key = bitfinexApiKey.value().trim(), secret = bitfinexApiSecret.value().trim();
   if (!key || !secret) {
     const error = 'Faltan secretos de Bitfinex (BITFINEX_API_KEY, BITFINEX_API_SECRET)';
     await db.collection('cuentasVivas').doc('bitfinex').set({ cuenta: 'Bitfinex', fuente: 'bitfinex_api', error, errorEn: FieldValue.serverTimestamp() }, { merge: true });
     throw new Error(error);
   }
-  const r = await sincronizarBitfinexConCliente(db, crearClienteBitfinex({ key, secret }));
-  console.log(`[sincronizarBitfinex] ${r.posiciones} activos · ${r.movimientos} movimientos · ${r.prestamos} préstamos de funding · para revisar ${r.paraRevisar} · flujos ${JSON.stringify(r.flujos)}`);
+  const c = await conCandado(db, 'bitfinex', quien, () => sincronizarBitfinexConCliente(db, crearClienteBitfinex({ key, secret })));
+  if (!c.corrio) {
+    console.log(`[${quien}] ya hay una sincronización de Bitfinex corriendo (${c.quien ?? '?'}, candado hasta ${new Date(c.hasta).toISOString()}): no se llama a la API`);
+    return null;
+  }
+  const r = c.resultado;
+  console.log(`[${quien}] ${r.posiciones} activos · ${r.movimientos} movimientos · ${r.prestamos} préstamos de funding · para revisar ${r.paraRevisar} · flujos ${JSON.stringify(r.flujos)}`);
   return r;
 }
 
@@ -2639,23 +2649,28 @@ export const sincronizarBitfinex = onSchedule(
     timeZone: 'America/Argentina/Buenos_Aires',
     region: 'southamerica-east1',
     timeoutSeconds: 300,
+    maxInstances: 1,
     secrets: SECRETOS_BITFINEX,
   },
   async () => {
-    try { await correrSincronizacionBitfinex(); }
+    // Candado tomado → sale sin error (ya lo logueó correrSincronizacionBitfinex).
+    try { await correrSincronizacionBitfinex('sincronizarBitfinex'); }
     catch (e) { console.error(`[sincronizarBitfinex] falló: ${e instanceof Error ? e.message : String(e)}`); }
   },
 );
 
 // Botón "Sincronizar Bitfinex ahora" (solo el dueño).
 export const sincronizarBitfinexAhora = onCall(
-  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 300, secrets: SECRETOS_BITFINEX },
+  { region: 'southamerica-east1', memory: '256MiB', timeoutSeconds: 300, maxInstances: 1, secrets: SECRETOS_BITFINEX },
   async (request) => {
     if (!request.auth) throw new HttpsError('unauthenticated', 'No autenticado');
     const email = request.auth.token.email?.toLowerCase();
     if (email !== DUENO_EMAIL) throw new HttpsError('permission-denied', 'Solo el dueño');
-    try { return await correrSincronizacionBitfinex(); }
+    let r: Awaited<ReturnType<typeof correrSincronizacionBitfinex>>;
+    try { r = await correrSincronizacionBitfinex('sincronizarBitfinexAhora'); }
     catch (e) { throw new HttpsError('internal', e instanceof Error ? e.message : String(e)); }
+    if (!r) throw new HttpsError('failed-precondition', 'Ya hay una sincronización de Bitfinex corriendo; probá en unos minutos.');
+    return r;
   },
 );
 
