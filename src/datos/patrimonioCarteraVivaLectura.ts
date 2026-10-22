@@ -22,7 +22,12 @@ export async function sincronizarPPIAhora() {
   return (await _sincronizarPPI()).data;
 }
 
-const _sincronizarBitfinex = httpsCallable<void, { posiciones: number; movimientos: number; prestamos: number; paraRevisar: number }>(functions, 'sincronizarBitfinexAhora', { timeout: 300_000 });
+const _sincronizarBitfinex = httpsCallable<void, {
+  posiciones: number; movimientos: number; prestamos: number; paraRevisar: number;
+  /** Addendum 1 B — la cartera viva se recalcula adentro; si falló, el motivo. */
+  carteraError?: string | null;
+  flujos?: { error?: string };
+}>(functions, 'sincronizarBitfinexAhora', { timeout: 300_000 });
 /** F9.196 H2c — "Sincronizar Bitfinex ahora". Al terminar, la Function ya recalculó la cartera viva. */
 export async function sincronizarBitfinexAhora() {
   return (await _sincronizarBitfinex()).data;

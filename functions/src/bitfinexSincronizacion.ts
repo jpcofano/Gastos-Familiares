@@ -194,6 +194,8 @@ async function ledgerPaginado(cliente: ClienteBitfinex, categoria: number, desde
 
 export async function sincronizarBitfinex(db: Firestore, cliente: ClienteBitfinex, ahora: () => number = Date.now): Promise<{
   posiciones: number; movimientos: number; prestamos: number; paraRevisar: number; flujos: ResumenFlujos;
+  /** F9.196.1 Addendum 1 B — por qué no se pudo recalcular la cartera viva (null = se recalculó). */
+  carteraError: string | null;
 }> {
   const ref = db.collection('cuentasVivas').doc('bitfinex');
   try {
@@ -219,10 +221,18 @@ export async function sincronizarBitfinex(db: Firestore, cliente: ClienteBitfine
     await ref.set({ ...JSON.parse(JSON.stringify(plan.cuentaViva)), sincronizadoEn: FieldValue.serverTimestamp(), errorEn: null });
     const flujos = await flujosSinRomper(db, 'sincronizarBitfinex');
     // Las cantidades de la card cripto salen de la cartera viva: se recalcula ya, no a las 18:20.
-    await actualizarCarteraViva(db, ahora).catch(e => console.error(`[sincronizarBitfinex] cartera viva: ${e instanceof Error ? e.message : String(e)}`));
+    // Si falla, Bitfinex ya quedó sincronizado: no se tira, pero se devuelve el motivo (el botón no
+    // puede decir "Valor de hoy recalculado" si no lo está).
+    const carteraError = await actualizarCarteraViva(db, ahora)
+      .then(d => (d ? null : 'no hay una corrida vigente'))
+      .catch(e => {
+        const m = e instanceof Error ? e.message : String(e);
+        console.error(`[sincronizarBitfinex] cartera viva: ${m}`);
+        return m;
+      });
     return {
       posiciones: plan.cuentaViva.posiciones.length, movimientos: plan.movimientos.length,
-      prestamos: plan.cuentaViva.prestamos.length, paraRevisar: plan.cuentaViva.paraRevisar?.length ?? 0, flujos,
+      prestamos: plan.cuentaViva.prestamos.length, paraRevisar: plan.cuentaViva.paraRevisar?.length ?? 0, flujos, carteraError,
     };
   } catch (e) {
     await ref.set({ cuenta: CUENTA_BITFINEX, fuente: 'bitfinex_api', error: e instanceof Error ? e.message : String(e), errorEn: FieldValue.serverTimestamp() }, { merge: true });

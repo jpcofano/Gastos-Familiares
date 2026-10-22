@@ -1513,7 +1513,10 @@ function BotonesSincronizar({ onActualizado, onToast, textoRecalcular = 'Recalcu
     try {
       if (cual === 'bitfinex') {
         const r = await sincronizarBitfinexAhora();
-        onToast(`Bitfinex sincronizado: ${r.posiciones} activos, ${r.movimientos} movimientos${r.paraRevisar ? `, ${r.paraRevisar} para revisar` : ''}. Valor de hoy recalculado.`, false);
+        const resumen = `${r.posiciones} activos, ${r.movimientos} movimientos${r.paraRevisar ? `, ${r.paraRevisar} para revisar` : ''}`;
+        // Addendum 1 B: la cartera la recalcula la Function; si falló, no se dice "recalculado".
+        if (r.carteraError) onToast(`Bitfinex sincronizado (${resumen}), pero no se pudo calcular el valor de hoy: ${r.carteraError}`, true);
+        else onToast(`Bitfinex sincronizado: ${resumen}. Valor de hoy recalculado.${r.flujos?.error ? ` ⚠ Ojo: los flujos automáticos fallaron: ${r.flujos.error}.` : ''}`, false);
       } else if (cual === 'ppi') {
         const r = await sincronizarPPIAhora();
         // PPI ya quedó sincronizado: si después falla la cartera, se dice las dos cosas.
@@ -5032,10 +5035,13 @@ export default function Patrimonio() {
   const recalcularYRecargarCarteraViva = () => {
     recalcularCarteraViva()
       .then(rc => {
-        if (rc.avisoFlujos) setToast({ texto: `Valor de hoy recalculado. ⚠ Ojo: ${rc.avisoFlujos}.`, error: false });
-        return cargarCarteraViva();
+        // Se suma al aviso que ya estaba (la ingesta o Balanz), no lo reemplaza.
+        if (rc.avisoFlujos) setToast(prev => ({ texto: `${prev?.texto ? `${prev.texto} ` : ''}⚠ Ojo: ${rc.avisoFlujos}.`, error: false }));
+        // Si lo que falla es solo la recarga, se dice eso (el cálculo sí se hizo).
+        return cargarCarteraViva().then(setCarteraViva).catch(e => {
+          setToast({ texto: `Valor de hoy recalculado, pero no se pudo recargar en pantalla: ${mensajeDeErrorCallable(e)}. Recargá la página.`, error: true });
+        });
       })
-      .then(setCarteraViva)
       .catch(e => {
         console.warn('[carteraViva] no se pudo recalcular:', e);
         setToast({ texto: `No se pudo calcular el valor de hoy: ${mensajeDeErrorCallable(e)}`, error: true });
