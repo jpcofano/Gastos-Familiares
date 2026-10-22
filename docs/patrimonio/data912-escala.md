@@ -30,30 +30,34 @@ unos puntos; lo que importa es el factor (100), no el decimal.
 
 ## ¿El código asume bien la escala?
 
-`escalaData912` (`functions/src/preciosRespaldo.ts:71-74`):
+**Hoy (desde F9.196.1 Addendum 1 C):** `escalaData912(tipo)` (`functions/src/preciosRespaldo.ts:72`):
 
 ```ts
-if (tipo !== 'bono' && tipo !== 'on') return 1;
-return escalaPPI ?? 100;
+return tipo === 'bono' || tipo === 'on' ? 100 : 1;
 ```
 
-- **Bonos:** asume 100 → **coincide**.
-- **ONs:** asume 100 → **coincide** en la única ON medida (TLCPO). Es un solo dato: otra ON podría
-  publicarse distinto (no hay razón para pensarlo, pero no está medido).
-- **Letras:** no hay un tipo `letra` (`PosicionTipo`, `functions/src/patrimonioPrecios.ts:10`). PPI
-  mapea `LETRAS` a `bono` (`src/datos/compartido/clasificacionPPI.ts:20`); en Balanz y en la corrida
-  el tipo lo pone el importador o la ingesta (supuesto: `bono`, no verificado para TZXM7). Si es
-  `bono`, se busca en `arg_bonds` (`PANEL_POR_TIPO`, `patrimonioPrecios.ts:58`), donde está, y se
-  divide por 100 → **coincide**.
-- **Decidido y hecho (F9.196.1 Addendum 1 C):** `escalaData912(tipo)` da 100 fijo para bonos y ONs.
-  La escala de PPI ya no se aplica al precio de data912. Lo que sigue es el análisis que llevó a
-  esa decisión.
-- **Ojo con un detalle (resuelto):** si PPI guardó una escala para la especie (`escalaPPI`), el código usa esa
-  escala también para el precio de data912. Lo medido dice que data912 es siempre por 100 en bonos,
-  letras y ONs, sin depender de lo que diga PPI. Si alguna especie tuviera `nominalInPrice` = 1 en
-  PPI, el precio de data912 quedaría 100 veces alto (el test `functions/src/h2a.test.ts:215` fija
-  justamente `escalaData912('on', 1) === 1`). La escala de PPI se guarda solo cuando data912 no trajo
-  la especie y se usa el respaldo de PPI (`patrimonioPreciosCron.ts`, `respaldoPPI`), y después no
-  vence: el riesgo es condicional, pero real. Con TLCPO no pasa, porque PPI también da 100. Lo más seguro sería
-  que `escalaData912` devuelva 100 fijo para bonos y ONs y dejar la escala de PPI solo para el
-  precio de PPI. Es una decisión para tomar: esta medición no cambia código.
+Esto pasa por tipo:
+- **Bonos:** 100, que **coincide** con lo medido.
+- **ONs:** 100. **Coincide** en la única ON medida (TLCPO). Es un solo dato: otra ON podría
+  publicarse distinto. No hay razón para pensarlo, pero no está medido.
+- **Letras:** no hay un tipo `letra` (`PosicionTipo`, `functions/src/patrimonioPrecios.ts:10`).
+  - PPI mapea `LETRAS` a `bono` (`src/datos/compartido/clasificacionPPI.ts:20`).
+  - En Balanz y en la corrida, el tipo lo pone el importador o la ingesta. Se supone `bono`, pero no
+    está verificado para TZXM7.
+  - Si es `bono`, se busca en `arg_bonds` (`PANEL_POR_TIPO`, `patrimonioPrecios.ts:58`), donde está,
+    y se divide por 100: **coincide**.
+
+La escala de PPI (`nominalInPrice` / `escalaPPI`) se usa **solo** para el precio que viene de PPI
+(`respaldoPPI` en `patrimonioPreciosCron.ts`). El test `functions/src/h2a.test.ts:215` fija
+`escalaData912('on') === 100` y `escalaData912('bono') === 100`. El test `:216-219` comprueba que un
+bono con `escalaPPI = 1` guardada no cambia el precio de data912.
+
+### Antes del Addendum 1 C (histórico)
+
+- El código hacía `return escalaPPI ?? 100` para bonos y ONs, o sea que usaba la escala de PPI
+  también para el precio de data912.
+- La escala de PPI se guardaba cuando data912 no traía la especie y se usaba el respaldo de PPI, y
+  después no vencía. Si PPI hubiera dado `nominalInPrice` = 1 para un bono, el precio de data912
+  habría quedado 100 veces alto.
+- Esta medición mostró que data912 es siempre por 100, diga lo que diga PPI. Juan decidió fijarla
+  en 100 (Addendum 1 C, 21/10/2026).

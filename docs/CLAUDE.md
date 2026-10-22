@@ -2095,12 +2095,12 @@ Cuatro usuarios reales: Juan y Maria (admins, login con Google), Federico y Sofi
     indicadores y análisis IA plegados), Tenencias con orden y buscador.
   Código compartido en `src/datos/compartido/` (copia en `functions/src/compartido/`,
   `scripts/verificarCopiasIdenticas.ts`). Verificación: `npx tsx scripts/verificarF9196.ts` (cubre
-  H1–H6 con datos sintéticos) y los bancos `functions/src/{ppiApi,h2a,h2c,h5,patrimonioStops}.test.ts`.
+  H1–H6, F9.196.1 H0–H4 y el Addendum 1 A y B con datos sintéticos; C está en `h2a.test.ts`) y los bancos `functions/src/{ppiApi,h2a,h2c,h5,patrimonioStops}.test.ts`.
   `tsc`: 41 → 41, 0 en `functions/`. **Pendiente de cierre manual:** secretos `PPI_*` (5) y
   `BITFINEX_*` (2) antes del deploy (`actualizarPreciosDiarios` ahora los declara) → deploy de
   rules + functions + hosting → permiso de Cloud Run invoker para los callables nuevos → probar en la
   app (ver el reporte de cierre).
-- F9.196.1 (ajustes después del deploy de F9.196) — **código cerrado el 22/10/2026; falta el deploy**.
+- F9.196.1 (ajustes después del deploy de F9.196) — **código cerrado el 21/10/2026; falta el deploy**.
   Ver `docs/prompts/F9.196.1-ajustes.md` y los contratos en `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
   Cada hito tuvo revisión independiente y sus arreglos en un commit propio. Hitos:
   - **H0** — "Mis Instrumentos" de Balanz en dólares o en pesos:
@@ -3431,7 +3431,7 @@ de `docs/patrimonio/` quedó como nota que apunta acá).
 Schema JSON de validación: `docs/patrimonio/posicion.schema.json`.
 
 **Implementado hasta F9.196.1 + Addendum 1** (F9.196 deployada el 21/10/2026; F9.196.1 y el
-Addendum 1 con el código cerrado el 22/10/2026, falta su deploy: `docs/prompts/F9.196.1-deploy.md`). Detalle completo en
+Addendum 1 con el código cerrado el 21/10/2026, falta su deploy: `docs/prompts/F9.196.1-deploy.md`). Detalle completo en
 `docs/patrimonio/CLAUDE-PATRIMONIO.md`.
 
 ### Una corrida es el estado completo a una fecha (F9.189 §1)

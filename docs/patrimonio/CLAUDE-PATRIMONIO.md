@@ -371,7 +371,7 @@ Implementación en cadena (cada una depende de la anterior):
   - Contratos abajo, en las secciones "F9.196 …".
   - Verificación: `scripts/verificarF9196.ts` y `functions/src/{ppiApi,h2a,h2c,h5,patrimonioStops}.test.ts`.
 
-- **F9.196.1** — Ajustes después del deploy *(código cerrado el 22/10/2026; falta el deploy)*
+- **F9.196.1** — Ajustes después del deploy *(código cerrado el 21/10/2026; falta el deploy)*
   - H0 Balanz en dólares o en pesos · H1 flujos desde el 21/10, apareo al revés y "Para decidir" ·
     H2 ratio CEDEAR/ADR y valores absurdos · H3 candado de Bitfinex · H4 las dos fechas de Balanz ·
     H5 splits de PPI medidos, sin detector · H6 escala de data912 verificada.
@@ -1428,7 +1428,7 @@ Escribe `carteraViva/ultima` con la composición por cuenta, los efectos y la `f
   - **10.** "Letras" de PPI se tratan como `bono`.
   - **14.** Una tesis se importa aunque `resultado` no pase la validación.
   - **15.** El análisis de un solo ticker no pide tesis.
-- F9.196.1 §5 (22/10/2026): PPI no registra los splits de PAMP, TGSU2, TRAN ni YPFD
+- F9.196.1 §5 (21/10/2026): PPI no registra los splits de PAMP, TGSU2, TRAN ni YPFD
   (`docs/patrimonio/ppi-splits-medicion.md`). No hay detector de splits y siguen `costoSospechoso`
   (decisión de Juan del 21/10: quedan así por ahora).
 - F9.196.1 Addendum 1 (21/10/2026), decisiones aceptadas por Juan:
