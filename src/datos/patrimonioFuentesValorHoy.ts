@@ -11,7 +11,10 @@ export type DocFuentesValorHoy = {
   frescura?: string[] | null;
   tcViejo?: boolean | null;
   inconsistencias?: string[] | null;
-  cuentas?: Array<{ cuenta: string; fuente?: string | null; leidoEn?: string | null; error?: string | null }> | null;
+  cuentas?: Array<{
+    cuenta: string; fuente?: string | null; leidoEn?: string | null; error?: string | null;
+    porArchivo?: boolean; tenenciaDel?: string | null; cajaAl?: string | null;
+  }> | null;
 };
 
 export type AvisoValorHoy =
@@ -45,6 +48,12 @@ export function fechaLecturaCripto(frescura: string[], hoy: string): string | nu
 
 /** Más de esto (en días hábiles) entre la lectura de una cuenta con API y el cálculo = fuente vieja. */
 export const DIAS_HABILES_FUENTE_VIEJA = 1;
+/**
+ * Nota de revisión 5 — lo mismo para las cuentas por archivo (Balanz), más largo que el de las APIs:
+ * la app revalúa la tenencia con el precio del día, así que el archivo solo hay que volver a subirlo
+ * si operaste. Se mira la tenencia ("Mis Instrumentos") y la caja anclada (archivo de Movimientos).
+ */
+export const DIAS_HABILES_ARCHIVO_VIEJO = 5;
 
 /**
  * Los avisos del valor de hoy:
@@ -70,8 +79,18 @@ export function avisosValorHoy(cv: DocFuentesValorHoy | null | undefined): Aviso
       if (!yaEsta) out.push({ tipo: 'error_cuenta', texto: `${c.cuenta}: la última sincronización falló (${c.error})` });
       continue;
     }
-    // Solo las cuentas con API de verdad (PPI, Bitfinex): un "Mis Instrumentos" de hace días no es
-    // una fuente vieja (la app lo revalúa con el precio del día; se resube solo si hubo operaciones).
+    // Cuentas por archivo (nota de revisión 5): tenencia y caja, cada una con su aviso y qué subir
+    // (dos avisos si las dos están viejas: son dos archivos distintos).
+    if (c.porArchivo && hoy) {
+      if (c.tenenciaDel && diasHabilesEntre(c.tenenciaDel, hoy) > DIAS_HABILES_ARCHIVO_VIEJO) {
+        out.push({ tipo: 'fuente_vieja', texto: `${c.cuenta}: tenencia del ${ddmm(c.tenenciaDel)} (subí un Mis Instrumentos más nuevo)` });
+      }
+      if (c.cajaAl && diasHabilesEntre(c.cajaAl, hoy) > DIAS_HABILES_ARCHIVO_VIEJO) {
+        out.push({ tipo: 'fuente_vieja', texto: `${c.cuenta}: caja al ${ddmm(c.cajaAl)} (subí un Movimientos más nuevo)` });
+      }
+      continue;
+    }
+    // Las cuentas con API de verdad (PPI, Bitfinex), con su umbral de 1 día hábil.
     const leida = fechaArgValida(c.leidoEn);
     if (c.fuente === 'api' && rotuloFuenteCuenta(c.fuente, c.cuenta, frescura) === 'API' && leida && hoy) {
       if (diasHabilesEntre(leida, hoy) > DIAS_HABILES_FUENTE_VIEJA) out.push({ tipo: 'fuente_vieja', texto: `${c.cuenta} (leída el ${ddmm(leida)})` });
@@ -86,7 +105,8 @@ export function avisosValorHoy(cv: DocFuentesValorHoy | null | undefined): Aviso
 }
 
 /** "API" / "archivo" / "carga" / "manual", para la tabla por cuenta. */
-export function rotuloFuenteCuenta(fuente: string | null | undefined, cuenta: string, frescura: string[] | null | undefined): string {
+export function rotuloFuenteCuenta(fuente: string | null | undefined, cuenta: string, frescura: string[] | null | undefined, porArchivo?: boolean): string {
+  if (porArchivo) return 'archivo';
   if (fuente === 'manual') return 'manual';
   if (fuente === 'corrida') return 'carga';
   if (fuente === 'api') {

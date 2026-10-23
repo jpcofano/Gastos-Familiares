@@ -106,12 +106,16 @@ export default function FuentesValorHoyCard({ cv, privado, usd, fechaCorrida }: 
             {cuentas.map((c, i) => {
               const dif = typeof c.valorUsd === 'number' && typeof c.valorCargaUsd === 'number' ? c.valorUsd - c.valorCargaUsd : null;
               const colorDif = dif === null ? undefined : dif >= 0 ? 'var(--gf-income)' : 'var(--gf-expense)';
-              const fuente = rotuloFuenteCuenta(c.fuente, c.cuenta, frescura);
+              const fuente = rotuloFuenteCuenta(c.fuente, c.cuenta, frescura, c.porArchivo);
+              // Nota de revisión 5: en Balanz por archivo, las dos fechas (tenencia y caja) en vez de la fecha base.
+              const fechas = c.porArchivo
+                ? `tenencia ${c.tenenciaDel ? ddmm(c.tenenciaDel) : `${ddmm(c.fechaBase)} (carga)`} · caja ${c.cajaAl ? ddmm(c.cajaAl) : 'de la carga'}`
+                : ddmm(c.fechaBase);
               return chico ? (
                 <div key={i} style={{ padding: '7px 0', borderTop: i ? '1px solid var(--gf-gray-100)' : 'none', fontSize: 12 }}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere' }}>{c.cuenta}{c.error ? ' ⚠' : ''}</span>
-                    <span style={sub}>{fuente} · {ddmm(c.fechaBase)}</span>
+                    <span style={sub}>{fuente} · {fechas}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>
                     <span>carga {fmtUsd(c.valorCargaUsd)}</span>
@@ -123,7 +127,7 @@ export default function FuentesValorHoyCard({ cv, privado, usd, fechaCorrida }: 
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) 0.8fr 0.7fr 1fr 1fr 1fr', gap: 8, fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--gf-gray-100)', fontVariantNumeric: 'tabular-nums', alignItems: 'baseline' }}>
                   <span style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{c.cuenta}{c.error ? ' ⚠' : ''}</span>
                   <span>{fuente}</span>
-                  <span>{ddmm(c.fechaBase)}</span>
+                  <span style={c.porArchivo ? { fontSize: 11 } : undefined}>{fechas}</span>
                   <span style={{ textAlign: 'right' }}>{fmtUsd(c.valorCargaUsd)}</span>
                   <span style={{ textAlign: 'right' }}>{fmtUsd(c.valorUsd)}</span>
                   <span style={{ textAlign: 'right', fontWeight: 700, color: colorDif }}>{fmtDif(dif)}</span>

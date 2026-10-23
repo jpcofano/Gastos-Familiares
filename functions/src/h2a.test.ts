@@ -235,6 +235,16 @@ console.log('\n=== cron de cartera viva (datos sintéticos) ===');
     t('nota 2: flujos reales = depósitos − retiros desde el corte, en USD (ARS con el MEP; sin compras, inferidos ni anteriores al corte)',
       Math.abs(flujosRealesUsd(movs, { fecha: '2026-10-13' }, 1500) - (1000 - 100)) < 1e-9 && flujosRealesUsd(movs, { fecha: '2026-10-13' }, null) === 1000);
     const cvM = armarCarteraViva(corridaB, [], movs, { hoy: '2026-10-22', porIdentidad: {} }, null, [], { valor: 1500, fuente: 'dolarapi-bolsa', fechaCotizacion: '2026-10-22', viejo: false });
+    // Nota de revisión 5: las fechas de Balanz por archivo quedan en cuentas[] (y nada para las demás).
+    const vivaArchivo = { cuenta: 'Balanz 1120830', fuente: 'archivo_balanz', leidoEn: '2026-10-21T17:33:30-03:00', exportadoEn: '2026-10-21T17:33:30-03:00', error: null,
+      cajaAnclada: { estado: 'ok', hasta: '2026-09-21' }, saldos: { ARS: 0, USD: 0 },
+      posiciones: [{ cuenta: 'Balanz 1120830', titular: null, ticker: 'GD30', tipo: 'bono', sector: 'x', pais_riesgo: 'AR', moneda_origen: 'USD', valor_origen: 100, cantidad: 100, fuente: 'archivo_balanz', revisar: false }],
+    } as unknown as Parameters<typeof armarCarteraViva>[1][number];
+    const cvA = armarCarteraViva(corridaB, [vivaB, vivaArchivo], [], { hoy: '2026-10-22', porIdentidad: {} }, null, [], null);
+    const cA = cvA.cuentas.find(c => c.cuenta === 'Balanz 1120830')!;
+    const cBfx = cvA.cuentas.find(c => c.cuenta === 'Bitfinex')!;
+    t('nota 5: Balanz por archivo trae porArchivo, tenenciaDel y cajaAl; las demás cuentas no',
+      cA.porArchivo === true && cA.tenenciaDel === '2026-10-21' && cA.cajaAl === '2026-09-21' && cBfx.porArchivo === undefined && cBfx.tenenciaDel === undefined, { cA, cBfx });
     t('nota 2: efectoMovimientos = flujos + sin explicar', cvM.efectoFlujosUsd === 900 && Math.abs((cvM.efectoFlujosUsd ?? 0) + (cvM.efectoSinExplicarUsd ?? 0) - cvM.efectoMovimientosUsd) < 0.011, { m: cvM.efectoMovimientosUsd, f: cvM.efectoFlujosUsd, s: cvM.efectoSinExplicarUsd });
   }
 

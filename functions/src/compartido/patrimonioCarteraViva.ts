@@ -121,6 +121,15 @@ export type CuentaCarteraViva = {
   error: string | null;
   valorUsd: number;
   valorCargaUsd: number;
+  /**
+   * F9.196 nota de revisión 5 — cuentas de Balanz por archivo. Opcionales: los documentos viejos no
+   * los traen. `porArchivo` = la cuenta viva es `archivo_balanz`; `tenenciaDel` = exportación del
+   * "Mis Instrumentos" (null si todavía no hay); `cajaAl` = última liquidación del archivo de
+   * Movimientos (`cajaAnclada.hasta`, null si no hay).
+   */
+  porArchivo?: boolean;
+  tenenciaDel?: string | null;
+  cajaAl?: string | null;
 };
 
 export type CarteraViva = {
@@ -470,6 +479,10 @@ export function armarCarteraViva(
     const viva = vivas.get(nombre);
     const conApi = cuentasConApi.has(nombre);
     if (viva?.error) inconsistencias.push(`${nombre}: la última sincronización falló (${viva.error})`);
+    // Nota de revisión 5: las dos fechas de Balanz por archivo, como dato (no hace falta leer la frescura).
+    const archivo = viva?.fuente === 'archivo_balanz'
+      ? viva as CuentaViva & { exportadoEn?: string; cajaAnclada?: { hasta?: string } }
+      : null;
     return {
       cuenta: nombre,
       fuente: conApi ? 'api' : 'corrida',
@@ -479,6 +492,11 @@ export function armarCarteraViva(
       error: viva?.error ?? null,
       valorUsd: suma(salida.filter(l => l.cuenta === nombre).map(l => l.valorUsd)),
       valorCargaUsd: suma(trabajo.filter(l => l.cuenta === nombre).map(l => l.v0)),
+      ...(archivo ? {
+        porArchivo: true,
+        tenenciaDel: archivo.posiciones?.length ? (archivo.exportadoEn ?? archivo.leidoEn).slice(0, 10) : null,
+        cajaAl: archivo.cajaAnclada?.hasta ?? null,
+      } : {}),
     };
   });
   for (const nombre of [...new Set(manuales.map(m => m.cuenta))]) {

@@ -427,6 +427,19 @@ console.log('\n=== F9.196 nota de revisión 4: avisos del valor de hoy ===');
   ok(inc.length === 2 && inc.every(x => x.tipo === 'inconsistencia'), 'cada inconsistencia → 1 aviso (no se esconde ninguna)');
   const viejoDoc = avisosValorHoy({ calculadaEnISO: '2026-10-22T23:23:00Z', frescura: ['PPI XXXXX: API hoy 18:10'] });
   ok(viejoDoc.length === 1 && viejoDoc[0].tipo === 'sin_lectura_cripto' && avisosValorHoy(null).length === 0, 'documento viejo sin campos: no rompe');
+  // Nota de revisión 5: Balanz por archivo, tenencia y caja con 5 días hábiles (cálculo del jueves 22/10).
+  const balanz = (tenenciaDel: string | null, cajaAl: string | null) => avisosValorHoy({ ...base, cuentas: [
+    ...base.cuentas.filter(c => !c.cuenta.startsWith('Balanz')),
+    { cuenta: 'Balanz 1120830', fuente: 'api', leidoEn: `${tenenciaDel ?? '2026-10-22'}T17:00:00-03:00`, error: null, porArchivo: true, tenenciaDel, cajaAl },
+  ] });
+  ok(balanz('2026-10-19', '2026-10-19').length === 0, 'Balanz: tenencia y caja a 3 días hábiles → sin aviso');
+  const cajaVieja = balanz('2026-10-19', '2026-09-21');
+  ok(cajaVieja.length === 1 && cajaVieja[0].texto === 'Balanz 1120830: caja al 21/09 (subí un Movimientos más nuevo)', 'Balanz: caja a 23 días hábiles → 1 aviso que dice qué subir', cajaVieja);
+  const lasDos = balanz('2026-10-01', '2026-09-21');
+  ok(lasDos.length === 2 && lasDos.some(x => x.texto.includes('tenencia del 01/10 (subí un Mis Instrumentos')) && lasDos.some(x => x.texto.includes('caja al 21/09')),
+    'Balanz: tenencia y caja viejas → 2 avisos (son dos archivos distintos para subir)', lasDos);
+  ok(balanz(null, '2026-10-21').length === 0 && balanz('2026-10-21', null).length === 0, 'Balanz sin Mis Instrumentos o sin Movimientos: no avisa por lo que no hay');
+  ok(rotuloFuenteCuenta('api', 'Balanz 1', [], true) === 'archivo', 'porArchivo manda sobre el texto de la frescura');
   ok(rotuloFuenteCuenta('api', 'Balanz 999001', base.frescura) === 'archivo' && rotuloFuenteCuenta('api', 'PPI XXXXX', base.frescura) === 'API'
     && rotuloFuenteCuenta('corrida', 'Nexo', base.frescura) === 'carga' && rotuloFuenteCuenta('manual', 'ACN', []) === 'manual' && rotuloFuenteCuenta(undefined, 'X', null) === '—',
     'tabla por cuenta: fuente API / archivo / carga / manual, y "—" si falta');
