@@ -98,7 +98,7 @@ export default function ParaDecidirCard({ manuales, privado, onAplicado }: {
     } catch (e) {
       // Puede haber cortado el cliente con el server todavía aplicando: se relee igual.
       await recargar();
-      setAviso({ texto: `No se pudo aplicar: ${mensajeDeErrorCallable(e)}`, error: true });
+      setAviso({ texto: `No se pudo aplicar: ${mensajeDeErrorCallable(e, navigator.onLine)}`, error: true });
     } finally {
       setOcupado(null);
     }

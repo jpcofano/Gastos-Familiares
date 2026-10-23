@@ -5,8 +5,11 @@
 /**
  * A — el texto para mostrar de un error de callable. Firebase devuelve `internal` sin texto cuando
  * la Function se cae, se corta por timeout o tira algo que no es HttpsError: en ese caso se explica.
+ * Nota de revisión 5.2: sin conexión, el SDK también da `internal` sin texto; si quien llama sabe que
+ * no hay red (`online === false`, de `navigator.onLine`), se dice eso. Pura: `online` es un parámetro.
  */
-export function mensajeDeErrorCallable(e: unknown): string {
+export function mensajeDeErrorCallable(e: unknown, online = true): string {
+  if (online === false) return 'Sin conexión: revisá internet y probá de nuevo';
   const code = typeof (e as { code?: unknown })?.code === 'string' ? (e as { code: string }).code : '';
   const msg = String((e as Error)?.message ?? e ?? '').trim();
   const sinTexto = !msg || msg.toLowerCase() === 'internal';

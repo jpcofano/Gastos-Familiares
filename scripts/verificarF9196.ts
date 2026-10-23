@@ -382,6 +382,11 @@ console.log('\n=== F9.196.1 Addendum 1 A: mensaje del internal sin texto ===');
   const tiempo = mensajeDeErrorCallable(Object.assign(new Error('deadline-exceeded'), { code: 'functions/deadline-exceeded' }));
   ok(sinTexto.startsWith('No respondió la función') && conTexto === 'Faltan secretos de PPI' && tiempo.startsWith('La función tardó'),
     'internal sin texto → "No respondió la función…"; con texto → el texto real; deadline → aviso de tiempo', { sinTexto, conTexto, tiempo });
+  // Nota de revisión 5.2: sin conexión manda, con cualquier error.
+  const offline = mensajeDeErrorCallable(Object.assign(new Error('internal'), { code: 'functions/internal' }), false);
+  ok(offline === 'Sin conexión: revisá internet y probá de nuevo' && mensajeDeErrorCallable(new Error('x'), false) === offline
+    && mensajeDeErrorCallable(Object.assign(new Error('internal'), { code: 'functions/internal' }), true).startsWith('No respondió la función'),
+    'online === false → "Sin conexión…"; online (o sin pasar) → como antes', offline);
 }
 
 console.log('\n=== F9.196.1 Addendum 1 B: ok: false nunca es éxito ===');

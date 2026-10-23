@@ -1525,7 +1525,7 @@ function BotonesSincronizar({ onActualizado, onToast, textoRecalcular = 'Recalcu
         let rc: Awaited<ReturnType<typeof recalcularCarteraViva>>;
         try { rc = await recalcularCarteraViva(); }
         catch (e) {
-          onToast(`PPI sincronizado (${r.posiciones} posiciones, ${r.movimientos} movimientos), pero no se pudo calcular el valor de hoy: ${mensajeDeErrorCallable(e)}`, true);
+          onToast(`PPI sincronizado (${r.posiciones} posiciones, ${r.movimientos} movimientos), pero no se pudo calcular el valor de hoy: ${mensajeDeErrorCallable(e, navigator.onLine)}`, true);
           onActualizado();
           return;
         }
@@ -1536,7 +1536,7 @@ function BotonesSincronizar({ onActualizado, onToast, textoRecalcular = 'Recalcu
       }
       onActualizado();
     } catch (e) {
-      onToast(`${cual === 'ppi' ? 'No se pudo sincronizar PPI' : cual === 'bitfinex' ? 'No se pudo sincronizar Bitfinex' : 'No se pudo calcular el valor de hoy'}: ${mensajeDeErrorCallable(e)}`, true);
+      onToast(`${cual === 'ppi' ? 'No se pudo sincronizar PPI' : cual === 'bitfinex' ? 'No se pudo sincronizar Bitfinex' : 'No se pudo calcular el valor de hoy'}: ${mensajeDeErrorCallable(e, navigator.onLine)}`, true);
     } finally {
       setOcupado(null);
     }
@@ -5057,12 +5057,12 @@ export default function Patrimonio() {
         if (rc.avisoFlujos) setToast(prev => ({ texto: `${prev?.texto ? `${prev.texto} ` : ''}⚠ Ojo: ${rc.avisoFlujos}.`, error: false }));
         // Si lo que falla es solo la recarga, se dice eso (el cálculo sí se hizo).
         return cargarCarteraViva().then(setCarteraViva).catch(e => {
-          setToast({ texto: `Valor de hoy recalculado, pero no se pudo recargar en pantalla: ${mensajeDeErrorCallable(e)}. Recargá la página.`, error: true });
+          setToast({ texto: `Valor de hoy recalculado, pero no se pudo recargar en pantalla: ${mensajeDeErrorCallable(e, navigator.onLine)}. Recargá la página.`, error: true });
         });
       })
       .catch(e => {
         console.warn('[carteraViva] no se pudo recalcular:', e);
-        setToast({ texto: `No se pudo calcular el valor de hoy: ${mensajeDeErrorCallable(e)}`, error: true });
+        setToast({ texto: `No se pudo calcular el valor de hoy: ${mensajeDeErrorCallable(e, navigator.onLine)}`, error: true });
       });
   };
   // F9.196 Addendum 2 §A — "Actualizar Balanz" (Mis Instrumentos → cuentasVivas).
