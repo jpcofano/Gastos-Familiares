@@ -70,6 +70,8 @@ import { accionesAMirar, ordenarTenencias, type OrdenTenencias } from '../datos/
 import AccionesAMirarCard from './AccionesAMirarCard';
 import { Plegable } from './FichaStopsTesis';
 import ParaDecidirCard from './ParaDecidirCard';
+import FuentesValorHoyCard, { ID_FUENTES_VALOR_HOY } from './FuentesValorHoyCard';
+import { avisosValorHoy } from '../datos/patrimonioFuentesValorHoy';
 import { cargarCarteraViva, sincronizarPPIAhora, sincronizarBitfinexAhora, recalcularCarteraViva, type DocCarteraViva } from '../datos/patrimonioCarteraVivaLectura';
 import { mensajeDeErrorCallable } from '../datos/patrimonioRecalcular';
 
@@ -1561,14 +1563,17 @@ function BotonesSincronizar({ onActualizado, onToast, textoRecalcular = 'Recalcu
 
 // ── F9.196 H2a — Hero "Valor de hoy (estimado)" ──────────────────────────────
 // El número grande es la cartera viva (`carteraViva/ultima`): cada cuenta con su mejor fuente y el
-// precio y el MEP del día. Abajo, la última carga y la diferencia separada en precios, dólar y
-// movimientos, más una línea de frescura por cuenta. Las inconsistencias se muestran, no se corrigen.
-function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
+// precio y el MEP del día. Abajo, la última carga y la diferencia separada en precios, dólar,
+// movimientos y sin explicar. Nota de revisión 4: la frescura por cuenta, el MEP y las
+// inconsistencias pasan a Configuración → "Fuentes del valor de hoy"; acá queda una línea con
+// "Calculado …", "⚠ N avisos" (se siguen mostrando, no se esconden) y "Ver fuentes".
+function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast, onVerFuentes }: {
   cv: DocCarteraViva; fijosUsd: number; tc: number;
   onActualizado: () => void; onToast: (texto: string, error: boolean) => void;
+  onVerFuentes: () => void;
 }) {
   const $ = useDinero();
-  const [verInconsistencias, setVerInconsistencias] = useState(false);
+  const avisos = avisosValorHoy(cv);
   const mep = cv.tc?.valor ?? tc;
   const diferencia = cv.totalUsd - cv.totalCargaUsd;
   const precioSinDolar = cv.efectoPreciosUsd - cv.efectoDolarUsd;
@@ -1604,23 +1609,23 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
         </div>
       </div>
       <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', margin: '14px 0 10px' }} />
-      <div style={{ fontSize: 11, opacity: .7, lineHeight: 1.55 }}>
-        {cv.frescura.map((l, i) => <div key={i}>{l}</div>)}
-        {calculada && <div style={{ opacity: .7 }}>Calculado {fmtFecha(calculada.slice(0, 10))} {calculada.slice(11, 16)}</div>}
+      {/* Nota de revisión 4: una sola línea; el detalle está en Configuración → "Fuentes del valor de hoy". */}
+      <div style={{ fontSize: 11, textAlign: 'center', lineHeight: 1.55, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '0 6px' }}>
+        <span style={{ opacity: .65 }}>Calculado {calculada ? `${calculada.slice(8, 10)}/${calculada.slice(5, 7)} ${calculada.slice(11, 16)}` : '—'}</span>
+        {avisos.length > 0 && (
+          <>
+            <span style={{ opacity: .4 }}>·</span>
+            <button onClick={onVerFuentes} style={{ background: 'none', border: 'none', padding: '4px 2px', margin: '-4px 0', color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
+              ⚠ {avisos.length} {avisos.length === 1 ? 'aviso' : 'avisos'}
+            </button>
+          </>
+        )}
+        <span style={{ opacity: .4 }}>·</span>
+        <button onClick={onVerFuentes} style={{ background: 'none', border: 'none', padding: '4px 2px', margin: '-4px 0', color: '#fff', opacity: .85, fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)', textDecoration: 'underline' }}>
+          Ver fuentes
+        </button>
       </div>
-      {cv.inconsistencias.length > 0 && (
-        <div style={{ marginTop: 8, fontSize: 11 }}>
-          <button onClick={() => setVerInconsistencias(v => !v)} style={{ background: 'none', border: 'none', padding: 0, color: '#fbbf24', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}>
-            {cv.inconsistencias.length} inconsistencia(s) {verInconsistencias ? '▴' : '▾'}
-          </button>
-          {verInconsistencias && (
-            <ul style={{ margin: '4px 0 0', paddingLeft: 16, opacity: .8, lineHeight: 1.45 }}>
-              {cv.inconsistencias.map((x, i) => <li key={i}>{x}</li>)}
-            </ul>
-          )}
-        </div>
-      )}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', margin: '12px 0 10px' }} />
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', margin: '10px 0 10px' }} />
       <div style={{ textAlign: 'center', opacity: .65 }}>
         <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', marginBottom: 3 }}>Patrimonio total (hoy)</div>
         <div style={{ fontSize: 24, fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{$.usd(cv.totalUsd + fijosUsd)}</div>
@@ -1630,7 +1635,7 @@ function HeroValorDeHoy({ cv, fijosUsd, tc, onActualizado, onToast }: {
   );
 }
 
-function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, posicionesCorrida, indicadores, identidadesHoy, onAbrirFicha, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
+function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, onVerFuentes, posicionesCorrida, indicadores, identidadesHoy, onAbrirFicha, tc, fechaCorrida, activosFijos, historial, flujos, informes, generandoInforme, onGenerarInforme, onToast, posiciones, manuales, topesRiesgo, riesgoConfigurado, factores }: {
   M: PatMetrics; tc: number; fechaCorrida: string;
   /** F9.196 H2a — métricas sobre la cartera viva (pesos, riesgo); `M` es la corrida. */
   Mhoy: PatMetrics;
@@ -1638,6 +1643,8 @@ function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, pos
   /** Fecha de corrida de una cartera viva desactualizada (calculada sobre otra corrida), o null. */
   carteraVivaVieja: string | null;
   onCarteraViva: () => void;
+  /** Nota de revisión 4 — ir a Configuración → "Fuentes del valor de hoy". */
+  onVerFuentes: () => void;
   /** La corrida (para la card cripto hasta H2c); `posiciones` es la cartera viva si existe. */
   posicionesCorrida: Posicion[];
   /** F9.196 H6 — para "Acciones a mirar". */
@@ -1695,7 +1702,7 @@ function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, pos
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {carteraViva && (
-        <HeroValorDeHoy cv={carteraViva} fijosUsd={fijosUsd} tc={tc} onActualizado={onCarteraViva} onToast={onToast} />
+        <HeroValorDeHoy cv={carteraViva} fijosUsd={fijosUsd} tc={tc} onActualizado={onCarteraViva} onToast={onToast} onVerFuentes={onVerFuentes} />
       )}
       {/* 1. Hero negro — sin cartera viva calculada todavía: el de la corrida */}
       {!carteraViva && (
@@ -4386,7 +4393,9 @@ function PoliticaRiesgoCard({ topes, configurado, onGuardar }: {
   );
 }
 
-function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onToast, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarFactores, onImportarCafciManual, onFlujosAplicados }: {
+function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, configCafci, cafciCarteras, sincronizandoCafci, topesRiesgo, riesgoConfigurado, onGuardarRiesgo, onToast, onEditFijo, onAddFijo, onEditManual, onAddManual, onToggleIA, onAddFlujo, onEditFlujo, onSincronizarCafci, onGuardarConfigCafci, onImportarFondosCafci, onImportarMappingCafci, onImportarFactores, onImportarCafciManual, onFlujosAplicados, carteraViva }: {
+  /** Nota de revisión 4 — `carteraViva/ultima`, para "Fuentes del valor de hoy". */
+  carteraViva: DocCarteraViva | null;
   /** F9.196.1 §1.c — después de "Aplicar" en "Para decidir": recargar flujos y cartera viva. */
   onFlujosAplicados: () => void;
   activosFijos: ActivoFijo[];
@@ -4420,6 +4429,8 @@ function ConfigTab({ activosFijos, manuales, configIA, fechaCorrida, flujos, con
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <PosicionesManualesCard manuales={manuales} fechaCorrida={fechaCorrida} onEdit={onEditManual} onAdd={onAddManual} />
       <ActivosFijosCard activosFijos={activosFijos} onEdit={onEditFijo} onAdd={onAddFijo} />
+      {/* Nota de revisión 4 — el detalle del hero "Valor de hoy": frescura, cuentas, inconsistencias y dólar. */}
+      <FuentesValorHoyCard cv={carteraViva} privado={$cfg.privado} usd={$cfg.usd} fechaCorrida={fechaCorrida} />
       {/* F9.196.1 §1.c — los depósitos y retiros sin par, arriba de los flujos manuales. */}
       <ParaDecidirCard
         manuales={flujos.filter(f => !(f as FlujoPatrimonio & { automatico?: boolean }).automatico)
@@ -5720,6 +5731,11 @@ export default function Patrimonio() {
               onAbrirFicha={ident => { setFichaAbierta(ident); setTab('tenencias'); }}
               M={M} Mhoy={Mhoy ?? M} carteraViva={cvVigente} carteraVivaVieja={!!carteraViva && !cvVigente ? carteraViva.fechaCorrida : null} posicionesCorrida={posiciones}
               onCarteraViva={() => { cargarCarteraViva().then(setCarteraViva).catch(() => setCarteraViva(null)); }}
+              onVerFuentes={() => {
+                setTab('config');
+                // Después de que la pestaña se monte: scroll a la sección.
+                setTimeout(() => document.getElementById(ID_FUENTES_VALOR_HOY)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+              }}
               tc={tc} fechaCorrida={fechaCorrida}
               activosFijos={activosFijos}
               historial={historial}
@@ -5890,6 +5906,7 @@ export default function Patrimonio() {
           )}
           {tab === 'config' && (
             <ConfigTab
+              carteraViva={carteraViva}
               onFlujosAplicados={() => {
                 cargarFlujos().then(setFlujos).catch(e => console.warn('[flujos]', e));
                 cargarCarteraViva().then(setCarteraViva).catch(e => console.warn('[carteraViva]', e));

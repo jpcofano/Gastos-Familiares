@@ -30,6 +30,8 @@ import { conCandado, type DbCandado } from '../functions/src/candado';
 import { frescuraCartera } from '../functions/src/carteraVivaCron';
 // F9.196.1 Addendum 1 — A y B.
 import { mensajeDeErrorCallable, exigirRecalculoOk } from '../src/datos/patrimonioRecalcular';
+// F9.196 nota de revisión 4.
+import { avisosValorHoy, rotuloFuenteCuenta } from '../src/datos/patrimonioFuentesValorHoy';
 
 let fallas = 0;
 const ok = (cond: boolean, msg: string, detalle?: unknown) => {
@@ -390,6 +392,44 @@ console.log('\n=== F9.196.1 Addendum 1 B: ok: false nunca es éxito ===');
   const conFlujos = exigirRecalculoOk({ ok: true, totalUsd: 100, flujos: { internas: 0, pendientes: 0, flujos: 0, sinTc: 0, error: 'timeout' } });
   ok(tira({ ok: true, totalUsd: 100 }) === null && conFlujos.avisoFlujos === 'los flujos automáticos fallaron: timeout',
     'ok: true → no tira; si fallaron los flujos, el aviso va aparte');
+}
+
+console.log('\n=== F9.196 nota de revisión 4: avisos del valor de hoy ===');
+{
+  const base = {
+    calculadaEnISO: '2026-10-22T23:23:00Z', tcViejo: false, inconsistencias: [] as string[],
+    frescura: ['PPI XXXXX: API hoy 18:10', 'Balanz 999001: tenencia del 16/10 · caja al 16/10', 'Bitfinex: API hoy 09:20', 'Cripto: lectura hoy 09:15', 'MEP $1.549, hoy 20:23'],
+    cuentas: [
+      { cuenta: 'PPI XXXXX', fuente: 'api', leidoEn: '2026-10-22T21:10:00Z', error: null },
+      { cuenta: 'Balanz 999001', fuente: 'api', leidoEn: '2026-10-16T17:42:00-03:00', error: null },
+      { cuenta: 'Bitfinex', fuente: 'api', leidoEn: '2026-10-22T12:20:00Z', error: null },
+      { cuenta: 'Nexo', fuente: 'corrida', leidoEn: null, error: null },
+    ],
+  };
+  ok(avisosValorHoy(base).length === 0, '0 avisos: todo al día (un "Mis Instrumentos" de días atrás no es fuente vieja)', avisosValorHoy(base));
+  const fechas = avisosValorHoy({ ...base, frescura: base.frescura.map(l => l.startsWith('Balanz') ? 'Balanz 999001: tenencia del 21/10 · caja al 16/10 · ⚠ fechas distintas: una operación entre las dos puede estar en una y no en la otra' : l) });
+  ok(fechas.length === 1 && fechas[0].tipo === 'fechas_distintas', 'fechas distintas (caja ≠ tenencia) → 1 aviso', fechas);
+  // Como lo arma armarCarteraViva: la falla está en `cuentas[].error` Y en `inconsistencias[]`.
+  const conError = { ...base, cuentas: base.cuentas.map(c => c.cuenta === 'Bitfinex' ? { ...c, leidoEn: '2026-10-13T12:20:00Z', error: 'HTTP 500' } : c) };
+  const err = avisosValorHoy({ ...conError, inconsistencias: ['Bitfinex: la última sincronización falló (HTTP 500)'] });
+  ok(err.length === 1 && err[0].tipo === 'inconsistencia', 'cuenta con error → 1 aviso, no 2 (ya viene en inconsistencias) ni fuente vieja', err);
+  const errSolo = avisosValorHoy(conError);
+  ok(errSolo.length === 1 && errSolo[0].tipo === 'error_cuenta', 'cuenta con error que no está en inconsistencias (doc viejo) → igual 1 aviso', errSolo);
+  const vieja = avisosValorHoy({ ...base, cuentas: base.cuentas.map(c => c.cuenta === 'PPI XXXXX' ? { ...c, leidoEn: '2026-10-19T21:10:00Z' } : c) });
+  ok(vieja.length === 1 && vieja[0].tipo === 'fuente_vieja', 'cuenta con API leída hace más de 1 día hábil → fuente vieja', vieja);
+  ok(avisosValorHoy({ ...base, tcViejo: true }).map(x => x.tipo).join() === 'tc_viejo', 'tcViejo → 1 aviso');
+  const sinCripto = avisosValorHoy({ ...base, frescura: base.frescura.map(l => l.startsWith('Cripto') ? 'Cripto: sin lectura de precios' : l) });
+  ok(sinCripto.length === 1 && sinCripto[0].tipo === 'sin_lectura_cripto', 'sin lectura cripto → 1 aviso');
+  const criptoVieja = avisosValorHoy({ ...base, frescura: base.frescura.map(l => l.startsWith('Cripto') ? 'Cripto: lectura 13/10' : l) });
+  ok(criptoVieja.length === 1 && criptoVieja[0].tipo === 'fuente_vieja' && criptoVieja[0].texto === 'Cripto (lectura del 13/10)', 'lectura cripto de más de 1 día hábil → fuente vieja', criptoVieja);
+  ok(avisosValorHoy({ ...base, calculadaEnISO: 'no-es-fecha', cuentas: [{ cuenta: 'X', fuente: 'api', leidoEn: 'tampoco' }] }).length === 0, 'fechas inválidas: no rompe ni inventa avisos');
+  const inc = avisosValorHoy({ ...base, inconsistencias: ['Bitfinex BTC: sin precio, valuado a la carga', 'Nexo: algo'] });
+  ok(inc.length === 2 && inc.every(x => x.tipo === 'inconsistencia'), 'cada inconsistencia → 1 aviso (no se esconde ninguna)');
+  const viejoDoc = avisosValorHoy({ calculadaEnISO: '2026-10-22T23:23:00Z', frescura: ['PPI XXXXX: API hoy 18:10'] });
+  ok(viejoDoc.length === 1 && viejoDoc[0].tipo === 'sin_lectura_cripto' && avisosValorHoy(null).length === 0, 'documento viejo sin campos: no rompe');
+  ok(rotuloFuenteCuenta('api', 'Balanz 999001', base.frescura) === 'archivo' && rotuloFuenteCuenta('api', 'PPI XXXXX', base.frescura) === 'API'
+    && rotuloFuenteCuenta('corrida', 'Nexo', base.frescura) === 'carga' && rotuloFuenteCuenta('manual', 'ACN', []) === 'manual' && rotuloFuenteCuenta(undefined, 'X', null) === '—',
+    'tabla por cuenta: fuente API / archivo / carga / manual, y "—" si falta');
 }
 
 h0aH4.then(() => {
