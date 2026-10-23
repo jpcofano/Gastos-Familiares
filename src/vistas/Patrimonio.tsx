@@ -5966,34 +5966,40 @@ export default function Patrimonio() {
         />
       )}
 
-      {/* F9.101 — CTA post-ingesta: navega a Research con la card de actualización integral */}
-      {toastIngestaOk && (
-        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 60, maxWidth: 480, margin: '0 auto', background: 'var(--gf-ink)', color: '#fff', borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10, boxShadow: 'var(--shadow-card)' }}>
-          <Icon name="check" size={16} color="var(--gf-emerald-line, #0a7d5e)" style={{ marginTop: 2, flexShrink: 0 }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 12.5 }}>Corrida actualizada</div>
-            <button
-              onClick={() => { setTab('research'); setToastIngestaOk(false); }}
-              style={{ marginTop: 6, background: 'rgba(255,255,255,.16)', border: 'none', borderRadius: 8, padding: '7px 10px', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
-            >
-              Actualizar análisis con la cartera nueva →
-            </button>
-          </div>
-          <button onClick={() => setToastIngestaOk(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
-            <Icon name="x" size={15} color="#fff" />
-          </button>
-        </div>
-      )}
-
-      {/* F9.102 3b — toast mínimo de resultado (éxito o error). F9.115 — lo comparten
-          "Sincronizar CAFCI" y las descargas de corrida/dossier. */}
-      {toast && (
-        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 60, maxWidth: 480, margin: '0 auto', background: 'var(--gf-ink)', color: '#fff', borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10, boxShadow: 'var(--shadow-card)' }}>
-          <Icon name={toast.error ? 'triangle-alert' : 'check'} size={16} color={toast.error ? '#fca5a5' : 'var(--gf-emerald-line, #0a7d5e)'} style={{ marginTop: 2, flexShrink: 0 }} />
-          <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.4 }}>{toast.texto}</div>
-          <button onClick={() => setToast(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
-            <Icon name="x" size={15} color="#fff" />
-          </button>
+      {/* Nota de revisión 5.3 — un solo contenedor fijo con los dos toasts en columna: si aparecen juntos,
+          el de resultado (p. ej. un error del valor de hoy) va arriba y ninguno tapa al otro ni al botón
+          "Actualizar análisis…". pointerEvents: el contenedor no bloquea la pantalla, los toasts sí reciben clics. */}
+      {(toast || toastIngestaOk) && (
+        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 60, maxWidth: 480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none' }}>
+          {/* F9.102 3b — toast mínimo de resultado (éxito o error). F9.115 — lo comparten
+              "Sincronizar CAFCI" y las descargas de corrida/dossier. */}
+          {toast && (
+            <div role={toast.error ? 'alert' : 'status'} style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10, boxShadow: 'var(--shadow-card)', pointerEvents: 'auto' }}>
+              <Icon name={toast.error ? 'triangle-alert' : 'check'} size={16} color={toast.error ? '#fca5a5' : 'var(--gf-emerald-line, #0a7d5e)'} style={{ marginTop: 2, flexShrink: 0 }} />
+              <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.4 }}>{toast.texto}</div>
+              <button onClick={() => setToast(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+                <Icon name="x" size={15} color="#fff" />
+              </button>
+            </div>
+          )}
+          {/* F9.101 — CTA post-ingesta: navega a Research con la card de actualización integral */}
+          {toastIngestaOk && (
+            <div style={{ background: 'var(--gf-ink)', color: '#fff', borderRadius: 14, padding: '12px 14px', display: 'flex', alignItems: 'flex-start', gap: 10, boxShadow: 'var(--shadow-card)', pointerEvents: 'auto' }}>
+              <Icon name="check" size={16} color="var(--gf-emerald-line, #0a7d5e)" style={{ marginTop: 2, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 12.5 }}>Corrida actualizada</div>
+                <button
+                  onClick={() => { setTab('research'); setToastIngestaOk(false); }}
+                  style={{ marginTop: 6, background: 'rgba(255,255,255,.16)', border: 'none', borderRadius: 8, padding: '7px 10px', color: '#fff', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-base)' }}
+                >
+                  Actualizar análisis con la cartera nueva →
+                </button>
+              </div>
+              <button onClick={() => setToastIngestaOk(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, flexShrink: 0 }}>
+                <Icon name="x" size={15} color="#fff" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 
