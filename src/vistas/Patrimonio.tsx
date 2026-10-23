@@ -104,7 +104,7 @@ import {
 } from '../datos/patrimonioCriptoLectura';
 // F9.116 §1 — calcMetrics/sectorDisplay salieron de este archivo a un módulo puro y
 // reusable; la lógica no cambió.
-import { calcMetrics, sectorDisplay, SECTOR_DISPLAY, manualToPosicion } from '../datos/patrimonioMetricas';
+import { calcMetrics, sectorDisplay, SIN_CLASIFICAR, manualToPosicion } from '../datos/patrimonioMetricas';
 // F9.116 §2 — motor único de escenarios: los cuatro idiosincráticos que vivían acá se
 // movieron al módulo y conviven con los sistémicos por beta. Una sola fuente de números.
 import {
@@ -115,21 +115,34 @@ import {
   type ResultadoEscenario, type ViolacionBanda, type MixObjetivo, type TopesRiesgo, type Bloque,
 } from '../datos/patrimonioRiesgo';
 
+// F9.196 nota de revisión 6 — un color por grupo de `sectorDisplay`. Por la base del grupo (sin el
+// sufijo de país), con un tono más claro para la variante Global; "Sin clasificar" en gris.
 const SECTOR_COL: Record<string, string> = {
-  'Energía AR':       '#f5a623',
-  'Energía Global':   '#f7c843',
-  'Cripto':           '#f7931a',
-  'Renta fija AR':    '#4f8ef7',
-  'Renta fija Global':'#7ba7f7',
-  'Bancos AR':        '#2bb673',
-  'ONs AR':           '#6366f1',
-  'Cash':             '#94a3b8',
-  'Tecnología Global':'#a855f7',
-  'Global':           '#a855f7',
-  'Consumo AR':       '#ec4899',
-  'FCI AR':           '#14b8a6',
+  'Energía':             '#f5a623',
+  'Cripto':              '#f7931a',
+  'Stablecoins':         '#26a17b',
+  'Cash':                '#64748b',
+  'Renta fija pesos AR': '#4f8ef7',
+  'Renta fija USD AR':   '#6366f1',
+  'Acciones AR (FCI)':   '#0ea5e9',
+  'Bancos':              '#2bb673',
+  'Materiales':          '#b45309',
+  'Agro':                '#65a30d',
+  'Telecom':             '#e11d48',
+  'Tecnología':          '#a855f7',
+  'Consumo':             '#ec4899',
+  'Real Estate':         '#d946ef',
+  'FCI':                 '#14b8a6',
+  'Global':              '#8b5cf6',
+  [SIN_CLASIFICAR]:      '#cbd5e1',
 };
-function sectorColor(disp: string): string { return SECTOR_COL[disp] ?? '#8b8b8b'; }
+const COL_GLOBAL: Record<string, string> = { 'Energía': '#f7c843', 'Tecnología': '#c084fc', 'Bancos': '#5fd39b' };
+function sectorColor(disp: string): string {
+  if (SECTOR_COL[disp]) return SECTOR_COL[disp];
+  const m = /^(.*) (AR|Global)$/.exec(disp);
+  if (m) return (m[2] === 'Global' ? COL_GLOBAL[m[1]] : undefined) ?? SECTOR_COL[m[1]] ?? '#8b8b8b';
+  return '#8b8b8b';
+}
 
 // ── Snapshot de métricas para decisiones ──────────────────────────────────────
 function buildMetricasSnap(M: PatMetrics, todasPosiciones: Posicion[]): MetricasSnap {
@@ -316,9 +329,24 @@ function simularOpcion(posiciones: Posicion[], opcion: OpcionConfig) {
 }
 
 // ── Barra apilada ─────────────────────────────────────────────────────────────
-function CompBar({ M }: { M: PatMetrics }) {
+function CompBar({ M, posiciones = [] }: {
+  M: PatMetrics;
+  /** Nota de revisión 6 — para ver qué tickers caen en "Sin clasificar" (con la clave original). */
+  posiciones?: Array<{ ticker: string; cuenta?: string; sector: string; pais_riesgo: string; valorUsd: number }>;
+}) {
   const $ = useDinero();
   const [mostrarOtros, setMostrarOtros] = useState(false);
+  const [mostrarSinClasificar, setMostrarSinClasificar] = useState(false);
+  const sinClasificar = posiciones.filter(p => sectorDisplay(p.sector, p.pais_riesgo) === SIN_CLASIFICAR)
+    .sort((a, b) => b.valorUsd - a.valorUsd);
+  /** El detalle desplegable de "Sin clasificar": ticker, cuenta, clave original y valor. */
+  const detalleSinClasificar = (sangria: number) => mostrarSinClasificar && sinClasificar.map((p, i) => (
+    <div key={`sc-${i}`} title={`sector: «${p.sector || ''}»`} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 11.5, paddingLeft: sangria, color: 'var(--color-text-sec)', flexWrap: 'wrap' }}>
+      <span style={{ fontWeight: 700 }}>{p.ticker}</span>
+      <span style={{ fontSize: 10.5, color: 'var(--gf-gray-400)', minWidth: 0, overflowWrap: 'anywhere' }}>{p.cuenta ? `${p.cuenta} · ` : ''}sector «{p.sector || 'vacío'}»</span>
+      {!$.privado && <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{$.usd(p.valorUsd)}</span>}
+    </div>
+  ));
   const segs = Object.entries(M.bySector).sort((a, b) => b[1] - a[1]);
   const mayores = segs.filter(([, v]) => v / M.total >= UMBRAL_OTROS);
   const menores = segs.filter(([, v]) => v / M.total < UMBRAL_OTROS);
@@ -332,7 +360,11 @@ function CompBar({ M }: { M: PatMetrics }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {mayores.map(([k, v]) => (
-          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <Fragment key={k}>
+          <div
+            onClick={k === SIN_CLASIFICAR && sinClasificar.length ? () => setMostrarSinClasificar(x => !x) : undefined}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: k === SIN_CLASIFICAR && sinClasificar.length ? 'pointer' : undefined }}
+          >
             <span style={{ width: 9, height: 9, borderRadius: 3, background: sectorColor(k), flexShrink: 0 }} />
             <span style={{ fontWeight: 600 }}>{k}</span>
             {/* F9.121 — el chip de la derecha ya es el % sobre M.total, la misma base del modo
@@ -340,7 +372,10 @@ function CompBar({ M }: { M: PatMetrics }) {
                 (mismo criterio que la Sección 3 para las filas que ya traen un pct()). */}
             {!$.privado && <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{$.usd(v)}</span>}
             <span style={{ marginLeft: $.privado ? 'auto' : undefined, fontSize: 11, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
+            {k === SIN_CLASIFICAR && sinClasificar.length > 0 && <Icon name={mostrarSinClasificar ? 'chevron-up' : 'chevron-down'} size={13} color="var(--gf-gray-400)" />}
           </div>
+          {k === SIN_CLASIFICAR && detalleSinClasificar(17)}
+          </Fragment>
         ))}
         {menores.length > 0 && (
           <>
@@ -355,12 +390,19 @@ function CompBar({ M }: { M: PatMetrics }) {
               <Icon name={mostrarOtros ? 'chevron-up' : 'chevron-down'} size={13} color="var(--gf-gray-400)" />
             </div>
             {mostrarOtros && menores.map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, paddingLeft: 17 }}>
+              <Fragment key={k}>
+              <div
+                onClick={k === SIN_CLASIFICAR && sinClasificar.length ? () => setMostrarSinClasificar(x => !x) : undefined}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, paddingLeft: 17, cursor: k === SIN_CLASIFICAR && sinClasificar.length ? 'pointer' : undefined }}
+              >
                 <span style={{ width: 8, height: 8, borderRadius: 3, background: sectorColor(k), flexShrink: 0 }} />
                 <span style={{ fontWeight: 600, color: 'var(--color-text-sec)' }}>{k}</span>
                 {!$.privado && <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: 'var(--color-text-sec)' }}>{$.usd(v)}</span>}
                 <span style={{ marginLeft: $.privado ? 'auto' : undefined, fontSize: 10.5, fontWeight: 700, color: 'var(--gf-gray-400)', background: 'var(--gf-gray-100)', borderRadius: 999, padding: '1px 7px' }}>{pct(v / M.total)}</span>
+                {k === SIN_CLASIFICAR && sinClasificar.length > 0 && <Icon name={mostrarSinClasificar ? 'chevron-up' : 'chevron-down'} size={12} color="var(--gf-gray-400)" />}
               </div>
+              {k === SIN_CLASIFICAR && detalleSinClasificar(34)}
+              </Fragment>
             ))}
           </>
         )}
@@ -1787,7 +1829,7 @@ function ResumenTab({ M, Mhoy, carteraViva, carteraVivaVieja, onCarteraViva, onV
       {/* 3. Composición por sector */}
       <Card>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Composición por sector</div>
-        <CompBar M={Mhoy} />
+        <CompBar M={Mhoy} posiciones={[...posiciones, ...manuales.map(manualToPosicion)]} />
       </Card>
 
       {/* 4. Evolución entre corridas */}
@@ -2047,7 +2089,7 @@ function TenenciasTab({ M, posiciones, manuales, fechaCorrida, indicadores, anal
       {/* Composición por sector */}
       <Card>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Composición por sector</div>
-        <CompBar M={M} />
+        <CompBar M={M} posiciones={[...posiciones, ...manuales.map(manualToPosicion)]} />
       </Card>
 
       {/* F9.196 H6 — buscador y orden */}
@@ -5293,7 +5335,7 @@ export default function Patrimonio() {
   function buildByTickerMap(): Record<string, { totalUsd: number; sectorDisp: string }> {
     const byTickerMap: Record<string, { totalUsd: number; sectorDisp: string }> = {};
     for (const p of todasPosiciones) {
-      const sec = (() => { const base = SECTOR_DISPLAY[p.sector] ?? p.sector; if (p.sector === 'cripto' || p.sector === 'cash' || p.sector === 'global') return base; return base + (p.pais_riesgo === 'AR' ? ' AR' : ' Global'); })();
+      const sec = sectorDisplay(p.sector, p.pais_riesgo);   // nota de revisión 6: la misma función, no una copia
       if (!byTickerMap[p.ticker]) byTickerMap[p.ticker] = { totalUsd: 0, sectorDisp: sec };
       byTickerMap[p.ticker].totalUsd += p.valorUsd;
     }

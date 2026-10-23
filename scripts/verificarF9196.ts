@@ -14,6 +14,7 @@ import {
   type MovimientoCuenta,
 } from '../src/datos/patrimonioMovimientos';
 import type { LecturaCripto } from '../src/datos/patrimonioCripto';
+import { sectorDisplay, calcMetrics, SIN_CLASIFICAR } from '../src/datos/patrimonioMetricas';
 // F9.196 cierre — H2 (sincronizaciones y valor de hoy), H5 (tesis) y H6 (card y orden de Tenencias).
 import { planSincronizacionPPI, ventanaDesde } from '../functions/src/ppiSincronizacion';
 import { planSincronizacionBitfinex } from '../functions/src/bitfinexSincronizacion';
@@ -448,6 +449,32 @@ console.log('\n=== F9.196 nota de revisión 4: avisos del valor de hoy ===');
   ok(rotuloFuenteCuenta('api', 'Balanz 999001', base.frescura) === 'archivo' && rotuloFuenteCuenta('api', 'PPI XXXXX', base.frescura) === 'API'
     && rotuloFuenteCuenta('corrida', 'Nexo', base.frescura) === 'carga' && rotuloFuenteCuenta('manual', 'ACN', []) === 'manual' && rotuloFuenteCuenta(undefined, 'X', null) === '—',
     'tabla por cuenta: fuente API / archivo / carga / manual, y "—" si falta');
+}
+
+console.log('\n=== F9.196 nota de revisión 6: composición por sector ===');
+{
+  // Las 15 claves de la carga del 13/10.
+  const claves = ['agro', 'bancos', 'cer_pesos', 'corporativo_usd', 'cripto', 'efectivo', 'energia', 'lecaps_pesos', 'materiales',
+    'money_market_pesos', 'renta_variable_ar', 'soberano_usd', 'stablecoin', 'tech', 'telecom'];
+  const grupos = claves.map(k => [k, sectorDisplay(k, 'AR')] as const);
+  ok(grupos.every(([k, g]) => g !== SIN_CLASIFICAR && !g.includes(k) && !g.includes('_')), 'las 15 claves de la carga caen en un grupo con nombre (ninguna cruda)', grupos);
+  ok(sectorDisplay('cash', 'global') === 'Cash' && sectorDisplay('efectivo', 'AR') === 'Cash' && sectorDisplay('money_market_usd', 'AR') === 'Cash',
+    'cash, efectivo y money_market_usd → el mismo grupo "Cash"');
+  ok(sectorDisplay('', 'AR') === SIN_CLASIFICAR && sectorDisplay('xyz', 'AR') === SIN_CLASIFICAR && sectorDisplay(undefined, undefined) === SIN_CLASIFICAR,
+    '"" y "xyz" → "Sin clasificar" (sin sufijo de país)');
+  ok(sectorDisplay('soberano_usd', 'AR') === 'Renta fija USD AR' && sectorDisplay('cer_pesos', 'AR') === 'Renta fija pesos AR' && sectorDisplay('stablecoin', 'global') === 'Stablecoins'
+    && sectorDisplay('energia', 'AR') === 'Energía AR' && sectorDisplay('tech', 'global') === 'Tecnología Global' && sectorDisplay('cripto', 'global') === 'Cripto',
+    'grupos fijos sin sufijo de país repetido; los de siempre con su sufijo');
+  ok(sectorDisplay('Energía', 'global') === 'Energía Global' && sectorDisplay('Real Estate', 'AR') === 'Real Estate AR' && sectorDisplay(' TECH ', 'global') === 'Tecnología Global',
+    'sectores escritos a mano (tildes, mayúsculas, espacios) se reconocen');
+  const pos = claves.concat(['', 'xyz', 'cash']).map((sector, i) => ({
+    ticker: `T${i}`, tipo: 'accion', sector, pais_riesgo: 'AR', cuenta: 'X', titular: null, moneda_origen: 'USD', valor_origen: 100 + i,
+    cantidad: 1, fuente: '', revisar: false, valorUsd: 100 + i, tcUsado: null, fechaCorrida: '2026-10-13',
+  })) as unknown as Posicion[];
+  const M = calcMetrics(pos);
+  const sumaGrupos = Object.values(M.bySector).reduce((a, v) => a + v, 0);
+  ok(Math.abs(sumaGrupos - M.total) < 1e-9 && M.bySector[SIN_CLASIFICAR] === 100 + 15 + 100 + 16 && !Object.keys(M.bySector).some(k => k.includes('_')),
+    'la suma de los grupos es igual al total; "Sin clasificar" junta "" y "xyz"', M.bySector);
 }
 
 h0aH4.then(() => {

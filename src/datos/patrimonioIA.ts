@@ -356,7 +356,9 @@ export function tickerADriver(ticker: string, sectorDisp: string): Driver {
   if (/^(BMA|GGAL|SUPV|BBAR|VALO)$/.test(t)) return 'bancos_ar';
   if (/^(ACN|GLOB|CVX|VZ|MSFT|GOOGL|GOOG|AMZN|META|NVDA|AAPL)$/.test(t) || t === 'B') return 'tech_global';
   if (/cripto|defi|btc|eth/.test(s)) return 'cripto';
-  if (/soberano|bono usd|global/.test(s)) return 'soberano';
+  // F9.196 nota de revisión 6: "Renta fija USD AR" es el grupo nuevo de soberano_usd / corporativo_usd / on
+  // (antes se veía "soberano_usd AR"); las ONs también van al driver soberano (riesgo país).
+  if (/soberano|bono usd|renta fija usd|global/.test(s)) return 'soberano';
   if (/energi|tarifas|gas|electr|util|petr|oil/.test(s)) return 'energia_ar';
   if (/peso|cer|ajust|local|captur/.test(s)) return 'cer_pesos';
   if (/tech|eeuu/.test(s)) return 'tech_global';

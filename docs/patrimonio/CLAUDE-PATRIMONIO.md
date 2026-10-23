@@ -241,6 +241,15 @@ contradiría la postura. Va como número informativo, sin color.
 
 ## Pendientes / decisiones abiertas
 
+- **Lista cerrada de sectores en el `.txt` (F9.196 nota de revisión 6):** hoy `sector` es texto
+  libre: el contrato fija `tipo` y `pais_riesgo`, no `sector`. La composición ya no muestra claves
+  crudas (`GRUPO_SECTOR` / `sectorDisplay` en `src/datos/patrimonioMetricas.ts`: lo desconocido va
+  a "Sin clasificar"). Falta:
+  - agregar al contrato la lista de claves válidas;
+  - que la ingesta avise cuando llega una fuera de lista.
+
+  `scripts/listarSinClasificar.ts` (solo lectura) dice qué cae hoy en "Sin clasificar".
+
 - **A5 — Fuentes a documentar (bloqueante para el prompt):** un archivo por
   cuenta. Cuentas conocidas hasta ahora:
   - Balanz 402665 (conjunta, Lascano y/o Cofano)

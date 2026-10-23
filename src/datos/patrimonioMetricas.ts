@@ -17,31 +17,67 @@ export function manualToPosicion(m: PosicionManual): Posicion {
   };
 }
 
-// ── Sector crudo → display ────────────────────────────────────────────────────
+// ── Sector crudo → grupo de display ───────────────────────────────────────────
 // Acompaña a calcMetrics porque las claves de bySector son las de display (no las crudas).
-export const SECTOR_DISPLAY: Record<string, string> = {
-  energia:             'Energía',
-  bancos:              'Bancos',
-  cripto:              'Cripto',
-  cer_pesos:           'Renta fija',
-  deuda_soberana_ar:   'Renta fija',
-  deuda_soberana_usd:  'Renta fija',
-  on:                  'ONs',
-  cash:                'Cash',
-  tecnologia:          'Tecnología',
-  tech:                'Tecnología',
-  consumo:             'Consumo',
-  real_estate:         'Real Estate',
-  materiales:          'Materiales',
-  agro:                'Agro',
-  fci:                 'FCI',
-  global:              'Global',
+//
+// F9.196 nota de revisión 6 — `sector` es texto libre en el `.txt` (el contrato fija `tipo` y
+// `pais_riesgo`, no `sector`): la carga del 13/10 trae 15 claves y el mapa viejo no tenía 8, que se
+// mostraban crudas ("soberano_usd AR", "efectivo AR", "AR" a secas). Es SOLO display: las claves
+// guardadas no cambian y el modelo de riesgo (patrimonioRiesgo.ts) las sigue usando tal cual.
+//
+// `pais`:
+// - 'sufijo'  → " AR" / " Global" según `pais_riesgo`, como siempre (Energía AR, Tecnología Global…);
+// - 'ninguno' → sin país (Cripto, Stablecoins, Cash, Global, Sin clasificar);
+// - 'fijo'    → el nombre ya lo dice (Renta fija pesos AR, Renta fija USD AR, Acciones AR (FCI)).
+export type GrupoSector = { grupo: string; pais: 'sufijo' | 'ninguno' | 'fijo' };
+
+export const SIN_CLASIFICAR = 'Sin clasificar';
+
+export const GRUPO_SECTOR: Record<string, GrupoSector> = {
+  cripto:              { grupo: 'Cripto', pais: 'ninguno' },
+  // La reserva en USDC/USDT: aparte de Cripto (no la infla) y de Cash (no es la caja del broker).
+  // El riesgo "Cripto (clase)" va por `tipo`, no cambia.
+  stablecoin:          { grupo: 'Stablecoins', pais: 'ninguno' },
+  // Una sola caja: la cartera viva usa `cash`, la carga `efectivo` (BCMMUSDA, money market USD).
+  // Lo que está en pesos también va acá (separar pesos y dólares es otra decisión).
+  cash:                { grupo: 'Cash', pais: 'ninguno' },
+  efectivo:            { grupo: 'Cash', pais: 'ninguno' },
+  money_market_usd:    { grupo: 'Cash', pais: 'ninguno' },
+  cer_pesos:           { grupo: 'Renta fija pesos AR', pais: 'fijo' },
+  lecaps_pesos:        { grupo: 'Renta fija pesos AR', pais: 'fijo' },
+  money_market_pesos:  { grupo: 'Renta fija pesos AR', pais: 'fijo' },
+  deuda_soberana_ar:   { grupo: 'Renta fija pesos AR', pais: 'fijo' },
+  soberano_usd:        { grupo: 'Renta fija USD AR', pais: 'fijo' },
+  deuda_soberana_usd:  { grupo: 'Renta fija USD AR', pais: 'fijo' },
+  corporativo_usd:     { grupo: 'Renta fija USD AR', pais: 'fijo' },
+  on:                  { grupo: 'Renta fija USD AR', pais: 'fijo' },
+  renta_variable_ar:   { grupo: 'Acciones AR (FCI)', pais: 'fijo' },
+  energia:             { grupo: 'Energía', pais: 'sufijo' },
+  bancos:              { grupo: 'Bancos', pais: 'sufijo' },
+  materiales:          { grupo: 'Materiales', pais: 'sufijo' },
+  agro:                { grupo: 'Agro', pais: 'sufijo' },
+  telecom:             { grupo: 'Telecom', pais: 'sufijo' },
+  tecnologia:          { grupo: 'Tecnología', pais: 'sufijo' },
+  tech:                { grupo: 'Tecnología', pais: 'sufijo' },
+  consumo:             { grupo: 'Consumo', pais: 'sufijo' },
+  real_estate:         { grupo: 'Real Estate', pais: 'sufijo' },
+  fci:                 { grupo: 'FCI', pais: 'sufijo' },
+  global:              { grupo: 'Global', pais: 'ninguno' },
 };
 
-export function sectorDisplay(sector: string, pais_riesgo: string): string {
-  const base = SECTOR_DISPLAY[sector] ?? sector;
-  if (sector === 'cripto' || sector === 'cash' || sector === 'global') return base;
-  return base + (pais_riesgo === 'AR' ? ' AR' : pais_riesgo === 'global' ? ' Global' : '');
+/**
+ * El grupo que se ve en la composición. Una clave vacía o desconocida NO se muestra cruda: va a
+ * "Sin clasificar" (y en el desplegable se ve la clave original).
+ */
+/** "Energía" / "Real Estate" / "real-estate" → "energia" / "real_estate": las manuales se cargan a mano. */
+const claveSector = (s: string | null | undefined) => (s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+export function sectorDisplay(sector: string | null | undefined, pais_riesgo: string | null | undefined): string {
+  const g = GRUPO_SECTOR[claveSector(sector)];
+  if (!g) return SIN_CLASIFICAR;
+  if (g.pais !== 'sufijo') return g.grupo;
+  return g.grupo + (pais_riesgo === 'AR' ? ' AR' : pais_riesgo === 'global' ? ' Global' : '');
 }
 
 export function calcMetrics(posiciones: Posicion[]): PatMetrics {
